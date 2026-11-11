@@ -915,6 +915,7 @@ fn render_range(
                                 screen_aspect: source_aspect,
                                 split_gap: webcam.split_gap,
                                 pane_radius: webcam.pane_radius,
+                                split_rest: 0.0,
                             },
                             camera_aspect,
                             shrink,
@@ -4128,7 +4129,12 @@ mod webcam_export_tests {
         assert_eq!(frame.len(), 320 * 240 * 3);
 
         for y in [10, 120, 230] {
-            for x in [20, 145] {
+            let edge = pixel(&frame, 320, 20, y);
+            assert!(
+                edge[0] > 150 && edge[1] > 150 && edge[2] < 90,
+                "the screen pane rests on the screen's own left edge at y={y}: {edge:?}"
+            );
+            for x in [145, 190] {
                 let px = pixel(&frame, 320, x, y);
                 assert!(
                     px[2] > 150 && px[0] < 90 && px[1] < 90,

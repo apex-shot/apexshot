@@ -863,14 +863,15 @@ impl Stage {
         {
             self.apply_geometry();
         }
-        let screen = self
-            .webcam
-            .layout_frame(self.source_size.get())
+        let frame = self.webcam.layout_frame(self.source_size.get());
+        let screen = frame
             .map(|frame| frame.screen)
             .filter(|screen| !screen.is_full());
         self.clip.set_layout_rect(
             screen.map(|screen| (screen.x, screen.y, screen.width, screen.height)),
         );
+        self.clip
+            .set_layout_anchor(frame.map(|frame| frame.screen_anchor).unwrap_or(0.5));
     }
 
     /// Set the stage aspect only when it really moves: `AspectFrame` re-runs
@@ -1169,14 +1170,15 @@ impl Stage {
         let video = match self
             .webcam
             .layout_frame(Some((source_width, source_height)))
-            .map(|frame| frame.screen)
-            .filter(|screen| !screen.is_full())
+            .map(|frame| (frame.screen, frame.screen_anchor))
+            .filter(|(screen, _)| !screen.is_full())
         {
-            Some(screen) => {
+            Some((screen, anchor)) => {
                 let draw = screen_transform(
                     video,
                     screen,
                     f64::from(source_width) / f64::from(source_height.max(1)),
+                    anchor,
                 )
                 .draw;
                 super::cursor::VideoRect {
@@ -1387,12 +1389,14 @@ fn screen_transform(
     video: super::cursor::VideoRect,
     screen: super::webcam::Rect,
     screen_aspect: f64,
+    anchor: f64,
 ) -> ScreenView {
     let placement = super::rounded_clip::pane_placement(
         video.width,
         video.height,
         (screen.x, screen.y, screen.width, screen.height),
         screen_aspect,
+        anchor,
     );
     let place = |(x, y, width, height): (f64, f64, f64, f64)| super::cursor::VideoRect {
         x: video.x + x,
@@ -1631,13 +1635,15 @@ fn build_stage(
             let video = source.and_then(|source| clip_video_rect(&clip, width, height, source));
             let screen = webcam
                 .layout_frame(source)
-                .map(|frame| frame.screen)
-                .filter(|screen| !screen.is_full());
+                .map(|frame| (frame.screen, frame.screen_anchor))
+                .filter(|(screen, _)| !screen.is_full());
             let source_aspect = source
                 .map(|(w, h)| f64::from(w) / f64::from(h.max(1)))
                 .unwrap_or(0.0);
             let view = match (video, screen) {
-                (Some(video), Some(screen)) => Some(screen_transform(video, screen, source_aspect)),
+                (Some(video), Some((screen, anchor))) => {
+                    Some(screen_transform(video, screen, source_aspect, anchor))
+                }
                 _ => None,
             };
             draw_in_video(
@@ -2591,7 +2597,7 @@ mod tests {
             width: 0.5,
             height: 1.0,
         };
-        let view = screen_transform(video, screen, 0.0);
+        let view = screen_transform(video, screen, 0.0, 0.5);
         assert!((view.clip.x - 10.0).abs() < 1e-9);
         assert!((view.clip.y - 20.0).abs() < 1e-9);
         assert!((view.clip.width - 100.0).abs() < 1e-9);
@@ -2624,7 +2630,7 @@ mod tests {
                     width: 0.5,
                     height: 1.0,
                 };
-                let view = screen_transform(video, screen, 0.0);
+                let view = screen_transform(video, screen, 0.0, 0.5);
                 super::draw_in_video(
                     &context,
                     Some(video),

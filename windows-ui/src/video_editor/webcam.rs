@@ -677,6 +677,11 @@ impl LayoutSettings {
             split_ratio: self.split_ratio,
             split_auto: self.split_auto,
             split_flip: self.split_flip,
+            split_rest: if stage.split_rest.is_finite() {
+                stage.split_rest.clamp(0.0, 1.0)
+            } else {
+                0.0
+            },
             split_gap: if self.split_padded {
                 finite_non_negative(stage.split_gap)
             } else {
@@ -793,6 +798,10 @@ pub(super) struct LayoutFrame {
     /// The screen pane's corner radius, as a fraction of half its shorter
     /// side, like `camera_radius`. Only the padded split rounds it.
     pub screen_radius: f64,
+    /// Where the cover-cropped screen sits in its pane along the axis it
+    /// overflows: 0 shows its left or top edge, 1 its right or bottom edge,
+    /// 0.5 centres it. Only the split crops the screen.
+    pub screen_anchor: f64,
     /// How much of the person's matte blends into the camera, 0..=1.
     pub cutout: f64,
     pub mirror: bool,
@@ -809,6 +818,8 @@ struct Geometry {
     split_ratio: f64,
     split_auto: bool,
     split_flip: bool,
+    /// The split's resting edge, see [`StageShape::split_rest`].
+    split_rest: f64,
     /// The padded split's gap, in stage heights; 0 unless padded.
     split_gap: f64,
     /// The padded split's pane radius, in stage heights; 0 unless padded.
@@ -861,6 +872,7 @@ fn canonical(layout: CameraLayout, geometry: Geometry) -> LayoutFrame {
                     geometry.overlay.radius
                 },
                 screen_radius: 0.0,
+                screen_anchor: 0.5,
                 cutout: 0.0,
                 mirror: geometry.overlay.mirror,
             }
@@ -871,6 +883,7 @@ fn canonical(layout: CameraLayout, geometry: Geometry) -> LayoutFrame {
             camera_alpha: 1.0,
             camera_radius: 0.0,
             screen_radius: 0.0,
+            screen_anchor: 0.5,
             cutout: 0.0,
             mirror: geometry.overlay.mirror,
         },
@@ -882,6 +895,14 @@ fn canonical(layout: CameraLayout, geometry: Geometry) -> LayoutFrame {
                 camera_alpha: 1.0,
                 camera_radius: pane_radius(geometry, camera),
                 screen_radius: pane_radius(geometry, screen),
+                // The studied split rests the cropped screen against its own
+                // outer edge (`DgH:7279`, `DgH:7932-7950`); `split_rest`
+                // slides it toward the camera's side.
+                screen_anchor: if geometry.split_flip {
+                    1.0 - geometry.split_rest
+                } else {
+                    geometry.split_rest
+                },
                 cutout: 0.0,
                 mirror: geometry.overlay.mirror,
             };
@@ -901,6 +922,7 @@ fn canonical(layout: CameraLayout, geometry: Geometry) -> LayoutFrame {
             camera_alpha: 0.0,
             camera_radius: geometry.overlay.radius,
             screen_radius: 0.0,
+            screen_anchor: 0.5,
             cutout: 0.0,
             mirror: geometry.overlay.mirror,
         },
@@ -910,6 +932,7 @@ fn canonical(layout: CameraLayout, geometry: Geometry) -> LayoutFrame {
             camera_alpha: 1.0,
             camera_radius: 0.0,
             screen_radius: 0.0,
+            screen_anchor: 0.5,
             cutout: 1.0,
             mirror: geometry.overlay.mirror,
         },
@@ -1020,6 +1043,9 @@ pub(super) struct StageShape {
     pub split_gap: f64,
     /// The padded split's pane corner radius.
     pub pane_radius: f64,
+    /// Where the split's screen rests, 0..=1: 0 against its own outer edge,
+    /// 1 against the edge beside the camera.
+    pub split_rest: f64,
 }
 
 impl StageShape {
@@ -1030,6 +1056,7 @@ impl StageShape {
             screen_aspect: aspect,
             split_gap: 0.0,
             pane_radius: 0.0,
+            split_rest: 0.0,
         }
     }
 }
@@ -1243,6 +1270,7 @@ fn split_zoomed(geometry: Geometry, overlay_radius: f64) -> LayoutFrame {
         camera_alpha: 1.0,
         camera_radius: overlay_radius,
         screen_radius: 0.0,
+        screen_anchor: 0.5,
         cutout: 0.0,
         mirror: geometry.overlay.mirror,
     }
@@ -1262,7 +1290,18 @@ fn split_zoomed(geometry: Geometry, overlay_radius: f64) -> LayoutFrame {
 /// the whole frame, or the contained rect a proportional placement gives, maps
 /// to itself, so a picture that already fits is shown whole and is never
 /// cropped.
+#[allow(dead_code)] // The tests place the centred cover through it.
 pub(super) fn screen_cover_rect(screen: Rect) -> Rect {
+    screen_cover_rect_anchored(screen, 0.5)
+}
+
+/// [`screen_cover_rect`] placed by `anchor` along the axis it overflows, 0.5 centred.
+pub(super) fn screen_cover_rect_anchored(screen: Rect, anchor: f64) -> Rect {
+    let anchor = if anchor.is_finite() {
+        anchor.clamp(0.0, 1.0)
+    } else {
+        0.5
+    };
     let x = if screen.x.is_finite() { screen.x } else { 0.0 };
     let y = if screen.y.is_finite() { screen.y } else { 0.0 };
     let width = if screen.width.is_finite() && screen.width > 0.0 {
@@ -1277,8 +1316,8 @@ pub(super) fn screen_cover_rect(screen: Rect) -> Rect {
     };
     let side = width.max(height);
     Rect {
-        x: x + (width - side) / 2.0,
-        y: y + (height - side) / 2.0,
+        x: x + (width - side) * anchor,
+        y: y + (height - side) * anchor,
         width: side,
         height: side,
     }
@@ -1287,7 +1326,23 @@ pub(super) fn screen_cover_rect(screen: Rect) -> Rect {
 /// [`screen_cover_rect`] on a stage of `stage_aspect` for a screen of
 /// `screen_aspect`: the rect, in stage fractions, the whole screen is drawn
 /// into so it covers `screen` with its own aspect, centred on it.
+#[allow(dead_code)] // The tests place the centred cover through it.
 pub(super) fn screen_cover_rect_in(screen: Rect, stage_aspect: f64, screen_aspect: f64) -> Rect {
+    screen_cover_rect_in_anchored(screen, stage_aspect, screen_aspect, 0.5)
+}
+
+/// [`screen_cover_rect_in`] placed by `anchor` along the axis it overflows, 0.5 centred.
+pub(super) fn screen_cover_rect_in_anchored(
+    screen: Rect,
+    stage_aspect: f64,
+    screen_aspect: f64,
+    anchor: f64,
+) -> Rect {
+    let anchor = if anchor.is_finite() {
+        anchor.clamp(0.0, 1.0)
+    } else {
+        0.5
+    };
     let stage = sane_aspect(stage_aspect);
     let source = sane_aspect(screen_aspect);
     let x = if screen.x.is_finite() { screen.x } else { 0.0 };
@@ -1306,8 +1361,8 @@ pub(super) fn screen_cover_rect_in(screen: Rect, stage_aspect: f64, screen_aspec
     let scale = (width * stage / source).max(height);
     let draw_width = source * scale / stage;
     Rect {
-        x: x + (width - draw_width) / 2.0,
-        y: y + (height - scale) / 2.0,
+        x: x + (width - draw_width) * anchor,
+        y: y + (height - scale) * anchor,
         width: draw_width,
         height: scale,
     }
@@ -1551,6 +1606,7 @@ fn interpolate(from: LayoutFrame, to: LayoutFrame, t: f64) -> LayoutFrame {
         camera_alpha: from.camera_alpha + (to.camera_alpha - from.camera_alpha) * t,
         camera_radius: from.camera_radius + (to.camera_radius - from.camera_radius) * t,
         screen_radius: from.screen_radius + (to.screen_radius - from.screen_radius) * t,
+        screen_anchor: from.screen_anchor + (to.screen_anchor - from.screen_anchor) * t,
         cutout: from.cutout + (to.cutout - from.cutout) * t,
         mirror: to.mirror,
     }
@@ -2238,6 +2294,7 @@ impl WebcamModel {
                 screen_aspect: video_aspect,
                 split_gap: self.state.split_gap.get(),
                 pane_radius: self.state.pane_radius.get(),
+                split_rest: 0.0,
             },
             camera_aspect,
             self.state.zoom_shrink.get(),
@@ -3116,7 +3173,7 @@ pub(super) fn composite_layout_into(
     if size.0 == 0 || size.1 == 0 {
         return Ok(());
     }
-    shrink_screen(pixels, size, frame.screen);
+    shrink_screen(pixels, size, frame.screen, frame.screen_anchor);
     if frame.camera_alpha <= 0.0 {
         return Ok(());
     }
@@ -3415,6 +3472,7 @@ pub(super) fn composite_stage_trail_into(
             frame.screen,
             background,
             frame.screen_radius,
+            frame.screen_anchor,
         );
         composite_layout_into(
             target,
@@ -3513,7 +3571,7 @@ fn blend_layer(
 /// cover rect, so a pane without the footage's aspect shows the middle of the
 /// picture instead of shrinking the whole of it into a letterbox. A full rect
 /// is left untouched, which is every layout but the split.
-fn shrink_screen(pixels: &mut [u8], size: (u32, u32), screen: Rect) {
+fn shrink_screen(pixels: &mut [u8], size: (u32, u32), screen: Rect, anchor: f64) {
     if screen.is_full() {
         return;
     }
@@ -3526,7 +3584,12 @@ fn shrink_screen(pixels: &mut [u8], size: (u32, u32), screen: Rect) {
     if x0 == 0 && y0 == 0 && x1 == size.0 && y1 == size.1 {
         return;
     }
-    let scaled = resample_rgba(pixels, size, screen_cover_rect(screen), (x0, y0, x1, y1));
+    let scaled = resample_rgba(
+        pixels,
+        size,
+        screen_cover_rect_anchored(screen, anchor),
+        (x0, y0, x1, y1),
+    );
     for pixel in pixels.as_chunks_mut::<4>().0 {
         pixel.copy_from_slice(&[0, 0, 0, 255]);
     }
@@ -3543,6 +3606,7 @@ fn shrink_screen(pixels: &mut [u8], size: (u32, u32), screen: Rect) {
 /// `stage_size` pixels so it covers `pane`, and fill the rest of the stage
 /// with `background` (RGBA at `stage_size`) or black. `radius` rounds the
 /// pane's corners, as a fraction of half its shorter side.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn place_screen_into(
     stage: &mut [u8],
     stage_size: (u32, u32),
@@ -3551,6 +3615,7 @@ pub(super) fn place_screen_into(
     pane: Rect,
     background: Option<&[u8]>,
     radius: f64,
+    anchor: f64,
 ) {
     let fill_from = background.filter(|background| background.len() == stage.len());
     match fill_from {
@@ -3570,10 +3635,11 @@ pub(super) fn place_screen_into(
     if width == 0 || height == 0 {
         return;
     }
-    let cover = screen_cover_rect_in(
+    let cover = screen_cover_rect_in_anchored(
         pane,
         f64::from(stage_size.0) / f64::from(stage_size.1),
         f64::from(screen_size.0) / f64::from(screen_size.1),
+        anchor,
     );
     let scaled = resample_rgba_from(screen, screen_size, stage_size, cover, (x0, y0, x1, y1));
     let stride = stage_size.0 as usize * 4;
@@ -4587,6 +4653,7 @@ mod tests {
             camera_alpha: 1.0,
             camera_radius: 0.0,
             screen_radius: 0.0,
+            screen_anchor: 0.5,
             cutout: 0.0,
             mirror: false,
         };
@@ -4613,6 +4680,7 @@ mod tests {
             camera_alpha: 1.0,
             camera_radius: 0.0,
             screen_radius: 0.0,
+            screen_anchor: 0.5,
             cutout: 0.0,
             mirror: false,
         };
@@ -4644,6 +4712,7 @@ mod tests {
             camera_alpha: 1.0,
             camera_radius: 0.0,
             screen_radius: 0.0,
+            screen_anchor: 0.5,
             cutout: 0.0,
             mirror: false,
         };
@@ -4676,6 +4745,7 @@ mod tests {
             camera_alpha: 1.0,
             camera_radius: 0.0,
             screen_radius: 0.0,
+            screen_anchor: 0.5,
             cutout: 0.0,
             mirror: true,
         };
@@ -4755,6 +4825,7 @@ mod tests {
             camera_alpha: 1.0,
             camera_radius: 0.0,
             screen_radius: 0.0,
+            screen_anchor: 0.5,
             cutout: 0.0,
             mirror: false,
         };
@@ -4795,6 +4866,7 @@ mod tests {
             camera_alpha: 1.0,
             camera_radius: 0.0,
             screen_radius: 0.0,
+            screen_anchor: 0.5,
             cutout: 0.0,
             mirror: false,
         };
@@ -4839,7 +4911,7 @@ mod tests {
             let frame = layout.frame_at(0.0, LayerSettings::default(), 160.0 / 90.0, 1.0);
             let (x0, y0, x1, y1) = pixel_rect(frame.screen, size);
             let mut pixels = screen.clone();
-            shrink_screen(&mut pixels, size, frame.screen);
+            shrink_screen(&mut pixels, size, frame.screen, frame.screen_anchor);
             let inside = |x: u32, y: u32| pixel(&pixels, 160, x, y);
             let top_left = inside(x0 + 4, y0 + 4);
             let top_right = inside(x1 - 5, y0 + 4);
@@ -4902,7 +4974,7 @@ mod tests {
         let frame = layout.frame_at(0.0, LayerSettings::default(), 16.0 / 9.0, 16.0 / 9.0);
         assert_eq!(pixel_rect(frame.screen, size), (0, 0, 160, 180));
         let mut pixels = screen.clone();
-        shrink_screen(&mut pixels, size, frame.screen);
+        shrink_screen(&mut pixels, size, frame.screen, 0.5);
         let top = pixel(&pixels, size.0, 80, 1);
         assert_eq!(
             top, RED,
@@ -4944,7 +5016,7 @@ mod tests {
         let frame = layout.frame_at(0.0, LayerSettings::default(), 9.0 / 16.0, 9.0 / 16.0);
         assert_eq!(pixel_rect(frame.screen, size), (0, 0, 180, 160));
         let mut pixels = screen.clone();
-        shrink_screen(&mut pixels, size, frame.screen);
+        shrink_screen(&mut pixels, size, frame.screen, 0.5);
         for y in [2, 80, 157] {
             for x in [2, 90, 177] {
                 let shown = pixel(&pixels, size.0, x, y);
@@ -5029,6 +5101,7 @@ mod tests {
             camera_alpha: 0.0,
             camera_radius: 0.0,
             screen_radius: 0.0,
+            screen_anchor: 0.5,
             cutout: 0.0,
             mirror: false,
         };
@@ -5517,6 +5590,7 @@ mod tests {
             camera_alpha: 1.0,
             camera_radius: 0.1,
             screen_radius: 0.0,
+            screen_anchor: 0.5,
             cutout: 0.0,
             mirror: false,
         };
@@ -5690,6 +5764,7 @@ mod tests {
             camera_alpha: alpha,
             camera_radius: 0.0,
             screen_radius: 0.0,
+            screen_anchor: 0.5,
             cutout: 0.0,
             mirror: false,
         };
@@ -5746,6 +5821,7 @@ mod tests {
             camera_alpha: 1.0,
             camera_radius: 0.0,
             screen_radius: 0.0,
+            screen_anchor: 0.5,
             cutout: 0.0,
             mirror: false,
         };
@@ -5772,6 +5848,7 @@ mod tests {
             camera_alpha: 1.0,
             camera_radius: 0.0,
             screen_radius: 0.0,
+            screen_anchor: 0.5,
             cutout: 0.0,
             mirror: false,
         };
@@ -5855,6 +5932,7 @@ mod tests {
                 screen_aspect: 1.6,
                 split_gap: 0.0,
                 pane_radius: 0.0,
+                split_rest: 0.0,
             },
             1.0,
             0.0,
@@ -5886,6 +5964,7 @@ mod tests {
                 screen_aspect: 1.6,
                 split_gap: 0.0,
                 pane_radius: 0.0,
+                split_rest: 0.0,
             },
             1.0,
             0.0,
@@ -5924,6 +6003,7 @@ mod tests {
             screen_aspect: 1.6,
             split_gap: 0.1,
             pane_radius: 0.05,
+            split_rest: 0.0,
         };
         let layer = LayerSettings {
             enabled: true,
@@ -5959,12 +6039,14 @@ mod tests {
             screen_aspect: 1.6,
             split_gap: 0.1,
             pane_radius: 0.05,
+            split_rest: 0.0,
         };
         let plain = StageShape {
             aspect: 2.2625,
             screen_aspect: 1.6,
             split_gap: 0.0,
             pane_radius: 0.0,
+            split_rest: 0.0,
         };
         let frame = split.frame_at_staged(0.0, layer, padded, 1.0, 0.0);
         assert_eq!(frame, split.frame_at_staged(0.0, layer, plain, 1.0, 0.0));
@@ -5987,6 +6069,7 @@ mod tests {
             screen_aspect: 16.0 / 9.0,
             split_gap: 0.05,
             pane_radius: 0.0,
+            split_rest: 0.0,
         };
         let layer = LayerSettings {
             enabled: true,
@@ -5997,6 +6080,101 @@ mod tests {
         assert!((frame.screen.height - 0.9).abs() < 1e-9);
         assert!((frame.screen.y - 0.05).abs() < 1e-9);
         assert!((frame.screen.width - zone / (16.0 / 9.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_anchored_cover_slides_along_the_axis_it_overflows() {
+        let pane = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 0.6,
+            height: 1.0,
+        };
+        let left = screen_cover_rect_in_anchored(pane, 16.0 / 9.0, 16.0 / 9.0, 0.0);
+        let right = screen_cover_rect_in_anchored(pane, 16.0 / 9.0, 16.0 / 9.0, 1.0);
+        let middle = screen_cover_rect_in(pane, 16.0 / 9.0, 16.0 / 9.0);
+        assert!((left.width - 1.0).abs() < 1e-9);
+        assert!(left.x.abs() < 1e-9);
+        assert!((right.x - -0.4).abs() < 1e-9);
+        assert!((middle.x - -0.2).abs() < 1e-9);
+        assert!(left.y.abs() < 1e-9 && right.y.abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_split_rests_its_screen_against_its_own_edge() {
+        let split = LayoutSettings {
+            default_layout: CameraLayout::SplitScreen,
+            split_auto: false,
+            split_ratio: 0.6,
+            ..LayoutSettings::default()
+        };
+        let layer = LayerSettings::default();
+        for (flip, rest, anchor) in [
+            (false, 0.0, 0.0),
+            (false, 1.0, 1.0),
+            (true, 0.0, 1.0),
+            (true, 1.0, 0.0),
+        ] {
+            let flipped = LayoutSettings {
+                split_flip: flip,
+                ..split.clone()
+            };
+            let stage = StageShape {
+                aspect: 16.0 / 9.0,
+                screen_aspect: 16.0 / 9.0,
+                split_gap: 0.0,
+                pane_radius: 0.0,
+                split_rest: rest,
+            };
+            let frame = flipped.frame_at_staged(0.0, layer, stage, 1.0, 0.0);
+            assert!(
+                (frame.screen_anchor - anchor).abs() < 1e-9,
+                "flip={flip}, rest={rest}: {}",
+                frame.screen_anchor
+            );
+        }
+        let stage = StageShape {
+            aspect: 16.0 / 9.0,
+            screen_aspect: 16.0 / 9.0,
+            split_gap: 0.0,
+            pane_radius: 0.0,
+            split_rest: 0.0,
+        };
+        let frame = split.frame_at_staged(0.0, layer, stage, 1.0, 1.0);
+        assert!(
+            (frame.screen_anchor - 0.5).abs() < 1e-9,
+            "the zoomed split centres its screen: {}",
+            frame.screen_anchor
+        );
+    }
+
+    #[test]
+    fn the_split_shows_the_anchored_side_of_the_screen() {
+        let screen = camera_with(64, 36, |x, _| if x < 32 { RED } else { GREEN });
+        let pane = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 0.5,
+            height: 1.0,
+        };
+        for (anchor, expected) in [(0.0, RED), (1.0, GREEN)] {
+            let mut stage = vec![0u8; 64 * 36 * 4];
+            place_screen_into(
+                &mut stage,
+                (64, 36),
+                &screen,
+                (64, 36),
+                pane,
+                None,
+                0.0,
+                anchor,
+            );
+            assert_eq!(
+                pixel(&stage, 64, 16, 18),
+                expected,
+                "anchor={anchor} shows its own edge of the screen"
+            );
+        }
     }
 
     #[test]
@@ -6049,6 +6227,7 @@ mod tests {
             contained_screen(2.0, 1.0),
             Some(&background),
             0.0,
+            0.5,
         );
         assert_eq!(pixel(&stage, 40, 20, 10), [255, 0, 0, 255]);
         assert_eq!(pixel(&stage, 40, 2, 10), [0, 255, 0, 255]);
@@ -6063,6 +6242,7 @@ mod tests {
             contained_screen(2.0, 1.0),
             None,
             0.0,
+            0.5,
         );
         assert_eq!(pixel(&empty, 40, 2, 10), [0, 0, 0, 255]);
     }
@@ -6080,6 +6260,7 @@ mod tests {
             contained_screen(2.0, 1.0),
             Some(&background),
             1.0,
+            0.5,
         );
         let corner = pixel(&stage, 40, 10, 0);
         assert!(
