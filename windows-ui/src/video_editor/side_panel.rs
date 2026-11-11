@@ -22,8 +22,9 @@ use gtk4::prelude::*;
 use gtk4::{
     Align, ApplicationWindow, Box as GtkBox, Button, CssProvider, DrawingArea,
     EventControllerMotion, FileChooserAction, FileChooserNative, FileFilter, GestureClick,
-    GestureDrag, Grid, Image, Label, Orientation, PolicyType, ResponseType, ScrolledWindow,
-    SpinButton, Stack, StackTransitionType, Switch, ToggleButton,
+    GestureDrag, Grid, Image, Label, Orientation, PolicyType, ResponseType, Revealer,
+    RevealerTransitionType, ScrolledWindow, SpinButton, Stack, StackTransitionType, Switch,
+    ToggleButton,
 };
 use std::cell::{Cell, RefCell};
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
@@ -1240,10 +1241,6 @@ fn build_zoom_panel(
     (panel, refresh)
 }
 
-/// The camera shapes the panel offers, named the way the recorder's Settings
-/// page names them.
-const WEBCAM_SHAPES: [&str; 4] = ["Circle", "Square", "Rectangle", "Vertical"];
-
 /// The longest cross-fade the renderer draws. The slider mirrors it so a
 /// project carrying a longer transition still shows its own value.
 const WEBCAM_TRANSITION_MAX: f64 = 3.0;
@@ -1252,70 +1249,63 @@ const WEBCAM_TRANSITION_MAX: f64 = 3.0;
 const WEBCAM_PREVIEW_HEIGHT: f64 = 40.0;
 
 /// The fixed height of one layout tile, before scale.
-const WEBCAM_CARD_HEIGHT: f64 = 62.0;
+const WEBCAM_CARD_HEIGHT: f64 = 70.0;
 
 /// The horizontal padding the camera body inherits from the shared panel sheet.
 const WEBCAM_BODY_INSET: f64 = 28.0;
 
-/// The six cards the layout chooser offers, in the order it draws them.
+/// The five cards the layout chooser offers, in the order it draws them.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum WebcamLayoutCard {
-    Screen,
-    Camera,
     Bubble,
-    Circle,
     Split,
     Cutout,
+    Camera,
+    Screen,
 }
 
 impl WebcamLayoutCard {
-    const ALL: [Self; 6] = [
-        Self::Screen,
-        Self::Camera,
+    const ALL: [Self; 5] = [
         Self::Bubble,
-        Self::Circle,
         Self::Split,
         Self::Cutout,
+        Self::Camera,
+        Self::Screen,
     ];
 
     fn label(self) -> &'static str {
         match self {
-            Self::Screen => "Screen",
-            Self::Camera => "Camera",
             Self::Bubble => "Bubble",
-            Self::Circle => "Circle",
             Self::Split => "Split",
             Self::Cutout => "Cutout",
+            Self::Camera => "Camera",
+            Self::Screen => "Screen",
         }
     }
 
     fn tooltip(self) -> &'static str {
         match self {
-            Self::Screen => "Show the screen on its own.",
-            Self::Camera => "Fill the frame with the camera.",
             Self::Bubble => "Camera bubble on the screen.",
-            Self::Circle => "Round camera bubble on the screen.",
             Self::Split => "Put the screen and camera side by side.",
             Self::Cutout => "Set the camera person on the screen.",
+            Self::Camera => "Fill the frame with the camera.",
+            Self::Screen => "Show the screen on its own.",
         }
     }
 
     fn layout(self) -> CameraLayout {
         match self {
-            Self::Screen => CameraLayout::ScreenOnly,
-            Self::Camera => CameraLayout::FullscreenCamera,
-            Self::Bubble | Self::Circle => CameraLayout::CameraOverlay,
+            Self::Bubble => CameraLayout::CameraOverlay,
             Self::Split => CameraLayout::SplitScreen,
             Self::Cutout => CameraLayout::CameraCutout,
+            Self::Camera => CameraLayout::FullscreenCamera,
+            Self::Screen => CameraLayout::ScreenOnly,
         }
     }
 
+    /// Choosing a card keeps the bubble's shape; the Shape controls change it.
     fn overlay_shape(self) -> Option<u8> {
-        match self {
-            Self::Bubble => Some(2),
-            Self::Circle => Some(0),
-            _ => None,
-        }
+        None
     }
 }
 
@@ -1374,6 +1364,7 @@ fn webcam_panel_needs_rebuild(
             || previous.selected != state.selected
             || previous.duration != state.duration
             || previous.frame_aspect != state.frame_aspect
+            || previous.auto_split_share != state.auto_split_share
     })
 }
 
@@ -1423,40 +1414,23 @@ fn webcam_cutout_position(step: usize) -> f64 {
     step.min(2) as f64 / 2.0
 }
 
-/// Which shape chip a layer matches, so a hand-tuned radius or aspect leaves
-/// every chip clear instead of lighting the nearest one. The layer's height is
-/// a fraction of the frame height, so a shape's physical aspect becomes
-/// `frame_aspect * aspect_for_shape`.
-fn webcam_shape_index(layer: &LayerSettings, frame_aspect: f64) -> Option<usize> {
-    let frame_aspect = webcam_frame_aspect(frame_aspect);
-    let aspect = if layer.w > 0.0 {
-        layer.h / layer.w
-    } else {
-        1.0
-    };
-    let tolerance = 0.02 * frame_aspect.max(1.0);
-    (0..WEBCAM_SHAPES.len()).find(|&index| {
-        let shape = index as u8;
-        (layer.radius - super::webcam::radius_for_shape(shape)).abs() < 0.02
-            && (aspect - frame_aspect * super::webcam::aspect_for_shape(shape)).abs() < tolerance
-    })
+/// Which studied aspect chip the bubble matches, if any.
+fn webcam_aspect_index(layer: &LayerSettings, frame_aspect: f64) -> Option<usize> {
+    let aspect = layer.pixel_aspect(webcam_frame_aspect(frame_aspect));
+    super::webcam::OVERLAY_ASPECTS
+        .iter()
+        .position(|(_, value)| (aspect / value - 1.0).abs() < 0.02)
 }
 
 fn webcam_layout_card(
     layout: CameraLayout,
-    layer: Option<&LayerSettings>,
-    frame_aspect: f64,
+    _layer: Option<&LayerSettings>,
+    _frame_aspect: f64,
 ) -> WebcamLayoutCard {
     match layout {
         CameraLayout::ScreenOnly => WebcamLayoutCard::Screen,
         CameraLayout::FullscreenCamera => WebcamLayoutCard::Camera,
-        CameraLayout::CameraOverlay => {
-            if layer.is_some_and(|layer| webcam_shape_index(layer, frame_aspect) == Some(0)) {
-                WebcamLayoutCard::Circle
-            } else {
-                WebcamLayoutCard::Bubble
-            }
-        }
+        CameraLayout::CameraOverlay => WebcamLayoutCard::Bubble,
         CameraLayout::SplitScreen => WebcamLayoutCard::Split,
         CameraLayout::CameraCutout => WebcamLayoutCard::Cutout,
     }
@@ -1526,26 +1500,6 @@ fn webcam_card_ellipse_fill(
     let _ = context.restore();
     context.set_source_rgba(color.0, color.1, color.2, color.3);
     let _ = context.fill();
-}
-
-fn webcam_card_ellipse_outline(
-    context: &gtk4::cairo::Context,
-    rect: WebcamCardRect,
-    line_width: f64,
-    color: (f64, f64, f64, f64),
-) {
-    let (x, y, width, height) = rect;
-    if width <= 0.0 || height <= 0.0 {
-        return;
-    }
-    let _ = context.save();
-    context.translate(x + width / 2.0, y + height / 2.0);
-    context.scale(width / 2.0, height / 2.0);
-    context.arc(0.0, 0.0, 1.0, 0.0, TAU);
-    let _ = context.restore();
-    context.set_source_rgba(color.0, color.1, color.2, color.3);
-    context.set_line_width(line_width);
-    let _ = context.stroke();
 }
 
 fn webcam_card_person(
@@ -1649,39 +1603,6 @@ fn draw_webcam_card_schematic(
                     bubble_y + bubble_height * 0.14,
                     bubble_width * 0.64,
                     bubble_height * 0.72,
-                ),
-                person,
-            );
-        }
-        WebcamLayoutCard::Circle => {
-            webcam_card_frame(
-                context,
-                (x, y, frame_width, frame_height),
-                frame_radius,
-                screen_fill,
-                screen_stroke,
-            );
-            let diameter = frame_height * 0.42;
-            let bubble_x = x + frame_width - diameter - 2.0;
-            let bubble_y = y + frame_height - diameter - 2.0;
-            webcam_card_ellipse_fill(
-                context,
-                (bubble_x, bubble_y, diameter, diameter),
-                camera_fill,
-            );
-            webcam_card_ellipse_outline(
-                context,
-                (bubble_x, bubble_y, diameter, diameter),
-                1.0,
-                camera_stroke,
-            );
-            webcam_card_person(
-                context,
-                (
-                    bubble_x + diameter * 0.19,
-                    bubble_y + diameter * 0.16,
-                    diameter * 0.62,
-                    diameter * 0.68,
                 ),
                 person,
             );
@@ -2040,6 +1961,61 @@ fn webcam_kicker(label: &str) -> Label {
     kicker
 }
 
+/// A titled group of controls whose body folds under its header: the same
+/// raised card, uppercase title and chevron the image editor's inspector uses.
+struct WebcamSection {
+    root: GtkBox,
+    body: GtkBox,
+}
+
+fn webcam_section(scale: f64, title: &str, open: bool) -> WebcamSection {
+    let px = |value: f64| (value * scale).round() as i32;
+    let root = GtkBox::new(Orientation::Vertical, px(8.0));
+    root.add_css_class("video-editor-section");
+    root.set_hexpand(true);
+
+    let header = GtkBox::new(Orientation::Horizontal, px(8.0));
+    header.add_css_class("video-editor-disclosure-header");
+    let heading = Label::new(Some(&title.to_uppercase()));
+    heading.add_css_class("video-editor-section-title");
+    heading.set_xalign(0.0);
+    heading.set_hexpand(true);
+    let chevron_name = |open: bool| {
+        if open {
+            "chevron-down-regular"
+        } else {
+            "chevron-right-regular"
+        }
+    };
+    let chevron = Image::from_icon_name(chevron_name(open));
+    chevron.set_pixel_size(px(12.0));
+    chevron.set_valign(Align::Center);
+    chevron.add_css_class("video-editor-disclosure-chevron");
+    header.append(&heading);
+    header.append(&chevron);
+    root.append(&header);
+
+    let body = GtkBox::new(Orientation::Vertical, px(8.0));
+    body.set_hexpand(true);
+    let revealer = Revealer::builder()
+        .transition_type(RevealerTransitionType::SlideDown)
+        .transition_duration(120)
+        .child(&body)
+        .build();
+    revealer.set_halign(Align::Fill);
+    revealer.set_reveal_child(open);
+    root.append(&revealer);
+
+    let click = GestureClick::new();
+    click.connect_pressed(move |_, _, _, _| {
+        let open = !revealer.reveals_child();
+        revealer.set_reveal_child(open);
+        chevron.set_icon_name(Some(chevron_name(open)));
+    });
+    header.add_controller(click);
+    WebcamSection { root, body }
+}
+
 /// The camera's placement: a field you drag the dot around inside, with a
 /// slider per axis underneath for the same two numbers.
 ///
@@ -2091,7 +2067,7 @@ impl WebcamPositionPad {
                 if n_press == 2 {
                     pad.place((0.5, 0.5));
                 } else {
-                    pad.apply_point(x, y);
+                    pad.snap_point(x, y);
                 }
             }
         });
@@ -2114,6 +2090,16 @@ impl WebcamPositionPad {
                     return;
                 };
                 pad.apply_point(start_x + offset_x, start_y + offset_y);
+            }
+        });
+        drag.connect_drag_end({
+            let pad = pad.clone();
+            move |_, _, _| {
+                let (x, y) = pad.alignment.get();
+                pad.place((
+                    webcam_snap_alignment(x, 0.25),
+                    webcam_snap_alignment(y, 0.5),
+                ));
             }
         });
         area.add_controller(drag);
@@ -2144,6 +2130,17 @@ impl WebcamPositionPad {
         self.place((
             webcam_pad_alignment(x, width, dot),
             webcam_pad_alignment(y, height, dot),
+        ));
+    }
+
+    /// Put the dot on the grid point nearest the pointer.
+    fn snap_point(&self, x: f64, y: f64) {
+        let width = f64::from(self.area.allocated_width().max(1));
+        let height = f64::from(self.area.allocated_height().max(1));
+        let dot = webcam_pad_dot_radius(width, height, self.scale) * 2.0;
+        self.place((
+            webcam_snap_alignment(webcam_pad_alignment(x, width, dot), 0.25),
+            webcam_snap_alignment(webcam_pad_alignment(y, height, dot), 0.5),
         ));
     }
 
@@ -2182,6 +2179,23 @@ impl WebcamPositionPad {
         context.stroke().ok();
 
         let radius = webcam_pad_dot_radius(width, height, self.scale);
+        // The snap grid: the dots sit exactly where the selection dot can sit,
+        // five across and three down, so a click lands on one of them.
+        let grid_radius = 2.0 * self.scale;
+        let dot_extent = radius * 2.0;
+        if light {
+            context.set_source_rgba(0.11, 0.13, 0.16, 0.25);
+        } else {
+            context.set_source_rgba(1.0, 1.0, 1.0, 0.25);
+        }
+        for alignment_y in [0.0, 0.5, 1.0] {
+            for alignment_x in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                let x = webcam_pad_offset(alignment_x, width, dot_extent) + radius;
+                let y = webcam_pad_offset(alignment_y, height, dot_extent) + radius;
+                context.arc(x, y, grid_radius, 0.0, TAU);
+                context.fill().ok();
+            }
+        }
         let (alignment_x, alignment_y) = self.alignment.get();
         let centre_x = webcam_pad_offset(alignment_x, width, radius * 2.0) + radius;
         let centre_y = webcam_pad_offset(alignment_y, height, radius * 2.0) + radius;
@@ -2226,18 +2240,23 @@ fn webcam_pad_alignment(point: f64, pad_extent: f64, dot_extent: f64) -> f64 {
     ((point - dot_extent * 0.5) / travel).clamp(0.0, 1.0)
 }
 
+/// The nearest point on an axis's snap grid.
+fn webcam_snap_alignment(value: f64, step: f64) -> f64 {
+    let value = if value.is_finite() {
+        value.clamp(0.0, 1.0)
+    } else {
+        0.5
+    };
+    (value / step).round() * step
+}
+
 struct WebcamPositionContext {
     pad: WebcamPositionPad,
-    horizontal: FilledSlider,
-    vertical: FilledSlider,
 }
 
 impl WebcamPositionContext {
-    fn refresh(&self, layer: &LayerSettings) {
-        let alignment = layer.overlay_alignment();
+    fn refresh(&self, alignment: (f64, f64)) {
         self.pad.refresh(alignment);
-        self.horizontal.set_value(alignment.0 * 100.0);
-        self.vertical.set_value(alignment.1 * 100.0);
     }
 }
 
@@ -2259,41 +2278,8 @@ fn build_webcam_position(
     let alignment = layer.overlay_alignment();
     let pad = WebcamPositionPad::new(scale, frame_aspect, alignment, on_move);
     root.append(&pad.area);
-    let horizontal_change = move_axis.clone();
-    let horizontal = value_slider_control(
-        &t("Horizontal"),
-        0.0,
-        100.0,
-        alignment.0 * 100.0,
-        1.0,
-        0,
-        scale,
-        move |value| horizontal_change(true, value / 100.0),
-    );
-    horizontal
-        .widget()
-        .set_tooltip_text(Some(&t("Percentage of the free space around the bubble.")));
-    let vertical = value_slider_control(
-        &t("Vertical"),
-        0.0,
-        100.0,
-        alignment.1 * 100.0,
-        1.0,
-        0,
-        scale,
-        move |value| move_axis(false, value / 100.0),
-    );
-    vertical
-        .widget()
-        .set_tooltip_text(Some(&t("Percentage of the free space around the bubble.")));
-    root.append(&horizontal.widget());
-    root.append(&vertical.widget());
-    let context = WebcamPositionContext {
-        pad,
-        horizontal,
-        vertical,
-    };
-    context.refresh(layer);
+    let context = WebcamPositionContext { pad };
+    context.refresh(alignment);
     (root, context)
 }
 
@@ -2312,94 +2298,40 @@ fn webcam_shape_button(label: &str, height: i32) -> ToggleButton {
     button
 }
 
-struct WebcamShapeContext {
-    root: GtkBox,
-    buttons: Vec<ToggleButton>,
-    radius: FilledSlider,
-}
-
-impl WebcamShapeContext {
-    fn refresh(&self, shape: Option<usize>, radius: f64) {
-        for (index, button) in self.buttons.iter().enumerate() {
-            button.set_active(shape == Some(index));
-        }
-        self.radius.set_value(radius * 100.0);
-    }
-}
-
-fn build_webcam_shape(
-    scale: f64,
-    shape: Option<usize>,
-    radius: f64,
-    set_shape: Rc<dyn Fn(u8)>,
-    set_radius: Rc<dyn Fn(f64)>,
-) -> WebcamShapeContext {
-    let root = GtkBox::new(Orientation::Vertical, (8.0 * scale).round() as i32);
-    root.set_hexpand(true);
-    root.append(&webcam_kicker(&t("SHAPE")));
-    let gap = (4.0 * scale).round() as i32;
-    let height = (28.0 * scale).round() as i32;
-    let grid = Grid::new();
-    grid.set_column_homogeneous(true);
-    grid.set_row_homogeneous(true);
-    grid.set_column_spacing(gap as u32);
-    grid.set_row_spacing(gap as u32);
-    grid.set_hexpand(true);
-    grid.set_halign(Align::Fill);
-    let initial_radius = radius;
-    let mut buttons = Vec::with_capacity(WEBCAM_SHAPES.len());
-    let mut first = None::<ToggleButton>;
-    for (index, label) in WEBCAM_SHAPES.iter().enumerate() {
-        let button = webcam_shape_button(label, height);
-        if let Some(first) = &first {
-            button.set_group(Some(first));
-        } else {
-            first = Some(button.clone());
-        }
-        let set_shape = set_shape.clone();
-        button.connect_clicked(move |button| {
-            if !button.is_active() {
-                button.set_active(true);
-            }
-            set_shape(index as u8);
-        });
-        grid.attach(&button, (index % 2) as i32, (index / 2) as i32, 1, 1);
-        buttons.push(button);
-    }
-    root.append(&grid);
-    let radius_slider = value_slider_control(
-        &t("Radius"),
-        0.0,
-        100.0,
-        initial_radius * 100.0,
-        1.0,
-        0,
-        scale,
-        move |value| set_radius(value / 100.0),
-    );
-    root.append(&radius_slider.widget());
-    let context = WebcamShapeContext {
-        root,
-        buttons,
-        radius: radius_slider,
-    };
-    context.refresh(shape, initial_radius);
-    context
-}
-
 struct WebcamOverlayContext {
     root: GtkBox,
     position: WebcamPositionContext,
     size: FilledSlider,
-    shape: WebcamShapeContext,
+    shrink: Switch,
+    shrink_size: FilledSlider,
+    shape_root: GtkBox,
+    shape_circle: ToggleButton,
+    shape_rounded: ToggleButton,
+    shape_square: ToggleButton,
+    aspects: Vec<ToggleButton>,
+    roundness: FilledSlider,
 }
 
 impl WebcamOverlayContext {
-    fn refresh(&self, layer: &LayerSettings, frame_aspect: f64) {
-        self.position.refresh(layer);
-        self.size.set_value(layer.w * 100.0);
-        self.shape
-            .refresh(webcam_shape_index(layer, frame_aspect), layer.radius);
+    fn refresh(&self, layer: &LayerSettings, frame_aspect: f64, alignment: (f64, f64)) {
+        self.position.refresh(alignment);
+        self.size
+            .set_value(layer.overlay_size_ratio(webcam_frame_aspect(frame_aspect)) * 100.0);
+        let shrinking = layer.zoomed_scale < 1.0;
+        self.shrink.set_active(shrinking);
+        self.shrink_size.widget().set_visible(shrinking);
+        self.shrink_size
+            .set_value(layer.zoomed_scale.min(super::webcam::ZOOMED_CAMERA_SCALE) * 100.0);
+        let aspect = webcam_aspect_index(layer, frame_aspect);
+        for (index, button) in self.aspects.iter().enumerate() {
+            button.set_active(aspect == Some(index));
+        }
+        let circle = layer.radius >= 0.99;
+        let square = layer.radius <= 0.01;
+        self.shape_circle.set_active(circle);
+        self.shape_square.set_active(square);
+        self.shape_rounded.set_active(!circle && !square);
+        self.roundness.set_value(layer.radius * 100.0);
     }
 }
 
@@ -2411,18 +2343,15 @@ fn build_webcam_overlay(
 ) -> WebcamOverlayContext {
     let root = GtkBox::new(Orientation::Vertical, (8.0 * scale).round() as i32);
     root.set_hexpand(true);
-    root.append(&webcam_hint(&t("Shared by every overlay.")));
-    root.append(&webcam_kicker(&t("POSITION")));
     let (position_box, position) =
         build_webcam_position(scale, layer, frame_aspect, actions.move_alignment.clone());
     root.append(&position_box);
-    root.append(&webcam_kicker(&t("SIZE")));
     let resize = actions.resize.clone();
     let size = value_slider_control(
         &t("Size"),
-        super::webcam::MIN_SIZE * 100.0,
-        super::webcam::MAX_SIZE * 100.0,
-        layer.w * 100.0,
+        super::webcam::MIN_OVERLAY_SIZE_RATIO * 100.0,
+        super::webcam::MAX_OVERLAY_SIZE_RATIO * 100.0,
+        layer.overlay_size_ratio(webcam_frame_aspect(frame_aspect)) * 100.0,
         1.0,
         0,
         scale,
@@ -2430,24 +2359,132 @@ fn build_webcam_overlay(
     )
     .with_suffix("%");
     size.widget().set_tooltip_text(Some(&t(
-        "The bubble's width, as a percentage of the frame.",
+        "The camera's longest side, as a percentage of the frame's shortest side.",
     )));
     root.append(&size.widget());
-    let shape = build_webcam_shape(
-        scale,
-        webcam_shape_index(layer, frame_aspect),
-        layer.radius,
-        actions.set_shape.clone(),
-        actions.set_radius.clone(),
+    let (shrink_row, shrink) = setting_switch_row(
+        &t("Shrink during zoom"),
+        &t("Make the camera smaller while the screen is zoomed, so it covers less of the recording."),
     );
-    root.append(&shape.root);
+    root.append(&shrink_row);
+    let set_zoomed_scale = actions.set_zoomed_scale.clone();
+    let shrink_size = value_slider_control(
+        &t("Shrink size"),
+        super::webcam::MIN_ZOOMED_CAMERA_SCALE * 100.0,
+        super::webcam::ZOOMED_CAMERA_SCALE * 100.0,
+        layer.zoomed_scale.min(super::webcam::ZOOMED_CAMERA_SCALE) * 100.0,
+        1.0,
+        0,
+        scale,
+        move |value| set_zoomed_scale(value / 100.0),
+    )
+    .with_suffix("%");
+    shrink.set_active(layer.zoomed_scale < 1.0);
+    shrink_size.widget().set_visible(layer.zoomed_scale < 1.0);
+    shrink.connect_state_set({
+        let set_zoomed_scale = actions.set_zoomed_scale.clone();
+        move |_, active| {
+            set_zoomed_scale(if active {
+                super::webcam::ZOOMED_CAMERA_SCALE
+            } else {
+                1.0
+            });
+            gtk4::glib::Propagation::Proceed
+        }
+    });
+    root.append(&shrink_size.widget());
+
+    let shape_root = GtkBox::new(Orientation::Vertical, (8.0 * scale).round() as i32);
+    shape_root.set_hexpand(true);
+    let shape_scope = GtkBox::new(Orientation::Horizontal, 0);
+    shape_scope.add_css_class("recording-editor-webcam-scope");
+    shape_scope.set_halign(Align::Fill);
+    shape_scope.set_hexpand(true);
+    shape_scope.set_homogeneous(true);
+    let (shape_circle, _) = webcam_scope_button(&t("Circle"));
+    let (shape_rounded, _) = webcam_scope_button(&t("Rounded"));
+    let (shape_square, _) = webcam_scope_button(&t("Square"));
+    shape_circle.set_hexpand(true);
+    shape_rounded.set_hexpand(true);
+    shape_square.set_hexpand(true);
+    shape_rounded.set_group(Some(&shape_circle));
+    shape_square.set_group(Some(&shape_circle));
+    shape_circle.connect_clicked({
+        let set_radius = actions.set_radius.clone();
+        let set_aspect = actions.set_aspect.clone();
+        move |button| {
+            if !button.is_active() {
+                button.set_active(true);
+            }
+            set_radius(1.0);
+            set_aspect(1.0);
+        }
+    });
+    shape_rounded.connect_clicked({
+        let set_radius = actions.set_radius.clone();
+        move |button| {
+            if !button.is_active() {
+                button.set_active(true);
+            }
+            set_radius(0.3);
+        }
+    });
+    shape_square.connect_clicked({
+        let set_radius = actions.set_radius.clone();
+        move |button| {
+            if !button.is_active() {
+                button.set_active(true);
+            }
+            set_radius(0.0);
+        }
+    });
+    shape_scope.append(&shape_circle);
+    shape_scope.append(&shape_rounded);
+    shape_scope.append(&shape_square);
+    shape_root.append(&shape_scope);
+    let aspect_grid = Grid::new();
+    aspect_grid.set_column_homogeneous(true);
+    aspect_grid.set_column_spacing((4.0 * scale).round() as u32);
+    aspect_grid.set_hexpand(true);
+    aspect_grid.set_halign(Align::Fill);
+    let chip_height = (28.0 * scale).round() as i32;
+    let mut aspects = Vec::with_capacity(super::webcam::OVERLAY_ASPECTS.len());
+    for (index, (label, value)) in super::webcam::OVERLAY_ASPECTS.iter().enumerate() {
+        let button = webcam_shape_button(label, chip_height);
+        let set_aspect = actions.set_aspect.clone();
+        let value = *value;
+        button.connect_clicked(move |_| set_aspect(value));
+        aspect_grid.attach(&button, index as i32, 0, 1, 1);
+        aspects.push(button);
+    }
+    shape_root.append(&aspect_grid);
+    let set_radius = actions.set_radius.clone();
+    let roundness = value_slider_control(
+        &t("Roundness"),
+        0.0,
+        100.0,
+        layer.radius * 100.0,
+        1.0,
+        0,
+        scale,
+        move |value| set_radius(value / 100.0),
+    );
+    shape_root.append(&roundness.widget());
+
     let context = WebcamOverlayContext {
         root,
         position,
         size,
-        shape,
+        shrink,
+        shrink_size,
+        shape_root,
+        shape_circle,
+        shape_rounded,
+        shape_square,
+        aspects,
+        roundness,
     };
-    context.refresh(layer, frame_aspect);
+    context.refresh(layer, frame_aspect, layer.overlay_alignment());
     context
 }
 
@@ -2457,11 +2494,22 @@ struct WebcamSplitContext {
     first_label: Label,
     second: ToggleButton,
     second_label: Label,
+    auto: Switch,
     width: FilledSlider,
+    fill_full: ToggleButton,
+    fill_padded: ToggleButton,
 }
 
 impl WebcamSplitContext {
-    fn refresh(&self, ratio: f64, flip: bool, portrait: bool) {
+    fn refresh(
+        &self,
+        ratio: f64,
+        flip: bool,
+        portrait: bool,
+        auto: bool,
+        auto_ratio: f64,
+        padded: bool,
+    ) {
         let (first, second) = if portrait {
             ("Top", "Bottom")
         } else {
@@ -2469,22 +2517,48 @@ impl WebcamSplitContext {
         };
         self.first_label.set_text(&t(first));
         self.second_label.set_text(&t(second));
+        let (first_tip, second_tip) = if portrait {
+            (
+                "Put the camera above the screen.",
+                "Put the camera below the screen.",
+            )
+        } else {
+            (
+                "Put the camera left of the screen.",
+                "Put the camera right of the screen.",
+            )
+        };
+        self.first.set_tooltip_text(Some(&t(first_tip)));
+        self.second.set_tooltip_text(Some(&t(second_tip)));
         if flip {
             self.first.set_active(true);
         } else {
             self.second.set_active(true);
         }
-        self.width.set_value(ratio * 100.0);
+        self.auto.set_active(auto);
+        self.width.widget().set_sensitive(!auto);
+        self.width
+            .set_value(if auto { auto_ratio } else { ratio } * 100.0);
+        if padded {
+            self.fill_padded.set_active(true)
+        } else {
+            self.fill_full.set_active(true)
+        }
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_webcam_split(
     scale: f64,
     ratio: f64,
     flip: bool,
+    split_auto: bool,
     portrait: bool,
+    padded: bool,
     set_flip: Rc<dyn Fn(bool)>,
     set_ratio: Rc<dyn Fn(f64)>,
+    set_auto: Rc<dyn Fn(bool)>,
+    set_padded: Rc<dyn Fn(bool)>,
 ) -> WebcamSplitContext {
     let root = GtkBox::new(Orientation::Vertical, (8.0 * scale).round() as i32);
     root.set_hexpand(true);
@@ -2501,9 +2575,19 @@ fn build_webcam_split(
     segment.append(&first);
     segment.append(&second);
 
-    root.append(&webcam_kicker(&t("CAMERA")));
+    root.append(&webcam_kicker(&t("Camera side").to_uppercase()));
     root.append(&segment);
-    root.append(&webcam_kicker(&t("SCREEN SHARE")));
+    root.append(&webcam_kicker(&t("Screen width").to_uppercase()));
+    let (auto_row, auto) = setting_switch_row(
+        &t("Automatic width"),
+        &t("Keep the screen's shape and give the camera the rest of the frame."),
+    );
+    auto.set_active(split_auto);
+    auto.connect_state_set(move |_, active| {
+        set_auto(active);
+        gtk4::glib::Propagation::Proceed
+    });
+    root.append(&auto_row);
     let width = value_slider_control(
         &t("Width"),
         10.0,
@@ -2515,10 +2599,41 @@ fn build_webcam_split(
         move |value| set_ratio(value / 100.0),
     )
     .with_suffix("%");
+    width.widget().set_sensitive(!split_auto);
     width.widget().set_tooltip_text(Some(&t(
         "The screen's share of the split, as a percentage.",
     )));
     root.append(&width.widget());
+    let fill = GtkBox::new(Orientation::Horizontal, 0);
+    fill.add_css_class("recording-editor-webcam-scope");
+    fill.set_hexpand(true);
+    fill.set_homogeneous(true);
+    let (fill_full, _) = webcam_scope_button(&t("Fullscreen"));
+    let (fill_padded, _) = webcam_scope_button(&t("Padded"));
+    fill_full.set_hexpand(true);
+    fill_padded.set_hexpand(true);
+    fill_padded.set_group(Some(&fill_full));
+    fill_full.set_tooltip_text(Some(&t("The split fills the frame edge to edge.")));
+    fill_padded.set_tooltip_text(Some(&t(
+        "Leave the Background padding between the screen and the camera, with rounded corners.",
+    )));
+    fill.append(&fill_full);
+    fill.append(&fill_padded);
+    root.append(&webcam_kicker(&t("Fill").to_uppercase()));
+    root.append(&fill);
+    let set_full = set_padded.clone();
+    fill_full.connect_clicked(move |button| {
+        if !button.is_active() {
+            button.set_active(true);
+        }
+        set_full(false);
+    });
+    fill_padded.connect_clicked(move |button| {
+        if !button.is_active() {
+            button.set_active(true);
+        }
+        set_padded(true);
+    });
     let set_first = set_flip.clone();
     first.connect_clicked(move |button| {
         if !button.is_active() {
@@ -2538,9 +2653,12 @@ fn build_webcam_split(
         first_label,
         second,
         second_label,
+        auto,
         width,
+        fill_full,
+        fill_padded,
     };
-    context.refresh(ratio, flip, portrait);
+    context.refresh(ratio, flip, portrait, split_auto, ratio, padded);
     context
 }
 
@@ -2548,23 +2666,36 @@ struct WebcamCutoutContext {
     root: GtkBox,
     sides: Vec<ToggleButton>,
     horizontal: FilledSlider,
+    size: FilledSlider,
+    softness: FilledSlider,
+    inset: FilledSlider,
 }
 
 impl WebcamCutoutContext {
-    fn refresh(&self, position: f64) {
+    fn refresh(&self, position: f64, cutout_size: f64, cutout_softness: f64, cutout_inset: f64) {
         let step = webcam_alignment_step(position);
         for (index, button) in self.sides.iter().enumerate() {
             button.set_active(step == Some(index));
         }
         self.horizontal.set_value(position * 100.0);
+        self.size.set_value(cutout_size * 100.0);
+        self.softness.set_value(cutout_softness * 100.0);
+        self.inset.set_value(cutout_inset);
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_webcam_cutout(
     scale: f64,
     position: f64,
     set_position: Rc<dyn Fn(f64)>,
     move_position: Rc<dyn Fn(f64)>,
+    cutout_size: f64,
+    cutout_softness: f64,
+    cutout_inset: f64,
+    set_cutout_size: Rc<dyn Fn(f64)>,
+    set_cutout_softness: Rc<dyn Fn(f64)>,
+    set_cutout_inset: Rc<dyn Fn(f64)>,
 ) -> WebcamCutoutContext {
     let root = GtkBox::new(Orientation::Vertical, (8.0 * scale).round() as i32);
     root.set_hexpand(true);
@@ -2609,23 +2740,84 @@ fn build_webcam_cutout(
         .widget()
         .set_tooltip_text(Some(&t("Percentage of the frame width.")));
     root.append(&horizontal.widget());
+    let size = value_slider_control(
+        &t("Size"),
+        super::webcam::MIN_CUTOUT_SIZE * 100.0,
+        super::webcam::MAX_CUTOUT_SIZE * 100.0,
+        cutout_size * 100.0,
+        1.0,
+        0,
+        scale,
+        {
+            let set = set_cutout_size.clone();
+            move |value| set(value / 100.0)
+        },
+    )
+    .with_suffix("%");
+    size.widget().set_tooltip_text(Some(&t(
+        "The person's size, as a percentage of the frame's shortest side.",
+    )));
+    let softness = value_slider_control(
+        &t("Edge softness"),
+        0.0,
+        100.0,
+        cutout_softness * 100.0,
+        1.0,
+        0,
+        scale,
+        {
+            let set = set_cutout_softness.clone();
+            move |value| set(value / 100.0)
+        },
+    )
+    .with_suffix("%");
+    let inset = value_slider_control(
+        &t("Edge inset"),
+        0.0,
+        super::webcam::MAX_CUTOUT_INSET,
+        cutout_inset,
+        0.1,
+        1,
+        scale,
+        {
+            let set = set_cutout_inset.clone();
+            move |value| set(value)
+        },
+    )
+    .with_suffix(" px");
+    root.append(&size.widget());
+    root.append(&softness.widget());
+    root.append(&inset.widget());
     let context = WebcamCutoutContext {
         root,
         sides,
         horizontal,
+        size,
+        softness,
+        inset,
     };
-    context.refresh(position);
+    context.refresh(position, cutout_size, cutout_softness, cutout_inset);
     context
 }
 
 struct WebcamCameraContext {
     root: GtkBox,
     mirror: Switch,
+    delay: FilledSlider,
+    silence: Switch,
+    silence_length: FilledSlider,
 }
 
 impl WebcamCameraContext {
-    fn refresh(&self, mirror: bool) {
+    fn refresh(&self, mirror: bool, delay_seconds: f64, hide_during_silence: Option<f64>) {
         self.mirror.set_active(mirror);
+        self.delay.set_value(delay_seconds * 1000.0);
+        self.silence.set_active(hide_during_silence.is_some());
+        self.silence_length
+            .set_value(hide_during_silence.unwrap_or(super::webcam::DEFAULT_SILENCE_SECONDS));
+        self.silence_length
+            .widget()
+            .set_visible(hide_during_silence.is_some());
     }
 }
 
@@ -2633,10 +2825,13 @@ fn build_webcam_camera(
     scale: f64,
     mirror: bool,
     set_mirror: Rc<dyn Fn(bool)>,
+    delay_seconds: f64,
+    set_delay: Rc<dyn Fn(f64)>,
+    hide_during_silence: Option<f64>,
+    set_silence: Rc<dyn Fn(Option<f64>)>,
 ) -> WebcamCameraContext {
     let root = GtkBox::new(Orientation::Vertical, (8.0 * scale).round() as i32);
     root.set_hexpand(true);
-    root.append(&webcam_hint(&t("Shared by every camera layout.")));
     let (row, switch) = setting_switch_row(
         &t("Mirror camera"),
         &t("Flip the camera left to right, the way a mirror shows it."),
@@ -2647,9 +2842,61 @@ fn build_webcam_camera(
         gtk4::glib::Propagation::Proceed
     });
     root.append(&row);
+    let max_ms = super::webcam::MAX_CAMERA_DELAY_SECONDS * 1000.0;
+    let delay = value_slider_control(
+        &t("Camera delay"),
+        -max_ms,
+        max_ms,
+        delay_seconds * 1000.0,
+        5.0,
+        0,
+        scale,
+        move |value| set_delay(value / 1000.0),
+    )
+    .with_suffix(" ms");
+    delay.widget().set_tooltip_text(Some(&t(
+        "Shift the camera against the screen and sound. Raise it if your lips move after the words, lower it if they move before.",
+    )));
+    root.append(&delay.widget());
+    let (silence_row, silence) = setting_switch_row(
+        &t("Hide during silence"),
+        &t("Hide the camera while nobody is talking, and bring it back when they do."),
+    );
+    root.append(&silence_row);
+    silence.set_active(hide_during_silence.is_some());
+    let switch_silence = set_silence.clone();
+    silence.connect_state_set(move |_, active| {
+        switch_silence(if active {
+            Some(super::webcam::DEFAULT_SILENCE_SECONDS)
+        } else {
+            None
+        });
+        gtk4::glib::Propagation::Proceed
+    });
+    let silence_length = value_slider_control(
+        &t("Minimum silence"),
+        super::webcam::MIN_SILENCE_SECONDS,
+        super::webcam::MAX_SILENCE_SECONDS,
+        hide_during_silence.unwrap_or(super::webcam::DEFAULT_SILENCE_SECONDS),
+        0.5,
+        1,
+        scale,
+        {
+            let set = set_silence.clone();
+            move |value| set(Some(value))
+        },
+    )
+    .with_suffix(" s");
+    silence_length
+        .widget()
+        .set_visible(hide_during_silence.is_some());
+    root.append(&silence_length.widget());
     WebcamCameraContext {
         root,
         mirror: switch,
+        delay,
+        silence,
+        silence_length,
     }
 }
 
@@ -2671,7 +2918,6 @@ fn build_webcam_transition(
 ) -> WebcamTransitionContext {
     let root = GtkBox::new(Orientation::Vertical, (8.0 * scale).round() as i32);
     root.set_hexpand(true);
-    root.append(&webcam_hint(&t("Shared by every layout change.")));
     let duration = value_slider_control(
         &t("Duration"),
         0.0,
@@ -2681,7 +2927,8 @@ fn build_webcam_transition(
         2,
         scale,
         move |value| set_duration(value),
-    );
+    )
+    .with_suffix(" s");
     root.append(&duration.widget());
     WebcamTransitionContext { root, duration }
 }
@@ -2689,13 +2936,21 @@ fn build_webcam_transition(
 struct WebcamContextActions {
     move_alignment: Rc<dyn Fn(bool, f64)>,
     resize: Rc<dyn Fn(f64)>,
-    set_shape: Rc<dyn Fn(u8)>,
+    set_aspect: Rc<dyn Fn(f64)>,
     set_radius: Rc<dyn Fn(f64)>,
+    set_zoomed_scale: Rc<dyn Fn(f64)>,
     set_split_flip: Rc<dyn Fn(bool)>,
+    set_split_padded: Rc<dyn Fn(bool)>,
     set_split_ratio: Rc<dyn Fn(f64)>,
+    set_split_auto: Rc<dyn Fn(bool)>,
     set_cutout_position: Rc<dyn Fn(f64)>,
     move_cutout_position: Rc<dyn Fn(f64)>,
+    set_cutout_size: Rc<dyn Fn(f64)>,
+    set_cutout_softness: Rc<dyn Fn(f64)>,
+    set_cutout_inset: Rc<dyn Fn(f64)>,
     set_mirror: Rc<dyn Fn(bool)>,
+    set_delay: Rc<dyn Fn(f64)>,
+    set_silence: Rc<dyn Fn(Option<f64>)>,
     set_transition: Rc<dyn Fn(f64)>,
 }
 
@@ -2705,13 +2960,21 @@ impl WebcamContextActions {
         Self {
             move_alignment: Rc::new(|_, _| {}),
             resize: Rc::new(|_| {}),
-            set_shape: Rc::new(|_| {}),
+            set_aspect: Rc::new(|_| {}),
             set_radius: Rc::new(|_| {}),
+            set_zoomed_scale: Rc::new(|_| {}),
             set_split_flip: Rc::new(|_| {}),
+            set_split_padded: Rc::new(|_| {}),
             set_split_ratio: Rc::new(|_| {}),
+            set_split_auto: Rc::new(|_| {}),
             set_cutout_position: Rc::new(|_| {}),
             move_cutout_position: Rc::new(|_| {}),
+            set_cutout_size: Rc::new(|_| {}),
+            set_cutout_softness: Rc::new(|_| {}),
+            set_cutout_inset: Rc::new(|_| {}),
             set_mirror: Rc::new(|_| {}),
+            set_delay: Rc::new(|_| {}),
+            set_silence: Rc::new(|_| {}),
             set_transition: Rc::new(|_| {}),
         }
     }
@@ -2732,7 +2995,9 @@ impl WebcamContext {
         layer: &LayerSettings,
         layouts: &LayoutSettings,
         frame_aspect: f64,
+        cue: Option<LayoutCue>,
         controls: WebcamControlUse,
+        auto_split_share: f64,
     ) {
         self.overlay.root.set_visible(controls.overlay);
         self.split.root.set_visible(controls.split);
@@ -2740,20 +3005,36 @@ impl WebcamContext {
         self.camera.root.set_visible(controls.mirror);
         self.transition.root.set_visible(controls.transitions);
         if controls.overlay {
-            self.overlay.refresh(layer, frame_aspect);
+            let alignment = cue
+                .and_then(|cue| cue.position)
+                .map(|[x, y]| (x, y))
+                .unwrap_or(layer.overlay_alignment());
+            self.overlay.refresh(layer, frame_aspect, alignment);
         }
         if controls.split {
             self.split.refresh(
                 layouts.split_ratio,
                 layouts.split_flip,
                 webcam_frame_aspect(frame_aspect) < 1.0,
+                layouts.split_auto,
+                auto_split_share,
+                layouts.split_padded,
             );
         }
         if controls.cutout {
-            self.cutout.refresh(layouts.cutout_position_x);
+            let position = cue
+                .and_then(|cue| cue.cutout_x)
+                .unwrap_or(layouts.cutout_position_x);
+            self.cutout.refresh(
+                position,
+                layouts.cutout_size,
+                layouts.cutout_softness,
+                layouts.cutout_inset,
+            );
         }
         if controls.mirror {
-            self.camera.refresh(layer.mirror);
+            self.camera
+                .refresh(layer.mirror, layer.delay_seconds, layer.hide_during_silence);
         }
         if controls.transitions {
             self.transition.refresh(layouts.transition_seconds);
@@ -2773,17 +3054,35 @@ fn build_webcam_context(
         scale,
         layouts.split_ratio,
         layouts.split_flip,
+        layouts.split_auto,
         webcam_frame_aspect(frame_aspect) < 1.0,
+        layouts.split_padded,
         actions.set_split_flip.clone(),
         actions.set_split_ratio.clone(),
+        actions.set_split_auto.clone(),
+        actions.set_split_padded.clone(),
     );
     let cutout = build_webcam_cutout(
         scale,
         layouts.cutout_position_x,
         actions.set_cutout_position.clone(),
         actions.move_cutout_position.clone(),
+        layouts.cutout_size,
+        layouts.cutout_softness,
+        layouts.cutout_inset,
+        actions.set_cutout_size.clone(),
+        actions.set_cutout_softness.clone(),
+        actions.set_cutout_inset.clone(),
     );
-    let camera = build_webcam_camera(scale, layer.mirror, actions.set_mirror.clone());
+    let camera = build_webcam_camera(
+        scale,
+        layer.mirror,
+        actions.set_mirror.clone(),
+        layer.delay_seconds,
+        actions.set_delay.clone(),
+        layer.hide_during_silence,
+        actions.set_silence.clone(),
+    );
     let transition = build_webcam_transition(
         scale,
         layouts.transition_seconds,
@@ -2795,8 +3094,6 @@ fn build_webcam_context(
     root.append(&overlay.root);
     root.append(&split.root);
     root.append(&cutout.root);
-    root.append(&camera.root);
-    root.append(&transition.root);
     WebcamContext {
         root,
         overlay,
@@ -2853,7 +3150,7 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
     // The layer's own switch sits above the layouts: off paints the screen
     // alone and leaves every layout change where it is.
     let (camera_row, camera_switch) = setting_switch_row(
-        &t("Camera layer"),
+        &t("Show camera"),
         &t("Draw the camera over the screen. Off shows the screen alone and keeps your layout changes."),
     );
     camera_switch.set_active(initial_layer.enabled);
@@ -2870,10 +3167,11 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
     editor.append(&camera_row);
 
     let rows = build_webcam_control_rows(scale);
-    editor.append(&rows.root);
-
     let cards = build_webcam_layout_grid(scale, initial.frame_aspect);
-    editor.append(&cards.root);
+    let layout_section = webcam_section(scale, &t("Layout"), true);
+    layout_section.body.append(&rows.root);
+    layout_section.body.append(&cards.root);
+    editor.append(&layout_section.root);
 
     let actions = WebcamContextActions {
         move_alignment: {
@@ -2881,6 +3179,26 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
             let syncing = syncing.clone();
             Rc::new(move |horizontal, value| {
                 if syncing.get() {
+                    return;
+                }
+                let state = timeline.webcam_panel_state();
+                if let Some((index, cue)) = webcam_selected_cue(&state) {
+                    timeline.show_webcam_layout_cue(index);
+                    let (mut x, mut y) = cue
+                        .position
+                        .map(|[x, y]| (x, y))
+                        .or_else(|| state.layer.map(|layer| layer.overlay_alignment()))
+                        .unwrap_or((1.0, 1.0));
+                    if horizontal {
+                        x = value;
+                    } else {
+                        y = value;
+                    }
+                    timeline.update_webcam_layouts_continuous(|layouts| {
+                        if let Some(cue) = layouts.cues.get_mut(index) {
+                            cue.position = Some([x, y]);
+                        }
+                    });
                     return;
                 }
                 timeline.update_webcam(|layer| {
@@ -2899,19 +3217,18 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
             let syncing = syncing.clone();
             Rc::new(move |value| {
                 if !syncing.get() {
-                    timeline.update_webcam(|layer| {
-                        let aspect = layer.h / layer.w;
-                        layer.resize_overlay(value / 100.0, aspect);
-                    });
+                    let frame = timeline.webcam_frame_aspect();
+                    timeline.update_webcam(|layer| layer.set_overlay_size(value / 100.0, frame));
                 }
             })
         },
-        set_shape: {
+        set_aspect: {
             let timeline = timeline.clone();
             let syncing = syncing.clone();
-            Rc::new(move |shape| {
+            Rc::new(move |aspect| {
                 if !syncing.get() {
-                    timeline.set_webcam_editing_layout(CameraLayout::CameraOverlay, Some(shape));
+                    let frame = timeline.webcam_frame_aspect();
+                    timeline.update_webcam(|layer| layer.set_overlay_aspect(aspect, frame));
                 }
             })
         },
@@ -2924,6 +3241,15 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
                 }
             })
         },
+        set_zoomed_scale: {
+            let timeline = timeline.clone();
+            let syncing = syncing.clone();
+            Rc::new(move |value| {
+                if !syncing.get() {
+                    timeline.update_webcam(|layer| layer.zoomed_scale = value);
+                }
+            })
+        },
         set_split_flip: {
             let timeline = timeline.clone();
             let syncing = syncing.clone();
@@ -2933,14 +3259,33 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
                 }
             })
         },
+        set_split_padded: {
+            let timeline = timeline.clone();
+            let syncing = syncing.clone();
+            Rc::new(move |padded| {
+                if !syncing.get() {
+                    timeline.update_webcam_layouts(|layouts| layouts.split_padded = padded);
+                }
+            })
+        },
         set_split_ratio: {
             let timeline = timeline.clone();
             let syncing = syncing.clone();
             Rc::new(move |value| {
                 if !syncing.get() {
                     timeline.update_webcam_layouts_continuous(|layouts| {
+                        layouts.split_auto = false;
                         layouts.split_ratio = value;
                     });
+                }
+            })
+        },
+        set_split_auto: {
+            let timeline = timeline.clone();
+            let syncing = syncing.clone();
+            Rc::new(move |auto| {
+                if !syncing.get() {
+                    timeline.update_webcam_layouts(|layouts| layouts.split_auto = auto);
                 }
             })
         },
@@ -2949,6 +3294,15 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
             let syncing = syncing.clone();
             Rc::new(move |position| {
                 if !syncing.get() {
+                    if let Some((index, _)) = webcam_selected_cue(&timeline.webcam_panel_state()) {
+                        timeline.show_webcam_layout_cue(index);
+                        timeline.update_webcam_layouts(|layouts| {
+                            if let Some(cue) = layouts.cues.get_mut(index) {
+                                cue.cutout_x = Some(position);
+                            }
+                        });
+                        return;
+                    }
                     timeline.update_webcam_layouts(|layouts| {
                         layouts.cutout_position_x = position;
                     });
@@ -2960,9 +3314,49 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
             let syncing = syncing.clone();
             Rc::new(move |position| {
                 if !syncing.get() {
+                    if let Some((index, _)) = webcam_selected_cue(&timeline.webcam_panel_state()) {
+                        timeline.show_webcam_layout_cue(index);
+                        timeline.update_webcam_layouts_continuous(|layouts| {
+                            if let Some(cue) = layouts.cues.get_mut(index) {
+                                cue.cutout_x = Some(position);
+                            }
+                        });
+                        return;
+                    }
                     timeline.update_webcam_layouts_continuous(|layouts| {
                         layouts.cutout_position_x = position;
                     });
+                }
+            })
+        },
+        set_cutout_size: {
+            let timeline = timeline.clone();
+            let syncing = syncing.clone();
+            Rc::new(move |value| {
+                if !syncing.get() {
+                    timeline
+                        .update_webcam_layouts_continuous(|layouts| layouts.cutout_size = value);
+                }
+            })
+        },
+        set_cutout_softness: {
+            let timeline = timeline.clone();
+            let syncing = syncing.clone();
+            Rc::new(move |value| {
+                if !syncing.get() {
+                    timeline.update_webcam_layouts_continuous(|layouts| {
+                        layouts.cutout_softness = value
+                    });
+                }
+            })
+        },
+        set_cutout_inset: {
+            let timeline = timeline.clone();
+            let syncing = syncing.clone();
+            Rc::new(move |value| {
+                if !syncing.get() {
+                    timeline
+                        .update_webcam_layouts_continuous(|layouts| layouts.cutout_inset = value);
                 }
             })
         },
@@ -2972,6 +3366,24 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
             Rc::new(move |mirror| {
                 if !syncing.get() {
                     timeline.update_webcam(|layer| layer.mirror = mirror);
+                }
+            })
+        },
+        set_delay: {
+            let timeline = timeline.clone();
+            let syncing = syncing.clone();
+            Rc::new(move |seconds| {
+                if !syncing.get() {
+                    timeline.update_webcam(|layer| layer.delay_seconds = seconds);
+                }
+            })
+        },
+        set_silence: {
+            let timeline = timeline.clone();
+            let syncing = syncing.clone();
+            Rc::new(move |value| {
+                if !syncing.get() {
+                    timeline.update_webcam(|layer| layer.hide_during_silence = value);
                 }
             })
         },
@@ -2994,7 +3406,18 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
         initial.frame_aspect,
         actions,
     );
-    editor.append(&context.root);
+    let settings_section = webcam_section(scale, &t("Layout settings"), true);
+    settings_section.body.append(&context.root);
+    editor.append(&settings_section.root);
+    let shape_section = webcam_section(scale, &t("Shape"), true);
+    shape_section.body.append(&context.overlay.shape_root);
+    editor.append(&shape_section.root);
+    let camera_section = webcam_section(scale, &t("Camera"), true);
+    camera_section.body.append(&context.camera.root);
+    editor.append(&camera_section.root);
+    let motion_section = webcam_section(scale, &t("Transitions"), false);
+    motion_section.body.append(&context.transition.root);
+    editor.append(&motion_section.root);
 
     let scroll = ScrolledWindow::new();
     scroll.add_css_class("recording-editor-zoom-scroll");
@@ -3112,12 +3535,14 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
     });
 
     let last = Rc::new(RefCell::new(None::<super::timeline::WebcamPanelState>));
+    let shape_section_root = shape_section.root.clone();
     let refresh: Rc<dyn Fn()> = {
         let last = last.clone();
         let syncing = syncing.clone();
         let empty = empty.clone();
         let error_hint = error_hint.clone();
         let editor = editor.clone();
+        let shape_section_root = shape_section_root.clone();
         let camera_switch = camera_switch.clone();
         let reset = reset.clone();
         let default_scope = rows.default_scope.clone();
@@ -3221,7 +3646,15 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
                     Some(&layer),
                     state.frame_aspect,
                 ));
-                context.refresh(&layer, &layouts, state.frame_aspect, controls);
+                context.refresh(
+                    &layer,
+                    &layouts,
+                    state.frame_aspect,
+                    webcam_selected_cue(&state).map(|(_, cue)| cue),
+                    controls,
+                    state.auto_split_share,
+                );
+                shape_section_root.set_visible(controls.overlay);
                 if let Some((_, cue)) = selected {
                     time_spin.adjustment().set_upper(state.duration.max(0.1));
                     time_spin.set_value(cue.at);
@@ -3773,6 +4206,16 @@ impl FilledSlider {
         } else {
             (0.07, 0.12, 0.72, 0.82)
         };
+
+        // A switched-off slider still shows its value, faded the way a
+        // disabled switch is, so it never reads as a live control.
+        let dim = if widget.is_sensitive() { 1.0 } else { 0.4 };
+        let (track_alpha, fill_alpha, text_alpha, handle_alpha) = (
+            track_alpha * dim,
+            fill_alpha * dim,
+            text_alpha * dim,
+            handle_alpha * dim,
+        );
 
         rounded_rect(context, 0.0, 0.0, width, height, radius);
         if light {
@@ -4332,6 +4775,7 @@ pub(super) fn install_css() {
             font-size: {webcam_kicker_text}px;
             font-weight: 600;
             letter-spacing: 0.8px;
+            margin-top: {webcam_kicker_gap}px;
         }}
         .recording-editor-webcam-status {{
             color: alpha(white, 0.50);
@@ -4427,6 +4871,7 @@ pub(super) fn install_css() {
         webcam_icon = px(28.0),
         webcam_icon_radius = px(7.0),
         webcam_kicker_text = px(11.0),
+        webcam_kicker_gap = px(6.0),
         webcam_status_text = px(11.0),
     );
     let provider = CssProvider::new();
@@ -4449,8 +4894,8 @@ mod tests {
         format_cue_clock, format_value, webcam_content_width, webcam_cutout_position,
         webcam_editing_controls, webcam_editing_layout, webcam_layout_card, webcam_pad_alignment,
         webcam_pad_dot_radius, webcam_pad_offset, webcam_panel_needs_rebuild,
-        webcam_preview_aspect, webcam_selected_cue, webcam_selection_reveal, webcam_shape_index,
-        WebcamContextActions, WebcamControlUse, WebcamLayoutCard,
+        webcam_preview_aspect, webcam_selected_cue, webcam_selection_reveal, WebcamContextActions,
+        WebcamControlUse, WebcamLayoutCard,
     };
     use gtk4::prelude::*;
     use gtk4::Orientation;
@@ -4458,7 +4903,12 @@ mod tests {
     const WIDE: f64 = 16.0 / 9.0;
 
     fn cue(at: f64, layout: CameraLayout) -> LayoutCue {
-        LayoutCue { at, layout }
+        LayoutCue {
+            at,
+            layout,
+            position: None,
+            cutout_x: None,
+        }
     }
 
     fn panel_state(
@@ -4482,6 +4932,7 @@ mod tests {
             cue_at_playhead: None,
             error: None,
             frame_aspect: WIDE,
+            auto_split_share: 0.5,
         }
     }
 
@@ -4547,14 +4998,14 @@ mod tests {
     }
 
     #[test]
-    fn six_cards_keep_the_chooser_order_and_cover_the_layouts() {
+    fn five_cards_keep_the_chooser_order_and_cover_the_layouts() {
         let labels: Vec<&str> = WebcamLayoutCard::ALL
             .iter()
             .map(|card| card.label())
             .collect();
         assert_eq!(
             labels,
-            vec!["Screen", "Camera", "Bubble", "Circle", "Split", "Cutout"]
+            vec!["Bubble", "Split", "Cutout", "Camera", "Screen"]
         );
 
         let layouts: Vec<CameraLayout> = WebcamLayoutCard::ALL
@@ -4564,33 +5015,27 @@ mod tests {
         assert_eq!(
             layouts,
             vec![
-                CameraLayout::ScreenOnly,
-                CameraLayout::FullscreenCamera,
-                CameraLayout::CameraOverlay,
                 CameraLayout::CameraOverlay,
                 CameraLayout::SplitScreen,
                 CameraLayout::CameraCutout,
+                CameraLayout::FullscreenCamera,
+                CameraLayout::ScreenOnly,
             ]
         );
-        assert_eq!(WebcamLayoutCard::Bubble.overlay_shape(), Some(2));
-        assert_eq!(WebcamLayoutCard::Circle.overlay_shape(), Some(0));
-        assert_eq!(WebcamLayoutCard::Screen.overlay_shape(), None);
-        assert_eq!(WebcamLayoutCard::Camera.overlay_shape(), None);
-        assert_eq!(WebcamLayoutCard::Split.overlay_shape(), None);
-        assert_eq!(WebcamLayoutCard::Cutout.overlay_shape(), None);
+        for card in WebcamLayoutCard::ALL {
+            assert_eq!(card.overlay_shape(), None);
+        }
     }
 
     #[test]
-    fn circle_and_bubble_follow_the_frame_aspect() {
+    fn every_overlay_lights_the_bubble_card() {
         let circle = shaped(0);
-        assert_eq!(webcam_shape_index(&circle, WIDE), Some(0));
         assert_eq!(
             webcam_layout_card(CameraLayout::CameraOverlay, Some(&circle), WIDE),
-            WebcamLayoutCard::Circle
+            WebcamLayoutCard::Bubble
         );
 
         let bubble = shaped(2);
-        assert_eq!(webcam_shape_index(&bubble, WIDE), Some(2));
         assert_eq!(
             webcam_layout_card(CameraLayout::CameraOverlay, Some(&bubble), WIDE),
             WebcamLayoutCard::Bubble
@@ -4601,7 +5046,6 @@ mod tests {
             h: 0.2,
             ..LayerSettings::default()
         };
-        assert_eq!(webcam_shape_index(&oval, WIDE), None);
         assert_eq!(
             webcam_layout_card(CameraLayout::CameraOverlay, Some(&oval), WIDE),
             WebcamLayoutCard::Bubble
@@ -4612,7 +5056,6 @@ mod tests {
             h: 0.31,
             ..LayerSettings::default()
         };
-        assert_eq!(webcam_shape_index(&custom, WIDE), None);
         assert_eq!(
             webcam_layout_card(CameraLayout::CameraOverlay, Some(&custom), WIDE),
             WebcamLayoutCard::Bubble
@@ -4624,14 +5067,13 @@ mod tests {
             h: 0.2 * portrait * aspect_for_shape(0),
             ..LayerSettings::default()
         };
-        assert_eq!(webcam_shape_index(&circle_portrait, portrait), Some(0));
         assert_eq!(
             webcam_layout_card(
                 CameraLayout::CameraOverlay,
                 Some(&circle_portrait),
                 portrait
             ),
-            WebcamLayoutCard::Circle
+            WebcamLayoutCard::Bubble
         );
     }
 
@@ -4988,7 +5430,7 @@ mod tests {
                 window.set_child(Some(&context.root));
                 for card in WebcamLayoutCard::ALL {
                     let controls = controls_for(card);
-                    context.refresh(&layer, &layouts, frame_aspect, controls);
+                    context.refresh(&layer, &layouts, frame_aspect, None, controls, 0.5);
                     let (minimum, natural) = measure_width(&context.root);
                     assert!(
                         minimum <= scroll_width,

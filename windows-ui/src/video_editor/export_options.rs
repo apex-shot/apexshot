@@ -452,6 +452,7 @@ mod tests {
                     cursor: crate::recording::editor::model::CursorSettings::default(),
                     sidecar: None,
                     webcam: None,
+                    stage: None,
                     canvas: None,
                     crf: 20,
                     audio: Vec::new(),
