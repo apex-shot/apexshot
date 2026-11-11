@@ -4385,3 +4385,78 @@ msgstr "مقدار الميل"
 
 msgid "Tilt with motion"
 msgstr "الإمالة مع الحركة"
+
+msgid "Automatic width"
+msgstr "العرض التلقائي"
+
+msgid "Camera delay"
+msgstr "تأخير الكاميرا"
+
+msgid "Camera side"
+msgstr "جهة الكاميرا"
+
+msgid "Edge inset"
+msgstr "هامش الحافة"
+
+msgid "Edge softness"
+msgstr "نعومة الحافة"
+
+msgid "Fill"
+msgstr "تعبئة"
+
+msgid "Hide during silence"
+msgstr "الإخفاء أثناء الصمت"
+
+msgid "Hide the camera while nobody is talking, and bring it back when they do."
+msgstr "تخفي الكاميرا عندما لا يتحدث أحد، وتعيدها عندما يبدأ الحديث."
+
+msgid "Keep the screen's shape and give the camera the rest of the frame."
+msgstr "تحافظ على شكل الشاشة وتمنح الكاميرا بقية الإطار."
+
+msgid "Layout"
+msgstr "التخطيط"
+
+msgid "Layout settings"
+msgstr "إعدادات التخطيط"
+
+msgid "Leave the Background padding between the screen and the camera, with rounded corners."
+msgstr "تترك حشو الخلفية بين الشاشة والكاميرا مع زوايا مستديرة."
+
+msgid "Make the camera smaller while the screen is zoomed, so it covers less of the recording."
+msgstr "تصغّر الكاميرا أثناء تكبير الشاشة لتغطي جزءًا أقل من التسجيل."
+
+msgid "Minimum silence"
+msgstr "أقل مدة للصمت"
+
+msgid "Padded"
+msgstr "مع حشو"
+
+msgid "Rounded"
+msgstr "مستدير"
+
+msgid "Roundness"
+msgstr "الاستدارة"
+
+msgid "Screen width"
+msgstr "عرض الشاشة"
+
+msgid "Shift the camera against the screen and sound. Raise it if your lips move after the words, lower it if they move before."
+msgstr "تزيح الكاميرا بالنسبة إلى الشاشة والصوت. ارفع القيمة إذا تحركت الشفاه بعد الكلمات، واخفضها إذا تحركت قبلها."
+
+msgid "Shrink during zoom"
+msgstr "التصغير أثناء التكبير"
+
+msgid "Shrink size"
+msgstr "حجم التصغير"
+
+msgid "The camera's longest side, as a percentage of the frame's shortest side."
+msgstr "أطول أضلاع الكاميرا كنسبة مئوية من أقصر أضلاع الإطار."
+
+msgid "The person's size, as a percentage of the frame's shortest side."
+msgstr "حجم الشخص كنسبة مئوية من أقصر أضلاع الإطار."
+
+msgid "The split fills the frame edge to edge."
+msgstr "يملأ السبليت الإطار من حافة إلى حافة."
+
+msgid "Transitions"
+msgstr "الانتقالات"
