@@ -80,6 +80,9 @@ struct RecordingRequest {
     double displayScale = 1.0;
     /// x264 CRF. 0 falls back to 20.
     int crf = 20;
+    /// Encode the screen in HEVC instead of H.264. The camera track stays
+    /// H.264.
+    bool hevc = false;
     /// Record a camera track beside the video. A camera that cannot be opened
     /// is reported through `warning` and leaves the recording without a track
     /// rather than failing it.

@@ -481,6 +481,7 @@ int recordOnce(bool pauseAndResume)
     request.includeMicrophone = !qEnvironmentVariableIsEmpty("APEXSHOT_TEST_MIC");
     request.fps = fps;
     request.crf = 28;
+    request.hevc = !qEnvironmentVariableIsEmpty("APEXSHOT_TEST_HEVC");
     const int requestedCrf = qEnvironmentVariableIntValue("APEXSHOT_TEST_CRF");
     if (requestedCrf > 0)
         request.crf = requestedCrf;

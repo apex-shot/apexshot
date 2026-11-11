@@ -11,10 +11,12 @@ constexpr char kFpsKey[] = "recording/video_fps";
 constexpr char kMaxResolutionKey[] = "recording/video_max_res";
 constexpr char kQualityKey[] = "recording/video_quality";
 constexpr char kMonoKey[] = "recording/video_mono";
+constexpr char kCodecKey[] = "recording/video_codec";
 
 constexpr int kDefaultFpsIndex = 1;
 constexpr int kDefaultMaxResolutionIndex = 0;
 constexpr int kDefaultQualityIndex = 1;
+constexpr int kDefaultCodecIndex = 0;
 
 template<typename Table>
 int clampedIndex(int index, const Table& table, int fallback)
@@ -32,6 +34,7 @@ void RecordingSettings::sanitize()
     maxResolutionIndex =
         clampedIndex(maxResolutionIndex, kRecordingResolutionOptions, kDefaultMaxResolutionIndex);
     qualityIndex = clampedIndex(qualityIndex, kRecordingQualityOptions, kDefaultQualityIndex);
+    codecIndex = clampedIndex(codecIndex, kRecordingCodecOptions, kDefaultCodecIndex);
 }
 
 int recordingFpsForIndex(int index)
@@ -146,6 +149,7 @@ RecordingSettings loadRecordingSettings(QSettings& settings)
     out.maxResolutionIndex = settings.value(kMaxResolutionKey, kDefaultMaxResolutionIndex).toInt();
     out.qualityIndex = settings.value(kQualityKey, kDefaultQualityIndex).toInt();
     out.monoAudio = settings.value(kMonoKey, false).toBool();
+    out.codecIndex = settings.value(kCodecKey, kDefaultCodecIndex).toInt();
     out.sanitize();
     return out;
 }
@@ -158,6 +162,7 @@ void saveRecordingSettings(QSettings& settings, const RecordingSettings& input)
     settings.setValue(kMaxResolutionKey, out.maxResolutionIndex);
     settings.setValue(kQualityKey, out.qualityIndex);
     settings.setValue(kMonoKey, out.monoAudio);
+    settings.setValue(kCodecKey, out.codecIndex);
     settings.sync();
 }
 

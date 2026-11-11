@@ -74,6 +74,7 @@ void checkDefaults(const QTemporaryDir& dir)
     CHECK(settings.recording.values.fpsIndex == 1);
     CHECK(settings.recording.values.maxResolutionIndex == 0);
     CHECK(settings.recording.values.qualityIndex == 1);
+    CHECK(settings.recording.values.codecIndex == 0);
     CHECK(!settings.recording.values.monoAudio);
     CHECK(!settings.recording.includeMicrophone);
     CHECK(!settings.recording.afterCopyToClipboard);
@@ -127,6 +128,7 @@ void checkParsing(const QTemporaryDir& dir)
     "fps_index": 3,
     "max_resolution_index": 2,
     "quality_index": 0,
+    "codec_index": 1,
     "mono_audio": true,
     "include_microphone": true,
     "include_speaker": true,
@@ -189,6 +191,7 @@ void checkParsing(const QTemporaryDir& dir)
     CHECK(settings.recording.values.fpsIndex == 3);
     CHECK(settings.recording.values.maxResolutionIndex == 2);
     CHECK(settings.recording.values.qualityIndex == 0);
+    CHECK(settings.recording.values.codecIndex == 1);
     CHECK(settings.recording.values.monoAudio);
     CHECK(settings.recording.includeMicrophone);
     CHECK(settings.recording.includeSpeaker);
@@ -220,6 +223,7 @@ void checkSanitizing(const QTemporaryDir& dir)
                   R"({
   "screenshots": { "format": "GIF", "timer_interval": 7 },
   "recording": { "fps_index": 99, "max_resolution_index": 99, "quality_index": 99,
+                 "codec_index": 99,
                  "filename_pattern": "   ",
                  "webcam": { "size_index": 9, "shape_index": -4,
                              "rel_x": 4.5, "rel_y": -1.0 } },
@@ -234,6 +238,7 @@ void checkSanitizing(const QTemporaryDir& dir)
     CHECK(settings.recording.values.fpsIndex == 1);
     CHECK(settings.recording.values.maxResolutionIndex == 0);
     CHECK(settings.recording.values.qualityIndex == 1);
+    CHECK(settings.recording.values.codecIndex == 0);
     CHECK(settings.recording.filenamePattern
           == QStringLiteral("ApexShot Recording {Date} at {Time}"));
     CHECK(settings.recording.webcam.sizeIndex == 3);

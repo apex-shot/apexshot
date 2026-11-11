@@ -2759,6 +2759,7 @@ private:
         request.maxWidth = maxResolution.width();
         request.maxHeight = maxResolution.height();
         request.monoAudio = videoSettings.monoAudio;
+        request.hevc = videoSettings.codecIndex == 1;
         const qreal displayDpr = Platform::monitorAt(region.center()).dpr;
         request.displayScale = !settings.recording.highDpi && displayDpr > 1.0
             ? 1.0 / displayDpr : 1.0;

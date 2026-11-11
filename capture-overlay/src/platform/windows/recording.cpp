@@ -136,10 +136,17 @@ bool runProbe(const QStringList& arguments, QString* out, QString* error)
 
 void appendHardwareEncoder(QStringList& args, const QString& hardware, int quality)
 {
-    if (hardware == QLatin1String("h264_qsv")) {
+    if (hardware.endsWith(QLatin1String("_qsv"))) {
         args << QStringLiteral("-c:v") << hardware << QStringLiteral("-global_quality")
              << QString::number(quality) << QStringLiteral("-preset")
              << QStringLiteral("veryfast") << QStringLiteral("-pix_fmt")
+             << QStringLiteral("nv12");
+    } else if (hardware.endsWith(QLatin1String("_amf"))) {
+        args << QStringLiteral("-c:v") << hardware << QStringLiteral("-rc")
+             << QStringLiteral("cqp") << QStringLiteral("-qp_i") << QString::number(quality)
+             << QStringLiteral("-qp_p") << QString::number(quality) << QStringLiteral("-qp_b")
+             << QString::number(quality) << QStringLiteral("-quality")
+             << QStringLiteral("speed") << QStringLiteral("-pix_fmt")
              << QStringLiteral("nv12");
     } else {
         args << QStringLiteral("-c:v") << hardware << QStringLiteral("-rc")
@@ -148,23 +155,34 @@ void appendHardwareEncoder(QStringList& args, const QString& hardware, int quali
              << QStringLiteral("-preset") << QStringLiteral("p5")
              << QStringLiteral("-pix_fmt") << QStringLiteral("yuv420p");
     }
+    // The hvc1 tag is what lets an HEVC MP4 play in the system player and in
+    // browsers; the default hev1 tag does not.
+    if (hardware.startsWith(QLatin1String("hevc_")))
+        args << QStringLiteral("-tag:v") << QStringLiteral("hvc1");
 }
 
-/// A hardware H.264 encoder this machine can open, or an empty string for
-/// libx264. Encoding the desktop and the camera in software keeps two cores
-/// busy for the whole recording, which is enough to make everything else on a
-/// laptop stutter; the integrated GPU encodes the same picture for a fraction
-/// of that.
-QString hardwareVideoEncoder(const QSize& size, int fps)
+/// A hardware encoder of the requested codec this machine can open, or an
+/// empty string for the software encoder. Encoding the desktop and the camera
+/// in software keeps two cores busy for the whole recording, which is enough
+/// to make everything else on a laptop stutter; the integrated GPU encodes the
+/// same picture for a fraction of that.
+QString hardwareVideoEncoder(const QSize& size, int fps, bool hevc = false)
 {
     static QHash<QString, QString> encoders;
-    const QString key = QStringLiteral("%1x%2@%3").arg(size.width()).arg(size.height()).arg(fps);
+    const QString key = QStringLiteral("%1x%2@%3%4")
+                            .arg(size.width())
+                            .arg(size.height())
+                            .arg(fps)
+                            .arg(hevc ? QStringLiteral(" hevc") : QString());
     if (encoders.contains(key))
         return encoders.value(key);
 
     const QString encoder = [&] {
         for (const QString& candidate :
-             {QStringLiteral("h264_qsv"), QStringLiteral("h264_nvenc")}) {
+             hevc ? QStringList{QStringLiteral("hevc_qsv"), QStringLiteral("hevc_nvenc"),
+                                QStringLiteral("hevc_amf")}
+                  : QStringList{QStringLiteral("h264_qsv"), QStringLiteral("h264_nvenc"),
+                                QStringLiteral("h264_amf")}) {
             QString output;
             QString error;
             QStringList args{QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"),
@@ -181,21 +199,36 @@ QString hardwareVideoEncoder(const QSize& size, int fps)
                 return candidate;
             }
         }
-        recordingLog(QStringLiteral("encoder: libx264 for %1 (no hardware encoder answered)")
-                         .arg(key));
+        recordingLog(QStringLiteral("encoder: %1 for %2 (no hardware encoder answered)")
+                         .arg(hevc ? QStringLiteral("libx265") : QStringLiteral("libx264"), key));
         return QString();
     }();
     encoders.insert(key, encoder);
     return encoder;
 }
 
-/// Append a video encoder chosen for this machine. `quality` is the CRF for
-/// libx264 and the equivalent constant-quality value for a hardware encoder.
-void appendVideoEncoder(QStringList& args, int quality, const QSize& size, int fps)
+/// Append a video encoder chosen for this machine. `quality` is the H.264
+/// CRF; HEVC adds kHevcQualityOffset, which lands at the same quality with a
+/// smaller file. A hardware encoder takes it as its constant-quality value.
+void appendVideoEncoder(QStringList& args,
+                        int quality,
+                        const QSize& size,
+                        int fps,
+                        bool hevc = false)
 {
-    const QString hardware = hardwareVideoEncoder(size, fps);
+    const int codecQuality = hevc ? quality + Platform::kHevcQualityOffset : quality;
+    const QString hardware = hardwareVideoEncoder(size, fps, hevc);
     if (!hardware.isEmpty()) {
-        appendHardwareEncoder(args, hardware, quality);
+        appendHardwareEncoder(args, hardware, codecQuality);
+        return;
+    }
+    if (hevc) {
+        args << QStringLiteral("-c:v") << QStringLiteral("libx265") << QStringLiteral("-preset")
+             << QStringLiteral("veryfast") << QStringLiteral("-crf")
+             << QString::number(codecQuality) << QStringLiteral("-pix_fmt")
+             << QStringLiteral("yuv420p") << QStringLiteral("-x265-params")
+             << QStringLiteral("log-level=error") << QStringLiteral("-tag:v")
+             << QStringLiteral("hvc1");
         return;
     }
     args << QStringLiteral("-c:v") << QStringLiteral("libx264") << QStringLiteral("-preset")
@@ -966,14 +999,16 @@ QStringList RecordingSession::Private::buildScreenArguments(const QString& segme
             ? recordingCrfResolutionReduction(outputSize.width(), outputSize.height())
             : 0;
     const int crf = std::max(1, crfBase - reduction);
-    appendVideoEncoder(args, crf, outputSize, fps);
+    appendVideoEncoder(args, crf, outputSize, fps, request.hevc);
     manifestCaptureBackend = useWindowCapture ? QStringLiteral("window-graphics")
         : useDdagrab                          ? QStringLiteral("ddagrab")
                                               : QStringLiteral("gdigrab");
-    const QString hardware = hardwareVideoEncoder(outputSize, fps);
-    manifestEncoder = hardware.isEmpty() ? QStringLiteral("libx264") : hardware;
+    const QString hardware = hardwareVideoEncoder(outputSize, fps, request.hevc);
+    manifestEncoder = !hardware.isEmpty() ? hardware
+        : request.hevc                    ? QStringLiteral("libx265")
+                                          : QStringLiteral("libx264");
     manifestOutputSize = outputSize;
-    manifestCrf = crf;
+    manifestCrf = request.hevc ? crf + Platform::kHevcQualityOffset : crf;
     args << QStringLiteral("-g") << QString::number(fps * 2) << QStringLiteral("-bf")
          << QStringLiteral("2") << QStringLiteral("-r") << QString::number(fps);
 
@@ -1522,7 +1557,10 @@ void RecordingSession::Private::completeSystemAudio(const QString& videoPath)
               << QStringLiteral("-ac")
               << (request.monoAudio ? QStringLiteral("1") : QStringLiteral("2"))
               << QStringLiteral("-movflags") << QStringLiteral("+faststart")
-              << QStringLiteral("-shortest") << mixedPath;
+              << QStringLiteral("-shortest");
+    if (request.hevc)
+        arguments << QStringLiteral("-tag:v") << QStringLiteral("hvc1");
+    arguments << mixedPath;
 
     auto* mixer = new QProcess(q);
     mixer->setProgram(ffmpegExecutable());
@@ -1861,7 +1899,8 @@ void RecordingSession::Private::compositeWebcam(
     appendVideoEncoder(compositeArgs,
                        compositeCrf,
                        videoSize,
-                       request.fps > 0 ? request.fps : 30);
+                       request.fps > 0 ? request.fps : 30,
+                       request.hevc);
     compositeArgs << QStringLiteral("-c:a") << QStringLiteral("copy")
                   << QStringLiteral("-movflags") << QStringLiteral("+faststart")
                   << compositePath;
@@ -2090,6 +2129,7 @@ QJsonObject RecordingSession::Private::recoveryState() const
         {QStringLiteral("fps"), request.fps},
         {QStringLiteral("displayScale"), request.displayScale},
         {QStringLiteral("crf"), request.crf},
+        {QStringLiteral("hevc"), request.hevc},
         {QStringLiteral("maxWidth"), request.maxWidth},
         {QStringLiteral("maxHeight"), request.maxHeight},
         {QStringLiteral("monoAudio"), request.monoAudio},
@@ -2201,8 +2241,11 @@ void RecordingSession::Private::finalize()
         QStringLiteral("copy"),
         QStringLiteral("-movflags"),
         QStringLiteral("+faststart"),
-        finalPath,
     });
+    if (request.hevc)
+        concat->setArguments(concat->arguments() << QStringLiteral("-tag:v")
+                                                 << QStringLiteral("hvc1"));
+    concat->setArguments(concat->arguments() << finalPath);
 
     QObject::connect(concat,
                      QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
@@ -2827,6 +2870,7 @@ bool RecordingSession::recover(const QString& workDir, QString& error)
     request.fps = requestObject.value(QStringLiteral("fps")).toInt(30);
     request.displayScale = requestObject.value(QStringLiteral("displayScale")).toDouble(1.0);
     request.crf = requestObject.value(QStringLiteral("crf")).toInt(20);
+    request.hevc = requestObject.value(QStringLiteral("hevc")).toBool();
     request.maxWidth = requestObject.value(QStringLiteral("maxWidth")).toInt();
     request.maxHeight = requestObject.value(QStringLiteral("maxHeight")).toInt();
     request.monoAudio = requestObject.value(QStringLiteral("monoAudio")).toBool();
