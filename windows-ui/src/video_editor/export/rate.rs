@@ -15,9 +15,11 @@ pub(crate) const MP4_AUDIO_BPS: f64 = 165_000.0;
 const BITS_PER_PIXEL: [(u32, f64); 4] = [(14, 0.3), (24, 0.05), (30, 0.0175), (42, 0.0075)];
 /// The low and high ends of a bitrate-mode size estimate.
 pub(crate) const BITRATE_SPREAD: (f64, f64) = (0.8, 1.1);
-/// How much slower than the reference model this exporter runs; measured on the
-/// development machine.
-const CALIBRATION: f64 = 1.0;
+/// How much slower than the reference model this exporter runs, measured on
+/// the development machine in a release build: a 10 s 1080p60 cursor export
+/// took 12.1 s against the model's 5.6 s, a plain 1080p30 export 3.6 s against
+/// 2.8 s. Zoom transitions with motion blur run slower still.
+const CALIBRATION: f64 = 2.0;
 
 /// Piecewise linear through the points, extending the first and last segments'
 /// lines past the ends instead of clamping.
@@ -157,7 +159,7 @@ mod tests {
     #[test]
     fn export_time_matches_the_reference_estimate() {
         let seconds = export_seconds((1920, 1080), 60.0, 10.0);
-        assert!((seconds - 5.555).abs() < 0.1, "{seconds}");
+        assert!((seconds - 5.555 * CALIBRATION).abs() < 0.2, "{seconds}");
     }
 
     #[test]
