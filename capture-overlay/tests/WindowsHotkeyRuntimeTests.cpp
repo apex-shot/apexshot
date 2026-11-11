@@ -54,6 +54,9 @@ void writeBindings(const QString& path, const QString& area, const QString& reco
         {QStringLiteral("save_last_capture"), QString()},
         {QStringLiteral("record_screen"), record},
         {QStringLiteral("recording_stop_save"), QString()},
+        {QStringLiteral("recording_pause"), QString()},
+        {QStringLiteral("recording_restart"), QString()},
+        {QStringLiteral("recording_marker"), QString()},
     };
     QSaveFile file(path);
     check(file.open(QIODevice::WriteOnly), "open temporary settings");
