@@ -463,6 +463,25 @@ bool validateSidecar(const QString& videoPath, double recordedSeconds)
     return true;
 }
 
+/// Clean up a test recording the way the recorder lays it out: the video, its
+/// pointer sidecar and manifest, and the recording ID folder holding them. The
+/// sidecar path comes from the MP4 tag, so it is resolved before the video is
+/// removed.
+void removeRecordingOutputs(const QString& video)
+{
+    const QString sidecar = Platform::sidecarPathFor(video);
+    const QString manifest = Platform::recordingManifestPathFor(video);
+    QFile::remove(video);
+    if (sidecar.isEmpty())
+        return;
+    QFile::remove(sidecar);
+    QFile::remove(manifest);
+    QDir(sidecar + QStringLiteral(".cursors")).removeRecursively();
+    // A tagged recording owns a whole folder under the recordings root.
+    if (QFileInfo(sidecar).fileName() == QStringLiteral("pointer.json"))
+        QDir(QFileInfo(sidecar).absolutePath()).removeRecursively();
+}
+
 int recordOnce(bool pauseAndResume)
 {
     Platform::RecordingSession session;
@@ -625,18 +644,7 @@ int recordOnce(bool pauseAndResume)
                                  }
                              }
                              if (qEnvironmentVariableIsEmpty("APEXSHOT_KEEP_TEST_OUTPUT"))
-                                 QFile::remove(output);
-                             if (qEnvironmentVariableIsEmpty("APEXSHOT_KEEP_TEST_OUTPUT")) {
-                                 const QString sidecar = Platform::sidecarPathFor(output);
-                                 if (!sidecar.isEmpty()) {
-                                     QFile::remove(sidecar);
-                                     QFile::remove(Platform::recordingManifestPathFor(output));
-                                     if (QFileInfo(sidecar).fileName()
-                                         == QStringLiteral("pointer.json"))
-                                         QDir(QFileInfo(sidecar).absolutePath())
-                                             .removeRecursively();
-                                 }
-                             }
+                                 removeRecordingOutputs(output);
                          }
                          loop.quit();
                      });
@@ -1469,7 +1477,7 @@ int recordUntilDiskLow()
     }
     std::printf("OK: low-disk stop kept %s after %lld ms\n", qPrintable(output),
                 static_cast<long long>(clock.elapsed()));
-    QFile::remove(output);
+    removeRecordingOutputs(output);
     return 0;
 }
 
@@ -1560,9 +1568,7 @@ int recordAndRecover()
     }
     std::printf("OK recover: %s (%lld bytes)\n", qPrintable(output),
                 static_cast<long long>(QFileInfo(output).size()));
-    QFile::remove(output);
-    QFile::remove(sidecar);
-    QFile::remove(Platform::recordingManifestPathFor(output));
+    removeRecordingOutputs(output);
     return 0;
 }
 
