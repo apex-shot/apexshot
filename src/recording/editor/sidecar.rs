@@ -767,6 +767,60 @@ pub struct PointerSidecar {
     plan_cache: PlanCache,
 }
 
+/// Moments the recorder marked, and where each pause ended, in source
+/// seconds, from the recording manifest beside the pointer sidecar.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RecordingMarks {
+    /// Moments the person marked with the recording-marker shortcut.
+    pub markers: Vec<f64>,
+    /// Where each session after the first begins: the recording resumed there.
+    pub pauses: Vec<f64>,
+}
+
+impl RecordingMarks {
+    /// Read the marks from a manifest's JSON text. Anything missing or
+    /// malformed reads as no marks.
+    pub fn parse(text: &str) -> Self {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
+            return Self::default();
+        };
+        let seconds = |value: &serde_json::Value| {
+            value
+                .as_f64()
+                .filter(|ms| ms.is_finite() && *ms >= 0.0)
+                .map(|ms| ms / 1000.0)
+        };
+        let mut markers: Vec<f64> = value
+            .get("markers")
+            .and_then(|markers| markers.as_array())
+            .map(|markers| markers.iter().filter_map(seconds).collect())
+            .unwrap_or_default();
+        markers.sort_by(f64::total_cmp);
+        let mut pauses: Vec<f64> = value
+            .get("sessions")
+            .and_then(|sessions| sessions.as_array())
+            .map(|sessions| {
+                sessions
+                    .iter()
+                    .skip(1)
+                    .filter_map(|session| session.get("startMs").and_then(seconds))
+                    .collect()
+            })
+            .unwrap_or_default();
+        pauses.sort_by(f64::total_cmp);
+        Self { markers, pauses }
+    }
+
+    /// The marks recorded beside `video_path`, or none.
+    pub fn for_video(video_path: &Path) -> Self {
+        let mut path = PointerSidecar::sidecar_path(video_path).into_os_string();
+        path.push(".recording.json");
+        std::fs::read_to_string(path)
+            .map(|text| Self::parse(&text))
+            .unwrap_or_default()
+    }
+}
+
 impl PointerSidecar {
     pub fn new(t0_monotonic_us: i64, region: CaptureRegion) -> Self {
         Self {
@@ -1825,6 +1879,21 @@ mod tests {
     fn new_sidecars_are_version_two() {
         let sidecar = PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
         assert_eq!(sidecar.version, 2);
+    }
+
+    #[test]
+    fn recording_marks_read_markers_and_resumes_from_the_manifest() {
+        let marks = RecordingMarks::parse(
+            r#"{"sessions":[{"startMs":0,"endMs":800},{"startMs":800,"endMs":1800},
+                {"startMs":1800,"endMs":2500}],"markers":[1500,400]}"#,
+        );
+        assert_eq!(marks.markers, vec![0.4, 1.5]);
+        assert_eq!(marks.pauses, vec![0.8, 1.8]);
+        assert_eq!(RecordingMarks::parse("not json"), RecordingMarks::default());
+        assert_eq!(
+            RecordingMarks::parse(r#"{"sessions":[{"startMs":0}]}"#),
+            RecordingMarks::default()
+        );
     }
 
     #[test]
