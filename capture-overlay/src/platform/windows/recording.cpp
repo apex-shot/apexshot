@@ -25,6 +25,7 @@
 #include <QThread>
 #include <QTimer>
 #include <QUuid>
+#include <QVector>
 
 #include <algorithm>
 #include <functional>
@@ -486,6 +487,38 @@ QString quoteConcatPath(const QString& path)
     return QStringLiteral("file '%1'").arg(escaped);
 }
 
+/// The file a segment's one-frame marker output writes.
+QString markerPathFor(const QString& segmentPath)
+{
+    return segmentPath + QStringLiteral(".mark");
+}
+
+/// A second, one-frame output that writes a single byte to the segment's
+/// marker file as the first frame clears the input, then closes while the
+/// recording output carries on. Flushing the packet makes the file's write
+/// time the moment of that frame, which the OS records whatever the
+/// recorder's own thread was doing. `prefix` is any filter the frame needs
+/// before it can be scaled.
+void appendFirstFrameMarker(QStringList& args, const QString& prefix, const QString& segmentPath)
+{
+    args << QStringLiteral("-map") << QStringLiteral("0:v") << QStringLiteral("-an")
+         << QStringLiteral("-vf") << prefix + QStringLiteral("scale=1:1")
+         << QStringLiteral("-frames:v") << QStringLiteral("1") << QStringLiteral("-c:v")
+         << QStringLiteral("rawvideo") << QStringLiteral("-pix_fmt") << QStringLiteral("gray")
+         << QStringLiteral("-flush_packets") << QStringLiteral("1") << QStringLiteral("-f")
+         << QStringLiteral("rawvideo") << markerPathFor(segmentPath);
+}
+
+/// When ffmpeg wrote a segment's marker, in milliseconds since the epoch, or
+/// -1 when no first frame ever reached it.
+qint64 markerWrittenMs(const QString& segmentPath)
+{
+    const QFileInfo info(markerPathFor(segmentPath));
+    if (!info.isFile() || info.size() <= 0)
+        return -1;
+    return info.lastModified().toMSecsSinceEpoch();
+}
+
 } // namespace
 
 namespace Platform {
@@ -776,6 +809,11 @@ QStringList RecordingSession::Private::buildScreenArguments(const QString& segme
          << QStringLiteral("2") << QStringLiteral("-r") << QString::number(fps);
 
     args << QStringLiteral("-movflags") << QStringLiteral("+faststart") << segmentPath;
+
+    // The screen's first-frame mark; the camera writes the matching one.
+    appendFirstFrameMarker(args,
+                           useDdagrab ? QStringLiteral("hwdownload,format=bgra,") : QString(),
+                           segmentPath);
     return args;
 }
 
@@ -827,6 +865,9 @@ QStringList RecordingSession::Private::buildWebcamArguments(
     appendVideoEncoder(args, 18, trackSize, fps);
     args << QStringLiteral("-g") << QString::number(fps * 2) << QStringLiteral("-r")
          << QString::number(fps) << webcamSegmentPath;
+
+    // The camera's first-frame mark, timed against the screen's.
+    appendFirstFrameMarker(args, QString(), webcamSegmentPath);
 
     // The preview is a small MJPEG stream rather than raw frames: at the
     // bubble's size a raw pipe carries tens of megabytes a second, so any
@@ -1352,7 +1393,44 @@ void RecordingSession::Private::completeWebcamTrack(const QString& videoPath)
     QDir().mkpath(QFileInfo(trackPath).absolutePath());
     QFile::remove(trackPath);
 
-    const auto settle = [this, videoPath, trackPath, finish](bool written, const QString& detail) {
+    // Each camera segment's lag behind its screen segment, from the write
+    // times of their first-frame markers; empty when any marker is missing.
+    QVector<double> lags;
+    if (segments.size() == webcamSegments.size()) {
+        for (int index = 0; index < webcamSegments.size(); ++index) {
+            const qint64 screen = markerWrittenMs(segments.at(index));
+            const qint64 camera = markerWrittenMs(webcamSegments.at(index));
+            if (screen < 0 || camera < 0) {
+                recordingLog(QStringLiteral("webcam sync: segment %1 has no first-frame mark")
+                                 .arg(index));
+                lags.clear();
+                break;
+            }
+            lags.append(std::max(0.0, double(camera - screen) / 1000.0));
+            recordingLog(QStringLiteral("webcam sync: segment %1 camera lag %2 s")
+                             .arg(index)
+                             .arg(lags.last(), 0, 'f', 3));
+        }
+    }
+    // Joining segments needs each screen segment's length to place the next
+    // camera segment; without them the join falls back to the estimate.
+    QVector<double> segmentSeconds;
+    if (!lags.isEmpty() && webcamSegments.size() > 1) {
+        if (segments.size() == webcamSegments.size()) {
+            for (const QString& segment : segments)
+                segmentSeconds.append(videoDuration(segment));
+        }
+        bool usable = segmentSeconds.size() == webcamSegments.size();
+        for (int index = 0; usable && index + 1 < webcamSegments.size(); ++index)
+            usable = segmentSeconds.at(index) + lags.at(index + 1) - lags.at(index) > 0.05;
+        if (!usable) {
+            recordingLog(QStringLiteral("webcam sync: segment lengths unreadable, estimating"));
+            lags.clear();
+        }
+    }
+
+    const auto settle = [this, videoPath, trackPath, finish, lags](bool written,
+                                                                   const QString& detail) {
         if (!written) {
             QFile::remove(trackPath);
             finish(false, detail);
@@ -1364,11 +1442,18 @@ void RecordingSession::Private::completeWebcamTrack(const QString& videoPath)
         webcamTrack.width = size.width();
         webcamTrack.height = size.height();
         webcamTrack.duration = videoDuration(trackPath);
-        // The camera process starts after the desktop process and both stop
-        // together, so the track is shorter from the front. Store that gap so
-        // the editor knows where the camera starts in video time.
+        // The camera's first frame was timed against the screen's first
+        // frame, so the gap is measured rather than inferred. Without that
+        // measurement, assume both stopped together and put the whole length
+        // difference at the front.
         const double videoSeconds = videoDuration(videoPath);
-        webcamTrack.start = std::max(0.0, videoSeconds - webcamTrack.duration);
+        const double estimate = std::max(0.0, videoSeconds - webcamTrack.duration);
+        webcamTrack.start = lags.isEmpty() ? estimate : lags.first();
+        recordingLog(QStringLiteral("webcam sync: start %1 s (%2), length estimate %3 s")
+                         .arg(webcamTrack.start, 0, 'f', 3)
+                         .arg(lags.isEmpty() ? QStringLiteral("estimated")
+                                             : QStringLiteral("measured"))
+                         .arg(estimate, 0, 'f', 3));
         if (!webcamTrack.is_valid()) {
             QFile::remove(trackPath);
             finish(false, QStringLiteral("the camera track had no readable frames"));
@@ -1407,8 +1492,18 @@ void RecordingSession::Private::completeWebcamTrack(const QString& videoPath)
         settle(false, QStringLiteral("could not prepare the camera segment list"));
         return;
     }
-    for (const QString& segment : webcamSegments)
-        list.write(quoteConcatPath(segment).toUtf8() + '\n');
+    for (int index = 0; index < webcamSegments.size(); ++index) {
+        list.write(quoteConcatPath(webcamSegments.at(index)).toUtf8() + '\n');
+        // Each camera segment starts its own lag after its screen segment.
+        // Ending every segment but the last where the next one belongs keeps
+        // the joined track in step with the joined screen: a short segment
+        // leaves a gap that holds its last frame, a long one is trimmed.
+        if (!lags.isEmpty() && index + 1 < webcamSegments.size()) {
+            const double length =
+                segmentSeconds.at(index) + lags.at(index + 1) - lags.at(index);
+            list.write(QStringLiteral("outpoint %1\n").arg(length, 0, 'f', 6).toUtf8());
+        }
+    }
     list.close();
 
     auto* joiner = new QProcess(q);
@@ -1471,10 +1566,10 @@ void RecordingSession::Private::compositeWebcam(
     const int y = std::clamp(int(std::lround(layout.y * videoSize.height())),
                              0,
                              std::max(0, videoSize.height() - 2));
-    // The camera process starts after the desktop encoder, so its track is
-    // usually a fraction of a second shorter. Hold its first frame for that
-    // gap rather than showing the desktop without a bubble at the start.
-    const double startDelay = std::max(0.0, videoSeconds - cameraSeconds);
+    // The camera's first frame sits webcamTrack.start into the video: the
+    // measured gap, or the length estimate without one. Hold that frame over
+    // the gap rather than showing the desktop without a bubble at the start.
+    const double startDelay = std::max(0.0, webcamTrack.start);
 
     QString filter = layout.flip ? QStringLiteral("[1:v]hflip,") : QStringLiteral("[1:v]");
     filter += QStringLiteral(

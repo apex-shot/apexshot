@@ -1766,9 +1766,10 @@ pub(super) const MAX_CAMERA_DELAY_SECONDS: f64 = 0.2;
 /// The track's first frame sits `start` seconds into the video (the gap the
 /// recorder measured), and from there it runs on its own clock. `rate` is
 /// track seconds per video second after that gap: 1 for a recording that
-/// stored its gap, and the old length ratio for a sidecar written before the
-/// gap existed. `delay` is the user's adjustment; a positive delay samples
-/// the camera later.
+/// stored its gap, whose track ends wherever the camera stopped, and the old
+/// length ratio for a sidecar written before the gap existed, which stores
+/// none. `delay` is the user's adjustment; a positive delay samples the
+/// camera later.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct CameraClock {
     pub start: f64,
@@ -1783,7 +1784,9 @@ impl CameraClock {
         } else {
             0.0
         };
-        let rate = if video_seconds.is_finite()
+        let rate = if start > 0.0 {
+            1.0
+        } else if video_seconds.is_finite()
             && track_seconds.is_finite()
             && video_seconds > start
             && track_seconds > 0.0
@@ -5331,6 +5334,15 @@ mod tests {
         assert!((clock.track_at(1.0) - 0.8).abs() < 1e-9);
         assert!((clock.time_scale() - 1.25).abs() < 1e-9);
         assert_eq!(clock.lead_at(1.0), 0.0);
+    }
+
+    #[test]
+    fn a_stored_gap_keeps_the_camera_at_its_own_speed() {
+        // A measured gap leaves the track ending where the camera stopped,
+        // which need not be the video's end; the track must not be stretched.
+        let clock = CameraClock::new(1.375, 29.433, 31.0, 0.0);
+        assert_eq!(clock.rate, 1.0);
+        assert!((clock.track_at(11.375) - 10.0).abs() < 1e-9);
     }
 
     #[test]
