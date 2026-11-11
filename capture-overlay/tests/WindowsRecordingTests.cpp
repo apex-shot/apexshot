@@ -1292,6 +1292,99 @@ int recordUntilDiskLow()
     return 0;
 }
 
+/// Crash recovery: a recording abandoned mid-session is listed as unfinished
+/// and recovers into a playable video with its pointer sidecar and manifest.
+int recordAndRecover()
+{
+    const QString path =
+        QDir(QDir::tempPath()).filePath(QStringLiteral("apexshot-record-recover.mp4"));
+    QFile::remove(path);
+
+    QString workDir;
+    {
+        Platform::RecordingSession session;
+        Platform::RecordingRequest request;
+        request.region = kRegion;
+        request.outputPath = path;
+        request.includeCursor = false;
+        request.fps = 30;
+        request.crf = 28;
+        QString error;
+        if (!session.start(request, error)) {
+            std::printf("FAIL recover start: %s\n", qPrintable(error));
+            return 1;
+        }
+        QEventLoop wait;
+        QTimer::singleShot(5500, &wait, &QEventLoop::quit);
+        wait.exec();
+        session.abandonForTesting();
+    }
+
+    const QVector<Platform::UnfinishedRecording> unfinished =
+        Platform::RecordingSession::unfinishedRecordings(true);
+    for (const Platform::UnfinishedRecording& item : unfinished) {
+        if (QFileInfo(item.outputPath) == QFileInfo(path))
+            workDir = item.workDir;
+    }
+    if (workDir.isEmpty()) {
+        std::printf("FAIL recover: the abandoned recording was not listed (%d found)\n",
+                    int(unfinished.size()));
+        return 1;
+    }
+
+    Platform::RecordingSession recovery;
+    bool kept = false;
+    QString output;
+    QString finishError;
+    bool finished = false;
+    QEventLoop loop;
+    QObject::connect(&recovery, &Platform::RecordingSession::finished, &recovery,
+                     [&](bool k, const QString& p, const QString& e) {
+                         kept = k;
+                         output = p;
+                         finishError = e;
+                         finished = true;
+                         loop.quit();
+                     });
+    QTimer::singleShot(30000, &loop, &QEventLoop::quit);
+    QString error;
+    if (!recovery.recover(workDir, error)) {
+        std::printf("FAIL recover: %s\n", qPrintable(error));
+        Platform::RecordingSession::discardUnfinished(workDir);
+        return 1;
+    }
+    loop.exec();
+    if (!finished || !kept || output.isEmpty() || QFileInfo(output).size() <= 0) {
+        std::printf("FAIL recover: nothing was saved (%s)\n", qPrintable(finishError));
+        Platform::RecordingSession::discardUnfinished(workDir);
+        return 1;
+    }
+    if (QFileInfo::exists(workDir)) {
+        std::printf("FAIL recover: the work directory was left behind\n");
+        return 1;
+    }
+    const QString sidecar = Platform::sidecarPathFor(output);
+    QFile manifestFile(Platform::recordingManifestPathFor(output));
+    const bool haveManifest = manifestFile.open(QIODevice::ReadOnly);
+    const QJsonObject manifest =
+        haveManifest ? QJsonDocument::fromJson(manifestFile.readAll()).object() : QJsonObject();
+    manifestFile.close();
+    if (sidecar.isEmpty() || !QFileInfo::exists(sidecar)) {
+        std::printf("FAIL recover: no pointer sidecar for %s\n", qPrintable(output));
+        return 1;
+    }
+    if (manifest.value(QStringLiteral("sessions")).toArray().size() != 1) {
+        std::printf("FAIL recover: the manifest has no session\n");
+        return 1;
+    }
+    std::printf("OK recover: %s (%lld bytes)\n", qPrintable(output),
+                static_cast<long long>(QFileInfo(output).size()));
+    QFile::remove(output);
+    QFile::remove(sidecar);
+    QFile::remove(Platform::recordingManifestPathFor(output));
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -1324,6 +1417,8 @@ int main(int argc, char** argv)
         return recordOnce(true);
     if (!qEnvironmentVariableIsEmpty("APEXSHOT_TEST_DISK_LOW"))
         return recordUntilDiskLow();
+    if (!qEnvironmentVariableIsEmpty("APEXSHOT_TEST_RECOVER"))
+        return recordAndRecover();
 
     // The cursor checks need a desktop that accepts input injection, which a
     // locked or game-focused session refuses; the camera path can still run.
@@ -1335,6 +1430,8 @@ int main(int argc, char** argv)
         result = recordOnce(true);
     if (result == 0)
         result = recordUntilDiskLow();
+    if (result == 0)
+        result = recordAndRecover();
     if (result == 0) {
         const int webcam = recordWithWebcam();
         // 77 is the camera-absent skip, which is not a failure of the recorder.
