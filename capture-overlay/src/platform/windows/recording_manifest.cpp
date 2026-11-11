@@ -44,6 +44,10 @@ QJsonObject recordingManifestJson(const RecordingManifest& manifest)
         sessions.append(entry);
     }
 
+    QJsonArray markers;
+    for (const qint64 marker : manifest.markers)
+        markers.append(marker);
+
     QJsonObject root{
         {QStringLiteral("version"), 1},
         {QStringLiteral("startedAtUnixMs"), manifest.startedAtUnixMs},
@@ -68,6 +72,7 @@ QJsonObject recordingManifestJson(const RecordingManifest& manifest)
                      {QStringLiteral("mono"), manifest.monoAudio}}},
         {QStringLiteral("cursor"), QJsonObject{{QStringLiteral("keys"), manifest.keys}}},
         {QStringLiteral("sessions"), sessions},
+        {QStringLiteral("markers"), markers},
     };
 
     if (manifest.hasWindow) {

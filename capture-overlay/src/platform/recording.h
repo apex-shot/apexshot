@@ -134,6 +134,10 @@ public:
     /// Stop and remove every segment and the output file.
     void discard();
 
+    /// Mark the current moment of the recording, for the editor's timeline.
+    /// While paused the mark lands where the recording will resume.
+    void addMarker();
+
     bool isActive() const;
     bool isPaused() const;
     QString outputPath() const;
@@ -168,6 +172,8 @@ public:
 
 signals:
     void elapsedChanged(qint64 elapsedMs);
+    /// A marker was added at `mediaMs` of the recording.
+    void markerAdded(qint64 mediaMs);
     void stateChanged();
     /// The capture process has stopped for finalization or discard.
     void captureStopped();

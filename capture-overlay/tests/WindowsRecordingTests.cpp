@@ -566,6 +566,27 @@ int recordOnce(bool pauseAndResume)
                                  } else {
                                      std::printf("OK pause/resume manifest: pause at %lld ms\n",
                                                  static_cast<long long>(firstEnd));
+                                     const QJsonArray markers =
+                                         manifest.value(QStringLiteral("markers")).toArray();
+                                     const qint64 first = markers.size() == 2
+                                         ? markers.at(0).toVariant().toLongLong()
+                                         : -1;
+                                     const qint64 second = markers.size() == 2
+                                         ? markers.at(1).toVariant().toLongLong()
+                                         : -1;
+                                     // 400 ms in, and 400 ms after the
+                                     // resume at media time ~800 ms.
+                                     if (first < 250 || first > 650 || second < 1000
+                                         || second > 1500) {
+                                         std::printf("FAIL markers: %lld, %lld\n",
+                                                     static_cast<long long>(first),
+                                                     static_cast<long long>(second));
+                                         result = 1;
+                                     } else {
+                                         std::printf("OK markers at %lld and %lld ms\n",
+                                                     static_cast<long long>(first),
+                                                     static_cast<long long>(second));
+                                     }
                                  }
                              }
                              if (qEnvironmentVariableIsEmpty("APEXSHOT_KEEP_TEST_OUTPUT"))
@@ -591,8 +612,10 @@ int recordOnce(bool pauseAndResume)
         cursorGuard.start();
 
     if (pauseAndResume) {
+        QTimer::singleShot(400, &session, [&session] { session.addMarker(); });
         QTimer::singleShot(800, &session, [&session] { session.pause(); });
         QTimer::singleShot(1800, &session, [&session] { session.resume(); });
+        QTimer::singleShot(2200, &session, [&session] { session.addMarker(); });
         QTimer::singleShot(2800, &session, [&session] { session.stop(); });
     } else {
         const auto inject = [&session,

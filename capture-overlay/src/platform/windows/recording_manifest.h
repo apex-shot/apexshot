@@ -71,6 +71,8 @@ struct RecordingManifest {
 
     bool keys = false;
     QVector<Session> sessions;
+    /// Moments marked while recording, in milliseconds of the joined video.
+    QVector<qint64> markers;
 };
 
 /// The manifest as JSON (format version 1).
