@@ -56,6 +56,14 @@ On the development machine, framing a 1080p passthrough export on a 2150×1310
 canvas raised it from 7.0 to 7.8–8.4 ms/frame. A zoomed export on a fixed frame
 is faster than without one, because the video rect is smaller than the source.
 
+A zoom with a canvas moves and grows the card over the padding, as the
+preview does. Frames whose card has left its rest rect take the CPU path:
+the video rect is rendered as usual (cursor, ripple, camera layer), the
+footage the card shows over the padding is cropped from the full decode, and
+`Framer::compose_card` lays both over the zoomed background inside the card's
+rounded shape in parallel row spans (8 ms for a 2160x1440 frame in release).
+Resting frames keep the fixed-rect path.
+
 ## GPU crop and scale
 
 When an export needs a camera view — a zoom, or an output size different from
