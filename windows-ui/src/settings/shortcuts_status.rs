@@ -239,6 +239,9 @@ pub fn install(widgets: &ShortcutSettingsWidgets) {
         ("save_last_capture", &widgets.save_last_capture_btn),
         ("record_screen", &widgets.record_screen_btn),
         ("recording_stop_save", &widgets.recording_stop_save_btn),
+        ("recording_pause", &widgets.recording_pause_btn),
+        ("recording_restart", &widgets.recording_restart_btn),
+        ("recording_marker", &widgets.recording_marker_btn),
     ]
     .into_iter()
     .filter_map(|(action, button)| {
