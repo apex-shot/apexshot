@@ -4474,3 +4474,17 @@ msgstr "Intensité de l'inclinaison"
 
 msgid "Tilt with motion"
 msgstr "Incliner avec le mouvement"
+
+msgid "Codec"
+msgstr "Codec"
+
+msgid "Smaller files at the same quality, but not every app or browser plays HEVC."
+msgstr "Des fichiers plus petits à qualité égale, mais toutes les applications et tous les navigateurs ne lisent pas le HEVC."
+msgid "Hardware encoding uses a bitrate, so file sizes follow the estimate; the software encoder uses a constant quality."
+msgstr "L’encodage matériel utilise un débit, la taille suit donc l’estimation ; l’encodeur logiciel utilise une qualité constante."
+
+msgid "Estimated output size: {size}"
+msgstr "Taille estimée : {size}"
+
+msgid "Export time ≈ {time}"
+msgstr "Durée d’exportation ≈ {time}"
