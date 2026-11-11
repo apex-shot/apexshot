@@ -542,6 +542,13 @@ fn render_range(
     let size = plan.size;
     let screen_size = plan.screen;
     let widened = screen_size != size;
+    // A padded split shows the background between its panes, so it goes
+    // through the stage even when the stage has the screen's shape.
+    let padded = model
+        .webcam
+        .as_ref()
+        .is_some_and(|webcam| webcam.layouts.split_padded && webcam.split_gap > 0.0);
+    let staged_path = widened || padded;
     let source = (
         f64::from(model.source_size.0),
         f64::from(model.source_size.1),
@@ -596,12 +603,12 @@ fn render_range(
         .map(|webcam| webcam.layouts.clone().clamped())
         .unwrap_or_default();
     let source_aspect = f64::from(model.source_size.0) / f64::from(model.source_size.1);
-    let mut staged = if widened {
+    let mut staged = if staged_path {
         vec![0u8; size.0 as usize * size.1 as usize * 4]
     } else {
         Vec::new()
     };
-    let stage_background = if widened {
+    let stage_background = if staged_path {
         model
             .canvas
             .as_ref()
@@ -903,8 +910,12 @@ fn render_range(
                         layouts.frame_at_staged(
                             time,
                             webcam.settings,
-                            stage_aspect,
-                            source_aspect,
+                            webcam::StageShape {
+                                aspect: stage_aspect,
+                                screen_aspect: source_aspect,
+                                split_gap: webcam.split_gap,
+                                pane_radius: webcam.pane_radius,
+                            },
                             camera_aspect,
                             shrink,
                         ),
@@ -980,7 +991,7 @@ fn render_range(
                     Some((pixels, size)) => (pixels, size),
                     None => (&[][..], (0, 0)),
                 };
-                let composited = if widened {
+                let composited = if staged_path {
                     webcam::composite_stage_trail_into(
                         &mut staged,
                         size,
@@ -1017,7 +1028,7 @@ fn render_range(
                     return Err(error);
                 }
             };
-            let picture: &[u8] = if widened { &staged } else { frame };
+            let picture: &[u8] = if staged_path { &staged } else { frame };
             converter.convert_into(picture, size, &mut nv12);
             if let Err(error) = sink.submit(nv12) {
                 let _ = decoder.kill();
@@ -3046,6 +3057,8 @@ mod webcam_export_tests {
                 path: track_path.to_path_buf(),
                 settings: layer,
                 layouts,
+                split_gap: 0.0,
+                pane_radius: 0.0,
                 track_seconds: 2.0,
                 start: camera_start,
                 video_seconds: 2.0,
@@ -3828,6 +3841,8 @@ mod webcam_export_tests {
                 path: track_path.clone(),
                 settings: bubble,
                 layouts,
+                split_gap: 0.0,
+                pane_radius: 0.0,
                 track_seconds: 4.0,
                 start: 0.0,
                 video_seconds: 4.0,
@@ -3985,6 +4000,8 @@ mod webcam_export_tests {
                     default_layout: CameraLayout::SplitScreen,
                     ..LayoutSettings::default()
                 },
+                split_gap: 0.0,
+                pane_radius: 0.0,
                 track_seconds: 2.0,
                 start: 0.0,
                 video_seconds: 2.0,
@@ -4324,6 +4341,8 @@ mod webcam_export_tests {
                     path: track_path.clone(),
                     settings: bubble,
                     layouts: layouts.clone(),
+                    split_gap: 0.0,
+                    pane_radius: 0.0,
                     track_seconds: 4.0,
                     start: 0.0,
                     video_seconds: 4.0,
@@ -4629,6 +4648,8 @@ mod webcam_export_tests {
                     path: track_path.clone(),
                     settings: bubble,
                     layouts: layouts.clone(),
+                    split_gap: 0.0,
+                    pane_radius: 0.0,
                     track_seconds: 4.0,
                     start: 0.0,
                     video_seconds: 4.0,
@@ -4712,6 +4733,227 @@ mod webcam_export_tests {
 
         let _ = fs::remove_file(&sidecar_path);
         let _ = fs::remove_file(&track_path);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_padded_split_shows_the_background_between_its_panes() {
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-webcam-padded-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        if fs::create_dir_all(&dir).is_err() {
+            return;
+        }
+        let wide_source = dir.join("wide.mp4");
+        if !solid_clip(&wide_source, "0xc83232", "320x200", 5.0) {
+            eprintln!("skipping the padded split test: ffmpeg is unavailable");
+            return;
+        }
+        let plain_source = dir.join("plain.mp4");
+        if !solid_clip(&plain_source, "0xc83232", "320x180", 5.0) {
+            eprintln!("skipping the padded split test: ffmpeg is unavailable");
+            return;
+        }
+        let Some(wide_track) = webcam_track_file(&wide_source) else {
+            eprintln!("skipping the padded split test: no sidecar directory");
+            return;
+        };
+        let Some(plain_track) = webcam_track_file(&plain_source) else {
+            eprintln!("skipping the padded split test: no sidecar directory");
+            return;
+        };
+        if let Some(parent) = wide_track.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if let Some(parent) = plain_track.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if !solid_clip(&wide_track, "0x00ff00", "320x320", 4.0) {
+            return;
+        }
+        if !solid_clip(&plain_track, "0x00ff00", "320x320", 4.0) {
+            return;
+        }
+        let track = |file: &Path| WebcamTrack {
+            file: file
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            width: 320,
+            height: 320,
+            duration: 4.0,
+            start: 0.0,
+            x: 0.6,
+            y: 0.6,
+            w: 0.3,
+            h: 0.3,
+            shape: 1,
+            flip: false,
+        };
+        let mut sidecar = PointerSidecar::new(
+            0,
+            crate::recording::editor::sidecar::CaptureRegion::from_capture(None, None, None, None),
+        );
+        sidecar.webcam = Some(track(&wide_track));
+        let wide_sidecar = PointerSidecar::sidecar_path(&wide_source);
+        if sidecar.write(&wide_sidecar).is_err() {
+            return;
+        }
+        sidecar.webcam = Some(track(&plain_track));
+        let plain_sidecar = PointerSidecar::sidecar_path(&plain_source);
+        if sidecar.write(&plain_sidecar).is_err() {
+            return;
+        }
+
+        let layouts = LayoutSettings {
+            default_layout: CameraLayout::SplitScreen,
+            split_auto: true,
+            split_flip: false,
+            split_padded: true,
+            cues: vec![],
+            ..LayoutSettings::default()
+        };
+        let bubble = LayerSettings {
+            x: 0.6,
+            y: 0.6,
+            w: 0.3,
+            h: 0.3,
+            radius: 0.0,
+            ..Default::default()
+        };
+        let export = |name: &str,
+                      source: &Path,
+                      track: &Path,
+                      source_size: (u32, u32),
+                      stage: Option<(u32, u32)>,
+                      canvas: Option<CanvasLayout>|
+         -> PathBuf {
+            let output = dir.join(name);
+            let model = ExportModel {
+                source: source.to_path_buf(),
+                source_size,
+                trim_start: 0.0,
+                trim_end: 1.5,
+                cuts: Vec::new(),
+                zooms: Vec::new(),
+                zoom_camera: crate::video_editor::zoom::ZoomCameraSettings {
+                    motion_blur: 0.0,
+                    ..Default::default()
+                },
+                cursor: CursorSettings::default(),
+                sidecar: PointerSidecar::load_next_to_video(source),
+                webcam: Some(webcam::WebcamExport {
+                    path: track.to_path_buf(),
+                    settings: bubble,
+                    layouts: layouts.clone(),
+                    split_gap: 0.1,
+                    pane_radius: 0.0,
+                    track_seconds: 4.0,
+                    start: 0.0,
+                    video_seconds: 4.0,
+                    last_frame: 3.95,
+                    source_size: (320, 320),
+                    silence: Vec::new(),
+                }),
+                stage,
+                canvas,
+                crf: 30,
+            };
+            let handle = start_export(model, output.clone());
+            loop {
+                match handle.receiver.recv_timeout(Duration::from_secs(120)) {
+                    Ok(ExportUpdate::Progress { .. }) => {}
+                    Ok(ExportUpdate::Finished(path)) => {
+                        assert_eq!(path, output);
+                        break;
+                    }
+                    Ok(ExportUpdate::Failed(message)) => panic!("export failed: {message}"),
+                    Ok(ExportUpdate::Cancelled) => panic!("export cancelled itself"),
+                    Err(error) => panic!("export did not report back: {error}"),
+                }
+            }
+            output
+        };
+        let mut blue = vec![0u8; 452 * 200 * 4];
+        for pixel in blue.as_chunks_mut::<4>().0 {
+            pixel.copy_from_slice(&[0, 0, 255, 255]);
+        }
+        let widened = export(
+            "widened.mp4",
+            &wide_source,
+            &wide_track,
+            (320, 200),
+            Some((452, 200)),
+            Some(CanvasLayout {
+                size: (452, 200),
+                video: (452, 200),
+                radius: 0.0,
+                background: std::sync::Arc::new(blue),
+            }),
+        );
+        let frame = frame_rgb(&widened, 0.5, (452, 200)).expect("the export decodes");
+        let [red, green, blue] = pixel(&frame, 452, 100, 100);
+        assert!(
+            red > 150 && green < 90,
+            "the screen pane is not red: {red}, {green}, {blue}"
+        );
+        let [red, green, blue] = pixel(&frame, 452, 330, 100);
+        assert!(
+            blue > 150 && red < 90 && green < 90,
+            "the gap is not the background: {red}, {green}, {blue}"
+        );
+        let [red, green, blue] = pixel(&frame, 452, 400, 100);
+        assert!(
+            green > 150 && red < 90,
+            "the camera pane is not green: {red}, {green}, {blue}"
+        );
+
+        let mut blue = vec![0u8; 320 * 180 * 4];
+        for pixel in blue.as_chunks_mut::<4>().0 {
+            pixel.copy_from_slice(&[0, 0, 255, 255]);
+        }
+        let plain = export(
+            "plain.mp4",
+            &plain_source,
+            &plain_track,
+            (320, 180),
+            None,
+            Some(CanvasLayout {
+                size: (320, 180),
+                video: (320, 180),
+                radius: 0.0,
+                background: std::sync::Arc::new(blue),
+            }),
+        );
+        let frame = frame_rgb(&plain, 0.5, (320, 180)).expect("the export decodes");
+        let [red, green, blue] = pixel(&frame, 320, 50, 3);
+        assert!(
+            blue > 150 && red < 90 && green < 90,
+            "the letterbox above the screen is not the background: {red}, {green}, {blue}"
+        );
+        let [red, green, blue] = pixel(&frame, 320, 50, 90);
+        assert!(
+            red > 150 && green < 90,
+            "the screen pane is not red: {red}, {green}, {blue}"
+        );
+        let [red, green, blue] = pixel(&frame, 320, 221, 90);
+        assert!(
+            blue > 150 && red < 90 && green < 90,
+            "the gap is not the background: {red}, {green}, {blue}"
+        );
+        let [red, green, blue] = pixel(&frame, 320, 280, 90);
+        assert!(
+            green > 150 && red < 90,
+            "the camera pane is not green: {red}, {green}, {blue}"
+        );
+
+        let _ = fs::remove_file(&wide_sidecar);
+        let _ = fs::remove_file(&plain_sidecar);
+        let _ = fs::remove_file(&wide_track);
+        let _ = fs::remove_file(&plain_track);
         let _ = fs::remove_dir_all(&dir);
     }
 }

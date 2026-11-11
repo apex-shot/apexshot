@@ -114,8 +114,8 @@ mod imp {
         /// Draw the child into a normalized layout pane, clipped to the same
         /// card shape. The whole source scales uniformly until it covers the
         /// pane, so the split crops the footage instead of stretching it, and
-        /// the corner radius is measured against the pane's width so the card's
-        /// corner keeps its pixel size.
+        /// the corner radius is scaled by the card's width, not the pane's, so a
+        /// pane's corner keeps the card's pixel size.
         fn snapshot_layout(
             &self,
             snapshot: &gtk4::Snapshot,
@@ -125,7 +125,7 @@ mod imp {
         ) {
             let placement = super::pane_placement(width, height, rect, self.screen_aspect.get());
             let (clip_x, clip_y, clip_width, clip_height) = placement.clip;
-            let radius = scaled_radius(self.radius.get(), self.canvas_width.get(), clip_width)
+            let radius = scaled_radius(self.radius.get(), self.canvas_width.get(), width)
                 .min(clip_width.min(clip_height) / 2.0);
             let bounds = graphene::Rect::new(
                 clip_x as f32,

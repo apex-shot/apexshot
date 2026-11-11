@@ -483,6 +483,10 @@ pub(super) struct LayoutSettings {
     pub split_auto: bool,
     /// Puts the screen on the far side of the split.
     pub split_flip: bool,
+    /// The studied Fill option: false fills the stage edge to edge, true
+    /// leaves the Background padding between the screen and the camera and
+    /// rounds both panes.
+    pub split_padded: bool,
     /// Where the cutout sits across the frame's width, in 0..=1: zero holds
     /// the person against the left edge, one against the right, and half
     /// centres them. It applies to every cutout in the composition.
@@ -505,6 +509,7 @@ impl Default for LayoutSettings {
             split_ratio: 0.5,
             split_auto: true,
             split_flip: false,
+            split_padded: false,
             cutout_position_x: 0.5,
             cutout_size: 0.5,
             cutout_softness: 0.2,
@@ -648,32 +653,40 @@ impl LayoutSettings {
         self.frame_at_staged(
             seconds,
             overlay,
-            video_aspect,
-            video_aspect,
+            StageShape::plain(video_aspect),
             camera_aspect,
             zoom_shrink,
         )
     }
 
-    /// [`Self::frame_at_zoomed`] on a stage of `stage_aspect` that holds a
-    /// screen of `screen_aspect`. Rects are fractions of the stage.
+    /// [`Self::frame_at_zoomed`] on `stage`, whose aspect may differ from the
+    /// screen's. Rects are fractions of the stage.
     pub(super) fn frame_at_staged(
         &self,
         seconds: f64,
         overlay: LayerSettings,
-        stage_aspect: f64,
-        screen_aspect: f64,
+        stage: StageShape,
         camera_aspect: f64,
         zoom_shrink: f64,
     ) -> LayoutFrame {
         let geometry = Geometry {
             overlay: overlay.clamped(),
-            video_aspect: sane_aspect(stage_aspect),
-            screen_aspect: sane_aspect(screen_aspect),
+            video_aspect: sane_aspect(stage.aspect),
+            screen_aspect: sane_aspect(stage.screen_aspect),
             camera_aspect: sane_aspect(camera_aspect),
             split_ratio: self.split_ratio,
             split_auto: self.split_auto,
             split_flip: self.split_flip,
+            split_gap: if self.split_padded {
+                finite_non_negative(stage.split_gap)
+            } else {
+                0.0
+            },
+            pane_radius: if self.split_padded {
+                finite_non_negative(stage.pane_radius)
+            } else {
+                0.0
+            },
             cutout_position_x: self.cutout_position_x,
             cutout_size: self.cutout_size,
             zoom_shrink: if zoom_shrink.is_finite() {
@@ -777,6 +790,9 @@ pub(super) struct LayoutFrame {
     pub camera_alpha: f64,
     /// The camera's corner radius, as a fraction of its shorter side.
     pub camera_radius: f64,
+    /// The screen pane's corner radius, as a fraction of half its shorter
+    /// side, like `camera_radius`. Only the padded split rounds it.
+    pub screen_radius: f64,
     /// How much of the person's matte blends into the camera, 0..=1.
     pub cutout: f64,
     pub mirror: bool,
@@ -793,6 +809,10 @@ struct Geometry {
     split_ratio: f64,
     split_auto: bool,
     split_flip: bool,
+    /// The padded split's gap, in stage heights; 0 unless padded.
+    split_gap: f64,
+    /// The padded split's pane radius, in stage heights; 0 unless padded.
+    pane_radius: f64,
     cutout_position_x: f64,
     cutout_size: f64,
     zoom_shrink: f64,
@@ -803,6 +823,14 @@ fn sane_aspect(aspect: f64) -> f64 {
         aspect
     } else {
         16.0 / 9.0
+    }
+}
+
+fn finite_non_negative(value: f64) -> f64 {
+    if value.is_finite() {
+        value.max(0.0)
+    } else {
+        0.0
     }
 }
 
@@ -832,6 +860,7 @@ fn canonical(layout: CameraLayout, geometry: Geometry) -> LayoutFrame {
                 } else {
                     geometry.overlay.radius
                 },
+                screen_radius: 0.0,
                 cutout: 0.0,
                 mirror: geometry.overlay.mirror,
             }
@@ -841,6 +870,7 @@ fn canonical(layout: CameraLayout, geometry: Geometry) -> LayoutFrame {
             camera: full,
             camera_alpha: 1.0,
             camera_radius: 0.0,
+            screen_radius: 0.0,
             cutout: 0.0,
             mirror: geometry.overlay.mirror,
         },
@@ -850,7 +880,8 @@ fn canonical(layout: CameraLayout, geometry: Geometry) -> LayoutFrame {
                 screen,
                 camera,
                 camera_alpha: 1.0,
-                camera_radius: 0.0,
+                camera_radius: pane_radius(geometry, camera),
+                screen_radius: pane_radius(geometry, screen),
                 cutout: 0.0,
                 mirror: geometry.overlay.mirror,
             };
@@ -869,6 +900,7 @@ fn canonical(layout: CameraLayout, geometry: Geometry) -> LayoutFrame {
             camera: geometry.overlay.rect_in(full),
             camera_alpha: 0.0,
             camera_radius: geometry.overlay.radius,
+            screen_radius: 0.0,
             cutout: 0.0,
             mirror: geometry.overlay.mirror,
         },
@@ -877,10 +909,24 @@ fn canonical(layout: CameraLayout, geometry: Geometry) -> LayoutFrame {
             camera: cutout_rect(geometry),
             camera_alpha: 1.0,
             camera_radius: 0.0,
+            screen_radius: 0.0,
             cutout: 1.0,
             mirror: geometry.overlay.mirror,
         },
     }
+}
+
+/// The padded split's corner radius for `pane`, as a fraction of half its
+/// shorter side.
+fn pane_radius(geometry: Geometry, pane: Rect) -> f64 {
+    if geometry.pane_radius <= 0.0 {
+        return 0.0;
+    }
+    let shorter = (pane.width * geometry.video_aspect).min(pane.height);
+    if shorter <= 0.0 {
+        return 0.0;
+    }
+    (geometry.pane_radius / (shorter / 2.0)).min(1.0)
 }
 
 /// The studied automatic split, as the screen's share of the frame's width.
@@ -924,6 +970,46 @@ pub(super) fn auto_split_stage_aspect(screen_aspect: f64, padding: f64) -> f64 {
         .clamp(1.0, AUTO_STAGE_MAX_ASPECT)
 }
 
+/// [`auto_split_stage_aspect`] for ApexShot's stage, whose Background padding
+/// sits outside it: the padded split's `gap` (in stage heights) joins the
+/// screen and the 9:16 camera column. A zero gap is exactly the studied
+/// unpadded resolver.
+pub(super) fn auto_split_stage_with_gap(screen_aspect: f64, gap: f64) -> f64 {
+    let screen = sane_aspect(screen_aspect);
+    let gap = finite_non_negative(gap);
+    let column = 16.0 / 9.0 - screen - gap;
+    if (0.4..=16.0 / 9.0).contains(&column) {
+        return 16.0 / 9.0;
+    }
+    (screen + gap + AUTO_STAGE_CAMERA_ASPECT).clamp(1.0, AUTO_STAGE_MAX_ASPECT)
+}
+
+/// The stage a composition's layouts are placed on. Lengths are in units of
+/// the stage's height.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct StageShape {
+    /// The stage's width over height.
+    pub aspect: f64,
+    /// The screen recording's width over height.
+    pub screen_aspect: f64,
+    /// The padded split's gap between its panes.
+    pub split_gap: f64,
+    /// The padded split's pane corner radius.
+    pub pane_radius: f64,
+}
+
+impl StageShape {
+    /// A stage with the screen's own aspect and no padding.
+    pub(super) fn plain(aspect: f64) -> Self {
+        Self {
+            aspect,
+            screen_aspect: aspect,
+            split_gap: 0.0,
+            pane_radius: 0.0,
+        }
+    }
+}
+
 /// Where the whole screen sits on a stage of another aspect: fitted inside it
 /// and centred, the studied rest place for every layout but the split. The
 /// whole stage when the two aspects match.
@@ -961,6 +1047,9 @@ pub(super) fn contained_screen(stage_aspect: f64, screen_aspect: f64) -> Rect {
 /// [`screen_cover_rect`] — cover-cropped, never stretched or letterboxed —
 /// while the camera fills its share from the raw camera aspect.
 fn split_rects(geometry: Geometry) -> (Rect, Rect) {
+    if geometry.split_gap > 0.0 {
+        return padded_split_rects(geometry);
+    }
     let ratio = if geometry.split_auto {
         auto_split_screen_ratio(geometry.video_aspect, geometry.screen_aspect)
     } else {
@@ -1015,6 +1104,87 @@ fn split_rects(geometry: Geometry) -> (Rect, Rect) {
     }
 }
 
+/// The studied screen pane may give up at most this share of its height,
+/// when padded, rather than be cropped.
+const SPLIT_PADDED_MAX_REDUCTION: f64 = 0.1;
+
+/// [`split_rects`] with the padded split's gap between the panes. In a
+/// landscape stage the screen pane gives up to a tenth of its height
+/// instead of being cropped, the studied way.
+fn padded_split_rects(geometry: Geometry) -> (Rect, Rect) {
+    let stage = geometry.video_aspect;
+    let ratio = geometry.split_ratio.clamp(MIN_SPLIT_RATIO, MAX_SPLIT_RATIO);
+    if stage >= 1.0 {
+        // In units of the stage's height.
+        let gap = geometry.split_gap.min(stage * 0.5);
+        let usable = stage - gap;
+        let camera = if geometry.split_auto {
+            let rest = usable - geometry.screen_aspect;
+            if rest > 0.4 {
+                rest
+            } else {
+                0.5
+            }
+        } else {
+            usable * (1.0 - ratio)
+        }
+        .clamp(
+            usable * (1.0 - MAX_SPLIT_RATIO),
+            usable * (1.0 - MIN_SPLIT_RATIO),
+        );
+        let zone = usable - camera;
+        let (screen_x, camera_x) = if geometry.split_flip {
+            (camera + gap, 0.0)
+        } else {
+            (0.0, zone + gap)
+        };
+        let height = if geometry.screen_aspect > zone {
+            (zone / geometry.screen_aspect).clamp(1.0 - SPLIT_PADDED_MAX_REDUCTION, 1.0)
+        } else {
+            1.0
+        };
+        (
+            Rect {
+                x: screen_x / stage,
+                y: (1.0 - height) / 2.0,
+                width: zone / stage,
+                height,
+            },
+            Rect {
+                x: camera_x / stage,
+                y: 0.0,
+                width: camera / stage,
+                height: 1.0,
+            },
+        )
+    } else {
+        let gap = geometry.split_gap.min(0.5);
+        let usable = 1.0 - gap;
+        let share = if geometry.split_auto { 0.5 } else { ratio };
+        let zone = usable * share;
+        let camera = usable - zone;
+        let (screen_y, camera_y) = if geometry.split_flip {
+            (camera + gap, 0.0)
+        } else {
+            (0.0, zone + gap)
+        };
+        (
+            Rect {
+                x: 0.0,
+                y: screen_y,
+                width: 1.0,
+                height: zone,
+            },
+            Rect {
+                x: 0.0,
+                y: camera_y,
+                width: 1.0,
+                height: camera,
+            },
+        )
+    }
+}
+
 /// The split layout while the screen is zoomed: the screen takes the whole
 /// frame and the camera floats as a studied overlay in the corner opposite
 /// the screen's pane: the bottom corner for a side-by-side split, and the
@@ -1048,6 +1218,7 @@ fn split_zoomed(geometry: Geometry, overlay_radius: f64) -> LayoutFrame {
         },
         camera_alpha: 1.0,
         camera_radius: overlay_radius,
+        screen_radius: 0.0,
         cutout: 0.0,
         mirror: geometry.overlay.mirror,
     }
@@ -1355,6 +1526,7 @@ fn interpolate(from: LayoutFrame, to: LayoutFrame, t: f64) -> LayoutFrame {
         camera: from.camera.lerp(to.camera, t),
         camera_alpha: from.camera_alpha + (to.camera_alpha - from.camera_alpha) * t,
         camera_radius: from.camera_radius + (to.camera_radius - from.camera_radius) * t,
+        screen_radius: from.screen_radius + (to.screen_radius - from.screen_radius) * t,
         cutout: from.cutout + (to.cutout - from.cutout) * t,
         mirror: to.mirror,
     }
@@ -1665,6 +1837,8 @@ struct State {
     composition_seconds: Cell<f64>,
     /// The preview stage's aspect when it is wider than the screen, else 0.
     stage_aspect: Cell<f64>,
+    split_gap: Cell<f64>,
+    pane_radius: Cell<f64>,
     zoom_shrink: Cell<f64>,
     /// The source time of the frame on screen, for the silence hide.
     source_seconds: Cell<f64>,
@@ -1707,6 +1881,8 @@ impl WebcamModel {
                 layouts_custom: Cell::new(false),
                 composition_seconds: Cell::new(0.0),
                 stage_aspect: Cell::new(0.0),
+                split_gap: Cell::new(0.0),
+                pane_radius: Cell::new(0.0),
                 zoom_shrink: Cell::new(0.0),
                 source_seconds: Cell::new(0.0),
                 source_path: RefCell::new(None),
@@ -1887,6 +2063,20 @@ impl WebcamModel {
         (self.state.repaint)();
     }
 
+    /// The padded split's gap and pane radius, in stage heights.
+    pub fn set_split_padding(&self, gap: f64, radius: f64) {
+        let gap = finite_non_negative(gap);
+        let radius = finite_non_negative(radius);
+        if (self.state.split_gap.get() - gap).abs() < 1e-12
+            && (self.state.pane_radius.get() - radius).abs() < 1e-12
+        {
+            return;
+        }
+        self.state.split_gap.set(gap);
+        self.state.pane_radius.set(radius);
+        (self.state.repaint)();
+    }
+
     /// Whether the studied auto stage widens for this composition: a camera
     /// that is on, whose default layout is the split.
     pub fn widens_stage(&self) -> bool {
@@ -1944,8 +2134,12 @@ impl WebcamModel {
         let frame = self.state.layouts.borrow().frame_at_staged(
             self.state.composition_seconds.get(),
             settings,
-            stage,
-            video_aspect,
+            StageShape {
+                aspect: stage,
+                screen_aspect: video_aspect,
+                split_gap: self.state.split_gap.get(),
+                pane_radius: self.state.pane_radius.get(),
+            },
             camera_aspect,
             self.state.zoom_shrink.get(),
         );
@@ -2023,6 +2217,8 @@ impl WebcamModel {
             path: track.path.clone(),
             settings,
             layouts,
+            split_gap: self.state.split_gap.get(),
+            pane_radius: self.state.pane_radius.get(),
             track_seconds: track.duration,
             start: track.start,
             video_seconds: track.video_seconds,
@@ -2233,6 +2429,9 @@ pub(super) struct WebcamExport {
     pub path: PathBuf,
     pub settings: LayerSettings,
     pub layouts: LayoutSettings,
+    /// The padded split's gap and pane radius, in stage heights.
+    pub split_gap: f64,
+    pub pane_radius: f64,
     pub track_seconds: f64,
     /// Seconds into the video where the track's first frame sits.
     pub start: f64,
@@ -2896,6 +3095,7 @@ pub(super) fn composite_stage_trail_into(
             screen_size,
             frame.screen,
             background,
+            frame.screen_radius,
         );
         composite_layout_into(
             target,
@@ -3022,7 +3222,8 @@ fn shrink_screen(pixels: &mut [u8], size: (u32, u32), screen: Rect) {
 
 /// Draw the whole screen (`screen`, `screen_size` pixels) onto a stage of
 /// `stage_size` pixels so it covers `pane`, and fill the rest of the stage
-/// with `background` (RGBA at `stage_size`) or black.
+/// with `background` (RGBA at `stage_size`) or black. `radius` rounds the
+/// pane's corners, as a fraction of half its shorter side.
 pub(super) fn place_screen_into(
     stage: &mut [u8],
     stage_size: (u32, u32),
@@ -3030,8 +3231,10 @@ pub(super) fn place_screen_into(
     screen_size: (u32, u32),
     pane: Rect,
     background: Option<&[u8]>,
+    radius: f64,
 ) {
-    match background.filter(|background| background.len() == stage.len()) {
+    let fill_from = background.filter(|background| background.len() == stage.len());
+    match fill_from {
         Some(background) => stage.copy_from_slice(background),
         None => {
             for pixel in stage.as_chunks_mut::<4>().0 {
@@ -3060,6 +3263,52 @@ pub(super) fn place_screen_into(
         let source = &scaled[y * row_bytes..(y + 1) * row_bytes];
         let target = (y0 as usize + y) * stride + x0 as usize * 4;
         stage[target..target + row_bytes].copy_from_slice(source);
+    }
+    if radius > 0.0 {
+        let r = radius.min(1.0) * f64::from(width.min(height)) / 2.0;
+        if r > 0.0 {
+            let reach = r.ceil().min(f64::from(width)).min(f64::from(height)) as u32;
+            let mut round = |x: u32, y: u32, cx: f64, cy: f64, left: bool, top: bool| {
+                let px = f64::from(x) + 0.5;
+                let py = f64::from(y) + 0.5;
+                let outside_x = if left { px < cx } else { px > cx };
+                let outside_y = if top { py < cy } else { py > cy };
+                if !(outside_x && outside_y) {
+                    return;
+                }
+                let d = ((px - cx) * (px - cx) + (py - cy) * (py - cy)).sqrt();
+                let coverage = (r - d + 0.5).clamp(0.0, 1.0);
+                if coverage >= 1.0 {
+                    return;
+                }
+                let index = (y0 as usize + y as usize) * stride + (x0 as usize + x as usize) * 4;
+                let mut fill = [0u8; 3];
+                if let Some(background) = fill_from {
+                    fill.copy_from_slice(&background[index..index + 3]);
+                }
+                for channel in 0..3 {
+                    let pane = f64::from(stage[index + channel]);
+                    let fill = f64::from(fill[channel]);
+                    stage[index + channel] = (fill + (pane - fill) * coverage).round() as u8;
+                }
+                stage[index + 3] = 255;
+            };
+            for y in 0..reach {
+                for x in 0..reach {
+                    round(x, y, r, r, true, true);
+                    round(width - 1 - x, y, f64::from(width) - r, r, false, true);
+                    round(x, height - 1 - y, r, f64::from(height) - r, true, false);
+                    round(
+                        width - 1 - x,
+                        height - 1 - y,
+                        f64::from(width) - r,
+                        f64::from(height) - r,
+                        false,
+                        false,
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -4018,6 +4267,7 @@ mod tests {
             camera: Rect::full(),
             camera_alpha: 1.0,
             camera_radius: 0.0,
+            screen_radius: 0.0,
             cutout: 0.0,
             mirror: false,
         };
@@ -4043,6 +4293,7 @@ mod tests {
             camera: Rect::full(),
             camera_alpha: 1.0,
             camera_radius: 0.0,
+            screen_radius: 0.0,
             cutout: 0.0,
             mirror: false,
         };
@@ -4073,6 +4324,7 @@ mod tests {
             camera: Rect::full(),
             camera_alpha: 1.0,
             camera_radius: 0.0,
+            screen_radius: 0.0,
             cutout: 0.0,
             mirror: false,
         };
@@ -4104,6 +4356,7 @@ mod tests {
             camera: Rect::full(),
             camera_alpha: 1.0,
             camera_radius: 0.0,
+            screen_radius: 0.0,
             cutout: 0.0,
             mirror: true,
         };
@@ -4182,6 +4435,7 @@ mod tests {
             camera: Rect::full(),
             camera_alpha: 1.0,
             camera_radius: 0.0,
+            screen_radius: 0.0,
             cutout: 0.0,
             mirror: false,
         };
@@ -4221,6 +4475,7 @@ mod tests {
             },
             camera_alpha: 1.0,
             camera_radius: 0.0,
+            screen_radius: 0.0,
             cutout: 0.0,
             mirror: false,
         };
@@ -4454,6 +4709,7 @@ mod tests {
             },
             camera_alpha: 0.0,
             camera_radius: 0.0,
+            screen_radius: 0.0,
             cutout: 0.0,
             mirror: false,
         };
@@ -4941,6 +5197,7 @@ mod tests {
             },
             camera_alpha: 1.0,
             camera_radius: 0.1,
+            screen_radius: 0.0,
             cutout: 0.0,
             mirror: false,
         };
@@ -5005,6 +5262,8 @@ mod tests {
             path: path.clone(),
             settings: LayerSettings::default(),
             layouts: LayoutSettings::default(),
+            split_gap: 0.0,
+            pane_radius: 0.0,
             track_seconds: duration,
             start: 0.0,
             video_seconds: duration,
@@ -5022,6 +5281,8 @@ mod tests {
             path: PathBuf::new(),
             settings: LayerSettings::default(),
             layouts: LayoutSettings::default(),
+            split_gap: 0.0,
+            pane_radius: 0.0,
             track_seconds: 8.0,
             start: 0.0,
             video_seconds: 10.0,
@@ -5094,6 +5355,7 @@ mod tests {
             },
             camera_alpha: 1.0,
             camera_radius: 0.0,
+            screen_radius: 0.0,
             cutout: 0.0,
             mirror: false,
         };
@@ -5119,6 +5381,7 @@ mod tests {
             },
             camera_alpha: 1.0,
             camera_radius: 0.0,
+            screen_radius: 0.0,
             cutout: 0.0,
             mirror: false,
         };
@@ -5180,7 +5443,18 @@ mod tests {
             enabled: true,
             ..LayerSettings::default()
         };
-        let frame = split.frame_at_staged(0.0, layer, 2.1625, 1.6, 1.0, 0.0);
+        let frame = split.frame_at_staged(
+            0.0,
+            layer,
+            StageShape {
+                aspect: 2.1625,
+                screen_aspect: 1.6,
+                split_gap: 0.0,
+                pane_radius: 0.0,
+            },
+            1.0,
+            0.0,
+        );
         let width = 1.6 / 2.1625;
         assert!(frame.screen.x.abs() < 1e-9);
         assert!((frame.screen.height - 1.0).abs() < 1e-9);
@@ -5200,12 +5474,125 @@ mod tests {
             default_layout: CameraLayout::CameraOverlay,
             ..LayoutSettings::default()
         };
-        let frame = layout.frame_at_staged(0.0, LayerSettings::default(), 2.1625, 1.6, 1.0, 0.0);
+        let frame = layout.frame_at_staged(
+            0.0,
+            LayerSettings::default(),
+            StageShape {
+                aspect: 2.1625,
+                screen_aspect: 1.6,
+                split_gap: 0.0,
+                pane_radius: 0.0,
+            },
+            1.0,
+            0.0,
+        );
         let contained = contained_screen(2.1625, 1.6);
         assert!((frame.screen.x - contained.x).abs() < 1e-9);
         assert!((frame.screen.y - contained.y).abs() < 1e-9);
         assert!((frame.screen.width - contained.width).abs() < 1e-9);
         assert!((frame.screen.height - contained.height).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_gapped_auto_stage_matches_the_studied_one_without_a_gap() {
+        for screen in [1.0, 4.0 / 3.0, 1.6, 16.0 / 9.0, 3.0] {
+            let gapped = auto_split_stage_with_gap(screen, 0.0);
+            let studied = auto_split_stage_aspect(screen, 0.0);
+            assert!(
+                (gapped - studied).abs() < 1e-9,
+                "{screen}: {gapped} vs {studied}"
+            );
+        }
+        assert!((auto_split_stage_with_gap(1.6, 0.1) - (1.6 + 0.1 + 0.5625)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_padded_split_leaves_a_gap_and_keeps_the_screen_shape() {
+        let split = LayoutSettings {
+            default_layout: CameraLayout::SplitScreen,
+            split_auto: true,
+            split_flip: false,
+            split_padded: true,
+            ..LayoutSettings::default()
+        };
+        let stage = StageShape {
+            aspect: 2.2625,
+            screen_aspect: 1.6,
+            split_gap: 0.1,
+            pane_radius: 0.05,
+        };
+        let layer = LayerSettings {
+            enabled: true,
+            ..LayerSettings::default()
+        };
+        let frame = split.frame_at_staged(0.0, layer, stage, 1.0, 0.0);
+        assert!(frame.screen.x.abs() < 1e-9);
+        assert!((frame.screen.width - 1.6 / 2.2625).abs() < 1e-9);
+        assert!((frame.screen.height - 1.0).abs() < 1e-9);
+        assert!((frame.camera.x - 1.7 / 2.2625).abs() < 1e-9);
+        assert!((frame.camera.width - 0.5625 / 2.2625).abs() < 1e-9);
+        let gap = frame.camera.x - (frame.screen.x + frame.screen.width);
+        assert!((gap - 0.1 / 2.2625).abs() < 1e-9);
+        assert!((frame.screen_radius - 0.05 / 0.5).abs() < 1e-9);
+        assert!((frame.camera_radius - 0.05 / (0.5625 / 2.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn padding_off_keeps_the_fullscreen_split() {
+        let split = LayoutSettings {
+            default_layout: CameraLayout::SplitScreen,
+            split_auto: true,
+            split_flip: false,
+            split_padded: false,
+            ..LayoutSettings::default()
+        };
+        let layer = LayerSettings {
+            enabled: true,
+            ..LayerSettings::default()
+        };
+        let padded = StageShape {
+            aspect: 2.2625,
+            screen_aspect: 1.6,
+            split_gap: 0.1,
+            pane_radius: 0.05,
+        };
+        let plain = StageShape {
+            aspect: 2.2625,
+            screen_aspect: 1.6,
+            split_gap: 0.0,
+            pane_radius: 0.0,
+        };
+        let frame = split.frame_at_staged(0.0, layer, padded, 1.0, 0.0);
+        assert_eq!(frame, split.frame_at_staged(0.0, layer, plain, 1.0, 0.0));
+        assert!((frame.screen.width - (1.0 - frame.camera.width)).abs() < 1e-9);
+        assert_eq!(frame.screen_radius, 0.0);
+        assert_eq!(frame.camera_radius, 0.0);
+    }
+
+    #[test]
+    fn a_padded_screen_gives_up_a_tenth_before_it_crops() {
+        let split = LayoutSettings {
+            default_layout: CameraLayout::SplitScreen,
+            split_auto: false,
+            split_ratio: 0.6,
+            split_padded: true,
+            ..LayoutSettings::default()
+        };
+        let stage = StageShape {
+            aspect: 16.0 / 9.0,
+            screen_aspect: 16.0 / 9.0,
+            split_gap: 0.05,
+            pane_radius: 0.0,
+        };
+        let layer = LayerSettings {
+            enabled: true,
+            ..LayerSettings::default()
+        };
+        let frame = split.frame_at_staged(0.0, layer, stage, 1.0, 0.0);
+        let zone = (16.0 / 9.0 - 0.05) * 0.6;
+        assert!((frame.screen.height - 0.9).abs() < 1e-9);
+        assert!((frame.screen.y - 0.05).abs() < 1e-9);
+        assert!((frame.screen.width - zone / (16.0 / 9.0)).abs() < 1e-9);
     }
 
     #[test]
@@ -5257,6 +5644,7 @@ mod tests {
             (20, 20),
             contained_screen(2.0, 1.0),
             Some(&background),
+            0.0,
         );
         assert_eq!(pixel(&stage, 40, 20, 10), [255, 0, 0, 255]);
         assert_eq!(pixel(&stage, 40, 2, 10), [0, 255, 0, 255]);
@@ -5270,7 +5658,30 @@ mod tests {
             (20, 20),
             contained_screen(2.0, 1.0),
             None,
+            0.0,
         );
         assert_eq!(pixel(&empty, 40, 2, 10), [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn a_rounded_pane_shows_the_background_in_its_corner() {
+        let screen = solid(20, 20, [255, 0, 0, 255]);
+        let background = solid(40, 20, [0, 255, 0, 255]);
+        let mut stage = vec![0u8; 40 * 20 * 4];
+        place_screen_into(
+            &mut stage,
+            (40, 20),
+            &screen,
+            (20, 20),
+            contained_screen(2.0, 1.0),
+            Some(&background),
+            1.0,
+        );
+        let corner = pixel(&stage, 40, 10, 0);
+        assert!(
+            corner[1] > corner[0],
+            "the rounded corner shows the background: {corner:?}"
+        );
+        assert_eq!(pixel(&stage, 40, 20, 10), [255, 0, 0, 255]);
     }
 }

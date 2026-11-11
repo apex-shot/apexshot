@@ -2495,10 +2495,20 @@ struct WebcamSplitContext {
     second_label: Label,
     auto: Switch,
     width: FilledSlider,
+    fill_full: ToggleButton,
+    fill_padded: ToggleButton,
 }
 
 impl WebcamSplitContext {
-    fn refresh(&self, ratio: f64, flip: bool, portrait: bool, auto: bool, auto_ratio: f64) {
+    fn refresh(
+        &self,
+        ratio: f64,
+        flip: bool,
+        portrait: bool,
+        auto: bool,
+        auto_ratio: f64,
+        padded: bool,
+    ) {
         let (first, second) = if portrait {
             ("Top", "Bottom")
         } else {
@@ -2515,6 +2525,11 @@ impl WebcamSplitContext {
         self.width.widget().set_sensitive(!auto);
         self.width
             .set_value(if auto { auto_ratio } else { ratio } * 100.0);
+        if padded {
+            self.fill_padded.set_active(true)
+        } else {
+            self.fill_full.set_active(true)
+        }
     }
 }
 
@@ -2525,9 +2540,11 @@ fn build_webcam_split(
     flip: bool,
     split_auto: bool,
     portrait: bool,
+    padded: bool,
     set_flip: Rc<dyn Fn(bool)>,
     set_ratio: Rc<dyn Fn(f64)>,
     set_auto: Rc<dyn Fn(bool)>,
+    set_padded: Rc<dyn Fn(bool)>,
 ) -> WebcamSplitContext {
     let root = GtkBox::new(Orientation::Vertical, (8.0 * scale).round() as i32);
     root.set_hexpand(true);
@@ -2573,6 +2590,36 @@ fn build_webcam_split(
         "The screen's share of the split, as a percentage.",
     )));
     root.append(&width.widget());
+    let fill = GtkBox::new(Orientation::Horizontal, 0);
+    fill.add_css_class("recording-editor-webcam-scope");
+    fill.set_hexpand(true);
+    fill.set_homogeneous(true);
+    let (fill_full, _) = webcam_scope_button(&t("Fullscreen"));
+    let (fill_padded, _) = webcam_scope_button(&t("Padded"));
+    fill_full.set_hexpand(true);
+    fill_padded.set_hexpand(true);
+    fill_padded.set_group(Some(&fill_full));
+    fill_full.set_tooltip_text(Some(&t("The split fills the frame edge to edge.")));
+    fill_padded.set_tooltip_text(Some(&t(
+        "Leave the Background padding between the screen and the camera, with rounded corners.",
+    )));
+    fill.append(&fill_full);
+    fill.append(&fill_padded);
+    root.append(&webcam_kicker(&t("FILL")));
+    root.append(&fill);
+    let set_full = set_padded.clone();
+    fill_full.connect_clicked(move |button| {
+        if !button.is_active() {
+            button.set_active(true);
+        }
+        set_full(false);
+    });
+    fill_padded.connect_clicked(move |button| {
+        if !button.is_active() {
+            button.set_active(true);
+        }
+        set_padded(true);
+    });
     let set_first = set_flip.clone();
     first.connect_clicked(move |button| {
         if !button.is_active() {
@@ -2594,8 +2641,10 @@ fn build_webcam_split(
         second_label,
         auto,
         width,
+        fill_full,
+        fill_padded,
     };
-    context.refresh(ratio, flip, portrait, split_auto, ratio);
+    context.refresh(ratio, flip, portrait, split_auto, ratio, padded);
     context
 }
 
@@ -2875,6 +2924,7 @@ struct WebcamContextActions {
     set_radius: Rc<dyn Fn(f64)>,
     set_zoomed_scale: Rc<dyn Fn(f64)>,
     set_split_flip: Rc<dyn Fn(bool)>,
+    set_split_padded: Rc<dyn Fn(bool)>,
     set_split_ratio: Rc<dyn Fn(f64)>,
     set_split_auto: Rc<dyn Fn(bool)>,
     set_cutout_position: Rc<dyn Fn(f64)>,
@@ -2898,6 +2948,7 @@ impl WebcamContextActions {
             set_radius: Rc::new(|_| {}),
             set_zoomed_scale: Rc::new(|_| {}),
             set_split_flip: Rc::new(|_| {}),
+            set_split_padded: Rc::new(|_| {}),
             set_split_ratio: Rc::new(|_| {}),
             set_split_auto: Rc::new(|_| {}),
             set_cutout_position: Rc::new(|_| {}),
@@ -2953,6 +3004,7 @@ impl WebcamContext {
                     webcam_frame_aspect(frame_aspect),
                     webcam_frame_aspect(frame_aspect),
                 ),
+                layouts.split_padded,
             );
         }
         if controls.cutout {
@@ -2990,9 +3042,11 @@ fn build_webcam_context(
         layouts.split_flip,
         layouts.split_auto,
         webcam_frame_aspect(frame_aspect) < 1.0,
+        layouts.split_padded,
         actions.set_split_flip.clone(),
         actions.set_split_ratio.clone(),
         actions.set_split_auto.clone(),
+        actions.set_split_padded.clone(),
     );
     let cutout = build_webcam_cutout(
         scale,
@@ -3188,6 +3242,15 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
             Rc::new(move |flip| {
                 if !syncing.get() {
                     timeline.update_webcam_layouts(|layouts| layouts.split_flip = flip);
+                }
+            })
+        },
+        set_split_padded: {
+            let timeline = timeline.clone();
+            let syncing = syncing.clone();
+            Rc::new(move |padded| {
+                if !syncing.get() {
+                    timeline.update_webcam_layouts(|layouts| layouts.split_padded = padded);
                 }
             })
         },

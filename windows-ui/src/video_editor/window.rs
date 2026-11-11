@@ -490,15 +490,46 @@ fn canvas_dimensions(aspect: FrameAspect, source: (u32, u32)) -> (u32, u32) {
 /// The stage the layouts are placed on: the source, widened to the studied
 /// auto stage when the frame follows the recording and the default camera
 /// layout is the split.
-fn stage_source(aspect: FrameAspect, source: (u32, u32), widen: bool) -> (u32, u32) {
+fn stage_source(aspect: FrameAspect, source: (u32, u32), widen: bool, gap: f64) -> (u32, u32) {
     if !widen || aspect != FrameAspect::Original || source.0 < source.1 || source.1 == 0 {
         return source;
     }
     let height = source.1;
-    let ratio =
-        super::webcam::auto_split_stage_aspect(f64::from(source.0) / f64::from(height), 0.0);
+    let screen = f64::from(source.0) / f64::from(height);
+    // An unpadded stage is the studied resolver's zero-gap case.
+    let ratio = if gap > 0.0 {
+        super::webcam::auto_split_stage_with_gap(screen, gap)
+    } else {
+        super::webcam::auto_split_stage_aspect(screen, 0.0)
+    };
     let width = even_dimension((f64::from(height) * ratio).round() as u32);
     (width.max(source.0), height)
+}
+
+/// The stage and the padded split's gap (in stage heights). The gap is the
+/// Background padding, the studied way the padded split spaces its panes;
+/// it widens an auto stage, which in turn sets the padding, so the pair is
+/// settled in two passes.
+fn split_stage(
+    aspect: FrameAspect,
+    screen: (u32, u32),
+    widen: bool,
+    padded: bool,
+    padding: f64,
+    has_fill: bool,
+) -> ((u32, u32), f64) {
+    let mut stage = stage_source(aspect, screen, widen, 0.0);
+    let mut gap = 0.0;
+    if padded {
+        for _ in 0..2 {
+            let canvas = canvas_dimensions(aspect, stage);
+            let pad = padding_px(canvas, padding, has_fill);
+            let video = video_rect_dimensions(aspect, stage, padding, has_fill);
+            gap = pad / f64::from(video.1.max(1));
+            stage = stage_source(aspect, screen, widen, gap);
+        }
+    }
+    (stage, gap)
 }
 
 /// Even dimensions keep the encoder's yuv420p happy.
@@ -735,6 +766,7 @@ struct Stage {
     background_selection: Rc<RefCell<Option<String>>>,
     source_size: Rc<Cell<Option<(u32, u32)>>>,
     widened: Cell<bool>,
+    padded: Cell<bool>,
     clip: super::rounded_clip::RoundedClip,
     clip_margins: Rc<RefCell<(i32, i32, i32, i32)>>,
     camera_view: Rc<Cell<Option<super::zoom::ViewRect>>>,
@@ -776,8 +808,17 @@ impl Stage {
         };
         let widen = self.webcam.widens_stage();
         self.widened.set(widen);
+        let padded = self.webcam.layouts().split_padded;
+        self.padded.set(padded);
         let screen = source;
-        let source = stage_source(self.aspect.get(), screen, widen);
+        let (source, gap) = split_stage(
+            self.aspect.get(),
+            screen,
+            widen,
+            padded,
+            self.background.padding(),
+            self.background.has_fill(),
+        );
         self.webcam.set_stage_aspect(if source == screen {
             0.0
         } else {
@@ -803,6 +844,12 @@ impl Stage {
         )));
         let (radius, measured_width) =
             card_radius(aspect, source, padding, has_fill, self.background.radius());
+        let pane_radius = if padded {
+            radius / f64::from(video_h.max(1))
+        } else {
+            0.0
+        };
+        self.webcam.set_split_padding(gap, pane_radius);
         self.clip.set_radius(radius, measured_width);
     }
 
@@ -810,7 +857,10 @@ impl Stage {
     /// The split clips it to its share and cover-crops the source; every other
     /// layout fills the video rect, so the card keeps its old geometry.
     fn apply_webcam_layout(&self) {
-        if self.source_size.get().is_some() && self.webcam.widens_stage() != self.widened.get() {
+        if self.source_size.get().is_some()
+            && (self.webcam.widens_stage() != self.widened.get()
+                || self.webcam.layouts().split_padded != self.padded.get())
+        {
             self.apply_geometry();
         }
         let screen = self
@@ -1763,6 +1813,7 @@ fn build_stage(
         background_selection: Rc::new(RefCell::new(None)),
         source_size,
         widened: Cell::new(false),
+        padded: Cell::new(false),
         clip,
         clip_margins: Rc::new(RefCell::new((i32::MIN, 0, 0, 0))),
         camera_view,
@@ -1930,7 +1981,15 @@ fn choose_recording(window: &ApplicationWindow, update_document: UpdateDocument)
 /// fill at the canvas size, the centred video rect, and the card's corner
 /// radius. None when the video is the canvas and nothing is rounded.
 fn export_canvas(stage: &Stage, source_size: (u32, u32)) -> Option<super::export::CanvasLayout> {
-    let source_size = stage_source(stage.aspect.get(), source_size, stage.webcam.widens_stage());
+    let source_size = split_stage(
+        stage.aspect.get(),
+        source_size,
+        stage.webcam.widens_stage(),
+        stage.webcam.layouts().split_padded,
+        stage.background.padding(),
+        stage.background.has_fill(),
+    )
+    .0;
     let aspect = stage.aspect.get();
     let padding = stage.background.padding();
     let has_fill = stage.background.has_fill();
@@ -2012,8 +2071,15 @@ fn export_model(
         sidecar,
         webcam: stage.webcam.export(),
         stage: {
-            let widened =
-                stage_source(stage.aspect.get(), source_size, stage.webcam.widens_stage());
+            let widened = split_stage(
+                stage.aspect.get(),
+                source_size,
+                stage.webcam.widens_stage(),
+                stage.webcam.layouts().split_padded,
+                stage.background.padding(),
+                stage.background.has_fill(),
+            )
+            .0;
             (widened != source_size).then_some(widened)
         },
         canvas: export_canvas(stage, source_size),
@@ -2444,27 +2510,45 @@ fn install_css() {
 mod tests {
     use super::{
         canvas_dimensions, card_radius, estimated_size_bytes, format_size, history_key,
-        output_dimensions, padding_px, screen_transform, stage_source, video_rect_dimensions,
-        FrameAspect, HistoryKey, QualityTier,
+        output_dimensions, padding_px, screen_transform, split_stage, stage_source,
+        video_rect_dimensions, FrameAspect, HistoryKey, QualityTier,
     };
 
     #[test]
     fn the_auto_stage_widens_for_the_split() {
         assert_eq!(
-            stage_source(FrameAspect::Original, (320, 200), true),
+            stage_source(FrameAspect::Original, (320, 200), true, 0.0),
             (432, 200)
         );
         assert_eq!(
-            stage_source(FrameAspect::Original, (320, 200), false),
+            stage_source(FrameAspect::Original, (320, 200), false, 0.0),
             (320, 200)
         );
         assert_eq!(
-            stage_source(FrameAspect::Wide, (320, 200), true),
+            stage_source(FrameAspect::Wide, (320, 200), true, 0.0),
             (320, 200)
         );
         assert_eq!(
-            stage_source(FrameAspect::Original, (200, 320), true),
+            stage_source(FrameAspect::Original, (200, 320), true, 0.0),
             (200, 320)
+        );
+    }
+
+    #[test]
+    fn the_padded_split_settles_its_stage_and_gap() {
+        assert_eq!(
+            split_stage(FrameAspect::Original, (320, 200), true, false, 0.5, true),
+            ((432, 200), 0.0)
+        );
+        assert_eq!(
+            split_stage(FrameAspect::Original, (320, 200), true, true, 0.5, false),
+            ((432, 200), 0.0)
+        );
+        let (stage, gap) = split_stage(FrameAspect::Original, (320, 200), true, true, 0.5, true);
+        assert!(gap > 0.0, "the padded split has no gap: {gap}");
+        assert!(
+            stage.0 > 432,
+            "the padded split did not widen the stage: {stage:?}"
         );
     }
 
