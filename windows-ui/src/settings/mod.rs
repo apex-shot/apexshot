@@ -711,6 +711,9 @@ fn build_settings_window(app: &Application) {
         shortcut_save_last_capture: shortcuts.save_last_capture_btn.clone(),
         shortcut_record_screen: shortcuts.record_screen_btn.clone(),
         shortcut_recording_stop_save: shortcuts.recording_stop_save_btn.clone(),
+        shortcut_recording_pause: shortcuts.recording_pause_btn.clone(),
+        shortcut_recording_restart: shortcuts.recording_restart_btn.clone(),
+        shortcut_recording_marker: shortcuts.recording_marker_btn.clone(),
         adv_retina_suffix: advanced.retina_suffix_check.clone(),
         adv_clipboard_mode: screenshots.clipboard_mode_input.clone(),
         adv_ocr_language: advanced.ocr_lang_input.clone(),
@@ -964,6 +967,9 @@ fn install_save_dirty_tracking(inputs: &Rc<SaveInputs>, mark_dirty: Rc<dyn Fn()>
     wire_shortcut_btn(&inputs.shortcut_save_last_capture);
     wire_shortcut_btn(&inputs.shortcut_record_screen);
     wire_shortcut_btn(&inputs.shortcut_recording_stop_save);
+    wire_shortcut_btn(&inputs.shortcut_recording_pause);
+    wire_shortcut_btn(&inputs.shortcut_recording_restart);
+    wire_shortcut_btn(&inputs.shortcut_recording_marker);
     wire_check(&inputs.adv_retina_suffix);
     wire_combo(&inputs.adv_clipboard_mode);
     wire_combo(&inputs.adv_ocr_language);

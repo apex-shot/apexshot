@@ -152,6 +152,12 @@ pub struct AppConfig {
     pub shortcut_open_recording_ui: String,
     pub shortcut_record_screen: String,
     pub shortcut_recording_stop_save: String,
+    /// Windows only: pause or resume the running recording.
+    pub shortcut_recording_pause: String,
+    /// Windows only: restart the running recording, after a confirmation.
+    pub shortcut_recording_restart: String,
+    /// Windows only: mark the current moment of the running recording.
+    pub shortcut_recording_marker: String,
     // Cloud settings
     pub cloud_screenshot_quality: String,
     pub cloud_copy_to_clipboard: String,
@@ -317,6 +323,9 @@ impl Default for AppConfig {
             shortcut_open_recording_ui: String::new(),
             shortcut_record_screen: String::new(),
             shortcut_recording_stop_save: "Ctrl+Alt+Shift+S".to_string(),
+            shortcut_recording_pause: "Ctrl+Alt+Shift+P".to_string(),
+            shortcut_recording_restart: "Ctrl+Alt+Shift+R".to_string(),
+            shortcut_recording_marker: "Ctrl+Alt+Shift+K".to_string(),
             cloud_screenshot_quality: "Optimized for sharing".to_string(),
             cloud_copy_to_clipboard: "ApexShot Cloud link".to_string(),
             cloud_show_recently_uploaded: true,

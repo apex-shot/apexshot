@@ -73,6 +73,9 @@ pub struct SaveInputs {
     pub shortcut_save_last_capture: Button,
     pub shortcut_record_screen: Button,
     pub shortcut_recording_stop_save: Button,
+    pub shortcut_recording_pause: Button,
+    pub shortcut_recording_restart: Button,
+    pub shortcut_recording_marker: Button,
     pub adv_retina_suffix: CheckButton,
     pub adv_clipboard_mode: SettingsSelect,
     pub adv_ocr_language: SettingsSelect,
@@ -298,6 +301,9 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<SaveOutcome> {
     config.shortcut_open_recording_ui.clear();
     config.shortcut_record_screen = button_label_value(&inputs.shortcut_record_screen);
     config.shortcut_recording_stop_save = button_label_value(&inputs.shortcut_recording_stop_save);
+    config.shortcut_recording_pause = button_label_value(&inputs.shortcut_recording_pause);
+    config.shortcut_recording_restart = button_label_value(&inputs.shortcut_recording_restart);
+    config.shortcut_recording_marker = button_label_value(&inputs.shortcut_recording_marker);
 
     config.adv_retina_suffix = inputs.adv_retina_suffix.is_active();
     config.adv_clipboard_mode = combo_value(&inputs.adv_clipboard_mode, "File & Image (default)");
@@ -428,6 +434,9 @@ fn write_shell_settings_to(path: &Path, config: &AppConfig) -> anyhow::Result<()
             "save_last_capture": config.shortcut_save_last_capture,
             "record_screen": config.shortcut_record_screen,
             "recording_stop_save": config.shortcut_recording_stop_save,
+            "recording_pause": config.shortcut_recording_pause,
+            "recording_restart": config.shortcut_recording_restart,
+            "recording_marker": config.shortcut_recording_marker,
         },
         "screenshots": {
             "export_location": config.screenshot_export_location,
@@ -725,6 +734,9 @@ mod tests {
             value["shortcuts"]["recording_stop_save"],
             "Ctrl+Alt+Shift+S"
         );
+        assert_eq!(value["shortcuts"]["recording_pause"], "Ctrl+Alt+Shift+P");
+        assert_eq!(value["shortcuts"]["recording_restart"], "Ctrl+Alt+Shift+R");
+        assert_eq!(value["shortcuts"]["recording_marker"], "Ctrl+Alt+Shift+K");
 
         write_shell_settings_to(&path, &AppConfig::default()).unwrap();
         let updated: serde_json::Value =
