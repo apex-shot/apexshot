@@ -1701,7 +1701,7 @@ impl PointerSidecar {
             if sample.t > t {
                 break;
             }
-            let moved = previous.map_or(true, |previous| {
+            let moved = previous.is_none_or(|previous| {
                 (sample.x - previous.x).hypot(sample.y - previous.y) > 0.5
             });
             if moved {
@@ -1715,7 +1715,7 @@ impl PointerSidecar {
             .map(|click| click.t)
             .chain(self.presses.iter().flat_map(|press| [press.down, press.up]))
         {
-            if time <= t && last_event.map_or(true, |last| time > last) {
+            if time <= t && last_event.is_none_or(|last| time > last) {
                 last_event = Some(time);
             }
         }
