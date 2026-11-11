@@ -1727,29 +1727,37 @@ fn draw_cursor_nv12(
     if x1 <= x0 || y1 <= y0 {
         return;
     }
-    let (bw, bh) = ((x1 - x0) as usize, (y1 - y0) as usize);
-    let (x0, y0) = (x0 as usize, y0 as usize);
+    // Chroma is upsampled from neighbouring samples, so the box is converted
+    // with a margin of one chroma sample and only the box itself is written
+    // back: its edge pixels then see their real neighbours and leave no seam.
+    const MARGIN: u32 = 2;
+    let ox0 = x0.saturating_sub(MARGIN) as usize;
+    let oy0 = y0.saturating_sub(MARGIN) as usize;
+    let ox1 = (x1 + MARGIN).min(size.0 & !1) as usize;
+    let oy1 = (y1 + MARGIN).min(size.1 & !1) as usize;
+    let (x0, y0, x1, y1) = (x0 as usize, y0 as usize, x1 as usize, y1 as usize);
+    let (ow, oh) = (ox1 - ox0, oy1 - oy0);
     let (fw, fh) = (size.0 as usize, size.1 as usize);
     scratch.frame.resize(fw * fh * 4, 0);
-    scratch.box_nv12.resize(bw * bh * 3 / 2, 0);
-    scratch.box_rgba.resize(bw * bh * 4, 0);
+    scratch.box_nv12.resize(ow * oh * 3 / 2, 0);
+    scratch.box_rgba.resize(ow * oh * 4, 0);
 
-    let luma = bw * bh;
-    for row in 0..bh {
-        scratch.box_nv12[row * bw..(row + 1) * bw]
-            .copy_from_slice(&nv12[(y0 + row) * fw + x0..(y0 + row) * fw + x0 + bw]);
+    let luma = ow * oh;
+    for row in 0..oh {
+        let start = (oy0 + row) * fw + ox0;
+        scratch.box_nv12[row * ow..(row + 1) * ow].copy_from_slice(&nv12[start..start + ow]);
     }
-    for row in 0..bh / 2 {
-        let start = fw * fh + (y0 / 2 + row) * fw + x0;
-        scratch.box_nv12[luma + row * bw..luma + (row + 1) * bw]
-            .copy_from_slice(&nv12[start..start + bw]);
+    for row in 0..oh / 2 {
+        let start = fw * fh + (oy0 / 2 + row) * fw + ox0;
+        scratch.box_nv12[luma + row * ow..luma + (row + 1) * ow]
+            .copy_from_slice(&nv12[start..start + ow]);
     }
 
-    converter.to_rgba_into(&scratch.box_nv12, (bw as u32, bh as u32), &mut scratch.box_rgba);
-    for row in 0..bh {
-        let start = ((y0 + row) * fw + x0) * 4;
-        scratch.frame[start..start + bw * 4]
-            .copy_from_slice(&scratch.box_rgba[row * bw * 4..(row + 1) * bw * 4]);
+    converter.to_rgba_into(&scratch.box_nv12, (ow as u32, oh as u32), &mut scratch.box_rgba);
+    for row in 0..oh {
+        let start = ((oy0 + row) * fw + ox0) * 4;
+        scratch.frame[start..start + ow * 4]
+            .copy_from_slice(&scratch.box_rgba[row * ow * 4..(row + 1) * ow * 4]);
     }
 
     draw_cursor(
@@ -1764,20 +1772,21 @@ fn draw_cursor_nv12(
         layer,
     );
 
-    for row in 0..bh {
-        let start = ((y0 + row) * fw + x0) * 4;
-        scratch.box_rgba[row * bw * 4..(row + 1) * bw * 4]
-            .copy_from_slice(&scratch.frame[start..start + bw * 4]);
+    for row in 0..oh {
+        let start = ((oy0 + row) * fw + ox0) * 4;
+        scratch.box_rgba[row * ow * 4..(row + 1) * ow * 4]
+            .copy_from_slice(&scratch.frame[start..start + ow * 4]);
     }
-    converter.convert_into(&scratch.box_rgba, (bw as u32, bh as u32), &mut scratch.box_nv12);
-    for row in 0..bh {
-        nv12[(y0 + row) * fw + x0..(y0 + row) * fw + x0 + bw]
-            .copy_from_slice(&scratch.box_nv12[row * bw..(row + 1) * bw]);
+    converter.convert_into(&scratch.box_rgba, (ow as u32, oh as u32), &mut scratch.box_nv12);
+    let width = x1 - x0;
+    for y in y0..y1 {
+        let source = (y - oy0) * ow + (x0 - ox0);
+        nv12[y * fw + x0..y * fw + x1].copy_from_slice(&scratch.box_nv12[source..source + width]);
     }
-    for row in 0..bh / 2 {
-        let start = fw * fh + (y0 / 2 + row) * fw + x0;
-        nv12[start..start + bw]
-            .copy_from_slice(&scratch.box_nv12[luma + row * bw..luma + (row + 1) * bw]);
+    for row in y0 / 2..y1 / 2 {
+        let source = luma + (row - oy0 / 2) * ow + (x0 - ox0);
+        let start = fw * fh + row * fw + x0;
+        nv12[start..start + width].copy_from_slice(&scratch.box_nv12[source..source + width]);
     }
 }
 
@@ -2678,19 +2687,26 @@ mod tests {
 
     #[test]
     fn the_nv12_cursor_overlay_matches_the_rgba_draw() {
-        use super::{
-            cursor_box, draw_cursor, draw_cursor_nv12, CursorScratch, Nv12Converter, YuvSpace,
-        };
-        use crate::recording::editor::model::{ClickEffect, CursorSettings};
+        use super::{cursor_box, draw_cursor, draw_cursor_nv12, CursorScratch};
+        use crate::recording::editor::model::ClickEffect;
         use crate::recording::editor::sidecar::{
             CaptureRegion, ClickSample, CursorKind, PointerSample, PointerSidecar,
         };
-        let size = (320, 180);
-        let mut frame = vec![0u8; size.0 as usize * size.1 as usize * 4];
+        use crate::video_editor::pixels::{Nv12Converter, YuvSpace};
+        let size = (320u32, 180u32);
+        let (width, height) = (size.0 as usize, size.1 as usize);
+        // Smooth footage, so a whole-frame round trip is near exact and the
+        // RGBA path is a fair reference.
+        let mut frame = vec![0u8; width * height * 4];
         for (index, pixel) in frame.as_chunks_mut::<4>().0.iter_mut().enumerate() {
-            let x = (index % size.0 as usize) as u8;
-            let y = (index / size.0 as usize) as u8;
-            pixel.copy_from_slice(&[x, y.wrapping_mul(3), 200 - x / 2, 255]);
+            let x = (index % width) as f64 / width as f64;
+            let y = (index / width) as f64 / height as f64;
+            pixel.copy_from_slice(&[
+                (40.0 + 160.0 * x) as u8,
+                (60.0 + 120.0 * y) as u8,
+                (180.0 - 100.0 * x) as u8,
+                255,
+            ]);
         }
         let mut sidecar = PointerSidecar::new(
             0,
@@ -2719,34 +2735,23 @@ mod tests {
         }];
         let view = (100.0, 40.0, 200.0, 120.0);
         let converter = Nv12Converter::new(YuvSpace::from_probe(None, None));
-        let mut base_nv12 = vec![0u8; size.0 as usize * size.1 as usize * 3 / 2];
-        converter.convert_into(&frame, size, &mut base_nv12);
-        {
-            let mut rt_rgba = vec![0u8; size.0 as usize * size.1 as usize * 4];
-            converter.to_rgba_into(&base_nv12, size, &mut rt_rgba);
-            let mut rt = vec![0u8; size.0 as usize * size.1 as usize * 3 / 2];
-            converter.convert_into(&rt_rgba, size, &mut rt);
-            let max = rt
-                .iter()
-                .zip(base_nv12.iter())
-                .map(|(left, right)| left.abs_diff(*right))
-                .max()
-                .unwrap_or(0);
-            eprintln!("DEBUG plain round trip max delta {max}");
-        }
+        let mut base = vec![0u8; width * height * 3 / 2];
+        converter.convert_into(&frame, size, &mut base);
+        let layer = || {
+            gtk4::cairo::ImageSurface::create(
+                gtk4::cairo::Format::ARgb32,
+                size.0 as i32,
+                size.1 as i32,
+            )
+            .unwrap()
+        };
         for effect in [ClickEffect::Circle, ClickEffect::None] {
             let settings = CursorSettings {
                 click_effect: effect,
                 ..CursorSettings::default()
             };
-            let mut rgba = vec![0u8; size.0 as usize * size.1 as usize * 4];
-            converter.to_rgba_into(&base_nv12, size, &mut rgba);
-            let mut layer = gtk4::cairo::ImageSurface::create(
-                gtk4::cairo::Format::ARgb32,
-                size.0 as i32,
-                size.1 as i32,
-            )
-            .unwrap();
+            let mut rgba = vec![0u8; width * height * 4];
+            converter.to_rgba_into(&base, size, &mut rgba);
             draw_cursor(
                 &mut rgba,
                 size,
@@ -2756,17 +2761,11 @@ mod tests {
                 settings,
                 0.21,
                 size,
-                &mut layer,
+                &mut layer(),
             );
-            let mut expected = vec![0u8; size.0 as usize * size.1 as usize * 3 / 2];
+            let mut expected = vec![0u8; base.len()];
             converter.convert_into(&rgba, size, &mut expected);
-            let mut fast = base_nv12.clone();
-            let mut layer2 = gtk4::cairo::ImageSurface::create(
-                gtk4::cairo::Format::ARgb32,
-                size.0 as i32,
-                size.1 as i32,
-            )
-            .unwrap();
+            let mut fast = base.clone();
             draw_cursor_nv12(
                 &mut fast,
                 size,
@@ -2776,63 +2775,48 @@ mod tests {
                 settings,
                 0.21,
                 size,
-                &mut layer2,
+                &mut layer(),
                 &converter,
                 &mut CursorScratch::default(),
             );
-            assert_ne!(fast, base_nv12, "{effect:?} drew nothing");
-            let max_delta = fast
-                .iter()
-                .zip(expected.iter())
-                .map(|(left, right)| left.abs_diff(*right))
-                .max()
-                .unwrap_or(0);
-            if let Some((index, delta)) = fast
-                .iter()
-                .zip(expected.iter())
-                .map(|(left, right)| left.abs_diff(*right))
-                .enumerate()
-                .max_by_key(|(_, delta)| *delta)
-            {
-                let luma = size.0 as usize * size.1 as usize;
-                let plane = if index < luma { "luma" } else { "chroma" };
-                let (row, col) = if index < luma {
-                    (index / size.0 as usize, index % size.0 as usize)
+            assert_ne!(fast, base, "{effect:?} drew nothing");
+            let (x, y, w, h) = cursor_box(size, view, &sidecar, settings, 0.21, size)
+                .expect("the cursor is on screen");
+            let (x0, y0) = ((x & !1) as usize, (y & !1) as usize);
+            let x1 = (((x + w + 1) & !1).min(size.0 & !1)) as usize;
+            let y1 = (((y + h + 1) & !1).min(size.1 & !1)) as usize;
+            let inside = |index: usize| {
+                let (row, column) = if index < width * height {
+                    (index / width, index % width)
                 } else {
-                    let offset = index - luma;
-                    (offset / size.0 as usize, offset % size.0 as usize)
+                    let offset = index - width * height;
+                    (offset / width * 2, offset % width)
                 };
-                let (bx, by, bw, bh) =
-                    cursor_box(size, view, &sidecar, settings, 0.21, size).unwrap();
-                eprintln!(
-                    "DEBUG {effect:?}: max delta {delta} at {plane} row {row} col {col}; box {bx},{by} {bw}x{bh}"
-                );
+                row >= y0 && row < y1 && column >= x0 && column < x1
+            };
+            let mut max_delta = 0u8;
+            let mut total = 0.0;
+            let mut count = 0usize;
+            for (index, (&got, (&want, &before))) in
+                fast.iter().zip(expected.iter().zip(base.iter())).enumerate()
+            {
+                if inside(index) {
+                    let delta = got.abs_diff(want);
+                    max_delta = max_delta.max(delta);
+                    total += f64::from(delta);
+                    count += 1;
+                } else {
+                    assert_eq!(got, before, "{effect:?} changed a byte outside the box at {index}");
+                }
             }
             assert!(
                 max_delta <= 3,
                 "{effect:?} NV12 overlay differs from the RGBA draw by {max_delta}"
             );
-            let mean_delta = fast
-                .iter()
-                .zip(expected.iter())
-                .map(|(left, right)| f64::from(left.abs_diff(*right)))
-                .sum::<f64>()
-                / fast.len() as f64;
             assert!(
-                mean_delta <= 1.0,
-                "{effect:?} NV12 overlay differs from the RGBA draw by {mean_delta} on average"
+                total / count.max(1) as f64 <= 1.0,
+                "{effect:?} NV12 overlay drifts from the RGBA draw"
             );
-            let (_, box_y, _, _) =
-                cursor_box(size, view, &sidecar, settings, 0.21, size).unwrap();
-            let top = (box_y & !1) as usize;
-            if top > 0 {
-                let end = top * size.0 as usize;
-                assert_eq!(
-                    fast[..end],
-                    base_nv12[..end],
-                    "{effect:?} touched luma rows above the cursor box"
-                );
-            }
         }
     }
 
