@@ -1966,7 +1966,11 @@ fn draw_cursor_nv12(
             .copy_from_slice(&nv12[start..start + ow]);
     }
 
-    converter.to_rgba_into(&scratch.box_nv12, (ow as u32, oh as u32), &mut scratch.box_rgba);
+    converter.to_rgba_into(
+        &scratch.box_nv12,
+        (ow as u32, oh as u32),
+        &mut scratch.box_rgba,
+    );
     for row in 0..oh {
         let start = ((oy0 + row) * fw + ox0) * 4;
         scratch.frame[start..start + ow * 4]
@@ -1990,7 +1994,11 @@ fn draw_cursor_nv12(
         scratch.box_rgba[row * ow * 4..(row + 1) * ow * 4]
             .copy_from_slice(&scratch.frame[start..start + ow * 4]);
     }
-    converter.convert_into(&scratch.box_rgba, (ow as u32, oh as u32), &mut scratch.box_nv12);
+    converter.convert_into(
+        &scratch.box_rgba,
+        (ow as u32, oh as u32),
+        &mut scratch.box_nv12,
+    );
     let width = x1 - x0;
     for y in y0..y1 {
         let source = (y - oy0) * ow + (x0 - ox0);
@@ -3232,8 +3240,10 @@ mod tests {
             let mut max_delta = 0u8;
             let mut total = 0.0;
             let mut count = 0usize;
-            for (index, (&got, (&want, &before))) in
-                fast.iter().zip(expected.iter().zip(base.iter())).enumerate()
+            for (index, (&got, (&want, &before))) in fast
+                .iter()
+                .zip(expected.iter().zip(base.iter()))
+                .enumerate()
             {
                 if inside(index) {
                     let delta = got.abs_diff(want);
@@ -3241,7 +3251,10 @@ mod tests {
                     total += f64::from(delta);
                     count += 1;
                 } else {
-                    assert_eq!(got, before, "{effect:?} changed a byte outside the box at {index}");
+                    assert_eq!(
+                        got, before,
+                        "{effect:?} changed a byte outside the box at {index}"
+                    );
                 }
             }
             assert!(
