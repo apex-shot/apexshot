@@ -850,6 +850,8 @@ public:
     /// Set while recover() runs: the pointer sidecar comes from the work
     /// directory's copy instead of the tracker.
     QString recoveredSidecarPath;
+    /// Moments marked during this recording, in media milliseconds.
+    QVector<qint64> markers;
 };
 
 qint64 RecordingSession::Private::elapsedMs() const
@@ -2096,6 +2098,7 @@ void RecordingSession::Private::writeManifest(const QString& videoPath)
     }
     manifest.keys = request.captureKeystrokes;
     manifest.sessions = manifestSessions;
+    manifest.markers = markers;
 
     QString error;
     if (!writeRecordingManifest(videoPath, manifest, &error))
@@ -2167,6 +2170,13 @@ QJsonObject RecordingSession::Private::recoveryState() const
          systemAudioPath.isEmpty() ? QString() : QFileInfo(systemAudioPath).fileName()},
         {QStringLiteral("systemAudioOffsetMs"), systemAudioOffsetMs},
         {QStringLiteral("sessions"), sessions},
+        {QStringLiteral("markers"),
+         [this] {
+             QJsonArray array;
+             for (const qint64 marker : markers)
+                 array.append(marker);
+             return array;
+         }()},
         {QStringLiteral("window"),
          QJsonObject{{QStringLiteral("title"), manifestWindow.title},
                      {QStringLiteral("app"), manifestWindow.app},
@@ -2582,6 +2592,7 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
 
     d->recordingStartedAtUnixMs = QDateTime::currentMSecsSinceEpoch();
     d->manifestSessions.clear();
+    d->markers.clear();
     d->manifestSessionOpen = false;
     d->firstScreenStartUnixMs = 0;
     d->cameraProcessDelayMs = -1;
@@ -2960,6 +2971,9 @@ bool RecordingSession::recover(const QString& workDir, QString& error)
         }
         d->manifestSessions.append(session);
     }
+    d->markers.clear();
+    for (const QJsonValue& value : state.value(QStringLiteral("markers")).toArray())
+        d->markers.append(int64From(value));
     d->manifestSessionOpen = false;
     const QJsonObject window = state.value(QStringLiteral("window")).toObject();
     d->manifestWindow.title = window.value(QStringLiteral("title")).toString();
@@ -3006,6 +3020,18 @@ bool RecordingSession::recover(const QString& workDir, QString& error)
     emit stateChanged();
     QTimer::singleShot(0, this, [d = d] { d->finalize(); });
     return true;
+}
+
+void RecordingSession::addMarker()
+{
+    if (d->state != Private::State::Recording && d->state != Private::State::Paused
+        && d->state != Private::State::Pausing)
+        return;
+    const qint64 at = d->elapsedMs();
+    d->markers.append(at);
+    recordingLog(QStringLiteral("marker at %1 ms").arg(at));
+    d->flushRecoveryState();
+    emit markerAdded(at);
 }
 
 void RecordingSession::abandonForTesting()
