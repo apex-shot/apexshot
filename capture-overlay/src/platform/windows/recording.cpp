@@ -554,6 +554,44 @@ QString recoveredOutputPath(const QString& path)
     return path;
 }
 
+/// A job every capture process joins. Windows closes the job's last handle
+/// when this process exits for any reason, crash included, and the
+/// kill-on-close limit then ends every process in it, so no ffmpeg keeps
+/// recording the screen after the recorder that owned it is gone.
+HANDLE recorderJob()
+{
+    static HANDLE job = [] {
+        HANDLE handle = CreateJobObjectW(nullptr, nullptr);
+        if (handle) {
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            if (!SetInformationJobObject(handle, JobObjectExtendedLimitInformation, &limits,
+                                         sizeof(limits))) {
+                CloseHandle(handle);
+                handle = nullptr;
+            }
+        }
+        return handle;
+    }();
+    return job;
+}
+
+/// Put a started capture process in the recorder's job.
+void bindToRecorderLifetime(QProcess* process)
+{
+    HANDLE job = recorderJob();
+    if (!job || !process || process->processId() <= 0)
+        return;
+    HANDLE child = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, FALSE,
+                               static_cast<DWORD>(process->processId()));
+    if (!child)
+        return;
+    if (!AssignProcessToJobObject(job, child))
+        recordingLog(QStringLiteral("capture: could not tie ffmpeg %1 to the recorder")
+                         .arg(process->processId()));
+    CloseHandle(child);
+}
+
 QString lowDiskMessage(qint64 freeBytes)
 {
     return QStringLiteral("Recording stopped because the disk is almost full. ApexShot keeps "
@@ -633,9 +671,10 @@ public:
             // disk long before the encoder runs out of room.
             if (++diskCheckTicks % 10 == 0)
                 checkDiskSpace();
-            // Every five seconds the work directory gets a fresh state file
-            // and pointer sidecar for crash recovery.
-            if (diskCheckTicks % 25 == 0 && state == State::Recording)
+            // Every two seconds the work directory gets a fresh state file
+            // and pointer sidecar, so a crash loses at most that much cursor
+            // data, about what it loses of the video's last fragment.
+            if (diskCheckTicks % 10 == 0 && state == State::Recording)
                 flushRecoveryState();
         });
     }
@@ -1081,6 +1120,8 @@ bool RecordingSession::Private::startSegment(QString& error)
         return false;
     }
 
+    bindToRecorderLifetime(process);
+
     if (windowCapture && !windowCapture->start(&error)) {
         // The pipe never delivered frames. Retry this segment through the
         // gdigrab fallback rather than failing the recording outright.
@@ -1133,6 +1174,7 @@ bool RecordingSession::Private::startSegment(QString& error)
             webcamActive = false;
             webcamTrack = Platform::WebcamTrack{};
         } else {
+            bindToRecorderLifetime(webcamProcess);
             webcamSegments.append(webcamPath);
             if (segmentIndex == 0 && firstScreenStartUnixMs > 0)
                 cameraProcessDelayMs =
@@ -2488,6 +2530,7 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
                              .arg(mic->errorString()));
             delete mic;
         } else {
+            bindToRecorderLifetime(mic);
             d->micProcess = mic;
             d->micPath = path;
             recordingLog(QStringLiteral("microphone: started %1").arg(path));
@@ -2851,6 +2894,12 @@ bool RecordingSession::recover(const QString& workDir, QString& error)
     d->systemAudio.reset();
 
     d->elapsedBeforeMs = int64From(state.value(QStringLiteral("elapsedMs")));
+    // The state file can be seconds older than the crash; the segments are
+    // what was actually captured.
+    qint64 capturedMs = 0;
+    for (const QString& segment : d->segments)
+        capturedMs += qRound64(videoDuration(segment) * 1000.0);
+    d->elapsedBeforeMs = std::max(d->elapsedBeforeMs, capturedMs);
     d->recordingStartedAtUnixMs = int64From(state.value(QStringLiteral("startedAtUnixMs")));
     d->manifestSessions.clear();
     for (const QJsonValue& value : state.value(QStringLiteral("sessions")).toArray()) {
@@ -2862,9 +2911,8 @@ bool RecordingSession::recover(const QString& workDir, QString& error)
         session.endMs = int64From(object.value(QStringLiteral("endMs")));
         session.windowBounds = rectFrom(object.value(QStringLiteral("windowBounds")));
         if (session.endedAtUnixMs == 0) {
-            session.endedAtUnixMs = QFileInfo(dir.filePath(kStateFileName)).lastModified()
-                                        .toMSecsSinceEpoch();
             session.endMs = d->elapsedBeforeMs;
+            session.endedAtUnixMs = session.startedAtUnixMs + (session.endMs - session.startMs);
         }
         d->manifestSessions.append(session);
     }
