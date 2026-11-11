@@ -386,7 +386,9 @@ impl Framer {
             .skip(y0)
             .take(y1.saturating_sub(y0))
             .for_each(|(y, (target, source))| {
-                blend_row(target, source, x0, x1, |x| rounded_coverage(x, y, rect, radius));
+                blend_row(target, source, x0, x1, |x| {
+                    rounded_coverage(x, y, rect, radius)
+                });
             });
 
         let (p0, p1) = (x0 / 2, x1.div_ceil(2).min(out_w / 2));
@@ -431,15 +433,21 @@ impl Framer {
                 let r = row - top / 2;
                 let source = &video_chroma[r * width..(r + 1) * width];
                 let y = top + r * 2;
-                blend_chroma_row(&mut target[left..left + width], source, 0, width / 2, |pair| {
-                    let x = left + pair * 2;
-                    (rounded_coverage(x, y, rect, radius)
-                        + rounded_coverage(x + 1, y, rect, radius)
-                        + rounded_coverage(x, y + 1, rect, radius)
-                        + rounded_coverage(x + 1, y + 1, rect, radius)
-                        + 2)
-                        / 4
-                });
+                blend_chroma_row(
+                    &mut target[left..left + width],
+                    source,
+                    0,
+                    width / 2,
+                    |pair| {
+                        let x = left + pair * 2;
+                        (rounded_coverage(x, y, rect, radius)
+                            + rounded_coverage(x + 1, y, rect, radius)
+                            + rounded_coverage(x, y + 1, rect, radius)
+                            + rounded_coverage(x + 1, y + 1, rect, radius)
+                            + 2)
+                            / 4
+                    },
+                );
             });
     }
 }
@@ -514,7 +522,9 @@ impl FramedSink {
 
     /// The rest rect and the zoom area of the canvas, when the export has one.
     pub(super) fn card_geometry(&self) -> Option<(StageRect, StageRect)> {
-        self.framer.as_ref().map(|framer| (framer.rest(), framer.area()))
+        self.framer
+            .as_ref()
+            .map(|framer| (framer.rest(), framer.area()))
     }
 
     /// Submit a frame drawn on a zoomed card. `outer` is the card's footage over

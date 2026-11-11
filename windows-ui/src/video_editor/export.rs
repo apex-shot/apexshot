@@ -783,20 +783,21 @@ fn render_range(
                     }
                     None => centre,
                 };
-                let target01 = (value.1 .0 / source.0.max(1.0), value.1 .1 / source.1.max(1.0));
-                Some((
-                    zoom::card_rect(rest, area, focal, value.0, target01),
-                    rest,
-                ))
+                let target01 = (
+                    value.1 .0 / source.0.max(1.0),
+                    value.1 .1 / source.1.max(1.0),
+                );
+                Some((zoom::card_rect(rest, area, focal, value.0, target01), rest))
             };
             let view_for = |value: zoom::Camera| match card_for(value) {
                 Some((card, rest)) => zoom::card_view(rest, card, source),
                 None => zoom::view_rect(value.0, value.1, source),
             };
             let view = view_for(camera_value);
-            let card = card_for(camera_value).filter(|(card, rest)| canvas::card_moved(*card, *rest));
-            let previous_value =
-                (!zoom::instant_blur_disabled(&model.zooms, composition_time)).then(|| {
+            let card =
+                card_for(camera_value).filter(|(card, rest)| canvas::card_moved(*card, *rest));
+            let previous_value = (!zoom::instant_blur_disabled(&model.zooms, composition_time))
+                .then(|| {
                     camera.evaluate(
                         &model.zooms,
                         source,
@@ -872,7 +873,13 @@ fn render_range(
                 outer_rgba.resize(out.0 as usize * out.1 as usize * 4, 0);
                 // A second blur pass over the whole canvas costs seconds per
                 // frame while the card sweeps; the video rect keeps its blur.
-                crop_scale_into(&decoded, model.source_size, outer_view, out, &mut outer_rgba);
+                crop_scale_into(
+                    &decoded,
+                    model.source_size,
+                    outer_view,
+                    out,
+                    &mut outer_rgba,
+                );
                 outer_nv12.resize(out.0 as usize * out.1 as usize * 3 / 2, 0);
                 converter.convert_into(&outer_rgba, out, &mut outer_nv12);
                 canvas::CardFrame {
