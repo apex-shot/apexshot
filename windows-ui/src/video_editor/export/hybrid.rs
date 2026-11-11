@@ -442,6 +442,52 @@ fn probe_pair(dir: &Path, primary: Encoder) -> Result<bool, End> {
     Ok(decoded.status.success() && decoded.stderr.is_empty())
 }
 
+/// The stream format a packet-copy join depends on: codec, profile, level,
+/// size, pixel format, and frame rate of the first video stream.
+fn stream_format(path: &Path) -> Result<String, End> {
+    let output = crate::utils::hidden_command(ffmpeg::ffprobe_executable())
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=codec_name,profile,level,width,height,pix_fmt,r_frame_rate",
+            "-of",
+            "csv=p=0",
+        ])
+        .arg(path)
+        .output()
+        .map_err(|error| End::Failed(format!("could not start ffprobe: {error}")))?;
+    let format = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !output.status.success() || format.is_empty() {
+        return Err(End::Failed(format!(
+            "could not read the export piece {}",
+            path.display()
+        )));
+    }
+    Ok(format)
+}
+
+/// Every piece must share the first piece's format, or the joined file
+/// switches stream parameters mid-way.
+fn check_formats(parts: &[PathBuf]) -> Result<(), End> {
+    let Some(first) = parts.first() else {
+        return Ok(());
+    };
+    let expected = stream_format(first)?;
+    for (index, part) in parts.iter().enumerate().skip(1) {
+        let found = stream_format(part)?;
+        if found != expected {
+            return Err(End::Failed(format!(
+                "the export pieces do not share one format (piece 1: {expected}; piece {}: {found}), so they cannot be joined",
+                index + 1
+            )));
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn join_segments(
     dir: &Path,
     parts: &[PathBuf],
@@ -453,6 +499,7 @@ pub(super) fn join_segments(
             "there are no export pieces to join".to_string(),
         ));
     }
+    check_formats(parts)?;
     let list = dir.join("concat.txt");
     let mut text = String::new();
     for part in parts {
@@ -599,6 +646,80 @@ mod tests {
         assert!(probe.status.success());
         let frames = String::from_utf8_lossy(&probe.stdout).trim().to_string();
         assert_eq!(frames, total.to_string());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    fn make_clip(dir: &Path, name: &str, profile: &str) -> PathBuf {
+        let path = dir.join(name);
+        let status = crate::utils::hidden_command(ffmpeg::ffmpeg_executable())
+            .args([
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=320x240:rate=30:duration=1",
+                "-c:v",
+                "libx264",
+                "-profile:v",
+                profile,
+                "-pix_fmt",
+                "yuv420p",
+            ])
+            .arg(&path)
+            .status()
+            .unwrap();
+        assert!(status.success(), "ffmpeg could not make {name}");
+        path
+    }
+
+    fn ffmpeg_available() -> bool {
+        crate::utils::hidden_command(ffmpeg::ffmpeg_executable())
+            .arg("-version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+
+    #[test]
+    fn matching_pieces_join() {
+        if !ffmpeg_available() {
+            eprintln!("skipping: ffmpeg is not available");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("apexshot-join-ok-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let a = make_clip(&dir, "a.mp4", "high");
+        let b = make_clip(&dir, "b.mp4", "high");
+        let joined = dir.join("joined.mp4");
+        assert!(join_segments(&dir, &[a, b], &joined, false).is_ok());
+        assert!(joined.exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn mismatched_pieces_fail_with_a_clear_message() {
+        if !ffmpeg_available() {
+            eprintln!("skipping: ffmpeg is not available");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("apexshot-join-bad-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let a = make_clip(&dir, "a.mp4", "high");
+        let b = make_clip(&dir, "b.mp4", "main");
+        let joined = dir.join("joined.mp4");
+        match join_segments(&dir, &[a, b], &joined, false) {
+            Err(End::Failed(message)) => {
+                assert!(message.contains("do not share one format"), "{message}")
+            }
+            _ => panic!("expected a format failure"),
+        }
+        assert!(!joined.exists());
         let _ = fs::remove_dir_all(&dir);
     }
 }
