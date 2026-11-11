@@ -73,7 +73,9 @@ fn find_child(file: &mut File, start: u64, end: u64, kind: &[u8; 4]) -> Option<(
         file.seek(SeekFrom::Start(position)).ok()?;
         let mut header = [0_u8; 8];
         file.read_exact(&mut header).ok()?;
-        let mut size = u64::from(u32::from_be_bytes([header[0], header[1], header[2], header[3]]));
+        let mut size = u64::from(u32::from_be_bytes([
+            header[0], header[1], header[2], header[3],
+        ]));
         let mut header_size = 8_u64;
         if size == 1 {
             let mut large = [0_u8; 8];
@@ -173,7 +175,10 @@ mod tests {
         let tagged = tagged_mp4_bytes(&format!("{RECORDING_ID_PREFIX}{TEST_ID}"));
         let cases: [(&str, Vec<u8>); 4] = [
             ("hello", tagged_mp4_bytes("hello")),
-            ("bad-id", tagged_mp4_bytes(&format!("{RECORDING_ID_PREFIX}not-an-id"))),
+            (
+                "bad-id",
+                tagged_mp4_bytes(&format!("{RECORDING_ID_PREFIX}not-an-id")),
+            ),
             ("garbage", vec![0x42_u8; 10]),
             ("truncated", tagged[..tagged.len() / 2].to_vec()),
         ];
@@ -191,7 +196,9 @@ mod tests {
         bytes.extend_from_slice(b"free");
         bytes.extend_from_slice(&24_u64.to_be_bytes());
         bytes.extend_from_slice(&[0_u8; 8]);
-        bytes.extend_from_slice(&tagged_mp4_bytes(&format!("{RECORDING_ID_PREFIX}{TEST_ID}")));
+        bytes.extend_from_slice(&tagged_mp4_bytes(&format!(
+            "{RECORDING_ID_PREFIX}{TEST_ID}"
+        )));
         let path = temp_video("large-size", &bytes);
         assert_eq!(recording_id_of(&path).as_deref(), Some(TEST_ID));
         let _ = std::fs::remove_file(&path);
@@ -200,7 +207,9 @@ mod tests {
     #[test]
     fn ids_are_validated() {
         assert!(is_valid_recording_id(TEST_ID));
-        assert!(!is_valid_recording_id("0123abcd-0000-4000-8000-00000000abcg"));
+        assert!(!is_valid_recording_id(
+            "0123abcd-0000-4000-8000-00000000abcg"
+        ));
         assert!(!is_valid_recording_id(&TEST_ID.replace('-', "")));
         assert!(!is_valid_recording_id(""));
     }

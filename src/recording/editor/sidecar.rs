@@ -1351,7 +1351,8 @@ impl PointerSidecar {
         self.loop_before_end_ms = loop_position_before_end_ms
             .filter(|value| value.is_finite())
             .map(|value| value.max(0.0));
-        self.playback_end_seconds = playback_end_seconds.filter(|end| end.is_finite() && *end > 0.0);
+        self.playback_end_seconds =
+            playback_end_seconds.filter(|end| end.is_finite() && *end > 0.0);
     }
 
     /// The source instant the tail behaviours measure back from.
@@ -2104,7 +2105,9 @@ mod recording_location_tests {
         let dir = video_dir("delete-folder");
         let video = dir.join("a.mp4");
         write_tagged_video(&video, &id);
-        sidecar_with_pointer(0.0, 0.0).write_next_to_video(&video).unwrap();
+        sidecar_with_pointer(0.0, 0.0)
+            .write_next_to_video(&video)
+            .unwrap();
         let cursors = recording_directory(&id).join("pointer.json.cursors");
         std::fs::create_dir_all(&cursors).unwrap();
         std::fs::write(cursors.join("x.png"), b"png").unwrap();
