@@ -1051,6 +1051,25 @@ button.image-editor-primary-button:active {
     color: rgba(17, 24, 39, 0.56);
 }
 
+/* Studio tier badge on a group header: a small warm pill, same family as
+   the Studio card's "In this export" tag. */
+.image-editor-studio-badge {
+    color: #ff9250;
+    background: rgba(255, 103, 13, 0.16);
+    border-radius: 999px;
+    padding: 1px 7px;
+    margin-top: 4px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.editor-theme-light .image-editor-studio-badge {
+    color: #c2410c;
+    background: rgba(255, 103, 13, 0.12);
+}
+
 /* Fill-source tabs: one 8px tray, three 26px pills, the open one raised. */
 .image-editor-bg-tabs {
     margin: 0 0 12px 0;

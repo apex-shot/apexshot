@@ -4366,6 +4366,18 @@ msgstr "预计文件大小：{size}"
 msgid "Export time ≈ {time}"
 msgstr "导出时间 ≈ {time}"
 
+msgid "Backgrounds and style"
+msgstr "背景与样式"
+
+msgid "Wallpapers, padding, rounded corners, shadows and frames for stills."
+msgstr "为静态图像添加壁纸、边距、圆角、阴影和边框。"
+
+msgid "Included with Studio"
+msgstr "包含在 Studio 中"
+
+msgid "Studio preview. A non-default rendered pose needs activation for final images."
+msgstr "Studio 预览。最终图像使用非默认渲染姿态需要激活。"
+
 msgid "Automatic width"
 msgstr "自动宽度"
 

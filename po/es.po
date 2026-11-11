@@ -4477,6 +4477,18 @@ msgstr "Tamaño estimado: {size}"
 msgid "Export time ≈ {time}"
 msgstr "Tiempo de exportación ≈ {time}"
 
+msgid "Backgrounds and style"
+msgstr "Fondos y estilo"
+
+msgid "Wallpapers, padding, rounded corners, shadows and frames for stills."
+msgstr "Fondos de pantalla, márgenes, esquinas redondeadas, sombras y marcos para imágenes fijas."
+
+msgid "Included with Studio"
+msgstr "Incluido en Studio"
+
+msgid "Studio preview. A non-default rendered pose needs activation for final images."
+msgstr "Vista previa de Studio. Una pose renderizada no predeterminada requiere activación para las imágenes finales."
+
 msgid "Automatic width"
 msgstr "Ancho automático"
 

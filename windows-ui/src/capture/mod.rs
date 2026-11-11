@@ -50,8 +50,9 @@ pub mod editor {
     #[rustfmt::skip]
     pub mod image_transform;
 
-    pub(crate) mod glass_render;
     pub(crate) mod shadow_render;
+    /// The "Made with ApexShot" mark painted over unlicensed Studio previews.
+    pub(crate) mod studio_watermark;
     pub(crate) mod style_render;
     /// Perspective projection for the Windows still-image editor.
     pub(crate) mod transform_render;
