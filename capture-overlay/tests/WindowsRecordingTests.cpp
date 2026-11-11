@@ -23,11 +23,15 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QPainter>
+#include <QProcess>
 #include <QRasterWindow>
 #include <QRegularExpression>
 #include <QSet>
+#include <QStandardPaths>
 #include <QStringList>
+#include <QTemporaryDir>
 #include <QTimer>
+#include <QUuid>
 
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -207,11 +211,39 @@ bool validateSidecar(const QString& videoPath, double recordedSeconds)
     }
 
     const QFileInfo sidecarInfo(path);
+    // A tagged recording keeps its pointer data in a folder named after its
+    // ID; an older video still resolves through the path hash. Both shapes are
+    // recognised, and a recording made by this check must be the tagged one.
     static const QRegularExpression hashName(QStringLiteral("^[0-9a-f]{64}$"));
+    const bool hashedShape = hashName.match(sidecarInfo.fileName()).hasMatch()
+        && sidecarInfo.dir().dirName() == QStringLiteral("pointer-sidecars");
     QDir directory = sidecarInfo.dir();
-    if (!hashName.match(sidecarInfo.fileName()).hasMatch()
-        || directory.dirName() != QStringLiteral("pointer-sidecars")) {
-        std::printf("FAIL sidecar hash path is malformed: %s\n", qPrintable(path));
+    const QString recordingId = Platform::recordingIdOf(videoPath);
+    if (recordingId.isEmpty()) {
+        std::printf("FAIL recording has no recording id tag\n");
+        return false;
+    }
+    const QString taggedPath = Platform::recordingSidecarPathFor(recordingId);
+    const bool taggedShape = !taggedPath.isEmpty() && path == taggedPath;
+    if (!hashedShape && !taggedShape) {
+        std::printf("FAIL sidecar path is neither the hash nor the id form: %s\n",
+                    qPrintable(path));
+        return false;
+    }
+    if (!taggedShape) {
+        std::printf("FAIL recording kept the hashed sidecar path: %s (expected %s)\n",
+                    qPrintable(path),
+                    qPrintable(taggedPath));
+        return false;
+    }
+    if (sidecarInfo.fileName() != QStringLiteral("pointer.json")
+        || directory.dirName() != recordingId) {
+        std::printf("FAIL sidecar id path is malformed: %s\n", qPrintable(path));
+        return false;
+    }
+    directory.cdUp();
+    if (directory.dirName() != QStringLiteral("recordings")) {
+        std::printf("FAIL sidecar is not under the recordings root: %s\n", qPrintable(path));
         return false;
     }
     directory.cdUp();
@@ -442,8 +474,11 @@ int recordOnce(bool pauseAndResume)
     if (!requestedPath.isEmpty())
         path = requestedPath;
     const QString oldSidecarPath = Platform::sidecarPathFor(path);
-    if (!oldSidecarPath.isEmpty())
+    if (!oldSidecarPath.isEmpty()) {
         QFile::remove(oldSidecarPath);
+        if (QFileInfo(oldSidecarPath).fileName() == QStringLiteral("pointer.json"))
+            QDir(QFileInfo(oldSidecarPath).absolutePath()).removeRecursively();
+    }
     QFile::remove(path);
     QDir().mkpath(QFileInfo(path).absolutePath());
 
@@ -596,6 +631,10 @@ int recordOnce(bool pauseAndResume)
                                  if (!sidecar.isEmpty()) {
                                      QFile::remove(sidecar);
                                      QFile::remove(Platform::recordingManifestPathFor(output));
+                                     if (QFileInfo(sidecar).fileName()
+                                         == QStringLiteral("pointer.json"))
+                                         QDir(QFileInfo(sidecar).absolutePath())
+                                             .removeRecursively();
                                  }
                              }
                          }
@@ -770,8 +809,11 @@ WindowRunResult runWindowSession(HWND window,
 {
     QFile::remove(path);
     const QString oldSidecar = Platform::sidecarPathFor(path);
-    if (!oldSidecar.isEmpty())
+    if (!oldSidecar.isEmpty()) {
         QFile::remove(oldSidecar);
+        if (QFileInfo(oldSidecar).fileName() == QStringLiteral("pointer.json"))
+            QDir(QFileInfo(oldSidecar).absolutePath()).removeRecursively();
+    }
 
     Platform::RecordingSession session;
     Platform::RecordingRequest request;
@@ -994,8 +1036,11 @@ int recordWindow()
                                                        &failure);
         QFile::remove(firstPath);
         const QString firstSidecar = Platform::sidecarPathFor(firstPath);
-        if (!firstSidecar.isEmpty())
+        if (!firstSidecar.isEmpty()) {
             QFile::remove(firstSidecar);
+            if (QFileInfo(firstSidecar).fileName() == QStringLiteral("pointer.json"))
+                QDir(QFileInfo(firstSidecar).absolutePath()).removeRecursively();
+        }
         if (first != WindowRunResult::Discarded) {
             std::printf("FAIL restart discard: %s\n", qPrintable(failure));
             return 1;
@@ -1100,8 +1145,11 @@ int recordWithWebcam()
     if (!requestedPath.isEmpty())
         path = requestedPath;
     const QString existingSidecar = Platform::sidecarPathFor(path);
-    if (!existingSidecar.isEmpty())
+    if (!existingSidecar.isEmpty()) {
         QFile::remove(existingSidecar);
+        if (QFileInfo(existingSidecar).fileName() == QStringLiteral("pointer.json"))
+            QDir(QFileInfo(existingSidecar).absolutePath()).removeRecursively();
+    }
     QFile::remove(path);
     QDir().mkpath(QFileInfo(path).absolutePath());
 
@@ -1520,6 +1568,124 @@ int recordAndRecover()
 
 } // namespace
 
+/// A finished recording carries its ID inside the MP4, so the pointer data
+/// follows the video through a rename or a move; an untagged video keeps the
+/// path-hash location.
+int testRecordingIdTag()
+{
+    const QString configured = qEnvironmentVariable("APEXSHOT_FFMPEG").trimmed();
+    const QString ffmpeg = !configured.isEmpty() && QFileInfo::exists(configured)
+        ? configured
+        : QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+    if (ffmpeg.isEmpty()) {
+        std::printf("SKIP: ffmpeg is unavailable\n");
+        return 77;
+    }
+
+    QTemporaryDir directory;
+    if (!directory.isValid()) {
+        std::printf("FAIL recording id tag: no temporary directory\n");
+        return 1;
+    }
+    const QString uuid = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const QString tagged = directory.filePath(QStringLiteral("tagged.mp4"));
+    const QString plain = directory.filePath(QStringLiteral("plain.mp4"));
+
+    const auto encode = [&ffmpeg](const QString& path, const QString& description) {
+        QStringList arguments{QStringLiteral("-y"),
+                              QStringLiteral("-hide_banner"),
+                              QStringLiteral("-loglevel"),
+                              QStringLiteral("error"),
+                              QStringLiteral("-f"),
+                              QStringLiteral("lavfi"),
+                              QStringLiteral("-i"),
+                              QStringLiteral("testsrc=size=64x64:rate=10"),
+                              QStringLiteral("-t"),
+                              QStringLiteral("1"),
+                              QStringLiteral("-c:v"),
+                              QStringLiteral("libx264"),
+                              QStringLiteral("-movflags"),
+                              QStringLiteral("+faststart")};
+        if (!description.isEmpty())
+            arguments << QStringLiteral("-metadata")
+                      << QStringLiteral("description=%1").arg(description);
+        arguments << path;
+        QProcess encoder;
+        encoder.setProgram(ffmpeg);
+        encoder.setProcessChannelMode(QProcess::MergedChannels);
+        encoder.setArguments(arguments);
+        encoder.start();
+        if (!encoder.waitForStarted(15000))
+            return false;
+        if (!encoder.waitForFinished(60000)) {
+            encoder.kill();
+            encoder.waitForFinished(5000);
+            return false;
+        }
+        return encoder.exitStatus() == QProcess::NormalExit && encoder.exitCode() == 0
+            && QFileInfo(path).size() > 0;
+    };
+
+    if (!encode(tagged, Platform::recordingIdTagValue(uuid))) {
+        std::printf("FAIL recording id tag: the tagged clip did not encode\n");
+        return 1;
+    }
+    if (!encode(plain, QString())) {
+        std::printf("FAIL recording id tag: the plain clip did not encode\n");
+        return 1;
+    }
+
+    const QString taggedId = Platform::recordingIdOf(tagged);
+    if (taggedId != uuid) {
+        std::printf("FAIL recording id tag: the tag reads \"%s\"\n", qPrintable(taggedId));
+        return 1;
+    }
+    const QString plainId = Platform::recordingIdOf(plain);
+    if (!plainId.isEmpty()) {
+        std::printf("FAIL recording id tag: an untagged clip carries \"%s\"\n",
+                    qPrintable(plainId));
+        return 1;
+    }
+    const QString taggedSidecar = Platform::sidecarPathFor(tagged);
+    if (taggedSidecar.isEmpty() || taggedSidecar != Platform::recordingSidecarPathFor(uuid)) {
+        std::printf("FAIL recording id tag: the sidecar path is %s\n",
+                    qPrintable(taggedSidecar));
+        return 1;
+    }
+    if (!Platform::sidecarPathFor(plain).contains(QStringLiteral("pointer-sidecars"))) {
+        std::printf("FAIL recording id tag: the untagged sidecar path is %s\n",
+                    qPrintable(Platform::sidecarPathFor(plain)));
+        return 1;
+    }
+
+    const QString renamed = directory.filePath(QStringLiteral("renamed.mp4"));
+    if (!QFile::rename(tagged, renamed)) {
+        std::printf("FAIL recording id tag: the clip could not be renamed\n");
+        return 1;
+    }
+    if (Platform::sidecarPathFor(renamed) != Platform::recordingSidecarPathFor(uuid)) {
+        std::printf("FAIL recording id tag: the renamed sidecar path is %s\n",
+                    qPrintable(Platform::sidecarPathFor(renamed)));
+        return 1;
+    }
+
+    const QString garbage = directory.filePath(QStringLiteral("garbage.mp4"));
+    QFile garbageFile(garbage);
+    if (!garbageFile.open(QIODevice::WriteOnly)
+        || garbageFile.write(QByteArrayLiteral("0123456789")) != 10) {
+        std::printf("FAIL recording id tag: the garbage clip could not be written\n");
+        return 1;
+    }
+    garbageFile.close();
+    if (!Platform::recordingIdOf(garbage).isEmpty()) {
+        std::printf("FAIL recording id tag: a garbage clip carries an id\n");
+        return 1;
+    }
+
+    std::printf("PASS recording id tag\n");
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     // The recorder is per-monitor DPI aware. Without this the test sees
@@ -1540,6 +1706,8 @@ int main(int argc, char** argv)
         return 1;
     if (!checkRecordingManifestJson())
         return 1;
+    if (!qEnvironmentVariableIsEmpty("APEXSHOT_TEST_RECORDING_ID_TAG"))
+        return testRecordingIdTag();
 
     QString error;
     if (!Platform::RecordingSession::available(&error)) {
@@ -1572,6 +1740,8 @@ int main(int argc, char** argv)
         result = recordUntilDiskLow();
     if (result == 0)
         result = recordAndRecover();
+    if (result == 0)
+        result = testRecordingIdTag();
     if (result == 0) {
         const int webcam = recordWithWebcam();
         // 77 is the camera-absent skip, which is not a failure of the recorder.

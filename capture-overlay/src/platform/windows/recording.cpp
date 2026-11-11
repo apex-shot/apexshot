@@ -63,6 +63,16 @@ void recordingLog(const QString& text)
     }
 }
 
+// The recording's ID travels inside the MP4 so the editor finds its pointer
+// data after the file is renamed or moved.
+void appendRecordingIdTag(QStringList& arguments, const QString& recordingId)
+{
+    if (recordingId.isEmpty())
+        return;
+    arguments << QStringLiteral("-metadata")
+              << QStringLiteral("description=%1").arg(Platform::recordingIdTagValue(recordingId));
+}
+
 QString ffmpegExecutable()
 {
     const QString configured = qEnvironmentVariable("APEXSHOT_FFMPEG").trimmed();
@@ -779,6 +789,9 @@ public:
     qint64 elapsedBeforeMs = 0;
     QString workDir;
     QString existingSidecarPath;
+    /// The ID written into the finished MP4's `description` tag, so the
+    /// pointer data follows the video through a rename or a move.
+    QString recordingId;
     QStringList segments;
     QStringList webcamSegments;
     int segmentIndex = 0;
@@ -1562,6 +1575,7 @@ void RecordingSession::Private::completeSystemAudio(const QString& videoPath)
               << QStringLiteral("-shortest");
     if (request.hevc)
         arguments << QStringLiteral("-tag:v") << QStringLiteral("hvc1");
+    appendRecordingIdTag(arguments, recordingId);
     arguments << mixedPath;
 
     auto* mixer = new QProcess(q);
@@ -1904,8 +1918,9 @@ void RecordingSession::Private::compositeWebcam(
                        request.fps > 0 ? request.fps : 30,
                        request.hevc);
     compositeArgs << QStringLiteral("-c:a") << QStringLiteral("copy")
-                  << QStringLiteral("-movflags") << QStringLiteral("+faststart")
-                  << compositePath;
+                  << QStringLiteral("-movflags") << QStringLiteral("+faststart");
+    appendRecordingIdTag(compositeArgs, recordingId);
+    compositeArgs << compositePath;
     composer->setArguments(compositeArgs);
     QObject::connect(
         composer,
@@ -1965,6 +1980,12 @@ void RecordingSession::Private::cleanupWorkDir()
 
 void RecordingSession::Private::removeDiscardedSidecar()
 {
+    // The take's own folder goes first; it only exists when finalise reached it.
+    if (!recordingId.isEmpty()) {
+        const QString own = Platform::recordingSidecarPathFor(recordingId);
+        if (!own.isEmpty())
+            QDir(QFileInfo(own).absolutePath()).removeRecursively();
+    }
     QString path = existingSidecarPath;
     if (path.isEmpty())
         path = sidecarPathFor(request.outputPath);
@@ -1974,6 +1995,14 @@ void RecordingSession::Private::removeDiscardedSidecar()
     QFile::remove(path + QStringLiteral(".webcam.mp4"));
     QFile::remove(path + QStringLiteral(".recording.json"));
     QDir(path + QStringLiteral(".cursors")).removeRecursively();
+    // A tagged recording owns a whole folder under the recordings root.
+    const QString root = Platform::recordingsRootDirectory();
+    const QFileInfo sidecarInfo(path);
+    if (!root.isEmpty()
+        && QDir::cleanPath(QFileInfo(sidecarInfo.absolutePath()).absolutePath())
+               .compare(QDir::cleanPath(root), Qt::CaseInsensitive) == 0) {
+        QDir(sidecarInfo.absolutePath()).removeRecursively();
+    }
     if (!webcamTrack.screenFile.isEmpty()) {
         QFileInfo info(request.outputPath);
         QFile::remove(info.dir().filePath(webcamTrack.screenFile));
@@ -2236,7 +2265,7 @@ void RecordingSession::Private::finalize()
     concat = new QProcess(q);
     concat->setProgram(ffmpegExecutable());
     concat->setProcessChannelMode(QProcess::MergedChannels);
-    concat->setArguments({
+    QStringList concatArguments{
         QStringLiteral("-y"),
         QStringLiteral("-hide_banner"),
         QStringLiteral("-loglevel"),
@@ -2251,11 +2280,12 @@ void RecordingSession::Private::finalize()
         QStringLiteral("copy"),
         QStringLiteral("-movflags"),
         QStringLiteral("+faststart"),
-    });
+    };
+    appendRecordingIdTag(concatArguments, recordingId);
     if (request.hevc)
-        concat->setArguments(concat->arguments() << QStringLiteral("-tag:v")
-                                                 << QStringLiteral("hvc1"));
-    concat->setArguments(concat->arguments() << finalPath);
+        concatArguments << QStringLiteral("-tag:v") << QStringLiteral("hvc1");
+    concatArguments << finalPath;
+    concat->setArguments(concatArguments);
 
     QObject::connect(concat,
                      QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
@@ -2384,6 +2414,7 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
         error = QStringLiteral("No output path was selected.");
         return false;
     }
+    d->recordingId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     d->existingSidecarPath = QFileInfo::exists(d->request.outputPath)
         ? sidecarPathFor(d->request.outputPath)
         : QString();
@@ -2906,6 +2937,9 @@ bool RecordingSession::recover(const QString& workDir, QString& error)
 
     d->request = request;
     d->workDir = workDir;
+    // A recovered recording is a new take of the same footage, so it gets an
+    // ID of its own rather than one already written into a partial file.
+    d->recordingId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     d->existingSidecarPath.clear();
     d->segments = existing(state.value(QStringLiteral("segments")));
     if (d->segments.isEmpty()) {
