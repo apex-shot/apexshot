@@ -13,6 +13,8 @@
 
 use std::ptr;
 
+use crate::recording::editor::click_effect::{RIPPLE_BAND_01, RIPPLE_PULL_01, RIPPLE_PULL_SIZE_01};
+
 use windows::core::{Interface, PCSTR};
 use windows::Win32::Foundation::HMODULE;
 use windows::Win32::Graphics::Direct3D::Fxc::{D3DCompile, D3DCOMPILE_OPTIMIZATION_LEVEL3};
@@ -44,6 +46,41 @@ pub(super) struct StageFrame {
     /// The screen fills the frame: no card edges or background, the trail
     /// weighted as `ScreenTrail` does. False for a card on a canvas.
     pub screen: bool,
+    /// Up to three live click ripples in source pixels: click x, click y, ring
+    /// radius, signed bounce. A zero bounce is an empty slot.
+    pub ripples: [[f32; 4]; 3],
+}
+
+/// The stage's ripple slots for one frame's live clicks, as
+/// `PreviewRipple::warp_pixels` selects them: the last three visible clicks,
+/// those older than 0 ms only. `clicks` are chronological, in source pixels.
+pub(super) fn ripple_slots(
+    clicks: &[crate::recording::editor::ripple_preview::PreviewRippleClick],
+    video_width: f64,
+) -> [[f32; 4]; 3] {
+    use crate::recording::editor::click_effect::{
+        ripple_bounce_at_ms, ripple_radius_px, RIPPLE_VISIBLE_DURATION_MS,
+    };
+    let mut slots = [[0.0f32; 4]; 3];
+    let live = clicks
+        .iter()
+        .rev()
+        .filter(|click| {
+            click.x.is_finite()
+                && click.y.is_finite()
+                && (0.0..RIPPLE_VISIBLE_DURATION_MS).contains(&click.age_ms)
+        })
+        .take(3)
+        .filter(|click| click.age_ms > 0.0);
+    for (slot, click) in slots.iter_mut().zip(live) {
+        *slot = [
+            click.x as f32,
+            click.y as f32,
+            ripple_radius_px(click.age_ms, RIPPLE_PULL_SIZE_01, video_width) as f32,
+            ripple_bounce_at_ms(click.age_ms) as f32,
+        ];
+    }
+    slots
 }
 
 /// A D3D11 pipeline that composites one NV12 frame at a time.
@@ -399,6 +436,17 @@ impl GpuStage {
                 blue_coef: self.blue_coef,
                 red_coef: self.red_coef,
                 mode: [if frame.screen { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0],
+                ripple_shape: [
+                    (f64::from(source_width) * RIPPLE_BAND_01) as f32,
+                    (f64::from(source_width) * RIPPLE_PULL_SIZE_01) as f32,
+                    (f64::from(source_width) * RIPPLE_PULL_01) as f32,
+                    if frame.ripples.iter().any(|slot| slot[3] != 0.0) {
+                        1.0
+                    } else {
+                        0.0
+                    },
+                ],
+                ripples: frame.ripples,
             };
             let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
             self.context
@@ -742,6 +790,8 @@ cbuffer Params : register(b0)
     float4 blueCoef;     // ur, ug, ub, 0
     float4 redCoef;      // vr, vg, vb, 0
     float4 mode;         // x: 1 = screen trail, 0 = card
+    float4 rippleShape;  // band, calm radius, peak pull (source px), any live
+    float4 ripples[3];   // click x, click y, radius (source px), bounce
 };
 
 Texture2D<float4> tex0 : register(t0);
@@ -843,6 +893,48 @@ float3 screen_trail(float2 p)
     return sqrt(sum / count);
 }
 
+float smooth01(float e0, float e1, float x)
+{
+    float t = saturate((x - e0) / (e1 - e0));
+    return t * t * (3.0 - 2.0 * t);
+}
+
+// The summed pull of the live clicks at source position s, in source pixels:
+// a port of click_effect.rs PreparedRipple::pull_px.
+float2 ripple_pull(float2 s)
+{
+    float2 total = 0;
+    float band = rippleShape.x;
+    float calm = rippleShape.y;
+    [unroll]
+    for (int k = 0; k < 3; k++)
+    {
+        float4 w = ripples[k];
+        if (w.w == 0.0) continue;
+        float2 rel = s - w.xy;
+        float d = length(rel);
+        if (d == 0.0 || abs(d - w.z) > band * 3.0) continue;
+        float rd = (d - w.z) / band;
+        float ring = exp(-rd * rd * 4.0);
+        float fade = calm > 0.5 ? smooth01(calm * 0.35, calm, d) : 1.0;
+        total += rel / d * (w.w * ring * rippleShape.z * fade);
+    }
+    return total;
+}
+
+// The output position the warped frame samples for p: the source position
+// under cardNow, pulled and clamped to the source as warp_pixels does. Pixels
+// outside the card keep their position so the padding is never warped.
+float2 rippled(float2 p)
+{
+    if (rippleShape.w < 0.5) return p;
+    float4 N = cardNow;
+    float2 s = (p - N.xy) / N.zw * sourceSize;
+    if (s.x < 0.0 || s.y < 0.0 || s.x > sourceSize.x || s.y > sourceSize.y) return p;
+    float2 moved = clamp(s - ripple_pull(s), float2(0, 0), sourceSize);
+    return N.xy + moved / sourceSize * N.zw;
+}
+
 // The source placed at cardNow, trailed from cardBefore, over the background.
 // A port of motion_blur.rs CardTrail::render (same sampling and weighting).
 float4 ps_compose(VsOut i) : SV_Target
@@ -854,6 +946,7 @@ float4 ps_compose(VsOut i) : SV_Target
         float2 q = (p - centre) / backgroundZoom + centre;
         background = tex1.SampleLevel(linearClamp, q / outSize, 0).rgb;
     }
+    p = rippled(p);
     if (mode.x > 0.5)
     {
         return float4(screen_trail(p), 1.0);
@@ -961,6 +1054,10 @@ struct Params {
     red_coef: [f32; 4],
     /// x: 1 for the screen trail, 0 for a card; yzw unused.
     mode: [f32; 4],
+    /// x: ring band, y: calm-zone radius, z: peak pull, all in source pixels;
+    /// w: 1 when any ripple slot is live.
+    ripple_shape: [f32; 4],
+    ripples: [[f32; 4]; 3],
 }
 
 #[cfg(test)]
@@ -990,6 +1087,7 @@ mod tests {
             background_zoom: 1.0,
             pivot: [0.5, 0.5],
             screen: true,
+            ripples: [[0.0; 4]; 3],
         };
         stage
             .render(&input, frame, &mut output)
@@ -1035,6 +1133,7 @@ mod tests {
             background_zoom: 1.0,
             pivot: [0.5, 0.5],
             screen: true,
+            ripples: [[0.0; 4]; 3],
         };
         stage
             .render(&input, frame, &mut output)
@@ -1092,6 +1191,7 @@ mod tests {
             background_zoom: 1.0,
             pivot: [0.5, 0.5],
             screen: true,
+            ripples: [[0.0; 4]; 3],
         };
         stage
             .render(&input, frame, &mut output)
@@ -1110,6 +1210,73 @@ mod tests {
         assert!(
             score >= 32.0,
             "the stage blurs differently from the CPU trail: {score:.1} dB"
+        );
+    }
+
+    #[test]
+    fn the_stage_ripples_like_the_cpu_warp() {
+        use crate::recording::editor::ripple_preview::{PreviewRipple, PreviewRippleClick};
+        let size = (640, 360);
+        let space = YuvSpace::from_probe(Some("bt709"), None);
+        let Ok(mut stage) = GpuStage::new(size, size, space, None) else {
+            eprintln!("skipping: no D3D11 stage");
+            return;
+        };
+        let converter = Nv12Converter::new(space);
+        let rgba = pattern(size);
+        let mut input = vec![0u8; size.0 as usize * size.1 as usize * 3 / 2];
+        converter.convert_into(&rgba, size, &mut input);
+        let clicks = vec![
+            PreviewRippleClick {
+                x: 300.0,
+                y: 170.0,
+                age_ms: 120.0,
+            },
+            PreviewRippleClick {
+                x: 360.0,
+                y: 200.0,
+                age_ms: 60.0,
+            },
+        ];
+        let card = [0.0, 0.0, 640.0, 360.0];
+        let frame = |ripples| StageFrame {
+            card,
+            before: card,
+            radius_fraction: 0.0,
+            background_zoom: 1.0,
+            pivot: [0.5, 0.5],
+            screen: true,
+            ripples,
+        };
+        let mut still = vec![0u8; input.len()];
+        stage
+            .render(&input, frame([[0.0; 4]; 3]), &mut still)
+            .expect("the GPU stage should composite");
+        let mut output = vec![0u8; input.len()];
+        stage
+            .render(&input, frame(ripple_slots(&clicks, 640.0)), &mut output)
+            .expect("the GPU stage should composite");
+        assert_ne!(still, output, "the ripple did not move the footage");
+
+        let mut decoded = vec![0u8; size.0 as usize * size.1 as usize * 4];
+        converter.to_rgba_into(&input, size, &mut decoded);
+        let warped = PreviewRipple {
+            view: (0.0, 0.0, 640.0, 360.0),
+            source_width: 640.0,
+            source_height: 360.0,
+            clicks,
+        }
+        .warp_pixels(&decoded, size, (0.0, 0.0, 640.0, 360.0), size);
+        assert_eq!(warped.len(), decoded.len(), "the CPU warp failed");
+        let mut cpu = vec![0u8; input.len()];
+        converter.convert_into(&warped, size, &mut cpu);
+
+        let luma = size.0 as usize * size.1 as usize;
+        let score = psnr(&cpu[..luma], &output[..luma]);
+        eprintln!("ripple luma PSNR: {score:.1} dB");
+        assert!(
+            score >= 38.0,
+            "the stage ripples differently from the CPU warp: {score:.1} dB"
         );
     }
 
@@ -1136,6 +1303,7 @@ mod tests {
             background_zoom: 1.0,
             pivot: [0.5, 0.5],
             screen: false,
+            ripples: [[0.0; 4]; 3],
         };
         stage
             .render(&input, frame, &mut output)
@@ -1193,6 +1361,7 @@ mod tests {
             background_zoom: zoom,
             pivot,
             screen: false,
+            ripples: [[0.0; 4]; 3],
         };
         let at = 10 * output_size.0 as usize + 390;
         stage
@@ -1316,6 +1485,7 @@ mod tests {
                         background_zoom: 1.0 + (grow - 1.0) * 0.125,
                         pivot: [0.6, 0.4],
                         screen,
+                        ripples: [[0.0; 4]; 3],
                     };
                     stage.render(&input, frame, &mut out).expect("render");
                 }

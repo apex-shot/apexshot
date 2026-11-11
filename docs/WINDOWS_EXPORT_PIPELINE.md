@@ -70,13 +70,13 @@ When the machine profile finds a hardware GPU the frame fits on, every frame is
 composited on the GPU (`export/compose_gpu.rs`): the decoded NV12 is uploaded,
 converted to RGB into a mipmapped texture, and one pixel shader places the source
 (the crop stretched over the frame, or the card on a canvas), its rounded
-corners, the zoomed background and the motion blur, ported from
-`motion_blur.rs` at the studied 16 samples and 4-texel fetch span. Two more
+corners, the zoomed background, the motion blur, ported from `motion_blur.rs`
+at the studied 16 samples and 4-texel fetch span, and the click ripple, which
+displaces each pixel's source position as `ripple_preview.rs` does. Two more
 passes convert to NV12, and the planes are read back for the encoder. The cursor
-is drawn on that frame inside its own box. Frames with a click ripple, exports
-with a camera layer, and a stage that fails mid-export use the GPU crop and
-scale or the CPU compositor below. `APEXSHOT_EXPORT_GPU_STAGE=0` keeps the CPU
-compositor.
+is drawn on that frame inside its own box. Exports with a camera layer, and a
+stage that fails mid-export, use the GPU crop and scale or the CPU compositor
+below. `APEXSHOT_EXPORT_GPU_STAGE=0` keeps the CPU compositor.
 
 In release on the development machine a blurred zoom transition renders in
 5.2 ms at 1080p and 8.7 ms on a 2160x1260 canvas, against about 390 ms per
