@@ -1292,8 +1292,14 @@ impl PointerSidecar {
         let key = [
             self.shake_threshold.to_bits(),
             self.pointer.len() as u64,
-            self.pointer.first().map(|sample| sample.t.to_bits()).unwrap_or(0),
-            self.pointer.last().map(|sample| sample.t.to_bits()).unwrap_or(0),
+            self.pointer
+                .first()
+                .map(|sample| sample.t.to_bits())
+                .unwrap_or(0),
+            self.pointer
+                .last()
+                .map(|sample| sample.t.to_bits())
+                .unwrap_or(0),
         ]
         .iter()
         .fold(1469598103934665603_u64, |hash, value| {
@@ -1311,7 +1317,8 @@ impl PointerSidecar {
             self.pointer
                 .iter()
                 .zip(&survivors.pointer)
-                .filter_map(|(sample, kept)| kept.then(|| sample.clone()))
+                .filter(|(_, kept)| **kept)
+                .map(|(sample, _)| sample.clone())
                 .collect(),
         );
         if let Ok(mut cache) = self.shake_cache.0.lock() {
@@ -2716,7 +2723,10 @@ mod tests {
         let filtered = sidecar.motion_position_at(0.5, 0.0, 1.0).unwrap().0;
         sidecar.set_shake_threshold(0.0);
         let raw = sidecar.motion_position_at(0.5, 0.0, 1.0).unwrap().0;
-        assert!((filtered - 100.0).abs() < 1e-9, "filtered cursor at {filtered}");
+        assert!(
+            (filtered - 100.0).abs() < 1e-9,
+            "filtered cursor at {filtered}"
+        );
         assert!((raw - 1500.0).abs() < 1e-9, "unfiltered cursor at {raw}");
     }
 
