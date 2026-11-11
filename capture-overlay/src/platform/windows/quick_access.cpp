@@ -54,6 +54,7 @@
 #include <QPainterPath>
 #include <QPointer>
 #include <QProcess>
+#include <QPushButton>
 #include <QRegion>
 #include <QScreen>
 #include <QSettings>
@@ -2017,6 +2018,94 @@ public:
             m_activeSession->stop();
     }
 
+    /// Offer to save recordings whose recorder stopped without finishing:
+    /// a crash, a power cut, or a killed process. The studied recorder offers
+    /// the same recover-or-discard choice on its next launch.
+    void offerRecovery()
+    {
+        if (m_activeSession || !m_pendingRecoveries.isEmpty())
+            return;
+        const QVector<Platform::UnfinishedRecording> unfinished =
+            Platform::RecordingSession::unfinishedRecordings();
+        if (unfinished.isEmpty())
+            return;
+
+        QMessageBox box;
+        box.setWindowTitle(QStringLiteral("Recording"));
+        box.setIcon(QMessageBox::Question);
+        box.setText(unfinished.size() == 1
+                        ? QStringLiteral("A recording did not finish saving.")
+                        : QStringLiteral("%1 recordings did not finish saving.")
+                              .arg(unfinished.size()));
+        box.setInformativeText(QStringLiteral(
+            "ApexShot stopped before it could save them. Recover saves what was captured; "
+            "Discard deletes it."));
+        QPushButton* recoverButton =
+            box.addButton(QStringLiteral("Recover"), QMessageBox::AcceptRole);
+        QPushButton* discardButton =
+            box.addButton(QStringLiteral("Discard"), QMessageBox::DestructiveRole);
+        box.addButton(QStringLiteral("Later"), QMessageBox::RejectRole);
+        box.setDefaultButton(recoverButton);
+        box.exec();
+
+        if (box.clickedButton() == discardButton) {
+            for (const Platform::UnfinishedRecording& item : unfinished)
+                Platform::RecordingSession::discardUnfinished(item.workDir);
+            return;
+        }
+        if (box.clickedButton() != recoverButton)
+            return;
+        m_pendingRecoveries = unfinished;
+        recoverNextRecording();
+    }
+
+    void recoverNextRecording()
+    {
+        if (m_pendingRecoveries.isEmpty() || m_activeSession)
+            return;
+        const Platform::UnfinishedRecording item = m_pendingRecoveries.takeFirst();
+        auto* session = new Platform::RecordingSession(this);
+        // The recovery holds the recorder like a recording would, so a new
+        // recording cannot start while the old one is still being joined.
+        m_activeSession = session;
+        const Platform::ShellSettings settings = Platform::loadShellSettings();
+
+        connect(session,
+                &Platform::RecordingSession::warning,
+                this,
+                [](const QString& message) {
+                    QMessageBox::information(nullptr, QStringLiteral("Recording"), message);
+                });
+        connect(session,
+                &Platform::RecordingSession::finished,
+                this,
+                [this, session, settings](bool kept, const QString& path, const QString& error) {
+                    if (m_activeSession == session)
+                        m_activeSession = nullptr;
+                    session->deleteLater();
+                    if (kept)
+                        presentRecording(QImage(), path, settings);
+                    else if (!error.isEmpty())
+                        QMessageBox::warning(
+                            nullptr,
+                            QStringLiteral("Recording"),
+                            QStringLiteral("The recording could not be recovered: %1").arg(error));
+                    QTimer::singleShot(0, this, [this] { recoverNextRecording(); });
+                });
+
+        QString error;
+        if (!session->recover(item.workDir, error)) {
+            if (m_activeSession == session)
+                m_activeSession = nullptr;
+            session->deleteLater();
+            QMessageBox::warning(
+                nullptr,
+                QStringLiteral("Recording"),
+                QStringLiteral("The recording could not be recovered: %1").arg(error));
+            QTimer::singleShot(0, this, [this] { recoverNextRecording(); });
+        }
+    }
+
 private:
     /// Keep the bubble's look and place, so the next preview opens the way this
     /// one was left instead of at the settings window's defaults.
@@ -3183,6 +3272,8 @@ private:
     QString m_lastScreenshotPath;
     QString m_lastScreenshotText;
     Platform::RecordingSession* m_activeSession = nullptr;
+    /// Unfinished recordings the person chose to recover, saved one at a time.
+    QVector<Platform::UnfinishedRecording> m_pendingRecoveries;
     /// Set when the restart button asks for a fresh take after the current
     /// one has finished discarding.
     std::function<void()> m_restartAfterFinish;
@@ -3474,6 +3565,10 @@ int run(QApplication& app)
                          if (reason == QSystemTrayIcon::Trigger)
                              shell->openMenu();
                      });
+
+    // Give the tray a moment to settle before asking about unfinished
+    // recordings from a previous run.
+    QTimer::singleShot(1500, shell, [shell] { shell->offerRecovery(); });
 
     if (!arguments.contains(QStringLiteral("--background")))
         QTimer::singleShot(0, shell, [shell] { shell->openMenu(); });
