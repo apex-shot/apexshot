@@ -1632,10 +1632,14 @@ impl Data {
     }
 
     /// Put the camera layer on the playhead: the composition instant its
-    /// layouts run on, and how far the screen's zoom has shrunk it there.
+    /// layouts run on, how far the screen's zoom has shrunk it there, and the
+    /// split's resting edge from the cursor.
     /// Both preview paths (the tick and a published edit) call this, so the
     /// camera never runs on a clock the shrink was not computed for.
-    fn sync_webcam_to_playhead(&self) {
+    fn sync_webcam_to_playhead(
+        &self,
+        sidecar: impl FnOnce() -> Option<crate::recording::editor::sidecar::PointerSidecar>,
+    ) {
         let Some(webcam) = self.webcam.as_ref() else {
             return;
         };
@@ -1650,6 +1654,19 @@ impl Data {
                 self.zoom_camera.lead_in_seconds(),
             )
         });
+        let fps = if self.fps > 0.0 { self.fps } else { 30.0 };
+        webcam.set_split_rest_at(
+            self.playhead,
+            &self.zoom_clips,
+            &self.camera_mapping(),
+            self.total_duration(),
+            super::zoom::ZoomCameraSettings {
+                frame_rate: fps,
+                ..self.zoom_camera
+            },
+            self.frame_size,
+            sidecar,
+        );
     }
 
     /// Returns whether the focus point actually moved, so the caller can skip a
@@ -2614,7 +2631,7 @@ impl Timeline {
         let placement = data.placement();
         let add_zoom = data.add_zoom_tool();
         let unzoomed = placement.is_some() || add_zoom.is_some();
-        data.sync_webcam_to_playhead();
+        data.sync_webcam_to_playhead(|| self.cursor.sidecar());
         let fps = if data.fps > 0.0 { data.fps } else { 30.0 };
         let camera_settings = super::zoom::ZoomCameraSettings {
             frame_rate: fps,
@@ -4093,7 +4110,7 @@ pub(super) fn build(
                     }
                 }
                 let composition_time = data.playhead;
-                data.sync_webcam_to_playhead();
+                data.sync_webcam_to_playhead(|| cursor.sidecar());
                 let placement = data.placement();
                 let add_zoom = data.add_zoom_tool();
                 let unzoomed = placement.is_some() || add_zoom.is_some();

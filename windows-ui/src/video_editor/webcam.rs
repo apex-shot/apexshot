@@ -1963,6 +1963,16 @@ struct State {
     split_gap: Cell<f64>,
     pane_radius: Cell<f64>,
     zoom_shrink: Cell<f64>,
+    /// The split's resting edge at the composition instant, see
+    /// [`super::split_rest`].
+    split_rest: Cell<f64>,
+    /// The plan `split_rest` is read from, and the key it was built for.
+    split_rest_plan: RefCell<
+        Option<(
+            super::split_rest::SplitRestKey,
+            super::split_rest::SplitRestPlan,
+        )>,
+    >,
     /// The source time of the frame on screen, for the silence hide.
     source_seconds: Cell<f64>,
     /// The video document this layer was loaded for, for its audio.
@@ -2012,6 +2022,8 @@ impl WebcamModel {
                 split_gap: Cell::new(0.0),
                 pane_radius: Cell::new(0.0),
                 zoom_shrink: Cell::new(0.0),
+                split_rest: Cell::new(0.0),
+                split_rest_plan: RefCell::new(None),
                 source_seconds: Cell::new(0.0),
                 source_path: RefCell::new(None),
                 cache: RefCell::new(None),
@@ -2250,6 +2262,77 @@ impl WebcamModel {
         });
     }
 
+    /// Read where the split's screen rests at `time` from the cursor, sprung
+    /// the studied way. The plan is rebuilt only when what it depends on
+    /// changes; `sidecar` is asked for only then.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn set_split_rest_at(
+        &self,
+        time: f64,
+        zooms: &[super::timeline::ZoomClip],
+        mapping: &super::zoom::TimeMapping,
+        duration: f64,
+        zoom: super::zoom::ZoomCameraSettings,
+        source_size: Option<(u32, u32)>,
+        sidecar: impl FnOnce() -> Option<crate::recording::editor::sidecar::PointerSidecar>,
+    ) {
+        let Some(settings) = self.settings() else {
+            self.state.split_rest.set(0.0);
+            return;
+        };
+        let camera_aspect = match self.state.track.borrow().as_ref() {
+            Some(track) => track.camera_size.0 as f64 / f64::from(track.camera_size.1.max(1)),
+            None => {
+                self.state.split_rest.set(0.0);
+                return;
+            }
+        };
+        let Some((width, height)) = source_size.filter(|(w, h)| *w > 0 && *h > 0) else {
+            self.state.split_rest.set(0.0);
+            return;
+        };
+        let video_aspect = f64::from(width) / f64::from(height);
+        let stage = match self.state.stage_aspect.get() {
+            aspect if aspect > 0.0 => aspect,
+            _ => video_aspect,
+        };
+        let key = super::split_rest::SplitRestKey {
+            layouts: self.state.layouts.borrow().clone(),
+            settings,
+            stage: StageShape {
+                aspect: stage,
+                screen_aspect: video_aspect,
+                split_gap: self.state.split_gap.get(),
+                pane_radius: self.state.pane_radius.get(),
+                split_rest: 0.0,
+            },
+            camera_aspect,
+            zooms: zooms.to_vec(),
+            mapping: mapping.clone(),
+            duration,
+            zoom,
+        };
+        let mut cached = self.state.split_rest_plan.borrow_mut();
+        if cached.as_ref().map(|(cached_key, _)| cached_key) != Some(&key) {
+            let cursor = sidecar()
+                .map(|sidecar| {
+                    super::split_rest::cursor_track(&sidecar, (f64::from(width), f64::from(height)))
+                })
+                .unwrap_or_default();
+            let plan = super::split_rest::plan_for(&key, &cursor);
+            *cached = Some((key, plan));
+        }
+        let value = cached
+            .as_ref()
+            .map(|(_, plan)| plan.value_at(time))
+            .unwrap_or(0.0);
+        self.state.split_rest.set(if value.is_finite() {
+            value.clamp(0.0, 1.0)
+        } else {
+            0.0
+        });
+    }
+
     /// Put the layer back where the recording captured it.
     pub fn reset(&self) {
         let Some(seeded) = *self.state.seeded.borrow() else {
@@ -2294,7 +2377,7 @@ impl WebcamModel {
                 screen_aspect: video_aspect,
                 split_gap: self.state.split_gap.get(),
                 pane_radius: self.state.pane_radius.get(),
-                split_rest: 0.0,
+                split_rest: self.state.split_rest.get(),
             },
             camera_aspect,
             self.state.zoom_shrink.get(),

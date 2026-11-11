@@ -7,10 +7,11 @@
 //! (`B39:18148`). This module decides the target, 0 for the resting edge and
 //! 1 for the other, and springs it over the composition.
 
-#![allow(dead_code)] // Wired into the export and the preview in a following change.
+use crate::recording::editor::sidecar::PointerSidecar;
 
-use super::webcam::Rect;
-use super::zoom::{self, CameraSpring};
+use super::timeline::ZoomClip;
+use super::webcam::{CameraLayout, LayerSettings, LayoutSettings, Rect, StageShape};
+use super::zoom::{self, CameraSpring, TimeMapping, ZoomCameraSettings};
 
 /// The studied clearance, as a share of the screen's cover width along the
 /// split (`DgH:7947`).
@@ -187,6 +188,100 @@ impl SplitRestPlan {
     }
 }
 
+/// Everything a split rest plan is built from. Two equal keys build the same
+/// plan, so the preview rebuilds only when one of these changes.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct SplitRestKey {
+    pub layouts: LayoutSettings,
+    pub settings: LayerSettings,
+    /// The stage; its `split_rest` is ignored.
+    pub stage: StageShape,
+    pub camera_aspect: f64,
+    pub zooms: Vec<ZoomClip>,
+    pub mapping: TimeMapping,
+    /// The composition's length in seconds.
+    pub duration: f64,
+    /// The screen's spring knobs and the composition frame rate.
+    pub zoom: ZoomCameraSettings,
+}
+
+/// The cursor as `(t, x01, y01)` in fractions of a `frame`-sized recording,
+/// moves and clicks together, sorted by time: the studied bounds read every
+/// mouse event (`B39:3365`).
+pub(super) fn cursor_track(sidecar: &PointerSidecar, frame: (f64, f64)) -> Vec<(f64, f64, f64)> {
+    if !(frame.0 > 0.0 && frame.1 > 0.0) {
+        return Vec::new();
+    }
+    let map = |x: f64, y: f64| {
+        let (x, y) = sidecar.map_to_video(x, y, frame.0, frame.1);
+        (x / frame.0, y / frame.1)
+    };
+    let mut track: Vec<(f64, f64, f64)> = sidecar
+        .pointer
+        .iter()
+        .map(|sample| (sample.t, sample.x, sample.y))
+        .chain(
+            sidecar
+                .clicks
+                .iter()
+                .map(|click| (click.t, click.x, click.y)),
+        )
+        .map(|(t, x, y)| {
+            let (x, y) = map(x, y);
+            (t, x, y)
+        })
+        .filter(|(t, x, y)| t.is_finite() && x.is_finite() && y.is_finite())
+        .collect();
+    track.sort_by(|a, b| a.0.total_cmp(&b.0));
+    track
+}
+
+/// The split's resting edge at composition `time`: `None` holds the last
+/// target (the screen is zoomed, or between segments).
+fn target_at(key: &SplitRestKey, cursor: &[(f64, f64, f64)], time: f64) -> Option<f64> {
+    if !key.settings.enabled || key.layouts.layout_at(time) != CameraLayout::SplitScreen {
+        return Some(0.0);
+    }
+    // The studied split only picks a resting side while unzoomed (`DgH:7933`).
+    if super::webcam::zoom_shrink_at(&key.zooms, time, key.zoom.lead_in_seconds()) > 0.0 {
+        return None;
+    }
+    let stage = StageShape {
+        split_rest: 0.0,
+        ..key.stage
+    };
+    let frame = key
+        .layouts
+        .frame_at_staged(time, key.settings, stage, key.camera_aspect, 0.0);
+    let cover =
+        super::webcam::screen_cover_rect_in(frame.screen, stage.aspect, stage.screen_aspect);
+    let geometry = SplitGeometry {
+        pane: frame.screen,
+        camera: frame.camera,
+        cover,
+        horizontal: !(stage.aspect.is_finite() && stage.aspect > 0.0) || stage.aspect >= 1.0,
+        screen_first: !key.layouts.split_flip,
+    };
+    let source = key.mapping.source_at(time)?;
+    let Some(bounds) = cursor_bounds(cursor, source) else {
+        return Some(0.0);
+    };
+    Some(if flips(geometry, bounds) { 1.0 } else { 0.0 })
+}
+
+/// The sprung resting edge over the whole composition.
+pub(super) fn plan_for(key: &SplitRestKey, cursor: &[(f64, f64, f64)]) -> SplitRestPlan {
+    if cursor.is_empty() {
+        return SplitRestPlan::default();
+    }
+    SplitRestPlan::build(
+        key.duration,
+        key.zoom.frame_rate,
+        key.zoom.spring(),
+        |time| target_at(key, cursor, time),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -337,5 +432,76 @@ mod tests {
         assert_eq!(mapping.source_at(2.5), Some(10.5));
         assert_eq!(mapping.source_at(3.5), None);
         assert_eq!(zoom::TimeMapping::default().source_at(4.0), Some(4.0));
+    }
+
+    #[test]
+    fn the_plan_flips_a_split_when_the_cursor_nears_the_camera() {
+        // A manual 0.6 side-by-side split of a 16:9 screen on a 16:9 stage:
+        // the screen's cover is wider than its pane. The cursor sits at the
+        // left for a second, then moves under where the camera is.
+        let key = SplitRestKey {
+            layouts: LayoutSettings {
+                default_layout: CameraLayout::SplitScreen,
+                split_auto: false,
+                split_ratio: 0.6,
+                ..LayoutSettings::default()
+            },
+            settings: LayerSettings::default(),
+            stage: StageShape {
+                aspect: 16.0 / 9.0,
+                screen_aspect: 16.0 / 9.0,
+                split_gap: 0.0,
+                pane_radius: 0.0,
+                split_rest: 0.0,
+            },
+            camera_aspect: 1.0,
+            zooms: Vec::new(),
+            mapping: TimeMapping::default(),
+            duration: 4.0,
+            zoom: ZoomCameraSettings {
+                frame_rate: 60.0,
+                ..ZoomCameraSettings::default()
+            },
+        };
+        let cursor = [
+            (0.0, 0.1, 0.5),
+            (1.0, 0.1, 0.5),
+            (1.01, 0.9, 0.5),
+            (4.0, 0.9, 0.5),
+        ];
+        let plan = plan_for(&key, &cursor);
+        assert_eq!(
+            plan.value_at(0.3),
+            0.0,
+            "clear of the camera it rests on its own edge"
+        );
+        assert!(
+            (plan.value_at(3.5) - 1.0).abs() < 0.02,
+            "under the camera it slides over"
+        );
+        // The look-ahead starts the slide before the cursor gets there.
+        assert!(plan.value_at(0.9) > 0.0);
+    }
+
+    #[test]
+    fn the_plan_stays_at_rest_outside_the_split() {
+        let key = SplitRestKey {
+            layouts: LayoutSettings {
+                default_layout: CameraLayout::CameraOverlay,
+                ..LayoutSettings::default()
+            },
+            settings: LayerSettings::default(),
+            stage: StageShape::plain(16.0 / 9.0),
+            camera_aspect: 1.0,
+            zooms: Vec::new(),
+            mapping: TimeMapping::default(),
+            duration: 2.0,
+            zoom: ZoomCameraSettings {
+                frame_rate: 60.0,
+                ..ZoomCameraSettings::default()
+            },
+        };
+        let plan = plan_for(&key, &[(0.0, 0.9, 0.5), (2.0, 0.9, 0.5)]);
+        assert_eq!(plan.value_at(1.0), 0.0);
     }
 }

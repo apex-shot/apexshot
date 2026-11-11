@@ -626,6 +626,40 @@ fn render_range(
         .filter(|webcam| webcam.source_size.0 > 0 && webcam.source_size.1 > 0)
         .map(|webcam| f64::from(webcam.source_size.0) / f64::from(webcam.source_size.1))
         .unwrap_or(16.0 / 9.0);
+    // Where the split's screen rests, from the cursor, sprung over the
+    // composition the studied way.
+    let split_rest_plan = webcam.as_ref().map(|webcam| {
+        let key = super::split_rest::SplitRestKey {
+            layouts: layouts.clone(),
+            settings: webcam.settings,
+            stage: webcam::StageShape {
+                aspect: stage_aspect,
+                screen_aspect: source_aspect,
+                split_gap: webcam.split_gap,
+                pane_radius: webcam.pane_radius,
+                split_rest: 0.0,
+            },
+            camera_aspect,
+            zooms: model.zooms.clone(),
+            mapping: plan.mapping.clone(),
+            duration: plan.total as f64 / fps,
+            zoom: camera_settings,
+        };
+        let cursor = model
+            .sidecar
+            .as_ref()
+            .map(|sidecar| {
+                super::split_rest::cursor_track(
+                    sidecar,
+                    (
+                        f64::from(model.source_size.0),
+                        f64::from(model.source_size.1),
+                    ),
+                )
+            })
+            .unwrap_or_default();
+        super::split_rest::plan_for(&key, &cursor)
+    });
     #[cfg(target_os = "windows")]
     let mut gpu = if !plan.passthrough && model.sidecar.is_none() && webcam.is_none() {
         match gpu::Scaler::new(model.source_size, size, space, fps) {
@@ -915,7 +949,10 @@ fn render_range(
                                 screen_aspect: source_aspect,
                                 split_gap: webcam.split_gap,
                                 pane_radius: webcam.pane_radius,
-                                split_rest: 0.0,
+                                split_rest: split_rest_plan
+                                    .as_ref()
+                                    .map(|plan| plan.value_at(time))
+                                    .unwrap_or(0.0),
                             },
                             camera_aspect,
                             shrink,

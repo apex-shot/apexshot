@@ -139,7 +139,6 @@ impl TimeMapping {
 
     /// The recorded source time shown at `composition` seconds, or `None`
     /// between segments and past the end.
-    #[allow(dead_code)] // Wired into the split's rest in a following change.
     pub(super) fn source_at(&self, composition: f64) -> Option<f64> {
         if !composition.is_finite() {
             return None;
