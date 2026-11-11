@@ -3253,6 +3253,10 @@ mod tests {
             .and_then(|value| value.parse().ok())
             .unwrap_or(0.0);
         let always_use_default = std::env::var("APEXSHOT_COMPARISON_ALWAYS_DEFAULT").is_ok();
+        let shake_threshold = std::env::var("APEXSHOT_COMPARISON_SHAKE")
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(crate::recording::editor::cursor_shake::DEFAULT_REMOVE_SHAKE_THRESHOLD);
         let cuts: Vec<f64> = std::env::var("APEXSHOT_COMPARISON_CUTS")
             .ok()
             .map(|text| {
@@ -3306,7 +3310,20 @@ mod tests {
             {
                 let free_x = free.presented_at(t, motion).map(|frame| frame.x);
                 let cut_x = with_cuts.presented_at(t, motion).map(|frame| frame.x);
-                eprintln!("plan {t}: free {free_x:?} cut {cut_x:?}");
+                let mut unfiltered = free.clone();
+                unfiltered.set_shake_threshold(0.0);
+                let mut filtered = free.clone();
+                filtered.set_shake_threshold(shake_threshold);
+                let raw = |sidecar: &crate::recording::editor::sidecar::PointerSidecar| {
+                    sidecar
+                        .presented_at(t, motion)
+                        .map(|frame| (frame.x.round(), frame.y.round()))
+                };
+                eprintln!(
+                    "plan {t}: free {free_x:?} cut {cut_x:?} shake-off {:?} shake-on {:?}",
+                    raw(&unfiltered),
+                    raw(&filtered)
+                );
             }
         }
         let model = ExportModel {
@@ -3323,6 +3340,7 @@ mod tests {
                 rotate_on_x_movement_ratio: rotation_ratio,
                 base_rotation_deg,
                 always_use_default,
+                remove_shake_threshold: shake_threshold,
                 ..CursorSettings::default()
             },
             sidecar: Some(sidecar),
