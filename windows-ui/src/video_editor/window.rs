@@ -2011,6 +2011,14 @@ fn export_canvas(stage: &Stage, source_size: (u32, u32)) -> Option<super::export
     }
     let size = output_dimensions(aspect, source_size, padding, has_fill);
     let video = video_rect_dimensions(aspect, source_size, padding, has_fill);
+    let canvas = canvas_dimensions(aspect, source_size);
+    let pad = padding_px(canvas, padding, has_fill).round().max(0.0) as u32;
+    let area = (
+        pad.min(size.0 / 2),
+        pad.min(size.1 / 2),
+        size.0.saturating_sub(pad * 2),
+        size.1.saturating_sub(pad * 2),
+    );
     let mut surface = gtk4::cairo::ImageSurface::create(
         gtk4::cairo::Format::ARgb32,
         size.0 as i32,
@@ -2048,6 +2056,7 @@ fn export_canvas(stage: &Stage, source_size: (u32, u32)) -> Option<super::export
         size,
         video,
         radius,
+        area,
         background: std::sync::Arc::new(background),
     })
 }
@@ -2061,10 +2070,17 @@ fn export_model(
     let footage = timeline.export_footage()?;
     let source_size = stage.source_size.get()?;
     let sidecar = stage.cursor.sidecar();
+    let footage_source = footage.source.clone();
     let source = sidecar
         .as_ref()
         .and_then(|sidecar| sidecar.editable_video_path(&footage.source))
         .unwrap_or(footage.source);
+    // The screen-only file a camera recording edits from may have no sound;
+    // the saved recording shares its timeline and always keeps it.
+    let mut audio = vec![source.clone()];
+    if footage_source != source {
+        audio.push(footage_source);
+    }
     Some(super::export::ExportModel {
         source,
         source_size,
@@ -2090,6 +2106,7 @@ fn export_model(
         },
         canvas: export_canvas(stage, source_size),
         crf: stage.quality.get().crf(),
+        audio,
     })
 }
 

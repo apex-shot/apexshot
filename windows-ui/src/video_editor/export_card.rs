@@ -10,6 +10,8 @@ use std::rc::Rc;
 use std::sync::mpsc::TryRecvError;
 use std::time::{Duration, Instant};
 
+/// The card covers the editor, so only one export runs at a time; a second one
+/// cannot be started until this card is dismissed.
 pub(super) fn show(
     shell: &Overlay,
     model: ExportModel,
@@ -103,10 +105,8 @@ pub(super) fn show(
     });
 
     let started = Instant::now();
-    let mut last_sample: Option<(Instant, u64)> = None;
-    let mut per_frame: Option<f64> = None;
+    let mut eta = Eta::default();
     let mut fraction = 0.0_f64;
-    let mut remaining = None;
     glib::timeout_add_local(Duration::from_millis(100), {
         let shell = shell.downgrade();
         let screen = screen.downgrade();
@@ -126,43 +126,30 @@ pub(super) fn show(
                 update = handle.receiver.try_recv();
             }
             if let Some((done, total)) = latest {
-                if let Some((since, previous)) = last_sample {
-                    if done > previous {
-                        let sample = since.elapsed().as_secs_f64() / (done - previous) as f64;
-                        per_frame = Some(
-                            per_frame.map_or(sample, |previous| previous * 0.6 + sample * 0.4),
-                        );
-                    } else if done < previous {
-                        // A hardware-encoder fallback starts progress from the beginning.
-                        per_frame = None;
-                    }
-                }
-                last_sample = Some((Instant::now(), done));
                 fraction = if total == 0 {
                     0.0
                 } else {
                     done as f64 / total as f64
                 };
-                remaining = per_frame.map(|seconds| seconds * total.saturating_sub(done) as f64);
+                eta.sample(Instant::now(), fraction);
                 bar.set_fraction(fraction.clamp(0.0, 1.0));
                 if !cancelling.get() {
-                    title.set_text(&format!(
-                        "{} · {:.0}%",
-                        t("Exporting video"),
-                        fraction * 100.0
-                    ));
+                    title.set_text(&if done == 0 {
+                        t("Preparing export…")
+                    } else {
+                        format!("{} · {:.0}%", t("Exporting video"), fraction * 100.0)
+                    });
                 }
             }
-            let eta = if fraction >= 1.0 {
+            let left = if fraction >= 1.0 {
                 t("Finishing…")
-            } else if let Some(seconds) = remaining {
-                let since = last_sample.map_or(0.0, |(instant, _)| instant.elapsed().as_secs_f64());
-                format!("{} {}", clock((seconds - since).max(0.0)), t("left"))
+            } else if let Some(seconds) = eta.remaining(Instant::now()) {
+                format!("{} {}", clock(seconds), t("left"))
             } else {
                 t("Estimating…")
             };
             timing.set_text(&format!(
-                "{} · {eta}",
+                "{} · {left}",
                 clock(started.elapsed().as_secs_f64())
             ));
             let failure = match update {
@@ -174,7 +161,7 @@ pub(super) fn show(
                     restore_editor(&shell);
                     return glib::ControlFlow::Break;
                 }
-                Ok(ExportUpdate::Finished(path)) => {
+                Ok(ExportUpdate::Finished(path, sound)) => {
                     title.set_text(&t("Exported successfully"));
                     crate::utils::notify::desktop_notification(
                         &t("Export complete"),
@@ -185,16 +172,26 @@ pub(super) fn show(
                         clock(started.elapsed().as_secs_f64()),
                         t("Complete")
                     ));
+                    let mut notes = Vec::new();
                     if clipboard {
                         match copy_file(&path) {
-                            Ok(()) => detail.set_text(&t(
+                            Ok(()) => notes.push(t(
                                 "File copied to clipboard. Ready to paste into other apps.",
                             )),
-                            Err(error) => detail.set_text(&format!(
+                            Err(error) => notes.push(format!(
                                 "{} {error}",
                                 t("Video exported, but could not copy to clipboard:")
                             )),
                         }
+                    }
+                    if let Some(error) = sound {
+                        notes.push(format!(
+                            "{} {error}",
+                            t("Exported, but the sound could not be added:")
+                        ));
+                    }
+                    if !notes.is_empty() {
+                        detail.set_text(&notes.join("\n"));
                         detail.set_visible(true);
                     }
                     upload.set_visible(true);
@@ -333,6 +330,62 @@ fn copy_file(path: &std::path::Path) -> Result<(), String> {
         .clipboard()
         .set_content(Some(&gdk::ContentProvider::for_value(&list.to_value())))
         .map_err(|error| error.to_string())
+}
+
+/// Progress must advance at least this often for the rate to stay valid.
+const STALL: Duration = Duration::from_secs(3);
+/// The shortest measured window an estimate is shown from.
+const MIN_WINDOW: Duration = Duration::from_secs(1);
+
+/// Time left from the export's progress fraction. The rate is measured from
+/// the first advance after a start, a stall, or a restart, so a hardware
+/// fallback or a long pause does not leave a stale estimate behind.
+#[derive(Default)]
+struct Eta {
+    /// Where the current measurement started.
+    start: Option<(Instant, f64)>,
+    /// The latest advance.
+    last: Option<(Instant, f64)>,
+}
+
+impl Eta {
+    fn sample(&mut self, at: Instant, progress: f64) {
+        if !progress.is_finite() || progress <= 0.0 {
+            return;
+        }
+        match self.last {
+            Some((_, previous)) if progress < previous - 1e-9 => {
+                self.start = Some((at, progress));
+                self.last = Some((at, progress));
+            }
+            Some((when, previous)) if progress > previous + 1e-9 => {
+                if at.saturating_duration_since(when) >= STALL || self.start.is_none() {
+                    self.start = Some((at, progress));
+                }
+                self.last = Some((at, progress));
+            }
+            Some(_) => {}
+            None => {
+                self.start = Some((at, progress));
+                self.last = Some((at, progress));
+            }
+        }
+    }
+
+    fn remaining(&self, now: Instant) -> Option<f64> {
+        let (start_at, start_progress) = self.start?;
+        let (last_at, last_progress) = self.last?;
+        if now.saturating_duration_since(last_at) >= STALL {
+            return None;
+        }
+        let window = last_at.saturating_duration_since(start_at);
+        if window < MIN_WINDOW || last_progress <= start_progress {
+            return None;
+        }
+        let per_unit = window.as_secs_f64() / (last_progress - start_progress);
+        let since = now.saturating_duration_since(last_at).as_secs_f64();
+        Some(((1.0 - last_progress) * per_unit - since).max(0.0))
+    }
 }
 
 fn clock(seconds: f64) -> String {
@@ -543,5 +596,71 @@ mod tests {
         assert_eq!(clock(0.0), "00:00");
         assert_eq!(clock(67.0), "01:07");
         assert_eq!(clock(3661.0), "1:01:01");
+    }
+}
+
+#[cfg(test)]
+mod eta_tests {
+    use super::*;
+
+    #[test]
+    fn a_steady_export_projects_its_rate() {
+        let t0 = Instant::now();
+        let mut eta = Eta::default();
+        eta.sample(t0, 0.1);
+        eta.sample(t0 + Duration::from_millis(1000), 0.2);
+        eta.sample(t0 + Duration::from_millis(2000), 0.3);
+        let remaining = eta.remaining(t0 + Duration::from_millis(2000)).unwrap();
+        assert!((remaining - 7.0).abs() < 1e-6, "{remaining}");
+        let remaining = eta.remaining(t0 + Duration::from_millis(2500)).unwrap();
+        assert!((remaining - 6.5).abs() < 1e-6, "{remaining}");
+    }
+
+    #[test]
+    fn less_than_a_second_of_progress_gives_no_estimate() {
+        let t0 = Instant::now();
+        let mut eta = Eta::default();
+        eta.sample(t0, 0.1);
+        eta.sample(t0 + Duration::from_millis(500), 0.2);
+        assert_eq!(eta.remaining(t0 + Duration::from_millis(500)), None);
+    }
+
+    #[test]
+    fn a_stall_discards_the_rate_until_progress_resumes() {
+        let t0 = Instant::now();
+        let mut eta = Eta::default();
+        eta.sample(t0, 0.1);
+        eta.sample(t0 + Duration::from_millis(1000), 0.2);
+        eta.sample(t0 + Duration::from_millis(2000), 0.3);
+        assert_eq!(eta.remaining(t0 + Duration::from_millis(5500)), None);
+        eta.sample(t0 + Duration::from_millis(6000), 0.35);
+        assert_eq!(eta.remaining(t0 + Duration::from_millis(6000)), None);
+        eta.sample(t0 + Duration::from_millis(7000), 0.4);
+        let remaining = eta.remaining(t0 + Duration::from_millis(7000)).unwrap();
+        assert!((remaining - 12.0).abs() < 1e-6, "{remaining}");
+    }
+
+    #[test]
+    fn progress_running_backwards_restarts_the_measurement() {
+        let t0 = Instant::now();
+        let mut eta = Eta::default();
+        eta.sample(t0, 0.1);
+        eta.sample(t0 + Duration::from_millis(1000), 0.2);
+        eta.sample(t0 + Duration::from_millis(2000), 0.5);
+        eta.sample(t0 + Duration::from_millis(2100), 0.05);
+        assert_eq!(eta.remaining(t0 + Duration::from_millis(2100)), None);
+        eta.sample(t0 + Duration::from_millis(3100), 0.15);
+        let remaining = eta.remaining(t0 + Duration::from_millis(3100)).unwrap();
+        assert!((remaining - 8.5).abs() < 1e-6, "{remaining}");
+    }
+
+    #[test]
+    fn no_progress_is_not_a_measurement() {
+        let t0 = Instant::now();
+        let mut eta = Eta::default();
+        eta.sample(t0, 0.0);
+        eta.sample(t0 + Duration::from_millis(2000), 0.0);
+        assert_eq!(eta.remaining(t0 + Duration::from_millis(2000)), None);
+        assert!(eta.start.is_none());
     }
 }

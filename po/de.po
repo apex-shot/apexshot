@@ -4270,6 +4270,9 @@ msgid "Video exported, but could not copy to clipboard:"
 msgstr ""
 "Video exportiert, aber das Kopieren in die Zwischenablage war nicht möglich:"
 
+msgid "Exported, but the sound could not be added:"
+msgstr "Exportiert, aber der Ton konnte nicht hinzugefügt werden:"
+
 msgid "Wait for the background image to finish loading."
 msgstr "Warte, bis das Hintergrundbild vollständig geladen ist."
 
@@ -4464,6 +4467,20 @@ msgstr "Neigungsstärke"
 
 msgid "Tilt with motion"
 msgstr "Mit der Bewegung neigen"
+
+msgid "Codec"
+msgstr "Codec"
+
+msgid "Smaller files at the same quality, but not every app or browser plays HEVC."
+msgstr "Kleinere Dateien bei gleicher Qualität, aber nicht jede App und jeder Browser spielt HEVC ab."
+msgid "Hardware encoding uses a bitrate, so file sizes follow the estimate; the software encoder uses a constant quality."
+msgstr "Hardware-Kodierung nutzt eine Bitrate, daher folgen Dateigrößen der Schätzung; der Software-Encoder nutzt eine konstante Qualität."
+
+msgid "Estimated output size: {size}"
+msgstr "Geschätzte Dateigröße: {size}"
+
+msgid "Export time ≈ {time}"
+msgstr "Exportdauer ≈ {time}"
 
 msgid "Backgrounds and style"
 msgstr "Hintergründe und Stil"

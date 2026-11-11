@@ -68,6 +68,7 @@ mod tests {
             stage: None,
             canvas: None,
             crf: 23,
+            audio: Vec::new(),
         }
     }
 
