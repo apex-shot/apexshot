@@ -78,7 +78,6 @@ struct ShellSettings {
         RecordingSettings values;
         bool includeMicrophone = false;
         bool includeSpeaker = false;
-        bool showCursor = true;
         bool afterShowResult = true;
         bool afterCopyToClipboard = false;
         bool afterSave = true;
