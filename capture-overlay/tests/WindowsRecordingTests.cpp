@@ -232,7 +232,7 @@ bool validateSidecar(const QString& videoPath, double recordedSeconds)
         return false;
     }
 
-    static const QRegularExpression cursorIdPattern(QStringLiteral("^[0-9a-f]{16}$"));
+    static const QRegularExpression cursorIdPattern(QStringLiteral("^(std|custom)-[0-9a-f]{16}$"));
     const QDir cursorFolder = sidecarInfo.dir().filePath(cursorFolderName);
     QSet<QString> cursorIds;
     for (const QJsonValue& value : cursors) {
