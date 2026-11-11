@@ -820,6 +820,21 @@ msgstr "Открыть интерфейс записи:"
 msgid "Record Screen:"
 msgstr "Записать экран:"
 
+msgid "HEVC (smaller files)"
+msgstr "HEVC (файлы меньше)"
+
+msgid "H.264"
+msgstr "H.264"
+
+msgid "Pause or Resume Recording:"
+msgstr "Приостановить или продолжить запись:"
+
+msgid "Restart Recording:"
+msgstr "Начать запись заново:"
+
+msgid "Add Recording Marker:"
+msgstr "Добавить метку записи:"
+
 msgid "Stop and Save Recording:"
 msgstr "Остановить и сохранить запись:"
 

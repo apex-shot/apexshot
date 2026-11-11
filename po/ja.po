@@ -808,6 +808,21 @@ msgstr "録画 UI を開く:"
 msgid "Record Screen:"
 msgstr "画面を録画:"
 
+msgid "HEVC (smaller files)"
+msgstr "HEVC（小さいファイル）"
+
+msgid "H.264"
+msgstr "H.264"
+
+msgid "Pause or Resume Recording:"
+msgstr "録画を一時停止／再開:"
+
+msgid "Restart Recording:"
+msgstr "録画をやり直す:"
+
+msgid "Add Recording Marker:"
+msgstr "録画マーカーを追加:"
+
 msgid "Stop and Save Recording:"
 msgstr "録画を停止して保存:"
 

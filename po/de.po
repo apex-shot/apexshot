@@ -829,6 +829,21 @@ msgstr "Aufnahmeoberfläche öffnen:"
 msgid "Record Screen:"
 msgstr "Bildschirm aufnehmen:"
 
+msgid "HEVC (smaller files)"
+msgstr "HEVC (kleinere Dateien)"
+
+msgid "H.264"
+msgstr "H.264"
+
+msgid "Pause or Resume Recording:"
+msgstr "Aufnahme pausieren oder fortsetzen:"
+
+msgid "Restart Recording:"
+msgstr "Aufnahme neu starten:"
+
+msgid "Add Recording Marker:"
+msgstr "Aufnahmemarkierung setzen:"
+
 msgid "Stop and Save Recording:"
 msgstr "Aufnahme stoppen und speichern:"
 

@@ -812,6 +812,21 @@ msgstr "فتح واجهة التسجيل:"
 msgid "Record Screen:"
 msgstr "تسجيل الشاشة:"
 
+msgid "HEVC (smaller files)"
+msgstr "HEVC (ملفات أصغر)"
+
+msgid "H.264"
+msgstr "H.264"
+
+msgid "Pause or Resume Recording:"
+msgstr "إيقاف التسجيل مؤقتًا أو استئنافه:"
+
+msgid "Restart Recording:"
+msgstr "إعادة بدء التسجيل:"
+
+msgid "Add Recording Marker:"
+msgstr "إضافة علامة إلى التسجيل:"
+
 msgid "Stop and Save Recording:"
 msgstr "إيقاف التسجيل وحفظه:"
 

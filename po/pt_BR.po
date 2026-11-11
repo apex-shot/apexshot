@@ -822,6 +822,21 @@ msgstr "Abrir interface de gravação:"
 msgid "Record Screen:"
 msgstr "Gravar tela:"
 
+msgid "HEVC (smaller files)"
+msgstr "HEVC (arquivos menores)"
+
+msgid "H.264"
+msgstr "H.264"
+
+msgid "Pause or Resume Recording:"
+msgstr "Pausar ou retomar gravação:"
+
+msgid "Restart Recording:"
+msgstr "Reiniciar gravação:"
+
+msgid "Add Recording Marker:"
+msgstr "Adicionar marcador de gravação:"
+
 msgid "Stop and Save Recording:"
 msgstr "Parar e salvar gravação:"
 
