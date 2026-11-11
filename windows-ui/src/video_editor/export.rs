@@ -14,6 +14,7 @@ mod canvas;
 #[cfg(target_os = "windows")]
 mod gpu;
 mod hybrid;
+mod machine;
 pub(super) mod rate;
 
 pub(super) use canvas::CanvasLayout;
@@ -579,6 +580,10 @@ fn render_with_workers(
     workers: Option<usize>,
 ) -> Result<(), End> {
     let plan = plan_render(model, settings)?;
+    eprintln!(
+        "[export] machine: {}",
+        machine::describe(machine::current())
+    );
     let hardware = settings.hardware && !software_forced();
     let primary = if hardware {
         encoder
@@ -587,7 +592,7 @@ fn render_with_workers(
     };
     let workers = workers
         .or_else(worker_override)
-        .unwrap_or_else(|| worker_count(&plan, primary))
+        .unwrap_or_else(|| worker_count(&plan, primary, model.source_size))
         .clamp(1, 6);
     let done = Arc::new(AtomicU64::new(0));
     let finished = Arc::new(AtomicBool::new(false));
@@ -1155,7 +1160,7 @@ fn render_range(
     Ok(())
 }
 
-fn worker_count(plan: &RenderPlan, primary: Encoder) -> usize {
+fn worker_count(plan: &RenderPlan, primary: Encoder, source: (u32, u32)) -> usize {
     if plan.passthrough || plan.total < (plan.fps * 8.0).round() as u64 {
         return 1;
     }
@@ -1176,6 +1181,12 @@ fn worker_count(plan: &RenderPlan, primary: Encoder) -> usize {
         .min(by_resolution)
         .min(by_sessions)
         .min(by_frames)
+        .min(machine::memory_workers(
+            machine::current(),
+            source,
+            plan.output,
+            primary.is_software(),
+        ))
 }
 
 fn split_ranges(total: u64, workers: usize) -> Vec<(u64, u64)> {

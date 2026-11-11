@@ -160,9 +160,21 @@ machine is limited by the worker count:
 - A hardware encoder that cannot open is skipped by the probe. A hardware
   encoder that fails later triggers the `libx264` retry.
 
-When a GPU compositor lands, its frame ring can be sized from
-`IDXGIAdapter3::QueryVideoMemoryInfo` and the same range split can fall back to
-the CPU compositor on WARP or low-memory adapters.
+The export reads one machine profile (`export/machine.rs`), logged at the start
+of every export: cores, RAM and free RAM, and the GPU. Only a hardware adapter
+counts as a GPU: with none, or only the software Basic Render adapter, the GPU
+crop and scale is skipped and the CPU path runs. With several, the
+low-power adapter is used, the integrated GPU on a hybrid laptop: frames are
+uploaded and read back every frame, and an integrated GPU shares system RAM
+with the CPU and the Quick Sync encoder. On the development machine a zoomed
+1080p export ran 25-27 ms/frame on the Iris Xe and 26-97 ms/frame on the RTX
+A500, which also slowed exports that never touched it by waking it.
+`APEXSHOT_EXPORT_ADAPTER=high-performance` picks the other one. The GPU path also has to
+fit: half the adapter's memory budget, and for an integrated GPU, which takes
+its textures from system RAM, half the free RAM. Parallel ranges are capped so
+they fit in half the free RAM (each range holds its frame buffers and its own
+decoder and encoder). `APEXSHOT_EXPORT_RAM_MB=<n>` and `APEXSHOT_EXPORT_GPU=0`
+simulate a weaker machine.
 
 ## Measuring
 
