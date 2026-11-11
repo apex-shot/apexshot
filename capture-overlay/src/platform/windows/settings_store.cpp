@@ -294,8 +294,6 @@ ShellSettings loadShellSettings()
             .toBool(out.recording.includeMicrophone);
     out.recording.includeSpeaker =
         recording.value(QStringLiteral("include_speaker")).toBool(out.recording.includeSpeaker);
-    out.recording.showCursor =
-        recording.value(QStringLiteral("show_cursor")).toBool(out.recording.showCursor);
     out.recording.afterShowResult =
         recording.value(QStringLiteral("after_show_result")).toBool(out.recording.afterShowResult);
     out.recording.afterCopyToClipboard =

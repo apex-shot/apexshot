@@ -447,7 +447,6 @@ fn write_shell_settings_to(path: &Path, config: &AppConfig) -> anyhow::Result<()
             "mono_audio": config.rec_video_mono,
             "include_microphone": config.rec_mic,
             "include_speaker": config.rec_speaker,
-            "show_cursor": config.rec_cursor,
             "after_show_result": true,
             "after_copy_to_clipboard": config.rec_after_capture_copy_to_clipboard,
             "after_save": config.rec_after_capture_save,
@@ -678,7 +677,7 @@ mod tests {
         assert_eq!(value["recording"]["mono_audio"], true);
         assert_eq!(value["recording"]["include_microphone"], true);
         assert_eq!(value["recording"]["include_speaker"], true);
-        assert_eq!(value["recording"]["show_cursor"], false);
+        assert!(value["recording"].get("show_cursor").is_none());
         assert_eq!(value["recording"]["after_copy_to_clipboard"], true);
         assert_eq!(value["recording"]["after_save"], false);
         assert_eq!(value["recording"]["after_open_editor"], true);

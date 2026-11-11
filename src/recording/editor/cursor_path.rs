@@ -7,7 +7,9 @@
 //! presets, and the default is the soft spring the reference uses when no
 //! preset is chosen. [`super::cursor_planner`] runs the planner that feeds it.
 
-/// The reference integrates the spring in four-millisecond buckets.
+/// The reference integrates the spring in one-millisecond steps and samples
+/// its speed schedule every four milliseconds: the spring's stiffness and
+/// damping are refreshed only when this bucket changes.
 pub const SPRING_BUCKET_MS: f64 = 4.0;
 /// Velocity and distance below which the reference snaps the spring to rest.
 pub const REST_EPSILON: f64 = 0.01;

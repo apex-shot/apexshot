@@ -76,7 +76,6 @@ void checkDefaults(const QTemporaryDir& dir)
     CHECK(settings.recording.values.qualityIndex == 1);
     CHECK(!settings.recording.values.monoAudio);
     CHECK(!settings.recording.includeMicrophone);
-    CHECK(settings.recording.showCursor);
     CHECK(!settings.recording.afterCopyToClipboard);
     CHECK(settings.recording.afterSave);
     CHECK(!settings.recording.afterOpenEditor);
@@ -193,7 +192,6 @@ void checkParsing(const QTemporaryDir& dir)
     CHECK(settings.recording.values.monoAudio);
     CHECK(settings.recording.includeMicrophone);
     CHECK(settings.recording.includeSpeaker);
-    CHECK(!settings.recording.showCursor);
     CHECK(!settings.recording.afterShowResult);
     CHECK(settings.recording.afterCopyToClipboard);
     CHECK(!settings.recording.afterSave);
