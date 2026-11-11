@@ -1417,6 +1417,9 @@ msgstr "Masquer la piste"
 msgid "Hide video"
 msgstr "Masquer la vidéo"
 
+msgid "Remove cursor shake"
+msgstr "Supprimer les tremblements du curseur"
+
 msgid "Hide when idle"
 msgstr "Masquer en cas d'inactivité"
 

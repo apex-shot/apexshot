@@ -1413,6 +1413,9 @@ msgstr "Скрыть трек"
 msgid "Hide video"
 msgstr "Скрыть видео"
 
+msgid "Remove cursor shake"
+msgstr "Убирать дрожание курсора"
+
 msgid "Hide when idle"
 msgstr "Скрывать при бездействии"
 

@@ -1396,6 +1396,9 @@ msgstr "إخفاء المسار"
 msgid "Hide video"
 msgstr "إخفاء الفيديو"
 
+msgid "Remove cursor shake"
+msgstr "إزالة اهتزاز المؤشر"
+
 msgid "Hide when idle"
 msgstr "إخفاء الشاشة عند عدم الاستخدام"
 

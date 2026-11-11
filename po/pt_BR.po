@@ -1412,6 +1412,9 @@ msgstr "Ocultar faixa"
 msgid "Hide video"
 msgstr "Ocultar vídeo"
 
+msgid "Remove cursor shake"
+msgstr "Remover tremor do cursor"
+
 msgid "Hide when idle"
 msgstr "Ocultar quando inativo"
 

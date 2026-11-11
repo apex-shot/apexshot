@@ -1386,6 +1386,9 @@ msgstr "トラックを非表示にする"
 msgid "Hide video"
 msgstr "動画を非表示にする"
 
+msgid "Remove cursor shake"
+msgstr "カーソルの揺れを除去"
+
 msgid "Hide when idle"
 msgstr "アイドル時に非表示にする"
 

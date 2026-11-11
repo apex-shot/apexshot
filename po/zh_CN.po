@@ -1384,6 +1384,9 @@ msgstr "隐藏音轨"
 msgid "Hide video"
 msgstr "隐藏视频"
 
+msgid "Remove cursor shake"
+msgstr "移除光标抖动"
+
 msgid "Hide when idle"
 msgstr "空闲时隐藏"
 

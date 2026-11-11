@@ -1420,6 +1420,9 @@ msgstr "Titel ausblenden"
 msgid "Hide video"
 msgstr "Video ausblenden"
 
+msgid "Remove cursor shake"
+msgstr "Zeigerzittern entfernen"
+
 msgid "Hide when idle"
 msgstr "Bei Inaktivität ausblenden"
 
