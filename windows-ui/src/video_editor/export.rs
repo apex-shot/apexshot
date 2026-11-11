@@ -4229,6 +4229,171 @@ mod webcam_export_tests {
     }
 
     #[test]
+    fn the_split_slides_its_screen_clear_of_the_cursor() {
+        use crate::recording::editor::sidecar::{CursorKind, PointerSample};
+
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-split-slide-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        if fs::create_dir_all(&dir).is_err() {
+            return;
+        }
+        let source = dir.join("screen.mp4");
+        if !halves_clip(&source, (640, 360), 3.0) {
+            eprintln!("skipping the split slide test: ffmpeg is unavailable");
+            return;
+        }
+        let Some(track_path) = webcam_track_file(&source) else {
+            eprintln!("skipping the split slide test: no sidecar directory");
+            return;
+        };
+        if let Some(parent) = track_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if !solid_clip(&track_path, "0x00ff00", "320x320", 3.0) {
+            return;
+        }
+        let track = WebcamTrack {
+            file: track_path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            width: 320,
+            height: 320,
+            duration: 3.0,
+            start: 0.0,
+            x: 0.7,
+            y: 0.1,
+            w: 0.2,
+            h: 0.3,
+            shape: 1,
+            flip: false,
+        };
+        let sidecar_path = PointerSidecar::sidecar_path(&source);
+        let write_pointer = |pointer: &[(f64, f64, f64)]| -> bool {
+            let mut sidecar = PointerSidecar::new(
+                0,
+                crate::recording::editor::sidecar::CaptureRegion::from_capture(
+                    None, None, None, None,
+                ),
+            );
+            sidecar.webcam = Some(track.clone());
+            sidecar.pointer = pointer
+                .iter()
+                .map(|&(t, x, y)| PointerSample {
+                    t,
+                    x,
+                    y,
+                    kind: CursorKind::Default,
+                    cursor_id: None,
+                })
+                .collect();
+            sidecar.write(&sidecar_path).is_ok()
+        };
+        let export = |name: &str, pointer: &[(f64, f64, f64)]| -> Option<PathBuf> {
+            if !write_pointer(pointer) {
+                return None;
+            }
+            let output = dir.join(name);
+            let model = ExportModel {
+                source: source.clone(),
+                source_size: (640, 360),
+                trim_start: 0.0,
+                trim_end: 2.8,
+                cuts: Vec::new(),
+                zooms: Vec::new(),
+                zoom_camera: crate::video_editor::zoom::ZoomCameraSettings {
+                    motion_blur: 0.0,
+                    ..Default::default()
+                },
+                cursor: CursorSettings::default(),
+                sidecar: PointerSidecar::load_next_to_video(&source),
+                webcam: Some(webcam::WebcamExport {
+                    path: track_path.clone(),
+                    settings: LayerSettings::default(),
+                    layouts: LayoutSettings {
+                        default_layout: CameraLayout::SplitScreen,
+                        cues: Vec::new(),
+                        split_auto: false,
+                        split_ratio: 0.5,
+                        split_flip: false,
+                        ..LayoutSettings::default()
+                    },
+                    split_gap: 0.0,
+                    pane_radius: 0.0,
+                    track_seconds: 3.0,
+                    start: 0.0,
+                    video_seconds: 3.0,
+                    last_frame: 2.95,
+                    source_size: (320, 320),
+                    silence: Vec::new(),
+                }),
+                stage: None,
+                canvas: None,
+                crf: 30,
+            };
+            let handle = start_export(model, output.clone());
+            loop {
+                match handle.receiver.recv_timeout(Duration::from_secs(120)) {
+                    Ok(ExportUpdate::Progress { .. }) => {}
+                    Ok(ExportUpdate::Finished(path)) => {
+                        assert_eq!(path, output);
+                        break;
+                    }
+                    Ok(ExportUpdate::Failed(message)) => panic!("export failed: {message}"),
+                    Ok(ExportUpdate::Cancelled) => panic!("export cancelled itself"),
+                    Err(error) => panic!("export did not report back: {error}"),
+                }
+            }
+            Some(output)
+        };
+        let Some(far) = export("far.mp4", &[(0.0, 64.0, 180.0), (2.8, 64.0, 180.0)]) else {
+            return;
+        };
+        let Some(near) = export(
+            "near.mp4",
+            &[
+                (0.0, 64.0, 180.0),
+                (1.0, 64.0, 180.0),
+                (1.01, 600.0, 180.0),
+                (2.8, 600.0, 180.0),
+            ],
+        ) else {
+            return;
+        };
+
+        let luma = |path: &Path, t: f64| -> u8 {
+            let frame = frame_rgb(path, t, (640, 360)).expect("the export decodes");
+            let [red, green, blue] = pixel(&frame, 640, 80, 40);
+            ((u16::from(red) + u16::from(green) + u16::from(blue)) / 3) as u8
+        };
+        let far05 = luma(&far, 0.5);
+        let far25 = luma(&far, 2.5);
+        let near05 = luma(&near, 0.5);
+        let near25 = luma(&near, 2.5);
+        eprintln!("split slide: far05={far05} far25={far25} near05={near05} near25={near25}");
+        assert!(
+            far05 < 60 && far25 < 60,
+            "at rest the split shows the screen's own edge: far05={far05} far25={far25}"
+        );
+        assert!(
+            near05 < 60,
+            "at rest the split shows the screen's own edge: near05={near05}"
+        );
+        assert!(
+            near25 > 190,
+            "the split slides its screen clear of the cursor: near25={near25}"
+        );
+
+        let _ = fs::remove_file(&sidecar_path);
+        let _ = fs::remove_file(&track_path);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn the_export_paints_a_captured_png_at_its_recording_hotspot() {
         use crate::recording::editor::sidecar::{
             CaptureRegion, CursorAsset, CursorKind, PointerSample, PointerSidecar,
