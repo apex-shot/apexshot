@@ -1001,31 +1001,9 @@ fn render_range(
                 let whole = (0.0, 0.0, f64::from(out.0), f64::from(out.1));
                 let outer_view = zoom::card_view(whole, rect, source);
                 outer_rgba.resize(out.0 as usize * out.1 as usize * 4, 0);
-                let outer_trail = previous_value.and_then(|previous| {
-                    let previous_card = card_for(previous).map_or(rect, |(card, _)| card);
-                    super::motion_blur::ScreenTrail::new(
-                        outer_view,
-                        zoom::card_view(whole, previous_card, source),
-                        source,
-                        out,
-                        fps,
-                        model.zoom_camera.motion_blur,
-                    )
-                });
-                match outer_trail {
-                    Some(outer_trail) => outer_trail.render(
-                        &decoded,
-                        model.source_size,
-                        out,
-                        &mut outer_rgba,
-                        16,
-                        4.0,
-                        4,
-                    ),
-                    None => {
-                        crop_scale_into(&decoded, model.source_size, outer_view, out, &mut outer_rgba)
-                    }
-                }
+                // A second blur pass over the whole canvas costs seconds per
+                // frame while the card sweeps; the video rect keeps its blur.
+                crop_scale_into(&decoded, model.source_size, outer_view, out, &mut outer_rgba);
                 outer_nv12.resize(out.0 as usize * out.1 as usize * 3 / 2, 0);
                 converter.convert_into(&outer_rgba, out, &mut outer_nv12);
                 canvas::CardFrame {
