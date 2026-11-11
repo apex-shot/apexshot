@@ -54,12 +54,26 @@ pub(super) struct WebcamLayerFile {
     pub h: f64,
     pub radius: f64,
     pub mirror: bool,
+    /// Manual camera sync in seconds. Absent in files written before it
+    /// existed, which played the camera with no adjustment.
+    #[serde(default)]
+    pub delay_seconds: f64,
+    /// The camera's size while zoomed. Absent in older files, which shrank to the studied 0.8.
+    #[serde(default = "default_zoomed_scale")]
+    pub zoomed_scale: f64,
+    /// Hide the camera during silences this long; absent is off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hide_during_silence: Option<f64>,
     /// The layout timeline: the recording's default layout and the changes
     /// that switch it while the composition plays. Absent in files written
     /// before layouts existed, where the two switches above still say what the
     /// default was.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layouts: Option<super::webcam::LayoutSettings>,
+}
+
+fn default_zoomed_scale() -> f64 {
+    super::webcam::ZOOMED_CAMERA_SCALE
 }
 
 impl WebcamLayerFile {
@@ -104,6 +118,9 @@ impl WebcamLayerFile {
             h: layer.h,
             radius: layer.radius,
             mirror: layer.mirror,
+            delay_seconds: layer.delay_seconds,
+            zoomed_scale: layer.zoomed_scale,
+            hide_during_silence: layer.hide_during_silence,
             layouts: Some(layouts.clone()),
         }
     }
@@ -484,20 +501,29 @@ mod tests {
                 h: 0.24,
                 radius: 0.5,
                 mirror: true,
+                delay_seconds: 0.0,
+                zoomed_scale: super::super::webcam::ZOOMED_CAMERA_SCALE,
+                hide_during_silence: None,
                 layouts: Some(LayoutSettings {
                     default_layout: CameraLayout::SplitScreen,
                     cues: vec![
                         LayoutCue {
                             at: 1.5,
                             layout: CameraLayout::FullscreenCamera,
+                            position: None,
+                            cutout_x: None,
                         },
                         LayoutCue {
                             at: 4.25,
                             layout: CameraLayout::CameraOverlay,
+                            position: None,
+                            cutout_x: None,
                         },
                         LayoutCue {
                             at: 9.0,
                             layout: CameraLayout::ScreenOnly,
+                            position: None,
+                            cutout_x: None,
                         },
                     ],
                     transition_seconds: 0.6,
@@ -661,6 +687,8 @@ mod tests {
             cues: vec![LayoutCue {
                 at: 2.0,
                 layout: CameraLayout::CameraCutout,
+                position: None,
+                cutout_x: None,
             }],
             transition_seconds: 0.3,
             split_ratio: 0.4,
@@ -697,6 +725,53 @@ mod tests {
         let file = WebcamLayerFile::from_layer(layer, &layouts);
         assert!(file.enabled);
         assert!(file.fullscreen);
+    }
+
+    #[test]
+    fn the_camera_delay_reads_as_zero_before_it_existed_and_survives_a_round_trip() {
+        let legacy: WebcamLayerFile = serde_json::from_str(
+            r#"{"enabled":true,"fullscreen":false,"x":0.62,"y":0.31,"w":0.18,"h":0.24,"radius":0.5,"mirror":true}"#,
+        )
+        .expect("a camera block without a delay reads");
+        assert_eq!(legacy.delay_seconds, 0.0);
+
+        let layer = super::super::webcam::LayerSettings {
+            delay_seconds: 0.05,
+            ..super::super::webcam::LayerSettings::default()
+        };
+        let file = WebcamLayerFile::from_layer(layer, &LayoutSettings::default());
+        let text = serde_json::to_string(&file).unwrap();
+        let loaded: WebcamLayerFile = serde_json::from_str(&text).unwrap();
+        assert_eq!(loaded.delay_seconds, 0.05);
+    }
+
+    #[test]
+    fn the_zoomed_scale_reads_as_the_studied_default_before_it_existed() {
+        let legacy: WebcamLayerFile = serde_json::from_str(
+            r#"{"enabled":true,"fullscreen":false,"x":0.62,"y":0.31,"w":0.18,"h":0.24,"radius":0.5,"mirror":true}"#,
+        )
+        .expect("a camera block without a zoomed scale reads");
+        assert_eq!(
+            legacy.zoomed_scale,
+            super::super::webcam::ZOOMED_CAMERA_SCALE
+        );
+        assert_eq!(legacy.zoomed_scale, 0.8);
+    }
+
+    #[test]
+    fn a_camera_block_without_a_silence_length_reads_it_as_off() {
+        let legacy: WebcamLayerFile = serde_json::from_str(
+            r#"{"enabled":true,"fullscreen":false,"x":0.62,"y":0.31,"w":0.18,"h":0.24,"radius":0.5,"mirror":true}"#,
+        )
+        .expect("a camera block without a silence length reads");
+        assert_eq!(legacy.hide_during_silence, None);
+    }
+
+    #[test]
+    fn a_layout_block_without_an_automatic_split_reads_it_as_on() {
+        let layouts: LayoutSettings =
+            serde_json::from_str(r#"{"default_layout":"split_screen","split_ratio":0.5}"#).unwrap();
+        assert!(layouts.split_auto);
     }
 
     #[test]

@@ -4453,3 +4453,78 @@ msgstr "Входит в Studio"
 
 msgid "Studio preview. A non-default rendered pose needs activation for final images."
 msgstr "Предпросмотр Studio. Для итоговых изображений с нестандартной позой требуется активация."
+
+msgid "Automatic width"
+msgstr "Автоматическая ширина"
+
+msgid "Camera delay"
+msgstr "Задержка камеры"
+
+msgid "Camera side"
+msgstr "Сторона камеры"
+
+msgid "Edge inset"
+msgstr "Отступ от края"
+
+msgid "Edge softness"
+msgstr "Мягкость края"
+
+msgid "Fill"
+msgstr "Заполнить"
+
+msgid "Hide during silence"
+msgstr "Скрывать во время тишины"
+
+msgid "Hide the camera while nobody is talking, and bring it back when they do."
+msgstr "Скрывает камеру, пока никто не говорит, и возвращает её, когда речь возобновляется."
+
+msgid "Keep the screen's shape and give the camera the rest of the frame."
+msgstr "Сохраняет форму экрана, а камере отдаёт остальную часть кадра."
+
+msgid "Layout"
+msgstr "Макет"
+
+msgid "Layout settings"
+msgstr "Настройки макета"
+
+msgid "Leave the Background padding between the screen and the camera, with rounded corners."
+msgstr "Оставляет между экраном и камерой отступ, заданный для фона, и скругляет углы."
+
+msgid "Make the camera smaller while the screen is zoomed, so it covers less of the recording."
+msgstr "Уменьшает камеру, пока экран увеличен, чтобы она меньше закрывала запись."
+
+msgid "Minimum silence"
+msgstr "Минимальная тишина"
+
+msgid "Padded"
+msgstr "С отступами"
+
+msgid "Rounded"
+msgstr "Скруглённая"
+
+msgid "Roundness"
+msgstr "Скругление"
+
+msgid "Screen width"
+msgstr "Ширина экрана"
+
+msgid "Shift the camera against the screen and sound. Raise it if your lips move after the words, lower it if they move before."
+msgstr "Сдвигает камеру относительно экрана и звука. Увеличьте значение, если губы двигаются после слов, и уменьшите, если до них."
+
+msgid "Shrink during zoom"
+msgstr "Уменьшать при увеличении"
+
+msgid "Shrink size"
+msgstr "Уменьшенный размер"
+
+msgid "The camera's longest side, as a percentage of the frame's shortest side."
+msgstr "Длинная сторона камеры в процентах от короткой стороны кадра."
+
+msgid "The person's size, as a percentage of the frame's shortest side."
+msgstr "Размер человека в процентах от короткой стороны кадра."
+
+msgid "The split fills the frame edge to edge."
+msgstr "Сплит заполняет кадр от края до края."
+
+msgid "Transitions"
+msgstr "Переходы"

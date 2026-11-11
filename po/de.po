@@ -4473,3 +4473,78 @@ msgstr "In Studio enthalten"
 
 msgid "Studio preview. A non-default rendered pose needs activation for final images."
 msgstr "Studio-Vorschau. Eine nicht standardmäßig gerenderte Pose erfordert für finale Bilder eine Aktivierung."
+
+msgid "Automatic width"
+msgstr "Automatische Breite"
+
+msgid "Camera delay"
+msgstr "Kameraverzögerung"
+
+msgid "Camera side"
+msgstr "Kameraseite"
+
+msgid "Edge inset"
+msgstr "Randabstand"
+
+msgid "Edge softness"
+msgstr "Kantenweichheit"
+
+msgid "Fill"
+msgstr "Füllen"
+
+msgid "Hide during silence"
+msgstr "Bei Stille ausblenden"
+
+msgid "Hide the camera while nobody is talking, and bring it back when they do."
+msgstr "Blendet die Kamera aus, solange niemand spricht, und wieder ein, sobald gesprochen wird."
+
+msgid "Keep the screen's shape and give the camera the rest of the frame."
+msgstr "Behält die Form des Bildschirms bei und gibt der Kamera den Rest des Bildes."
+
+msgid "Layout"
+msgstr "Layout"
+
+msgid "Layout settings"
+msgstr "Layout-Einstellungen"
+
+msgid "Leave the Background padding between the screen and the camera, with rounded corners."
+msgstr "Lässt zwischen Bildschirm und Kamera den Hintergrundabstand frei, mit abgerundeten Ecken."
+
+msgid "Make the camera smaller while the screen is zoomed, so it covers less of the recording."
+msgstr "Verkleinert die Kamera, solange der Bildschirm gezoomt ist, damit sie weniger von der Aufnahme verdeckt."
+
+msgid "Minimum silence"
+msgstr "Minimale Stille"
+
+msgid "Padded"
+msgstr "Mit Abstand"
+
+msgid "Rounded"
+msgstr "Abgerundet"
+
+msgid "Roundness"
+msgstr "Rundung"
+
+msgid "Screen width"
+msgstr "Bildschirmbreite"
+
+msgid "Shift the camera against the screen and sound. Raise it if your lips move after the words, lower it if they move before."
+msgstr "Verschiebt die Kamera gegenüber Bildschirm und Ton. Erhöhe den Wert, wenn sich die Lippen nach den Worten bewegen, und senke ihn, wenn sie sich davor bewegen."
+
+msgid "Shrink during zoom"
+msgstr "Beim Zoomen verkleinern"
+
+msgid "Shrink size"
+msgstr "Verkleinerte Größe"
+
+msgid "The camera's longest side, as a percentage of the frame's shortest side."
+msgstr "Die längste Seite der Kamera in Prozent der kürzesten Seite des Bildes."
+
+msgid "The person's size, as a percentage of the frame's shortest side."
+msgstr "Die Größe der Person in Prozent der kürzesten Seite des Bildes."
+
+msgid "The split fills the frame edge to edge."
+msgstr "Der Split füllt das Bild von Rand zu Rand."
+
+msgid "Transitions"
+msgstr "Übergänge"

@@ -7,6 +7,7 @@
 use gtk4::prelude::*;
 use gtk4::Application;
 pub(crate) mod background;
+mod camera_shadow;
 mod cursor;
 pub(crate) mod custom_fill;
 mod cutout;
@@ -22,6 +23,8 @@ mod preview;
 mod project;
 mod rounded_clip;
 pub(crate) mod side_panel;
+mod silence;
+mod split_rest;
 mod studio;
 mod timeline;
 mod type_scale;

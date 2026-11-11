@@ -4360,3 +4360,78 @@ msgstr "包含在 Studio 中"
 
 msgid "Studio preview. A non-default rendered pose needs activation for final images."
 msgstr "Studio 预览。最终图像使用非默认渲染姿态需要激活。"
+
+msgid "Automatic width"
+msgstr "自动宽度"
+
+msgid "Camera delay"
+msgstr "相机延迟"
+
+msgid "Camera side"
+msgstr "相机位置"
+
+msgid "Edge inset"
+msgstr "边缘内缩"
+
+msgid "Edge softness"
+msgstr "边缘柔化"
+
+msgid "Fill"
+msgstr "填充"
+
+msgid "Hide during silence"
+msgstr "静音时隐藏"
+
+msgid "Hide the camera while nobody is talking, and bring it back when they do."
+msgstr "无人说话时隐藏相机，有人说话时再显示出来。"
+
+msgid "Keep the screen's shape and give the camera the rest of the frame."
+msgstr "保持屏幕的形状，把画面的其余部分留给相机。"
+
+msgid "Layout"
+msgstr "布局"
+
+msgid "Layout settings"
+msgstr "布局设置"
+
+msgid "Leave the Background padding between the screen and the camera, with rounded corners."
+msgstr "在屏幕和相机之间保留背景的填充，并使用圆角。"
+
+msgid "Make the camera smaller while the screen is zoomed, so it covers less of the recording."
+msgstr "屏幕放大时缩小相机，使其遮挡更少的录制内容。"
+
+msgid "Minimum silence"
+msgstr "最短静音时长"
+
+msgid "Padded"
+msgstr "带边距"
+
+msgid "Rounded"
+msgstr "圆角"
+
+msgid "Roundness"
+msgstr "圆角程度"
+
+msgid "Screen width"
+msgstr "屏幕宽度"
+
+msgid "Shift the camera against the screen and sound. Raise it if your lips move after the words, lower it if they move before."
+msgstr "相对屏幕和声音平移相机。如果嘴唇在声音之后才动，请调大；如果在声音之前就动，请调小。"
+
+msgid "Shrink during zoom"
+msgstr "缩放时缩小"
+
+msgid "Shrink size"
+msgstr "缩小后的大小"
+
+msgid "The camera's longest side, as a percentage of the frame's shortest side."
+msgstr "相机的长边占画面短边的百分比。"
+
+msgid "The person's size, as a percentage of the frame's shortest side."
+msgstr "人物大小占画面短边的百分比。"
+
+msgid "The split fills the frame edge to edge."
+msgstr "Split 占满画面，边到边。"
+
+msgid "Transitions"
+msgstr "过渡"
