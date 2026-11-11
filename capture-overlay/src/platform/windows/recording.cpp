@@ -941,9 +941,12 @@ QStringList RecordingSession::Private::buildScreenArguments(const QString& segme
     // Fragmented segments stay readable up to their last fragment when the
     // recorder dies, the way the studied recorder's segmented writer does; a
     // plain MP4 only gets its index when ffmpeg exits cleanly. The join in
-    // finalize() writes the final file with a normal index.
+    // finalize() writes the final file with a normal index. Flushing each
+    // packet puts every finished fragment on disk instead of in ffmpeg's
+    // output buffer, which a killed process takes with it.
     args << QStringLiteral("-movflags")
-         << QStringLiteral("+frag_keyframe+empty_moov+default_base_moof") << segmentPath;
+         << QStringLiteral("+frag_keyframe+empty_moov+default_base_moof")
+         << QStringLiteral("-flush_packets") << QStringLiteral("1") << segmentPath;
 
     // The screen's first-frame mark; the camera writes the matching one.
     appendFirstFrameMarker(args,
@@ -1000,7 +1003,8 @@ QStringList RecordingSession::Private::buildWebcamArguments(
     appendVideoEncoder(args, 18, trackSize, fps);
     args << QStringLiteral("-g") << QString::number(fps * 2) << QStringLiteral("-r")
          << QString::number(fps) << QStringLiteral("-movflags")
-         << QStringLiteral("+frag_keyframe+empty_moov+default_base_moof") << webcamSegmentPath;
+         << QStringLiteral("+frag_keyframe+empty_moov+default_base_moof")
+         << QStringLiteral("-flush_packets") << QStringLiteral("1") << webcamSegmentPath;
 
     // The camera's first-frame mark, timed against the screen's.
     appendFirstFrameMarker(args, QString(), webcamSegmentPath);
