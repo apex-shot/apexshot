@@ -135,7 +135,7 @@ mod tests {
 
     #[test]
     fn hevc_tiers_follow_the_bits_per_pixel_table() {
-        let pixels = 1280.0 * 720.0 * 30.0;
+        let pixels: f64 = 1280.0 * 720.0 * 30.0;
         assert_eq!(
             hevc_bits_per_second(24, (1280, 720), 30.0),
             (pixels * 0.05).floor()
