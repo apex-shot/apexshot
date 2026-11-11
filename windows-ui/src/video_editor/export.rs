@@ -539,6 +539,12 @@ fn software_forced() -> bool {
     std::env::var("APEXSHOT_EXPORT_HARDWARE").ok().as_deref() == Some("0")
 }
 
+/// A recovery switch for drivers whose hardware decoder misbehaves.
+fn hardware_decode() -> bool {
+    cfg!(target_os = "windows")
+        && std::env::var("APEXSHOT_EXPORT_HWDECODE").ok().as_deref() != Some("0")
+}
+
 fn worker_override() -> Option<usize> {
     std::env::var("APEXSHOT_EXPORT_WORKERS")
         .ok()?
@@ -1263,18 +1269,27 @@ fn stop(child: &mut Child) {
     let _ = child.wait();
 }
 
-fn spawn_decoder(
+/// The decoder for one span: NV12 frames on the export's grid. With
+/// `hardware`, D3D11 decodes and ffmpeg copies each frame back for the
+/// filters; a stream the GPU cannot decode falls back to software inside
+/// ffmpeg.
+fn decoder_command(
     source: &Path,
     span: SourceSpan,
     first: u64,
     count: u64,
     fps: f64,
     size: (u32, u32),
-) -> Result<Child, End> {
+    hardware: bool,
+) -> std::process::Command {
     let source_start = span.source_start + first as f64 / fps;
     let duration = count as f64 / fps;
-    crate::utils::hidden_command(ffmpeg::ffmpeg_executable())
-        .args(["-hide_banner", "-loglevel", "error", "-nostdin"])
+    let mut command = crate::utils::hidden_command(ffmpeg::ffmpeg_executable());
+    command.args(["-hide_banner", "-loglevel", "error", "-nostdin"]);
+    if hardware {
+        command.args(["-hwaccel", "d3d11va"]);
+    }
+    command
         .args(["-ss", &format!("{source_start:.6}")])
         .arg("-i")
         .arg(source)
@@ -1284,7 +1299,19 @@ fn spawn_decoder(
         // Fill that leading gap on the output grid instead of losing a frame.
         .args(["-vf", &format!("scale={}:{},fps={fps}:start_time=0", size.0, size.1)])
         .args(["-frames:v", &count.to_string()])
-        .args(["-f", "rawvideo", "-pix_fmt", "nv12", "pipe:1"])
+        .args(["-f", "rawvideo", "-pix_fmt", "nv12", "pipe:1"]);
+    command
+}
+
+fn spawn_decoder(
+    source: &Path,
+    span: SourceSpan,
+    first: u64,
+    count: u64,
+    fps: f64,
+    size: (u32, u32),
+) -> Result<Child, End> {
+    decoder_command(source, span, first, count, fps, size, hardware_decode())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -1705,15 +1732,41 @@ fn draw_cursor(
 #[cfg(test)]
 mod tests {
     use super::{
-        frame_plan, frame_source_time, h264_level, output_size, rate, render, render_with_workers,
-        split_ranges, start_export, start_export_with_settings, total_frames, zoom, Codec, Encoder,
-        End, ExportModel, ExportSettings, ExportUpdate,
+        decoder_command, frame_plan, frame_source_time, h264_level, output_size, rate, render,
+        render_with_workers, split_ranges, start_export, start_export_with_settings, total_frames,
+        zoom, Codec, Encoder, End, ExportModel, ExportSettings, ExportUpdate, SourceSpan,
     };
     use crate::recording::editor::ffmpeg;
     use crate::recording::editor::model::{CursorRotationMode, CursorSettings};
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::sync::{atomic::AtomicBool, mpsc, Arc};
     use std::time::Duration;
+
+    #[test]
+    fn the_decoder_asks_for_d3d11_only_when_hardware_decoding() {
+        let span = SourceSpan {
+            composition_start: 0.0,
+            source_start: 1.0,
+            frames: 30,
+        };
+        let args = |hardware| -> Vec<String> {
+            decoder_command(Path::new("in.mp4"), span, 0, 30, 30.0, (640, 360), hardware)
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect()
+        };
+        let with = args(true);
+        let at = with
+            .iter()
+            .position(|arg| arg == "-hwaccel")
+            .expect("hwaccel requested");
+        assert_eq!(with[at + 1], "d3d11va");
+        assert!(at < with.iter().position(|arg| arg == "-i").unwrap());
+        assert!(!with.iter().any(|arg| arg == "-hwaccel_output_format"));
+        let without = args(false);
+        assert!(!without.iter().any(|arg| arg == "-hwaccel"));
+        assert_eq!(with.len(), without.len() + 2);
+    }
 
     #[test]
     fn the_encoder_pipe_writes_frames_in_order_and_recycles_buffers() {

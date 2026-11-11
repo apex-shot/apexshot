@@ -122,6 +122,9 @@ encoder gets a bitrate from the tier's bits per pixel (0.3, 0.05, 0.0175,
 - `APEXSHOT_EXPORT_HARDWARE=0` forces software encoding without changing the
   dialog. This is the recovery switch for a driver whose encoder passes the
   probe but produces bad output.
+- Decoding uses D3D11 (`-hwaccel d3d11va`); ffmpeg falls back to software for a
+  stream the GPU cannot decode. `APEXSHOT_EXPORT_HWDECODE=0` forces software
+  decoding.
 - `APEXSHOT_EXPORT_WORKERS=1` disables parallel ranges. Values from 1 to 6 are
   clamped.
 - `APEXSHOT_EXPORT_HYBRID=1` enables the chunked two-encoder path.
