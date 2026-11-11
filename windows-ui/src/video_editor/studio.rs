@@ -67,6 +67,7 @@ mod tests {
             webcam: None,
             canvas: None,
             crf: 23,
+            audio: Vec::new(),
         }
     }
 

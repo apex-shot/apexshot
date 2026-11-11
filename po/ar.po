@@ -4191,6 +4191,9 @@ msgstr "استُنفدت رفوعات هذا الشهر"
 msgid "Video exported, but could not copy to clipboard:"
 msgstr "تم تصدير الفيديو، لكن تعذر النسخ إلى الحافظة:"
 
+msgid "Exported, but the sound could not be added:"
+msgstr "تم التصدير، لكن تعذرت إضافة الصوت:"
+
 msgid "Wait for the background image to finish loading."
 msgstr "انتظر اكتمال تحميل صورة الخلفية."
 

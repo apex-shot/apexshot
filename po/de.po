@@ -4267,6 +4267,9 @@ msgid "Video exported, but could not copy to clipboard:"
 msgstr ""
 "Video exportiert, aber das Kopieren in die Zwischenablage war nicht möglich:"
 
+msgid "Exported, but the sound could not be added:"
+msgstr "Exportiert, aber der Ton konnte nicht hinzugefügt werden:"
+
 msgid "Wait for the background image to finish loading."
 msgstr "Warte, bis das Hintergrundbild vollständig geladen ist."
 

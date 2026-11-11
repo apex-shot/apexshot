@@ -4265,6 +4265,9 @@ msgstr "Las subidas de este mes se han agotado"
 msgid "Video exported, but could not copy to clipboard:"
 msgstr "Vídeo exportado, pero no se pudo copiar al portapapeles:"
 
+msgid "Exported, but the sound could not be added:"
+msgstr "Exportado, pero no se pudo añadir el sonido:"
+
 msgid "Wait for the background image to finish loading."
 msgstr "Espera a que la imagen de fondo termine de cargar."
 

@@ -4277,6 +4277,9 @@ msgstr "Les envois de ce mois-ci sont épuisés"
 msgid "Video exported, but could not copy to clipboard:"
 msgstr "Vidéo exportée, mais copie dans le presse-papiers impossible :"
 
+msgid "Exported, but the sound could not be added:"
+msgstr "Exporté, mais le son n’a pas pu être ajouté :"
+
 msgid "Wait for the background image to finish loading."
 msgstr "Attendez que l’image d’arrière-plan finisse de charger."
 

@@ -4165,6 +4165,9 @@ msgstr "今月のアップロード枠を使い切りました"
 msgid "Video exported, but could not copy to clipboard:"
 msgstr "動画は書き出しましたが、クリップボードにコピーできませんでした:"
 
+msgid "Exported, but the sound could not be added:"
+msgstr "書き出しましたが、音声を追加できませんでした:"
+
 msgid "Wait for the background image to finish loading."
 msgstr "背景画像の読み込みが完了するまでお待ちください。"
 

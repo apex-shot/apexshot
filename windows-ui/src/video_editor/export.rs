@@ -6,8 +6,10 @@
 //! press spring. The canvas around the video — the background fill, padding,
 //! frame aspect, and rounded corners — is laid on afterwards by
 //! `canvas::FramedSink`, so every render path produces only the video rect.
-//! Audio is not part of this path.
+//! The recording's sound is cut to the same spans and muxed in afterwards by
+//! `audio::add`, which copies the video stream instead of re-encoding it.
 
+mod audio;
 mod canvas;
 #[cfg(target_os = "windows")]
 mod gpu;
@@ -90,6 +92,9 @@ pub(super) struct ExportModel {
     /// None to export the video edge to edge.
     pub canvas: Option<CanvasLayout>,
     pub crf: u32,
+    /// Files that may carry the recording's sound, in order of preference;
+    /// the first with an audio stream is used. Empty means the source.
+    pub audio: Vec<PathBuf>,
 }
 
 /// One contiguous kept span of footage, rendered back to back.
@@ -172,8 +177,12 @@ pub(super) fn output_size(source: (u32, u32)) -> (u32, u32) {
 }
 
 pub(super) enum ExportUpdate {
-    Progress { done: u64, total: u64 },
-    Finished(PathBuf),
+    Progress {
+        done: u64,
+        total: u64,
+    },
+    /// The finished file, and why its sound could not be added when it could not.
+    Finished(PathBuf, Option<String>),
     Failed(String),
     Cancelled,
 }
@@ -232,8 +241,16 @@ pub(super) fn start_export_with_settings(
             }
         }
         match result {
+            Ok(()) if thread_cancel.load(Ordering::Relaxed) => {
+                let _ = std::fs::remove_file(&output);
+                let _ = sender.send(ExportUpdate::Cancelled);
+            }
             Ok(()) => {
-                let _ = sender.send(ExportUpdate::Finished(output));
+                let sound = audio::add(&model, settings, &output).err();
+                if let Some(error) = &sound {
+                    eprintln!("[export] the sound was not added: {error}");
+                }
+                let _ = sender.send(ExportUpdate::Finished(output, sound));
             }
             Err(End::Cancelled) => {
                 let _ = std::fs::remove_file(&output);
@@ -1791,6 +1808,7 @@ mod tests {
             webcam: None,
             canvas: None,
             crf: 0,
+            audio: Vec::new(),
         };
         let settings = ExportSettings {
             fps: Some(30),
@@ -1891,6 +1909,7 @@ mod tests {
             webcam: None,
             canvas: None,
             crf: 18,
+            audio: Vec::new(),
         };
         for fps in [24, 60] {
             let mut videos = Vec::new();
@@ -1991,6 +2010,7 @@ mod tests {
             webcam: None,
             canvas: None,
             crf: 20,
+            audio: Vec::new(),
         };
         for fps in [24, 60] {
             let settings = ExportSettings {
@@ -2153,12 +2173,13 @@ mod tests {
             webcam: None,
             canvas: None,
             crf: 20,
+            audio: Vec::new(),
         };
         let handle = start_export(model, output.clone());
         loop {
             match handle.receiver.recv_timeout(Duration::from_secs(180)) {
                 Ok(ExportUpdate::Progress { .. }) => {}
-                Ok(ExportUpdate::Finished(path)) => {
+                Ok(ExportUpdate::Finished(path, _)) => {
                     assert_eq!(path, output);
                     break;
                 }
@@ -2229,12 +2250,13 @@ mod tests {
             webcam: None,
             canvas: None,
             crf: 23,
+            audio: Vec::new(),
         };
         let handle = start_export(model, output.clone());
         loop {
             match handle.receiver.recv_timeout(Duration::from_secs(180)) {
                 Ok(ExportUpdate::Progress { .. }) => {}
-                Ok(ExportUpdate::Finished(path)) => {
+                Ok(ExportUpdate::Finished(path, _)) => {
                     assert_eq!(path, output);
                     break;
                 }
@@ -2280,6 +2302,7 @@ mod tests {
             webcam: None,
             canvas: None,
             crf: 23,
+            audio: Vec::new(),
         };
         let handle = start_export(model, output.clone());
         let progress = handle
@@ -2302,7 +2325,7 @@ mod tests {
     fn kind(update: &ExportUpdate) -> &'static str {
         match update {
             ExportUpdate::Progress { .. } => "progress",
-            ExportUpdate::Finished(_) => "finished",
+            ExportUpdate::Finished(_, _) => "finished",
             ExportUpdate::Failed(_) => "failed",
             ExportUpdate::Cancelled => "cancelled",
         }
@@ -2654,12 +2677,13 @@ mod tests {
                 webcam: None,
                 canvas: None,
                 crf: 20,
+                audio: Vec::new(),
             };
             let started = std::time::Instant::now();
             let handle = start_export(model, output.clone());
             let total = loop {
                 match handle.receiver.recv_timeout(Duration::from_secs(300)) {
-                    Ok(ExportUpdate::Finished(_)) => break 300.0,
+                    Ok(ExportUpdate::Finished(_, _)) => break 300.0,
                     Ok(ExportUpdate::Progress { total, .. }) => {
                         if total > 0 {
                             continue;
@@ -2855,12 +2879,13 @@ mod webcam_export_tests {
             }),
             canvas: None,
             crf: 30,
+            audio: Vec::new(),
         };
         let handle = start_export(model, output.clone());
         loop {
             match handle.receiver.recv_timeout(Duration::from_secs(120)) {
                 Ok(ExportUpdate::Progress { .. }) => {}
-                Ok(ExportUpdate::Finished(path)) => {
+                Ok(ExportUpdate::Finished(path, _)) => {
                     assert_eq!(path, output);
                     break;
                 }
@@ -3119,12 +3144,13 @@ mod webcam_export_tests {
             }),
             canvas: None,
             crf: 30,
+            audio: Vec::new(),
         };
         let handle = start_export(model, output.clone());
         loop {
             match handle.receiver.recv_timeout(Duration::from_secs(120)) {
                 Ok(ExportUpdate::Progress { .. }) => {}
-                Ok(ExportUpdate::Finished(path)) => {
+                Ok(ExportUpdate::Finished(path, _)) => {
                     assert_eq!(path, output);
                     break;
                 }
@@ -3273,12 +3299,13 @@ mod webcam_export_tests {
             }),
             canvas: None,
             crf: 30,
+            audio: Vec::new(),
         };
         let handle = start_export(model, output.clone());
         loop {
             match handle.receiver.recv_timeout(Duration::from_secs(120)) {
                 Ok(ExportUpdate::Progress { .. }) => {}
-                Ok(ExportUpdate::Finished(path)) => {
+                Ok(ExportUpdate::Finished(path, _)) => {
                     assert_eq!(path, output);
                     break;
                 }
@@ -3537,6 +3564,7 @@ mod webcam_export_tests {
             webcam: None,
             canvas: None,
             crf: 18,
+            audio: Vec::new(),
         };
         let settings = ExportSettings {
             fps: Some(30),
@@ -3607,6 +3635,7 @@ mod webcam_export_tests {
                 background: Arc::new(background),
             }),
             crf: 18,
+            audio: Vec::new(),
         };
         let settings = ExportSettings {
             fps: Some(30),

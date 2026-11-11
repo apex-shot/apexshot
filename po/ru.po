@@ -4247,6 +4247,9 @@ msgstr "Загрузки за этот месяц исчерпаны"
 msgid "Video exported, but could not copy to clipboard:"
 msgstr "Видео экспортировано, но не удалось скопировать в буфер обмена:"
 
+msgid "Exported, but the sound could not be added:"
+msgstr "Экспортировано, но не удалось добавить звук:"
+
 msgid "Wait for the background image to finish loading."
 msgstr "Дождитесь загрузки фонового изображения."
 

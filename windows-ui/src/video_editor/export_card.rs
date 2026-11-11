@@ -174,7 +174,7 @@ pub(super) fn show(
                     restore_editor(&shell);
                     return glib::ControlFlow::Break;
                 }
-                Ok(ExportUpdate::Finished(path)) => {
+                Ok(ExportUpdate::Finished(path, sound)) => {
                     title.set_text(&t("Exported successfully"));
                     crate::utils::notify::desktop_notification(
                         &t("Export complete"),
@@ -185,16 +185,26 @@ pub(super) fn show(
                         clock(started.elapsed().as_secs_f64()),
                         t("Complete")
                     ));
+                    let mut notes = Vec::new();
                     if clipboard {
                         match copy_file(&path) {
-                            Ok(()) => detail.set_text(&t(
+                            Ok(()) => notes.push(t(
                                 "File copied to clipboard. Ready to paste into other apps.",
                             )),
-                            Err(error) => detail.set_text(&format!(
+                            Err(error) => notes.push(format!(
                                 "{} {error}",
                                 t("Video exported, but could not copy to clipboard:")
                             )),
                         }
+                    }
+                    if let Some(error) = sound {
+                        notes.push(format!(
+                            "{} {error}",
+                            t("Exported, but the sound could not be added:")
+                        ));
+                    }
+                    if !notes.is_empty() {
+                        detail.set_text(&notes.join("\n"));
                         detail.set_visible(true);
                     }
                     upload.set_visible(true);

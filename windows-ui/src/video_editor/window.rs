@@ -1935,10 +1935,17 @@ fn export_model(
     let footage = timeline.export_footage()?;
     let source_size = stage.source_size.get()?;
     let sidecar = stage.cursor.sidecar();
+    let footage_source = footage.source.clone();
     let source = sidecar
         .as_ref()
         .and_then(|sidecar| sidecar.editable_video_path(&footage.source))
         .unwrap_or(footage.source);
+    // The screen-only file a camera recording edits from may have no sound;
+    // the saved recording shares its timeline and always keeps it.
+    let mut audio = vec![source.clone()];
+    if footage_source != source {
+        audio.push(footage_source);
+    }
     Some(super::export::ExportModel {
         source,
         source_size,
@@ -1952,6 +1959,7 @@ fn export_model(
         webcam: stage.webcam.export(),
         canvas: export_canvas(stage, source_size),
         crf: stage.quality.get().crf(),
+        audio,
     })
 }
 

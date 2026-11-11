@@ -4154,6 +4154,9 @@ msgstr "本月上传次数已用完"
 msgid "Video exported, but could not copy to clipboard:"
 msgstr "视频已导出，但无法复制到剪贴板："
 
+msgid "Exported, but the sound could not be added:"
+msgstr "已导出，但无法添加声音："
+
 msgid "Wait for the background image to finish loading."
 msgstr "请等待背景图片加载完成。"
 

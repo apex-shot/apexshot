@@ -410,6 +410,7 @@ mod tests {
                     webcam: None,
                     canvas: None,
                     crf: 20,
+                    audio: Vec::new(),
                 };
                 let chosen = Rc::new(Cell::new(None));
                 show(
