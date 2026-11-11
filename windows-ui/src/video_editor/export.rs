@@ -12,6 +12,9 @@
 mod audio;
 mod canvas;
 #[cfg(target_os = "windows")]
+#[allow(dead_code)]
+mod compose_gpu;
+#[cfg(target_os = "windows")]
 mod gpu;
 mod hybrid;
 pub(super) mod rate;
