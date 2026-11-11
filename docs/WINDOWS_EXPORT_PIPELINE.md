@@ -124,6 +124,14 @@ process by encoding two synthetic frames with the exact flags an export uses,
 then falls back to `libx264`. A probe passes only when the driver can actually
 run the encoder; an entry in `ffmpeg -encoders` is not enough.
 
+When none of those opens — for example a vendor runtime ffmpeg cannot load — the
+export tries Windows Media Foundation (`h264_mf` / `hevc_mf`) with hardware
+encoding forced, which uses whichever hardware encoder the drivers registered
+with Windows, before falling back to x264/x265. An NVIDIA driver older than the
+NVENC API the bundled ffmpeg was built against is not covered by this: on the
+development machine NVIDIA's Media Foundation encoder did not activate either,
+and Windows picked Quick Sync.
+
 The chosen codec is opened with a fixed H.264 profile and level for the output
 size and rate (`-profile:v high`, `-level:v …`), and constant-quality rate
 control at the editor's CRF. Every piece in a split export uses the same

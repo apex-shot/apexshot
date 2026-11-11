@@ -290,10 +290,12 @@ enum Encoder {
     Nvenc,
     QuickSync,
     Amf,
+    MediaFoundation,
     X264,
     HevcNvenc,
     HevcQuickSync,
     HevcAmf,
+    HevcMediaFoundation,
     X265,
 }
 
@@ -313,17 +315,39 @@ impl Encoder {
     fn is_hevc(self) -> bool {
         matches!(
             self,
-            Self::HevcNvenc | Self::HevcQuickSync | Self::HevcAmf | Self::X265
+            Self::HevcNvenc
+                | Self::HevcQuickSync
+                | Self::HevcAmf
+                | Self::HevcMediaFoundation
+                | Self::X265
         )
     }
 
     /// The fastest encoder this machine can open for a codec, probed once per process.
+    /// Media Foundation comes last among the hardware encoders: it reaches the
+    /// driver's encoder through Windows when ffmpeg's own vendor path cannot.
     fn fastest_for(codec: Codec) -> Self {
         static H264: OnceLock<Encoder> = OnceLock::new();
         static HEVC: OnceLock<Encoder> = OnceLock::new();
         let (cell, candidates) = match codec {
-            Codec::H264 => (&H264, [Self::Nvenc, Self::QuickSync, Self::Amf]),
-            Codec::Hevc => (&HEVC, [Self::HevcNvenc, Self::HevcQuickSync, Self::HevcAmf]),
+            Codec::H264 => (
+                &H264,
+                [
+                    Self::Nvenc,
+                    Self::QuickSync,
+                    Self::Amf,
+                    Self::MediaFoundation,
+                ],
+            ),
+            Codec::Hevc => (
+                &HEVC,
+                [
+                    Self::HevcNvenc,
+                    Self::HevcQuickSync,
+                    Self::HevcAmf,
+                    Self::HevcMediaFoundation,
+                ],
+            ),
         };
         *cell.get_or_init(|| {
             candidates
@@ -345,10 +369,12 @@ impl Encoder {
             Self::Nvenc => "h264_nvenc",
             Self::QuickSync => "h264_qsv",
             Self::Amf => "h264_amf",
+            Self::MediaFoundation => "h264_mf",
             Self::X264 => "libx264",
             Self::HevcNvenc => "hevc_nvenc",
             Self::HevcQuickSync => "hevc_qsv",
             Self::HevcAmf => "hevc_amf",
+            Self::HevcMediaFoundation => "hevc_mf",
             Self::X265 => "libx265",
         }
     }
@@ -362,8 +388,11 @@ impl Encoder {
         if self.is_hevc() {
             return self.hevc_args(crf, size, fps);
         }
+        // Media Foundation takes the profile as its numeric H.264 profile_idc.
         let profile = if self == Self::X264 && crf == 0 {
             "high444"
+        } else if self == Self::MediaFoundation {
+            "100"
         } else {
             "high"
         };
@@ -388,6 +417,14 @@ impl Encoder {
             Self::Nvenc => bitrate_args(&["-preset", "p4", "-tune", "hq", "-rc", "vbr"]),
             Self::QuickSync => bitrate_args(&["-preset", "medium"]),
             Self::Amf => bitrate_args(&["-quality", "balanced", "-rc", "vbr_peak"]),
+            Self::MediaFoundation => bitrate_args(&[
+                "-rate_control",
+                "pc_vbr",
+                "-scenario",
+                "archive",
+                "-hw_encoding",
+                "1",
+            ]),
             Self::X264 => [
                 "-preset", "veryfast", "-crf", &crf_text, "-pix_fmt", "yuv420p",
             ]
@@ -418,12 +455,29 @@ impl Encoder {
             Self::HevcNvenc => (&["-preset", "p4", "-tune", "hq", "-rc", "vbr"], "nv12"),
             Self::HevcQuickSync => (&["-preset", "medium"], "nv12"),
             Self::HevcAmf => (&["-quality", "balanced", "-rc", "vbr_peak"], "nv12"),
+            Self::HevcMediaFoundation => (
+                &[
+                    "-rate_control",
+                    "pc_vbr",
+                    "-scenario",
+                    "archive",
+                    "-hw_encoding",
+                    "1",
+                ],
+                "nv12",
+            ),
             _ => (
                 &["-preset", "veryfast", "-x265-params", "log-level=error"],
                 "yuv420p",
             ),
         };
-        ["-c:v", self.codec(), "-profile:v", "main"]
+        // Media Foundation takes the profile as its numeric HEVC profile (1 = Main).
+        let profile = if self == Self::HevcMediaFoundation {
+            "1"
+        } else {
+            "main"
+        };
+        ["-c:v", self.codec(), "-profile:v", profile]
             .into_iter()
             .chain(control.iter().copied())
             .map(str::to_string)
@@ -2443,7 +2497,12 @@ mod tests {
         let expected = rate::h264_bits_per_second(24, (1920, 1080), 60.0)
             .round()
             .to_string();
-        for encoder in [Encoder::Nvenc, Encoder::QuickSync, Encoder::Amf] {
+        for encoder in [
+            Encoder::Nvenc,
+            Encoder::QuickSync,
+            Encoder::Amf,
+            Encoder::MediaFoundation,
+        ] {
             let args = encoder.args(24, (1920, 1080), 60.0);
             let bitrate = args
                 .iter()
@@ -2468,6 +2527,7 @@ mod tests {
             Encoder::HevcNvenc,
             Encoder::HevcQuickSync,
             Encoder::HevcAmf,
+            Encoder::HevcMediaFoundation,
             Encoder::X265,
         ] {
             let args = encoder.args(24, (1920, 1080), 60.0);
@@ -2477,7 +2537,12 @@ mod tests {
                     .map(|index| args[index + 1].as_str())
             };
             assert_eq!(followed("-tag:v"), Some("hvc1"));
-            assert_eq!(followed("-profile:v"), Some("main"));
+            let profile = if encoder == Encoder::HevcMediaFoundation {
+                "1"
+            } else {
+                "main"
+            };
+            assert_eq!(followed("-profile:v"), Some(profile));
             assert_eq!(followed("-b:v"), Some(expected.as_str()));
             assert!(!args.iter().any(|value| value == "-level:v"));
             assert!(!args.iter().any(|value| value == "-crf"));
@@ -2485,6 +2550,27 @@ mod tests {
         assert_eq!(Encoder::software(Codec::Hevc), Encoder::X265);
         assert!(Encoder::X265.is_software());
         assert!(!Encoder::HevcQuickSync.is_software());
+    }
+
+    #[test]
+    fn media_foundation_encoders_force_the_hardware_path() {
+        let h264 = Encoder::MediaFoundation.args(24, (1920, 1080), 60.0);
+        let hevc = Encoder::HevcMediaFoundation.args(24, (1920, 1080), 60.0);
+        for (args, codec, profile) in [(&h264, "h264_mf", "100"), (&hevc, "hevc_mf", "1")] {
+            let followed = |flag: &str| {
+                args.iter()
+                    .position(|value| value == flag)
+                    .map(|index| args[index + 1].as_str())
+            };
+            assert_eq!(followed("-c:v"), Some(codec));
+            assert_eq!(followed("-profile:v"), Some(profile));
+            assert_eq!(followed("-hw_encoding"), Some("1"));
+            assert_eq!(followed("-rate_control"), Some("pc_vbr"));
+            assert_eq!(followed("-pix_fmt"), Some("nv12"));
+        }
+        assert!(!Encoder::MediaFoundation.is_software());
+        assert!(Encoder::HevcMediaFoundation.is_hevc());
+        assert!(!Encoder::MediaFoundation.is_hevc());
     }
 
     #[test]
@@ -3681,6 +3767,52 @@ mod tests {
                 "ffmpeg could not build the benchmark clip"
             );
         }
+        let camera = dir.join("cam720p30.mp4");
+        if !camera.is_file() {
+            let status =
+                crate::utils::hidden_command(crate::recording::editor::ffmpeg::ffmpeg_executable())
+                    .args([
+                        "-hide_banner",
+                        "-loglevel",
+                        "error",
+                        "-y",
+                        "-f",
+                        "lavfi",
+                        "-i",
+                        "testsrc=size=1280x720:rate=30",
+                        "-frames:v",
+                        "300",
+                        "-c:v",
+                        "libx264",
+                        "-preset",
+                        "ultrafast",
+                        "-crf",
+                        "18",
+                    ])
+                    .arg(&camera)
+                    .status()
+                    .expect("generate benchmark camera clip");
+            assert!(
+                status.success(),
+                "ffmpeg could not build the benchmark camera clip"
+            );
+        }
+        let bubble = crate::video_editor::webcam::WebcamExport {
+            path: camera.clone(),
+            settings: crate::video_editor::webcam::LayerSettings {
+                x: 0.72,
+                y: 0.68,
+                w: 0.24,
+                h: 0.28,
+                radius: 0.5,
+                ..Default::default()
+            },
+            layouts: crate::video_editor::webcam::LayoutSettings::default(),
+            track_seconds: 10.0,
+            video_seconds: 10.0,
+            last_frame: 9.95,
+            source_size: (1280, 720),
+        };
 
         let zoom = ZoomClip {
             start: 0.0,
@@ -3692,7 +3824,11 @@ mod tests {
             instant: false,
             anchor: None,
         };
-        for (label, zooms) in [("no zoom", Vec::new()), ("zoom 1.6x", vec![zoom])] {
+        for (label, zooms, webcam) in [
+            ("no zoom", Vec::new(), None),
+            ("zoom 1.6x", vec![zoom], None),
+            ("zoom 1.6x with camera", vec![zoom], Some(bubble)),
+        ] {
             let output = dir.join(format!("out-{}.mp4", label.replace(' ', "-")));
             let _ = std::fs::remove_file(&output);
             let model = ExportModel {
@@ -3705,7 +3841,7 @@ mod tests {
                 zoom_camera: crate::video_editor::zoom::ZoomCameraSettings::default(),
                 cursor: CursorSettings::default(),
                 sidecar: None,
-                webcam: None,
+                webcam,
                 canvas: None,
                 crf: 20,
                 audio: Vec::new(),
