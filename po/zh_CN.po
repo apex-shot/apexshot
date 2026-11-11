@@ -4351,3 +4351,9 @@ msgstr "倾斜程度"
 
 msgid "Tilt with motion"
 msgstr "随移动倾斜"
+
+msgid "Codec"
+msgstr "编码格式"
+
+msgid "Smaller files at the same quality, but not every app or browser plays HEVC."
+msgstr "同等画质下文件更小，但并非所有应用或浏览器都能播放 HEVC。"

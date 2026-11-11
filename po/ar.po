@@ -4388,3 +4388,9 @@ msgstr "مقدار الميل"
 
 msgid "Tilt with motion"
 msgstr "الإمالة مع الحركة"
+
+msgid "Codec"
+msgstr "الترميز"
+
+msgid "Smaller files at the same quality, but not every app or browser plays HEVC."
+msgstr "ملفات أصغر بالجودة نفسها، لكن ليس كل تطبيق أو متصفح يشغّل HEVC."

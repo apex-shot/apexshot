@@ -4444,3 +4444,9 @@ msgstr "Величина наклона"
 
 msgid "Tilt with motion"
 msgstr "Наклонять при движении"
+
+msgid "Codec"
+msgstr "Кодек"
+
+msgid "Smaller files at the same quality, but not every app or browser plays HEVC."
+msgstr "Файлы меньше при том же качестве, но HEVC воспроизводят не все приложения и браузеры."

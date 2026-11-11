@@ -4454,3 +4454,9 @@ msgstr "Intensidade da inclinação"
 
 msgid "Tilt with motion"
 msgstr "Inclinar com o movimento"
+
+msgid "Codec"
+msgstr "Codec"
+
+msgid "Smaller files at the same quality, but not every app or browser plays HEVC."
+msgstr "Arquivos menores com a mesma qualidade, mas nem todo app ou navegador reproduz HEVC."

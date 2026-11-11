@@ -4464,3 +4464,9 @@ msgstr "Neigungsstärke"
 
 msgid "Tilt with motion"
 msgstr "Mit der Bewegung neigen"
+
+msgid "Codec"
+msgstr "Codec"
+
+msgid "Smaller files at the same quality, but not every app or browser plays HEVC."
+msgstr "Kleinere Dateien bei gleicher Qualität, aber nicht jede App und jeder Browser spielt HEVC ab."

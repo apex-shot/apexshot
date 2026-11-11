@@ -4362,3 +4362,9 @@ msgstr "傾きの量"
 
 msgid "Tilt with motion"
 msgstr "動きに合わせて傾ける"
+
+msgid "Codec"
+msgstr "コーデック"
+
+msgid "Smaller files at the same quality, but not every app or browser plays HEVC."
+msgstr "同じ画質でファイルが小さくなりますが、HEVC を再生できないアプリやブラウザーもあります。"
