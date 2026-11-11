@@ -14,7 +14,7 @@ use crate::recording::editor::auto_zoom::release_position;
 use crate::recording::editor::sidecar::PointerSidecar;
 
 /// The studied screen spring's precision setting (`CpX:53-58`).
-const SCREEN_SPRING_PRECISION: f64 = 0.002;
+pub(super) const SCREEN_SPRING_PRECISION: f64 = 0.002;
 /// The shared follow spring at speed 1.0 and smoothness 0.5. The camera and
 /// the cursor sprite both chase on it.
 pub(super) const CAMERA_FOLLOW_SPRING: CameraSpring = CameraSpring {
@@ -135,6 +135,21 @@ impl TimeMapping {
                 })
                 .collect(),
         }
+    }
+
+    /// The recorded source time shown at `composition` seconds, or `None`
+    /// between segments and past the end.
+    #[allow(dead_code)] // Wired into the split's rest in a following change.
+    pub(super) fn source_at(&self, composition: f64) -> Option<f64> {
+        if !composition.is_finite() {
+            return None;
+        }
+        self.segments
+            .iter()
+            .find(|&&(start, end, _, _)| composition >= start && composition < end)
+            .map(|&(start, _, source_start, source_end)| {
+                (source_start + (composition - start)).min(source_end)
+            })
     }
 
     /// Every `(composition_start, composition_end, source_start, source_end)`
@@ -1030,7 +1045,7 @@ fn group_center_at(centers: &[(f64, (f64, f64))], time: f64) -> Option<(f64, f64
 
 /// The rest tolerance the studied spring sets whenever its target changes:
 /// the move's size times the precision setting, never under one move unit.
-fn studied_precision(value: f64, target: f64, precision: f64) -> f64 {
+pub(super) fn studied_precision(value: f64, target: f64, precision: f64) -> f64 {
     if value == target {
         return 1.0;
     }
@@ -1040,7 +1055,7 @@ fn studied_precision(value: f64, target: f64, precision: f64) -> f64 {
 /// One studied spring advance (`CpX:314-350`): the overspeed damping is chosen
 /// once per call, then the spring integrates in whole milliseconds. The last
 /// step uses the studied fractional rule exactly.
-fn studied_advance(
+pub(super) fn studied_advance(
     mut value: f64,
     mut velocity: f64,
     target: f64,

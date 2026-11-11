@@ -24,6 +24,7 @@ mod project;
 mod rounded_clip;
 pub(crate) mod side_panel;
 mod silence;
+mod split_rest;
 mod studio;
 mod timeline;
 mod type_scale;
