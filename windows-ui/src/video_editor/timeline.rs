@@ -6022,7 +6022,12 @@ fn draw_ruler(
         if x < -4.0 || x > width + 4.0 {
             continue;
         }
-        context.set_source_rgba(tick_r, tick_g, tick_b, if prefers_dark { 0.55 } else { 0.6 });
+        context.set_source_rgba(
+            tick_r,
+            tick_g,
+            tick_b,
+            if prefers_dark { 0.55 } else { 0.6 },
+        );
         context.set_dash(&[2.0 * scale, 2.0 * scale], 0.0);
         context.move_to(x, 0.0);
         context.line_to(x, height);
