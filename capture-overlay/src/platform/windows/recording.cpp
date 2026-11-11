@@ -3,6 +3,7 @@
 #include "platform/recording_settings.h"
 #include "platform/windows/audio_devices.h"
 #include "platform/windows/ddagrab.h"
+#include "platform/windows/disk_space.h"
 #include "platform/windows/pointer_tracker.h"
 #include "platform/windows/settings_store.h"
 #include "platform/windows/webcam_format.h"
@@ -479,6 +480,14 @@ QString concatListPath(const QString& workDir)
     return QDir(workDir).filePath(QStringLiteral("segments.txt"));
 }
 
+QString lowDiskMessage(qint64 freeBytes)
+{
+    return QStringLiteral("Recording stopped because the disk is almost full. ApexShot keeps "
+                          "at least %1 MB free; %2 MB was left. The recording so far was saved.")
+        .arg(Platform::kRecordingDiskReserveBytes / (1024 * 1024))
+        .arg(freeBytes / (1024 * 1024));
+}
+
 QString quoteConcatPath(const QString& path)
 {
     QString escaped = QDir::fromNativeSeparators(path);
@@ -512,7 +521,13 @@ public:
     {
         tick = new QTimer(q);
         tick->setInterval(200);
-        QObject::connect(tick, &QTimer::timeout, q, [this] { emit q->elapsedChanged(elapsedMs()); });
+        QObject::connect(tick, &QTimer::timeout, q, [this] {
+            emit q->elapsedChanged(elapsedMs());
+            // Every ten ticks (two seconds) is often enough to catch a filling
+            // disk long before the encoder runs out of room.
+            if (++diskCheckTicks % 10 == 0)
+                checkDiskSpace();
+        });
     }
 
     ~Private() = default;
@@ -536,6 +551,11 @@ public:
                         const QString& failure,
                         bool keepWorkDir = false);
     void fail(const QString& reason);
+    /// The smallest free size of the work and output volumes, or -1.
+    [[nodiscard]] qint64 freeRecordingBytes() const;
+    /// Stop and keep the recording when free space is under the reserve.
+    void checkDiskSpace();
+    void stopForLowDisk(qint64 freeBytes);
     void cleanupWorkDir();
     void removeDiscardedSidecar();
     void consumeWebcamPreview(const QByteArray& chunk);
@@ -575,6 +595,9 @@ public:
     int segmentIndex = 0;
     bool discardRequested = false;
     bool finishedEmitted = false;
+    int diskCheckTicks = 0;
+    /// Set once the low-disk stop ran, so the warning is shown only once.
+    bool lowDiskStopped = false;
     /// Resume was requested while the previous segment was still finalising.
     bool resumeAfterPause = false;
     QStringList audioArguments;
@@ -1167,6 +1190,34 @@ void RecordingSession::Private::fail(const QString& reason)
         : QStringLiteral("%1 The captured segments are in %2.")
               .arg(reason, QDir::toNativeSeparators(workDir));
     cleanupAndEmit(false, QString(), message, true);
+}
+
+qint64 RecordingSession::Private::freeRecordingBytes() const
+{
+    return lowestFreeDiskBytes({workDir, QFileInfo(request.outputPath).absolutePath()});
+}
+
+void RecordingSession::Private::checkDiskSpace()
+{
+    if (lowDiskStopped || state != State::Recording)
+        return;
+    const qint64 freeBytes = freeRecordingBytes();
+    if (freeBytes >= 0 && freeBytes < kRecordingDiskReserveBytes)
+        stopForLowDisk(freeBytes);
+}
+
+void RecordingSession::Private::stopForLowDisk(qint64 freeBytes)
+{
+    if (lowDiskStopped)
+        return;
+    lowDiskStopped = true;
+    const QString message = lowDiskMessage(freeBytes);
+    recordingLog(QStringLiteral("low disk: %1").arg(message));
+    qWarning().noquote() << "[recording]" << message;
+    // Stop first: the warning's handler may show a modal box, and the disk
+    // keeps filling while it is open.
+    q->stop();
+    emit q->warning(message);
 }
 
 void RecordingSession::Private::completeSystemAudio(const QString& videoPath)
@@ -1857,6 +1908,19 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
         return false;
     }
 
+    {
+        const qint64 freeBytes = d->freeRecordingBytes();
+        if (freeBytes >= 0 && freeBytes < kRecordingDiskReserveBytes) {
+            QDir(d->workDir).removeRecursively();
+            d->workDir.clear();
+            error = QStringLiteral("Not enough free disk space to record. ApexShot needs at "
+                                   "least %1 MB free; %2 MB is free.")
+                        .arg(kRecordingDiskReserveBytes / (1024 * 1024))
+                        .arg(freeBytes / (1024 * 1024));
+            return false;
+        }
+    }
+
     QStringList warnings;
     d->audioArguments = d->buildAudioArguments(warnings);
 
@@ -1957,6 +2021,8 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
     d->discardRequested = false;
     d->resumeAfterPause = false;
     d->finishedEmitted = false;
+    d->diskCheckTicks = 0;
+    d->lowDiskStopped = false;
     d->systemAudio.reset();
     d->systemAudioPath.clear();
     d->systemAudioOffsetMs = 0;
@@ -2089,6 +2155,14 @@ void RecordingSession::resume()
     }
     if (d->state != Private::State::Paused)
         return;
+
+    {
+        const qint64 freeBytes = d->freeRecordingBytes();
+        if (freeBytes >= 0 && freeBytes < kRecordingDiskReserveBytes) {
+            d->stopForLowDisk(freeBytes);
+            return;
+        }
+    }
 
     QString error;
     if (!d->startSegment(error)) {

@@ -6,6 +6,7 @@
 
 #include "platform/platform.h"
 #include "platform/recording.h"
+#include "platform/windows/disk_space.h"
 #include "platform/windows/pointer_tracker.h"
 #include "platform/windows/webcam_layout.h"
 
@@ -1122,6 +1123,103 @@ bool checkWebcamPlacement()
     return true;
 }
 
+/// The low-disk guard: a start under the reserve is refused, and a recording
+/// whose free space drops under it mid-session stops, keeps its file, and
+/// says why.
+int recordUntilDiskLow()
+{
+    const qint64 plenty = 64LL * 1024 * 1024 * 1024;
+    const qint64 scarce = 100LL * 1024 * 1024;
+
+    {
+        Platform::setFreeDiskBytesProbeForTesting([scarce](const QString&) { return scarce; });
+        Platform::RecordingSession session;
+        Platform::RecordingRequest request;
+        request.region = kRegion;
+        request.outputPath =
+            QDir(QDir::tempPath()).filePath(QStringLiteral("apexshot-record-diskfull-refused.mp4"));
+        request.includeCursor = false;
+        request.fps = 30;
+        request.crf = 28;
+        QString error;
+        const bool started = session.start(request, error);
+        Platform::setFreeDiskBytesProbeForTesting({});
+        if (started) {
+            session.discard();
+            std::printf("FAIL: a start under the disk reserve was accepted\n");
+            return 1;
+        }
+        if (!error.contains(QStringLiteral("free disk space"))) {
+            std::printf("FAIL: unexpected low-disk start error: %s\n", qPrintable(error));
+            return 1;
+        }
+    }
+
+    QElapsedTimer clock;
+    clock.start();
+    Platform::setFreeDiskBytesProbeForTesting([&clock, plenty, scarce](const QString&) {
+        return clock.elapsed() < 1500 ? plenty : scarce;
+    });
+
+    Platform::RecordingSession session;
+    const QString path =
+        QDir(QDir::tempPath()).filePath(QStringLiteral("apexshot-record-diskfull.mp4"));
+    QFile::remove(path);
+    Platform::RecordingRequest request;
+    request.region = kRegion;
+    request.outputPath = path;
+    request.includeCursor = false;
+    request.fps = 30;
+    request.crf = 28;
+
+    QString warningText;
+    bool kept = false;
+    QString output;
+    QString finishError;
+    bool finished = false;
+    QEventLoop loop;
+    QObject::connect(&session, &Platform::RecordingSession::warning, &session,
+                     [&](const QString& message) { warningText += message; });
+    QObject::connect(&session, &Platform::RecordingSession::finished, &session,
+                     [&](bool k, const QString& p, const QString& e) {
+                         kept = k;
+                         output = p;
+                         finishError = e;
+                         finished = true;
+                         loop.quit();
+                     });
+    QTimer::singleShot(20000, &loop, &QEventLoop::quit);
+
+    QString error;
+    if (!session.start(request, error)) {
+        Platform::setFreeDiskBytesProbeForTesting({});
+        std::printf("FAIL: low-disk recording did not start: %s\n", qPrintable(error));
+        return 1;
+    }
+    loop.exec();
+    Platform::setFreeDiskBytesProbeForTesting({});
+
+    if (!finished) {
+        session.discard();
+        std::printf("FAIL: the recording did not stop when the disk ran low\n");
+        return 1;
+    }
+    if (!kept || output.isEmpty() || QFileInfo(output).size() <= 0) {
+        std::printf("FAIL: the low-disk stop did not keep the recording (%s)\n",
+                    qPrintable(finishError));
+        return 1;
+    }
+    if (!warningText.contains(QStringLiteral("disk is almost full"))) {
+        std::printf("FAIL: the low-disk stop gave no reason (warning: %s)\n",
+                    qPrintable(warningText));
+        return 1;
+    }
+    std::printf("OK: low-disk stop kept %s after %lld ms\n", qPrintable(output),
+                static_cast<long long>(clock.elapsed()));
+    QFile::remove(output);
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -1150,6 +1248,8 @@ int main(int argc, char** argv)
         return recordOnce(false);
     if (!qEnvironmentVariableIsEmpty("APEXSHOT_TEST_FULL_SCREEN"))
         return recordOnce(true);
+    if (!qEnvironmentVariableIsEmpty("APEXSHOT_TEST_DISK_LOW"))
+        return recordUntilDiskLow();
 
     // The cursor checks need a desktop that accepts input injection, which a
     // locked or game-focused session refuses; the camera path can still run.
@@ -1159,6 +1259,8 @@ int main(int argc, char** argv)
     int result = recordOnce(false);
     if (result == 0)
         result = recordOnce(true);
+    if (result == 0)
+        result = recordUntilDiskLow();
     if (result == 0) {
         const int webcam = recordWithWebcam();
         // 77 is the camera-absent skip, which is not a failure of the recorder.

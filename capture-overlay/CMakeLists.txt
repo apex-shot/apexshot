@@ -22,6 +22,8 @@ if(WIN32)
         src/platform/windows/ddagrab.cpp
         src/platform/windows/ddagrab.h
         src/platform/windows/recording.cpp
+        src/platform/windows/disk_space.cpp
+        src/platform/windows/disk_space.h
         src/platform/windows/window_capture.cpp
         src/platform/windows/window_capture.h
         src/platform/windows/pointer_tracker.cpp
@@ -150,6 +152,8 @@ if(WIN32)
             src/platform/windows/ddagrab.cpp
             src/platform/windows/ddagrab.h
             src/platform/windows/recording.cpp
+            src/platform/windows/disk_space.cpp
+            src/platform/windows/disk_space.h
             src/platform/windows/window_capture.cpp
             src/platform/windows/window_capture.h
             src/platform/windows/screen_capture.cpp
@@ -181,6 +185,8 @@ if(WIN32)
             src/platform/windows/ddagrab.cpp
             src/platform/windows/ddagrab.h
             src/platform/windows/recording.cpp
+            src/platform/windows/disk_space.cpp
+            src/platform/windows/disk_space.h
             src/platform/windows/window_capture.cpp
             src/platform/windows/window_capture.h
             src/platform/windows/screen_capture.cpp
