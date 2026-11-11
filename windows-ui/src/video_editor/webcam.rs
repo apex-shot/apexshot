@@ -1707,6 +1707,46 @@ fn draw_camera_cover(
     let _ = context.restore();
 }
 
+/// [`draw_camera_cover`] with the studied fade blur: the picture is covered
+/// into an unclipped layer, blurred by `sigma` pixels, then cut to the shape,
+/// so the shape's edge stays crisp while the picture softens.
+fn draw_camera_cover_blurred(
+    context: &Context,
+    rect: Rect,
+    radius: f64,
+    flip: bool,
+    alpha: f64,
+    image: &ImageSurface,
+    sigma: f64,
+) {
+    if !sigma.is_finite() || sigma < 0.34 {
+        draw_camera_cover(context, rect, radius, flip, alpha, image);
+        return;
+    }
+    let width = rect.width.ceil().max(1.0) as i32;
+    let height = rect.height.ceil().max(1.0) as i32;
+    let Ok(mut layer) = ImageSurface::create(Format::ARgb32, width, height) else {
+        draw_camera_cover(context, rect, radius, flip, alpha, image);
+        return;
+    };
+    if let Ok(layer_context) = Context::new(&layer) {
+        let local = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: rect.width,
+            height: rect.height,
+        };
+        draw_camera_cover(&layer_context, local, 0.0, flip, 1.0, image);
+    }
+    gaussian_blur_surface(&mut layer, sigma);
+    let _ = context.save();
+    add_shape_path(context, rect, radius);
+    context.clip();
+    let _ = context.set_source_surface(&layer, rect.x, rect.y);
+    let _ = context.paint_with_alpha(alpha.clamp(0.0, 1.0));
+    let _ = context.restore();
+}
+
 struct Job {
     path: PathBuf,
     seconds: f64,
@@ -2400,13 +2440,14 @@ impl WebcamModel {
         };
         let radius = frame.camera_radius * rect.width.min(rect.height) / 2.0;
         self.draw_shadow(context, video, rect, radius, &frame, &image);
-        draw_camera_cover(
+        draw_camera_cover_blurred(
             context,
             rect,
             radius,
             frame.mirror,
             frame.camera_alpha,
             &image,
+            fade_blur_sigma_px(frame.camera_alpha, video.height),
         );
     }
 
@@ -3101,7 +3142,15 @@ pub(super) fn composite_layout_into(
             width: f64::from(width),
             height: f64::from(height),
         };
-        draw_camera_cover(&context, rect, radius, frame.mirror, 1.0, &camera_image);
+        draw_camera_cover_blurred(
+            &context,
+            rect,
+            radius,
+            frame.mirror,
+            1.0,
+            &camera_image,
+            fade_blur_sigma_px(frame.camera_alpha, f64::from(size.1)),
+        );
     }
     layer.mark_dirty();
     // The studied camera casts its shadow onto whatever is under it, so it
@@ -3169,6 +3218,123 @@ pub(super) fn camera_blur_strength(amount: f64, fps: f64, camera_alpha: f64) -> 
         return 0.0;
     }
     amount.clamp(0.0, 1.0) * fps / 60.0
+}
+
+/// The studied fade blur's radius at full transparency, in pixels of a stage
+/// 1080 pixels tall.
+const FADE_BLUR_RADIUS_STAGE_PX: f64 = 10.0;
+/// The studied blur's gaussian sigma per pixel of radius.
+const BLUR_SIGMA_PER_RADIUS: f64 = 0.5;
+
+/// The gaussian sigma, in pixels of a stage `stage_height_px` tall, the
+/// camera is blurred by while it fades: the studied
+/// `10 × (1 − alpha)` stage-pixel radius, nothing when fully opaque.
+pub(super) fn fade_blur_sigma_px(camera_alpha: f64, stage_height_px: f64) -> f64 {
+    if !camera_alpha.is_finite() || !stage_height_px.is_finite() || stage_height_px <= 0.0 {
+        return 0.0;
+    }
+    let alpha = camera_alpha.clamp(0.0, 1.0);
+    BLUR_SIGMA_PER_RADIUS * FADE_BLUR_RADIUS_STAGE_PX * (1.0 - alpha) * stage_height_px / 1080.0
+}
+
+/// Box widths whose three passes approximate a gaussian of `sigma`.
+fn gaussian_boxes(sigma: f64) -> [usize; 3] {
+    let ideal = (12.0 * sigma * sigma / 3.0 + 1.0).sqrt();
+    let mut lower = ideal.floor() as usize;
+    if lower.is_multiple_of(2) {
+        lower = lower.saturating_sub(1);
+    }
+    let lower = lower.max(1);
+    let upper = lower + 2;
+    let lower_f = lower as f64;
+    let m = ((12.0 * sigma * sigma - 3.0 * lower_f * lower_f - 12.0 * lower_f - 9.0)
+        / (-4.0 * lower_f - 4.0))
+        .round();
+    let mut boxes = [lower; 3];
+    for (index, size) in boxes.iter_mut().enumerate() {
+        if (index as f64) >= m {
+            *size = upper;
+        }
+    }
+    boxes
+}
+
+/// One box pass of `radius` along rows (`horizontal`) or columns, all four
+/// channels, reading clamped to the edge.
+fn box_pass(
+    src: &[u8],
+    dst: &mut [u8],
+    width: usize,
+    height: usize,
+    stride: usize,
+    radius: usize,
+    horizontal: bool,
+) {
+    let (lines, length) = if horizontal {
+        (height, width)
+    } else {
+        (width, height)
+    };
+    let index = |line: usize, at: usize| {
+        if horizontal {
+            line * stride + at * 4
+        } else {
+            at * stride + line * 4
+        }
+    };
+    let clamp = |at: isize| at.clamp(0, length as isize - 1) as usize;
+    let window = (2 * radius + 1) as u32;
+    for line in 0..lines {
+        let mut sum = [0u32; 4];
+        // The window for output position 0 covers source positions
+        // -radius..=radius, each clamped into 0..length-1.
+        for k in 0..=(2 * radius) {
+            let i = index(line, clamp(k as isize - radius as isize));
+            for c in 0..4 {
+                sum[c] += u32::from(src[i + c]);
+            }
+        }
+        for at in 0..length {
+            let o = index(line, at);
+            for c in 0..4 {
+                dst[o + c] = ((sum[c] + window / 2) / window) as u8;
+            }
+            let out = index(line, clamp(at as isize - radius as isize));
+            let incoming = index(line, clamp(at as isize + radius as isize + 1));
+            for c in 0..4 {
+                sum[c] = sum[c] + u32::from(src[incoming + c]) - u32::from(src[out + c]);
+            }
+        }
+    }
+}
+
+/// Blur a premultiplied ARGB32 surface in place by a gaussian of `sigma`
+/// pixels. Below a third of a pixel it is left alone.
+fn gaussian_blur_surface(surface: &mut ImageSurface, sigma: f64) {
+    if !sigma.is_finite() || sigma < 0.34 {
+        return;
+    }
+    let width = surface.width().max(0) as usize;
+    let height = surface.height().max(0) as usize;
+    let stride = surface.stride().max(0) as usize;
+    if width == 0 || height == 0 {
+        return;
+    }
+    surface.flush();
+    let Ok(mut data) = surface.data() else {
+        return;
+    };
+    let mut scratch = data.to_vec();
+    for size in gaussian_boxes(sigma) {
+        let radius = (size - 1) / 2;
+        if radius == 0 {
+            continue;
+        }
+        box_pass(&data, &mut scratch, width, height, stride, radius, true);
+        box_pass(&scratch, &mut data, width, height, stride, radius, false);
+    }
+    drop(data);
+    surface.mark_dirty();
 }
 
 /// How many layouts to average along a camera trail from `before` to `now`
@@ -5501,6 +5667,68 @@ mod tests {
         assert!((camera_blur_strength(0.5, 30.0, 1.0) - 0.25).abs() < 1e-9);
         assert_eq!(camera_blur_strength(1.0, 60.0, 0.0), 0.0);
         assert_eq!(camera_blur_strength(0.0, 60.0, 1.0), 0.0);
+    }
+
+    #[test]
+    fn the_fade_blur_follows_the_studied_radius() {
+        assert_eq!(fade_blur_sigma_px(1.0, 1080.0), 0.0);
+        assert!((fade_blur_sigma_px(0.0, 1080.0) - 5.0).abs() < 1e-9);
+        assert!((fade_blur_sigma_px(0.5, 2160.0) - 5.0).abs() < 1e-9);
+        assert_eq!(fade_blur_sigma_px(f64::NAN, 1080.0), 0.0);
+        assert_eq!(fade_blur_sigma_px(0.5, 0.0), 0.0);
+    }
+
+    #[test]
+    fn a_fading_camera_softens_and_an_opaque_one_stays_sharp() {
+        // A camera split hard down the middle, red | green. It is as wide as
+        // the stage so the seam is a true one-pixel edge; a smaller camera
+        // scaled up would spread the edge over its own filter ramp.
+        let camera = camera_with(1080, 1080, |x, _| if x < 540 { RED } else { GREEN });
+        let layout = |alpha: f64| LayoutFrame {
+            screen: Rect::full(),
+            camera: Rect::full(),
+            camera_alpha: alpha,
+            camera_radius: 0.0,
+            screen_radius: 0.0,
+            cutout: 0.0,
+            mirror: false,
+        };
+        // A 1080-tall frame so the fade reaches its full studied radius.
+        let size = (1080u32, 1080u32);
+        let mut opaque = solid(size.0, size.1, [0, 0, 0, 255]);
+        composite_layout_into(&mut opaque, size, layout(1.0), &camera, (1080, 1080), None).unwrap();
+        let mut fading = solid(size.0, size.1, [0, 0, 0, 255]);
+        composite_layout_into(&mut fading, size, layout(0.2), &camera, (1080, 1080), None).unwrap();
+        // Two pixels left of the seam: sharp stays pure red, faded mixes in green.
+        let sharp = pixel(&opaque, size.0, 538, 540);
+        let soft = pixel(&fading, size.0, 538, 540);
+        assert!(
+            sharp[1] < 10,
+            "the opaque camera keeps a hard edge: {sharp:?}"
+        );
+        assert!(
+            soft[1] > 5,
+            "the fading camera blurs across the edge: {soft:?}"
+        );
+        // Far from the seam both are flat red (scaled by alpha when fading).
+        let far = pixel(&fading, size.0, 100, 540);
+        assert!(far[1] < 3, "a flat area stays flat under the blur: {far:?}");
+    }
+
+    #[test]
+    fn the_gaussian_blur_keeps_a_flat_surface_flat() {
+        let mut surface = ImageSurface::create(Format::ARgb32, 16, 16).unwrap();
+        {
+            let context = Context::new(&surface).unwrap();
+            context.set_source_rgba(0.2, 0.4, 0.6, 1.0);
+            let _ = context.paint();
+        }
+        let before = surface.data().unwrap().to_vec();
+        gaussian_blur_surface(&mut surface, 3.0);
+        let after = surface.data().unwrap().to_vec();
+        for (a, b) in before.iter().zip(after.iter()) {
+            assert!((i32::from(*a) - i32::from(*b)).abs() <= 1);
+        }
     }
 
     #[test]
