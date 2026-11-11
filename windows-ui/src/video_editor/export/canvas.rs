@@ -10,6 +10,7 @@
 
 use super::{crop_scale_into, End, Sink};
 use crate::video_editor::pixels::Nv12Converter;
+use crate::video_editor::zoom::StageRect;
 use std::sync::Arc;
 
 /// The canvas the stage shows, measured at the editor's canvas size.
@@ -21,8 +22,40 @@ pub(in crate::video_editor) struct CanvasLayout {
     pub video: (u32, u32),
     /// The video card's corner radius, in canvas pixels.
     pub radius: f64,
+    /// The zoom area, the stage inside the padding, in canvas pixels at
+    /// `size`: x, y, width, height. A zoomed card stays covering it.
+    pub area: (u32, u32, u32, u32),
     /// The fill as opaque RGBA at `size`, row-major with no padding.
     pub background: Arc<Vec<u8>>,
+}
+
+/// The zoomed card for one frame, in pixels of the export canvas.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct CardFrame {
+    /// Where the card is drawn.
+    pub rect: StageRect,
+    /// The background's scale and its pivot, as fractions of the canvas.
+    pub background_zoom: f64,
+    pub pivot: (f64, f64),
+}
+
+/// Whether `card` has left `rest`, with the preview's tolerance.
+pub(super) fn card_moved(card: StageRect, rest: StageRect) -> bool {
+    (card.0 - rest.0).abs() > 0.01
+        || (card.1 - rest.1).abs() > 0.01
+        || (card.2 - rest.2).abs() > 0.01
+        || (card.3 - rest.3).abs() > 0.01
+}
+
+/// Coverage (0..=255) of the pixel at (x, y) by a rounded rectangle, from the
+/// signed distance at the pixel centre with a one-pixel ramp.
+fn rounded_coverage(x: usize, y: usize, rect: StageRect, radius: f64) -> u32 {
+    let half_w = rect.2 / 2.0;
+    let half_h = rect.3 / 2.0;
+    let qx = (x as f64 + 0.5 - (rect.0 + half_w)).abs() - (half_w - radius);
+    let qy = (y as f64 + 0.5 - (rect.1 + half_h)).abs() - (half_h - radius);
+    let distance = qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - radius;
+    ((0.5 - distance).clamp(0.0, 1.0) * 255.0).round() as u32
 }
 
 /// The video rect at an export size. A resolution pick scales the canvas, so
@@ -46,7 +79,16 @@ pub(super) struct Framer {
     /// Top-left of the video rect, even on both axes so chroma lines up.
     origin: (usize, usize),
     background: Vec<u8>,
+    /// The RGBA background at the export size, for the zoomed card's own
+    /// background pass.
+    background_rgba: Vec<u8>,
     radius: usize,
+    /// The video rect at rest and the zoom area, in export pixels.
+    rest: StageRect,
+    area: StageRect,
+    /// The zoomed background, NV12, cached by its scale and pivot.
+    zoomed: Option<((i64, i64, i64), Vec<u8>)>,
+    scratch: Vec<u8>,
     /// Coverage of the top-left corner, `radius` rows of `radius` bytes; the
     /// other three corners mirror it.
     corner: Vec<u8>,
@@ -77,6 +119,7 @@ impl Framer {
         };
         let mut background = vec![0u8; out.0 as usize * out.1 as usize * 3 / 2];
         converter.convert_into(rgba, out, &mut background);
+        let background_rgba = rgba.to_vec();
         let scale = f64::from(out.0) / f64::from(layout.size.0.max(1));
         let radius = if layout.radius.is_finite() && layout.radius > 0.0 {
             ((layout.radius * scale).round().max(0.0) as usize)
@@ -85,17 +128,43 @@ impl Framer {
         } else {
             0
         };
+        let origin = (
+            ((out.0 - video.0) / 2) as usize & !1,
+            ((out.1 - video.1) / 2) as usize & !1,
+        );
+        let scale_y = f64::from(out.1) / f64::from(layout.size.1.max(1));
+        let area = (
+            f64::from(layout.area.0) * scale,
+            f64::from(layout.area.1) * scale_y,
+            f64::from(layout.area.2) * scale,
+            f64::from(layout.area.3) * scale_y,
+        );
         Ok(Self {
             out: (out.0 as usize, out.1 as usize),
             video: (video.0 as usize, video.1 as usize),
-            origin: (
-                ((out.0 - video.0) / 2) as usize & !1,
-                ((out.1 - video.1) / 2) as usize & !1,
-            ),
+            origin,
             background,
+            background_rgba,
             radius,
+            rest: (
+                origin.0 as f64,
+                origin.1 as f64,
+                f64::from(video.0),
+                f64::from(video.1),
+            ),
+            area,
+            zoomed: None,
+            scratch: Vec::new(),
             corner: corner_coverage(radius),
         })
+    }
+
+    pub(super) fn rest(&self) -> StageRect {
+        self.rest
+    }
+
+    pub(super) fn area(&self) -> StageRect {
+        self.area
     }
 
     fn video_bytes(&self) -> usize {
@@ -169,6 +238,124 @@ impl Framer {
             }
         }
     }
+
+    /// Write one canvas frame for a zoomed card: the zoomed background, the
+    /// card's footage over the whole canvas (`outer`, NV12 at the export size)
+    /// inside the card's rounded shape, then `video` (NV12 at
+    /// [`video_size`](Self::video_size)) on top through the same shape.
+    pub(super) fn compose_card(
+        &mut self,
+        video: &[u8],
+        card: CardFrame,
+        outer: &[u8],
+        converter: &Nv12Converter,
+        out: &mut [u8],
+    ) {
+        let (out_w, out_h) = self.out;
+        let base = out_w * out_h;
+
+        if card.background_zoom > 1.0 + 1e-6 {
+            let key = (
+                (card.background_zoom * 1e4).round() as i64,
+                (card.pivot.0 * 1e4).round() as i64,
+                (card.pivot.1 * 1e4).round() as i64,
+            );
+            if !matches!(&self.zoomed, Some((cached, _)) if *cached == key) {
+                let w = out_w as f64;
+                let h = out_h as f64;
+                let px = card.pivot.0.clamp(0.0, 1.0) * w;
+                let py = card.pivot.1.clamp(0.0, 1.0) * h;
+                let z = card.background_zoom;
+                let view = (px - px / z, py - py / z, w / z, h / z);
+                self.scratch.resize(out_w * out_h * 4, 0);
+                crop_scale_into(
+                    &self.background_rgba,
+                    (out_w as u32, out_h as u32),
+                    view,
+                    (out_w as u32, out_h as u32),
+                    &mut self.scratch,
+                );
+                let mut nv12 = vec![0u8; base * 3 / 2];
+                converter.convert_into(&self.scratch, (out_w as u32, out_h as u32), &mut nv12);
+                self.zoomed = Some((key, nv12));
+            }
+            let zoomed = self
+                .zoomed
+                .as_ref()
+                .map(|(_, zoomed)| zoomed)
+                .expect("the zoomed background was just built");
+            out.copy_from_slice(zoomed);
+        } else {
+            out.copy_from_slice(&self.background);
+        }
+
+        let radius = (self.radius as f64 * card.rect.2 / self.rest.2.max(1.0))
+            .min(card.rect.2 / 2.0)
+            .min(card.rect.3 / 2.0)
+            .max(0.0);
+
+        let x0 = card.rect.0.floor().max(0.0) as usize;
+        let x1 = ((card.rect.0 + card.rect.2).ceil().max(0.0) as usize).min(out_w);
+        let y0 = card.rect.1.floor().max(0.0) as usize;
+        let y1 = ((card.rect.1 + card.rect.3).ceil().max(0.0) as usize).min(out_h);
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let alpha = rounded_coverage(x, y, card.rect, radius);
+                if alpha > 0 {
+                    let index = y * out_w + x;
+                    out[index] = blend(out[index], outer[index], alpha);
+                }
+            }
+        }
+        let pair_end = x1.div_ceil(2).min(out_w / 2);
+        for row in y0 / 2..y1.div_ceil(2).min(out_h / 2) {
+            let y = row * 2;
+            let lower = if y + 1 < out_h { y + 1 } else { y };
+            for pair in x0 / 2..pair_end {
+                let x = pair * 2;
+                let alpha = (rounded_coverage(x, y, card.rect, radius)
+                    + rounded_coverage(x + 1, y, card.rect, radius)
+                    + rounded_coverage(x + 1, lower, card.rect, radius)
+                    + rounded_coverage(x, lower, card.rect, radius)
+                    + 2)
+                    / 4;
+                if alpha > 0 {
+                    let index = base + row * out_w + x;
+                    out[index] = blend(out[index], outer[index], alpha);
+                    out[index + 1] = blend(out[index + 1], outer[index + 1], alpha);
+                }
+            }
+        }
+
+        let (width, height) = self.video;
+        let (left, top) = self.origin;
+        for y in 0..height {
+            for x in 0..width {
+                let cx = left + x;
+                let cy = top + y;
+                let alpha = rounded_coverage(cx, cy, card.rect, radius);
+                let index = cy * out_w + cx;
+                out[index] = blend(out[index], video[y * width + x], alpha);
+            }
+        }
+        let video_chroma = width * height;
+        for row in 0..height / 2 {
+            let y = row * 2;
+            for pair in 0..width / 2 {
+                let x = pair * 2;
+                let alpha = (rounded_coverage(left + x, top + y, card.rect, radius)
+                    + rounded_coverage(left + x + 1, top + y, card.rect, radius)
+                    + rounded_coverage(left + x, top + y + 1, card.rect, radius)
+                    + rounded_coverage(left + x + 1, top + y + 1, card.rect, radius)
+                    + 2)
+                    / 4;
+                let target = base + (top / 2 + row) * out_w + left + x;
+                let source = video_chroma + row * width + x;
+                out[target] = blend(out[target], video[source], alpha);
+                out[target + 1] = blend(out[target + 1], video[source + 1], alpha);
+            }
+        }
+    }
 }
 
 /// Coverage of a quarter circle of `radius` centred on the corner's inner
@@ -239,6 +426,29 @@ impl FramedSink {
         self.sink.submit(canvas)
     }
 
+    /// The rest rect and the zoom area of the canvas, when the export has one.
+    pub(super) fn card_geometry(&self) -> Option<(StageRect, StageRect)> {
+        self.framer.as_ref().map(|framer| (framer.rest(), framer.area()))
+    }
+
+    /// Submit a frame drawn on a zoomed card. `outer` is the card's footage over
+    /// the whole canvas, NV12 at the export size.
+    pub(super) fn submit_card(
+        &mut self,
+        frame: Vec<u8>,
+        card: CardFrame,
+        outer: &[u8],
+        converter: &Nv12Converter,
+    ) -> Result<(), End> {
+        let Some(framer) = self.framer.as_mut() else {
+            return self.sink.submit(frame);
+        };
+        let mut canvas = self.sink.buffer(self.pending)?;
+        framer.compose_card(&frame, card, outer, converter, &mut canvas);
+        self.spare.push(frame);
+        self.sink.submit(canvas)
+    }
+
     pub(super) fn finish(self) -> Result<(), End> {
         self.sink.finish()
     }
@@ -246,7 +456,7 @@ impl FramedSink {
 
 #[cfg(test)]
 mod tests {
-    use super::{corner_coverage, video_size, CanvasLayout, Framer};
+    use super::{corner_coverage, rounded_coverage, video_size, CanvasLayout, CardFrame, Framer};
     use crate::video_editor::pixels::{Nv12Converter, YuvSpace};
     use std::sync::Arc;
 
@@ -255,6 +465,7 @@ mod tests {
             size,
             video,
             radius,
+            area: (0, 0, size.0, size.1),
             background: Arc::new(vec![0u8; size.0 as usize * size.1 as usize * 4]),
         }
     }
@@ -309,5 +520,128 @@ mod tests {
         assert_eq!(out[12 * 64 + 32], 200);
         assert_eq!(out[24 * 64 + 16], 200);
         assert_eq!(out[24 * 64 + 32], 200);
+    }
+
+    #[test]
+    fn a_grown_card_covers_the_padding_with_footage() {
+        let converter = Nv12Converter::new(YuvSpace::from_probe(None, None));
+        let canvas = layout((64, 48), (32, 24), 0.0);
+        let mut framer = Framer::new(&canvas, (64, 48), &converter).unwrap();
+        let video = vec![200u8; 32 * 24 * 3 / 2];
+        let mut outer = vec![0u8; 64 * 48 * 3 / 2];
+        outer[..64 * 48].fill(120);
+        outer[64 * 48..].fill(128);
+        let mut out = vec![0u8; 64 * 48 * 3 / 2];
+        framer.compose_card(
+            &video,
+            CardFrame {
+                rect: (4.0, 3.0, 56.0, 42.0),
+                background_zoom: 1.0,
+                pivot: (0.5, 0.5),
+            },
+            &outer,
+            &converter,
+            &mut out,
+        );
+        let background_luma = framer.background[0];
+        // Outside the card the background shows.
+        assert_eq!(out[2 * 64 + 2], background_luma);
+        // The padding inside the card is footage.
+        assert_eq!(out[5 * 64 + 6], 120);
+        // The video rect still lands at (16, 12).
+        assert_eq!(out[15 * 64 + 20], 200);
+    }
+
+    #[test]
+    fn the_background_zooms_about_its_pivot() {
+        let converter = Nv12Converter::new(YuvSpace::from_probe(None, None));
+        let size = (64u32, 48u32);
+        let mut background = vec![0u8; size.0 as usize * size.1 as usize * 4];
+        for (index, pixel) in background.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            let x = index % size.0 as usize;
+            *pixel = if x < 32 {
+                [0, 0, 0, 255]
+            } else {
+                [255, 255, 255, 255]
+            };
+        }
+        let canvas = CanvasLayout {
+            size,
+            video: (32, 24),
+            radius: 0.0,
+            area: (0, 0, size.0, size.1),
+            background: Arc::new(background),
+        };
+        let mut framer = Framer::new(&canvas, size, &converter).unwrap();
+        let video = vec![0u8; 32 * 24 * 3 / 2];
+        let outer = vec![0u8; 64 * 48 * 3 / 2];
+        let card = framer.rest();
+        let mut out = vec![0u8; 64 * 48 * 3 / 2];
+        framer.compose_card(
+            &video,
+            CardFrame {
+                rect: card,
+                background_zoom: 1.0,
+                pivot: (0.5, 0.5),
+            },
+            &outer,
+            &converter,
+            &mut out,
+        );
+        assert!(
+            out[2 * 64 + 60] > 200,
+            "the right half should be white: {}",
+            out[2 * 64 + 60]
+        );
+        framer.compose_card(
+            &video,
+            CardFrame {
+                rect: card,
+                background_zoom: 2.0,
+                pivot: (0.0, 0.5),
+            },
+            &outer,
+            &converter,
+            &mut out,
+        );
+        assert!(
+            out[2 * 64 + 60] < 50,
+            "the zoom should bring the black half over it: {}",
+            out[2 * 64 + 60]
+        );
+    }
+
+    #[test]
+    fn a_zoomed_card_rounds_its_own_corners() {
+        let converter = Nv12Converter::new(YuvSpace::from_probe(None, None));
+        let canvas = layout((64, 48), (32, 24), 6.0);
+        let mut framer = Framer::new(&canvas, (64, 48), &converter).unwrap();
+        let video = vec![200u8; 32 * 24 * 3 / 2];
+        let mut outer = vec![0u8; 64 * 48 * 3 / 2];
+        outer[..64 * 48].fill(120);
+        outer[64 * 48..].fill(128);
+        let mut out = vec![0u8; 64 * 48 * 3 / 2];
+        framer.compose_card(
+            &video,
+            CardFrame {
+                rect: (4.0, 3.0, 56.0, 42.0),
+                background_zoom: 1.0,
+                pivot: (0.5, 0.5),
+            },
+            &outer,
+            &converter,
+            &mut out,
+        );
+        let background_luma = framer.background[0];
+        assert_eq!(out[3 * 64 + 4], background_luma);
+        assert_eq!(out[3 * 64 + 32], 120);
+    }
+
+    #[test]
+    fn rounded_coverage_is_full_inside_and_empty_outside() {
+        let rect = (0.0, 0.0, 10.0, 10.0);
+        assert_eq!(rounded_coverage(5, 5, rect, 3.0), 255);
+        assert_eq!(rounded_coverage(0, 0, rect, 3.0), 0);
+        assert_eq!(rounded_coverage(5, 0, rect, 3.0), 255);
     }
 }
