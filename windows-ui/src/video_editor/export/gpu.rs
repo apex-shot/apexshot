@@ -16,10 +16,11 @@ use std::ptr;
 
 use windows::core::{Interface, BOOL};
 use windows::Win32::Foundation::{HMODULE, RECT};
-use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_11_0};
+use windows::Win32::Graphics::Direct3D::{
+    D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_UNKNOWN, D3D_FEATURE_LEVEL_11_0,
+};
 use windows::Win32::Graphics::Direct3D11::*;
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_NV12, DXGI_RATIONAL, DXGI_SAMPLE_DESC};
-use windows::Win32::Graphics::Dxgi::IDXGIAdapter;
 
 use super::super::pixels::{YuvMatrix, YuvSpace};
 use super::super::zoom::ViewRect;
@@ -70,6 +71,15 @@ impl Scaler {
             return Err("BT.2020 is not handled by the video processor path".to_string());
         }
 
+        let machine = super::machine::current();
+        let Some(chosen) = machine.gpu.as_ref() else {
+            return Err("no hardware GPU".to_string());
+        };
+        if !super::machine::gpu_stage_fits(machine, source, size) {
+            return Err(format!("the GPU stage does not fit {}", chosen.name));
+        }
+        let adapter = super::machine::adapter(chosen);
+
         unsafe {
             let flags = D3D11_CREATE_DEVICE_FLAG(
                 D3D11_CREATE_DEVICE_BGRA_SUPPORT.0 | D3D11_CREATE_DEVICE_VIDEO_SUPPORT.0,
@@ -77,8 +87,12 @@ impl Scaler {
             let mut device = None;
             let mut context = None;
             D3D11CreateDevice(
-                None::<&IDXGIAdapter>,
-                D3D_DRIVER_TYPE_HARDWARE,
+                adapter.as_ref(),
+                if adapter.is_some() {
+                    D3D_DRIVER_TYPE_UNKNOWN
+                } else {
+                    D3D_DRIVER_TYPE_HARDWARE
+                },
                 HMODULE(ptr::null_mut()),
                 flags,
                 Some(&[D3D_FEATURE_LEVEL_11_0]),
