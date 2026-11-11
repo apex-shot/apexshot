@@ -19,10 +19,14 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QMutex>
 #include <QMutexLocker>
 #include <QProcess>
 #include <QRegularExpression>
+#include <QSaveFile>
 #include <QStandardPaths>
 #include <QThread>
 #include <QTimer>
@@ -481,6 +485,73 @@ QString concatListPath(const QString& workDir)
     return QDir(workDir).filePath(QStringLiteral("segments.txt"));
 }
 
+const QString kStateFileName = QStringLiteral("recording-state.json");
+const QString kPointerFileName = QStringLiteral("pointer.json");
+
+QJsonObject rectObject(const QRect& rect)
+{
+    return QJsonObject{{QStringLiteral("x"), rect.x()},
+                       {QStringLiteral("y"), rect.y()},
+                       {QStringLiteral("w"), rect.width()},
+                       {QStringLiteral("h"), rect.height()}};
+}
+
+QRect rectFrom(const QJsonValue& value)
+{
+    const QJsonObject object = value.toObject();
+    return QRect(object.value(QStringLiteral("x")).toInt(),
+                 object.value(QStringLiteral("y")).toInt(),
+                 object.value(QStringLiteral("w")).toInt(),
+                 object.value(QStringLiteral("h")).toInt());
+}
+
+qint64 int64From(const QJsonValue& value)
+{
+    return value.toVariant().toLongLong();
+}
+
+/// Whether `pid` is a running copy of this program. A pid the system reused
+/// for another program does not count.
+bool recorderProcessRunning(qint64 pid)
+{
+    if (pid <= 0)
+        return false;
+    HANDLE process = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
+                                 static_cast<DWORD>(pid));
+    if (!process)
+        return false;
+    bool running = WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
+    if (running) {
+        wchar_t image[MAX_PATH] = {};
+        DWORD size = MAX_PATH;
+        if (QueryFullProcessImageNameW(process, 0, image, &size) && size > 0) {
+            const QString name = QFileInfo(QString::fromWCharArray(image, int(size))).fileName();
+            const QString ours = QFileInfo(QCoreApplication::applicationFilePath()).fileName();
+            running = name.compare(ours, Qt::CaseInsensitive) == 0;
+        }
+    }
+    CloseHandle(process);
+    return running;
+}
+
+/// A free name beside `path`: "name (recovered).mp4", then "(recovered 2)".
+QString recoveredOutputPath(const QString& path)
+{
+    if (!QFileInfo::exists(path))
+        return path;
+    const QFileInfo info(path);
+    const QString suffix = info.suffix().isEmpty() ? QString() : QStringLiteral(".") + info.suffix();
+    for (int index = 1; index < 1000; ++index) {
+        const QString label = index == 1 ? QStringLiteral(" (recovered)")
+                                         : QStringLiteral(" (recovered %1)").arg(index);
+        const QString candidate =
+            info.dir().filePath(info.completeBaseName() + label + suffix);
+        if (!QFileInfo::exists(candidate))
+            return candidate;
+    }
+    return path;
+}
+
 QString lowDiskMessage(qint64 freeBytes)
 {
     return QStringLiteral("Recording stopped because the disk is almost full. ApexShot keeps "
@@ -528,6 +599,10 @@ public:
             // disk long before the encoder runs out of room.
             if (++diskCheckTicks % 10 == 0)
                 checkDiskSpace();
+            // Every five seconds the work directory gets a fresh state file
+            // and pointer sidecar for crash recovery.
+            if (diskCheckTicks % 25 == 0 && state == State::Recording)
+                flushRecoveryState();
         });
     }
 
@@ -568,6 +643,10 @@ public:
     void openManifestSession();
     void closeManifestSession();
     void writeManifest(const QString& videoPath);
+    /// Write `recording-state.json` and the pointer sidecar into the work
+    /// directory, so a recorder that dies can be recovered.
+    void flushRecoveryState();
+    [[nodiscard]] QJsonObject recoveryState() const;
 
     RecordingSession* q = nullptr;
     State state = State::Idle;
@@ -662,6 +741,9 @@ public:
     mutable QString manifestEncoder;
     mutable QSize manifestOutputSize;
     mutable int manifestCrf = 0;
+    /// Set while recover() runs: the pointer sidecar comes from the work
+    /// directory's copy instead of the tracker.
+    QString recoveredSidecarPath;
 };
 
 qint64 RecordingSession::Private::elapsedMs() const
@@ -822,7 +904,12 @@ QStringList RecordingSession::Private::buildScreenArguments(const QString& segme
     args << QStringLiteral("-g") << QString::number(fps * 2) << QStringLiteral("-bf")
          << QStringLiteral("2") << QStringLiteral("-r") << QString::number(fps);
 
-    args << QStringLiteral("-movflags") << QStringLiteral("+faststart") << segmentPath;
+    // Fragmented segments stay readable up to their last fragment when the
+    // recorder dies, the way the studied recorder's segmented writer does; a
+    // plain MP4 only gets its index when ffmpeg exits cleanly. The join in
+    // finalize() writes the final file with a normal index.
+    args << QStringLiteral("-movflags")
+         << QStringLiteral("+frag_keyframe+empty_moov+default_base_moof") << segmentPath;
     return args;
 }
 
@@ -873,7 +960,8 @@ QStringList RecordingSession::Private::buildWebcamArguments(
         : recordingOutputSize(webcamCaptureSize, QSize(1920, 1080));
     appendVideoEncoder(args, 18, trackSize, fps);
     args << QStringLiteral("-g") << QString::number(fps * 2) << QStringLiteral("-r")
-         << QString::number(fps) << webcamSegmentPath;
+         << QString::number(fps) << QStringLiteral("-movflags")
+         << QStringLiteral("+frag_keyframe+empty_moov+default_base_moof") << webcamSegmentPath;
 
     // The preview is a small MJPEG stream rather than raw frames: at the
     // bubble's size a raw pipe carries tens of megabytes a second, so any
@@ -1329,8 +1417,13 @@ void RecordingSession::Private::completeSystemAudio(const QString& videoPath)
     QStringList arguments{QStringLiteral("-y"), QStringLiteral("-hide_banner"),
                           QStringLiteral("-loglevel"), QStringLiteral("error"),
                           QStringLiteral("-i"), videoPath};
-    for (const AudioInput& input : inputs)
+    for (const AudioInput& input : inputs) {
+        // A recorder that died leaves its WAV header's lengths unwritten;
+        // reading to the end of the file works for a finished one too.
+        if (input.path.endsWith(QStringLiteral(".wav"), Qt::CaseInsensitive))
+            arguments << QStringLiteral("-ignore_length") << QStringLiteral("1");
         arguments << QStringLiteral("-i") << input.path;
+    }
     arguments << QStringLiteral("-filter_complex")
               << filter
               << QStringLiteral("-map") << QStringLiteral("0:v")
@@ -1713,10 +1806,21 @@ void RecordingSession::Private::cleanupAndEmit(bool kept,
     finishedEmitted = true;
     tick->stop();
     if (kept && !path.isEmpty() && QFileInfo(path).isFile()) {
-        pointerTracker.stop(elapsedMs());
         QString sidecarError;
-        if (!pointerTracker.writeSidecar(path, webcamTrack, &sidecarError))
-            qWarning().noquote() << "[recording] could not write pointer sidecar:" << sidecarError;
+        if (!recoveredSidecarPath.isEmpty()) {
+            if (QFileInfo::exists(recoveredSidecarPath)
+                && !PointerTracker::adoptSidecar(
+                    recoveredSidecarPath, path, webcamTrack, &sidecarError))
+                qWarning().noquote() << "[recording] could not restore pointer sidecar:"
+                                     << sidecarError;
+            QDir(QFileInfo(recoveredSidecarPath).absolutePath()).removeRecursively();
+            recoveredSidecarPath.clear();
+        } else {
+            pointerTracker.stop(elapsedMs());
+            if (!pointerTracker.writeSidecar(path, webcamTrack, &sidecarError))
+                qWarning().noquote() << "[recording] could not write pointer sidecar:"
+                                     << sidecarError;
+        }
         writeManifest(path);
     } else if (!kept && discardRequested) {
         pointerTracker.discard();
@@ -1724,6 +1828,11 @@ void RecordingSession::Private::cleanupAndEmit(bool kept,
     }
     if (!kept && !keepWorkDir)
         cleanupWorkDir();
+    // A kept work directory outlives this session: forget it so the
+    // destructor does not delete what the failure message points at, and so
+    // the next launch can offer to recover it.
+    if (keepWorkDir)
+        workDir.clear();
     emit q->finished(kept, kept ? path : QString(), failure);
     emit q->stateChanged();
 }
@@ -1811,6 +1920,100 @@ void RecordingSession::Private::writeManifest(const QString& videoPath)
         qWarning().noquote() << "[recording] could not write the recording manifest:" << error;
 }
 
+QJsonObject RecordingSession::Private::recoveryState() const
+{
+    const auto names = [](const QStringList& paths) {
+        QJsonArray array;
+        for (const QString& path : paths)
+            array.append(QFileInfo(path).fileName());
+        return array;
+    };
+    QJsonArray spans;
+    for (const auto& span : micPauseSpans)
+        spans.append(QJsonArray{span.first, span.second});
+    QJsonArray sessions;
+    for (const RecordingManifest::Session& session : manifestSessions) {
+        sessions.append(QJsonObject{{QStringLiteral("startedAtUnixMs"), session.startedAtUnixMs},
+                                    {QStringLiteral("endedAtUnixMs"), session.endedAtUnixMs},
+                                    {QStringLiteral("startMs"), session.startMs},
+                                    {QStringLiteral("endMs"), session.endMs},
+                                    {QStringLiteral("windowBounds"),
+                                     rectObject(session.windowBounds)}});
+    }
+    const QJsonObject requestObject{
+        {QStringLiteral("target"), static_cast<int>(request.target)},
+        {QStringLiteral("region"), rectObject(request.region)},
+        {QStringLiteral("windowId"), QString::number(static_cast<qulonglong>(request.windowId))},
+        {QStringLiteral("fps"), request.fps},
+        {QStringLiteral("displayScale"), request.displayScale},
+        {QStringLiteral("crf"), request.crf},
+        {QStringLiteral("maxWidth"), request.maxWidth},
+        {QStringLiteral("maxHeight"), request.maxHeight},
+        {QStringLiteral("monoAudio"), request.monoAudio},
+        {QStringLiteral("captureKeystrokes"), request.captureKeystrokes},
+        {QStringLiteral("microphoneDevice"), request.microphoneDevice},
+        {QStringLiteral("systemAudio"), static_cast<int>(request.systemAudio)},
+        {QStringLiteral("systemAudioApplication"), request.systemAudioApplication},
+        {QStringLiteral("webcamDevice"), request.webcamDevice},
+        {QStringLiteral("webcamLayout"),
+         QJsonObject{{QStringLiteral("x"), request.webcamLayout.x},
+                     {QStringLiteral("y"), request.webcamLayout.y},
+                     {QStringLiteral("w"), request.webcamLayout.w},
+                     {QStringLiteral("h"), request.webcamLayout.h},
+                     {QStringLiteral("shape"), request.webcamLayout.shape},
+                     {QStringLiteral("flip"), request.webcamLayout.flip}}},
+    };
+    return QJsonObject{
+        {QStringLiteral("version"), 1},
+        {QStringLiteral("pid"), static_cast<qint64>(QCoreApplication::applicationPid())},
+        {QStringLiteral("outputPath"), request.outputPath},
+        {QStringLiteral("startedAtUnixMs"), recordingStartedAtUnixMs},
+        {QStringLiteral("elapsedMs"), elapsedMs()},
+        {QStringLiteral("request"), requestObject},
+        {QStringLiteral("segments"), names(segments)},
+        {QStringLiteral("webcamSegments"), names(webcamSegments)},
+        {QStringLiteral("webcamActive"), webcamActive},
+        {QStringLiteral("webcamCameraWidth"), webcamCameraSize.width()},
+        {QStringLiteral("webcamCameraHeight"), webcamCameraSize.height()},
+        {QStringLiteral("webcamFps"), webcamFps},
+        {QStringLiteral("micPath"), micPath.isEmpty() ? QString() : QFileInfo(micPath).fileName()},
+        {QStringLiteral("micOffsetMs"), micOffsetMs},
+        {QStringLiteral("micPauseStartMs"), micPauseStartMs},
+        {QStringLiteral("micPauseSpans"), spans},
+        {QStringLiteral("systemAudioPath"),
+         systemAudioPath.isEmpty() ? QString() : QFileInfo(systemAudioPath).fileName()},
+        {QStringLiteral("systemAudioOffsetMs"), systemAudioOffsetMs},
+        {QStringLiteral("sessions"), sessions},
+        {QStringLiteral("window"),
+         QJsonObject{{QStringLiteral("title"), manifestWindow.title},
+                     {QStringLiteral("app"), manifestWindow.app},
+                     {QStringLiteral("bounds"), rectObject(manifestWindow.bounds)}}},
+        {QStringLiteral("capture"),
+         QJsonObject{{QStringLiteral("backend"), manifestCaptureBackend},
+                     {QStringLiteral("encoder"), manifestEncoder},
+                     {QStringLiteral("width"), manifestOutputSize.width()},
+                     {QStringLiteral("height"), manifestOutputSize.height()},
+                     {QStringLiteral("crf"), manifestCrf}}},
+    };
+}
+
+void RecordingSession::Private::flushRecoveryState()
+{
+    if (workDir.isEmpty())
+        return;
+    QString error;
+    if (!pointerTracker.writeSidecarTo(QDir(workDir).filePath(kPointerFileName),
+                                       Platform::WebcamTrack{},
+                                       &error))
+        recordingLog(QStringLiteral("recovery: pointer flush failed: %1").arg(error));
+    QSaveFile file(QDir(workDir).filePath(kStateFileName));
+    if (file.open(QIODevice::WriteOnly)) {
+        file.write(QJsonDocument(recoveryState()).toJson(QJsonDocument::Indented));
+        if (!file.commit())
+            recordingLog(QStringLiteral("recovery: state write failed: %1").arg(file.errorString()));
+    }
+}
+
 void RecordingSession::Private::finalize()
 {
     tick->stop();
@@ -1823,25 +2026,6 @@ void RecordingSession::Private::finalize()
     const QString finalPath = request.outputPath;
     QDir().mkpath(QFileInfo(finalPath).absolutePath());
     QFile::remove(finalPath);
-
-    if (segments.size() == 1) {
-        const QString segment = segments.first();
-        if (!QFile::rename(segment, finalPath)) {
-            if (!QFile::copy(segment, finalPath)) {
-                cleanupAndEmit(false,
-                               QString(),
-                               QStringLiteral("Could not move the recording to %1. "
-                                              "The captured segment is in %2.")
-                                   .arg(QDir::toNativeSeparators(finalPath),
-                                        QDir::toNativeSeparators(workDir)),
-                               true);
-                return;
-            }
-            QFile::remove(segment);
-        }
-        completeSystemAudio(finalPath);
-        return;
-    }
 
     QFile list(concatListPath(workDir));
     if (!list.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
@@ -2238,6 +2422,7 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
                             d->request.fps,
                             [d = d] { return d->elapsedMs(); },
                             d->request.captureKeystrokes);
+    d->flushRecoveryState();
     d->tick->start();
     emit stateChanged();
     emit elapsedChanged(0);
@@ -2255,6 +2440,7 @@ void RecordingSession::pause()
     // The mic keeps recording through the pause; the span is cut at mux time.
     d->micPauseStartMs = d->elapsedBeforeMs;
     d->pauseWallMs = QDateTime::currentMSecsSinceEpoch();
+    d->flushRecoveryState();
     if (d->systemAudio)
         d->systemAudio->setPaused(true);
     d->tick->stop();
@@ -2303,6 +2489,7 @@ void RecordingSession::resume()
         d->micPauseSpans.append({d->micPauseStartMs, d->micPauseStartMs + paused});
         d->micPauseStartMs = -1;
     }
+    d->flushRecoveryState();
     if (d->systemAudio)
         d->systemAudio->setPaused(false);
     d->tick->start();
@@ -2404,6 +2591,253 @@ void RecordingSession::setWebcamLayout(const WebcamLayout& layout)
     d->webcamTrack.y = std::clamp(layout.y, 0.0, 1.0);
     d->webcamTrack.w = std::clamp(layout.w, 0.0, 1.0);
     d->webcamTrack.h = std::clamp(layout.h, 0.0, 1.0);
+}
+
+QVector<UnfinishedRecording> RecordingSession::unfinishedRecordings(bool includeOwnProcess)
+{
+    QVector<UnfinishedRecording> found;
+    const QDir temp(QDir::tempPath());
+    const qint64 ownPid = QCoreApplication::applicationPid();
+    for (const QString& name :
+         temp.entryList({QStringLiteral("apexshot-recording-*")}, QDir::Dirs | QDir::NoDotAndDotDot)) {
+        const QString workDir = temp.filePath(name);
+        QFile stateFile(QDir(workDir).filePath(kStateFileName));
+        if (!stateFile.open(QIODevice::ReadOnly))
+            continue;
+        const QJsonObject state = QJsonDocument::fromJson(stateFile.readAll()).object();
+        stateFile.close();
+        if (state.isEmpty())
+            continue;
+        const qint64 pid = int64From(state.value(QStringLiteral("pid")));
+        if (pid == ownPid ? !includeOwnProcess : recorderProcessRunning(pid))
+            continue;
+        bool hasVideo = false;
+        for (const QJsonValue& segment : state.value(QStringLiteral("segments")).toArray()) {
+            if (QFileInfo(QDir(workDir).filePath(segment.toString())).size() > 0)
+                hasVideo = true;
+        }
+        if (!hasVideo) {
+            QDir(workDir).removeRecursively();
+            continue;
+        }
+        UnfinishedRecording recording;
+        recording.workDir = workDir;
+        recording.outputPath = state.value(QStringLiteral("outputPath")).toString();
+        recording.startedAtUnixMs = int64From(state.value(QStringLiteral("startedAtUnixMs")));
+        recording.durationMs = int64From(state.value(QStringLiteral("elapsedMs")));
+        found.append(recording);
+    }
+    std::sort(found.begin(), found.end(), [](const auto& left, const auto& right) {
+        return left.startedAtUnixMs < right.startedAtUnixMs;
+    });
+    return found;
+}
+
+void RecordingSession::discardUnfinished(const QString& workDir)
+{
+    // Only ever delete one of our own work directories.
+    if (QFileInfo(workDir).fileName().startsWith(QStringLiteral("apexshot-recording-"))
+        && QFileInfo::exists(QDir(workDir).filePath(kStateFileName)))
+        QDir(workDir).removeRecursively();
+}
+
+bool RecordingSession::recover(const QString& workDir, QString& error)
+{
+    if (d->state != Private::State::Idle && d->state != Private::State::Failed) {
+        error = QStringLiteral("A recording is already running.");
+        return false;
+    }
+    QFile stateFile(QDir(workDir).filePath(kStateFileName));
+    if (!stateFile.open(QIODevice::ReadOnly)) {
+        error = QStringLiteral("The unfinished recording's state could not be read.");
+        return false;
+    }
+    const QJsonObject state = QJsonDocument::fromJson(stateFile.readAll()).object();
+    stateFile.close();
+    if (state.isEmpty()) {
+        error = QStringLiteral("The unfinished recording's state is damaged.");
+        return false;
+    }
+
+    const QDir dir(workDir);
+    const auto existing = [&dir](const QJsonValue& value) {
+        QStringList paths;
+        for (const QJsonValue& entry : value.toArray()) {
+            const QString path = dir.filePath(entry.toString());
+            if (QFileInfo(path).size() > 0)
+                paths.append(path);
+        }
+        return paths;
+    };
+
+    const QJsonObject requestObject = state.value(QStringLiteral("request")).toObject();
+    RecordingRequest request;
+    request.target = static_cast<RecordingRequest::Target>(
+        requestObject.value(QStringLiteral("target")).toInt());
+    request.region = rectFrom(requestObject.value(QStringLiteral("region")));
+    request.windowId = static_cast<quintptr>(
+        requestObject.value(QStringLiteral("windowId")).toString().toULongLong());
+    request.outputPath =
+        recoveredOutputPath(state.value(QStringLiteral("outputPath")).toString());
+    request.includeCursor = false;
+    request.fps = requestObject.value(QStringLiteral("fps")).toInt(30);
+    request.displayScale = requestObject.value(QStringLiteral("displayScale")).toDouble(1.0);
+    request.crf = requestObject.value(QStringLiteral("crf")).toInt(20);
+    request.maxWidth = requestObject.value(QStringLiteral("maxWidth")).toInt();
+    request.maxHeight = requestObject.value(QStringLiteral("maxHeight")).toInt();
+    request.monoAudio = requestObject.value(QStringLiteral("monoAudio")).toBool();
+    request.captureKeystrokes = requestObject.value(QStringLiteral("captureKeystrokes")).toBool();
+    request.microphoneDevice = requestObject.value(QStringLiteral("microphoneDevice")).toString();
+    request.systemAudio = static_cast<RecordingRequest::SystemAudio>(
+        requestObject.value(QStringLiteral("systemAudio")).toInt());
+    request.systemAudioApplication =
+        requestObject.value(QStringLiteral("systemAudioApplication")).toString();
+    request.webcamDevice = requestObject.value(QStringLiteral("webcamDevice")).toString();
+    const QJsonObject layout = requestObject.value(QStringLiteral("webcamLayout")).toObject();
+    request.webcamLayout.x = layout.value(QStringLiteral("x")).toDouble();
+    request.webcamLayout.y = layout.value(QStringLiteral("y")).toDouble();
+    request.webcamLayout.w = layout.value(QStringLiteral("w")).toDouble();
+    request.webcamLayout.h = layout.value(QStringLiteral("h")).toDouble();
+    request.webcamLayout.shape = layout.value(QStringLiteral("shape")).toInt();
+    request.webcamLayout.flip = layout.value(QStringLiteral("flip")).toBool();
+    if (request.outputPath.isEmpty()) {
+        error = QStringLiteral("The unfinished recording has no output path.");
+        return false;
+    }
+
+    d->request = request;
+    d->workDir = workDir;
+    d->existingSidecarPath.clear();
+    d->segments = existing(state.value(QStringLiteral("segments")));
+    if (d->segments.isEmpty()) {
+        d->workDir.clear();
+        error = QStringLiteral("The unfinished recording captured no video.");
+        return false;
+    }
+    d->webcamSegments = existing(state.value(QStringLiteral("webcamSegments")));
+    d->webcamActive =
+        state.value(QStringLiteral("webcamActive")).toBool() && !d->webcamSegments.isEmpty();
+    d->webcamCameraSize = QSize(state.value(QStringLiteral("webcamCameraWidth")).toInt(),
+                                state.value(QStringLiteral("webcamCameraHeight")).toInt());
+    d->webcamFps = state.value(QStringLiteral("webcamFps")).toInt(30);
+    d->webcamTrack = Platform::WebcamTrack{};
+    if (d->webcamActive) {
+        d->webcamTrack.x = std::clamp(request.webcamLayout.x, 0.0, 1.0);
+        d->webcamTrack.y = std::clamp(request.webcamLayout.y, 0.0, 1.0);
+        d->webcamTrack.w = std::clamp(request.webcamLayout.w, 0.0, 1.0);
+        d->webcamTrack.h = std::clamp(request.webcamLayout.h, 0.0, 1.0);
+        d->webcamTrack.shape = std::clamp(request.webcamLayout.shape, 0, 3);
+        d->webcamTrack.flip = request.webcamLayout.flip;
+    }
+
+    const QString micName = state.value(QStringLiteral("micPath")).toString();
+    d->micPath = micName.isEmpty() ? QString() : dir.filePath(micName);
+    d->micOffsetMs = int64From(state.value(QStringLiteral("micOffsetMs")));
+    d->micPauseSpans.clear();
+    for (const QJsonValue& span : state.value(QStringLiteral("micPauseSpans")).toArray()) {
+        const QJsonArray pair = span.toArray();
+        d->micPauseSpans.append({int64From(pair.at(0)), int64From(pair.at(1))});
+    }
+    // A recorder that died while paused kept the microphone running to the
+    // end; everything after the pause began is cut.
+    const qint64 openPause = int64From(state.value(QStringLiteral("micPauseStartMs")));
+    if (openPause >= 0)
+        d->micPauseSpans.append({openPause, openPause + 24LL * 60 * 60 * 1000});
+    d->micPauseStartMs = -1;
+    const QString systemName = state.value(QStringLiteral("systemAudioPath")).toString();
+    d->systemAudioPath = systemName.isEmpty() ? QString() : dir.filePath(systemName);
+    d->systemAudioOffsetMs = int64From(state.value(QStringLiteral("systemAudioOffsetMs")));
+    d->systemAudio.reset();
+
+    d->elapsedBeforeMs = int64From(state.value(QStringLiteral("elapsedMs")));
+    d->recordingStartedAtUnixMs = int64From(state.value(QStringLiteral("startedAtUnixMs")));
+    d->manifestSessions.clear();
+    for (const QJsonValue& value : state.value(QStringLiteral("sessions")).toArray()) {
+        const QJsonObject object = value.toObject();
+        RecordingManifest::Session session;
+        session.startedAtUnixMs = int64From(object.value(QStringLiteral("startedAtUnixMs")));
+        session.endedAtUnixMs = int64From(object.value(QStringLiteral("endedAtUnixMs")));
+        session.startMs = int64From(object.value(QStringLiteral("startMs")));
+        session.endMs = int64From(object.value(QStringLiteral("endMs")));
+        session.windowBounds = rectFrom(object.value(QStringLiteral("windowBounds")));
+        if (session.endedAtUnixMs == 0) {
+            session.endedAtUnixMs = QFileInfo(dir.filePath(kStateFileName)).lastModified()
+                                        .toMSecsSinceEpoch();
+            session.endMs = d->elapsedBeforeMs;
+        }
+        d->manifestSessions.append(session);
+    }
+    d->manifestSessionOpen = false;
+    const QJsonObject window = state.value(QStringLiteral("window")).toObject();
+    d->manifestWindow.title = window.value(QStringLiteral("title")).toString();
+    d->manifestWindow.app = window.value(QStringLiteral("app")).toString();
+    d->manifestWindow.bounds = rectFrom(window.value(QStringLiteral("bounds")));
+    const QJsonObject capture = state.value(QStringLiteral("capture")).toObject();
+    d->manifestCaptureBackend = capture.value(QStringLiteral("backend")).toString();
+    d->manifestEncoder = capture.value(QStringLiteral("encoder")).toString();
+    d->manifestOutputSize = QSize(capture.value(QStringLiteral("width")).toInt(),
+                                  capture.value(QStringLiteral("height")).toInt());
+    d->manifestCrf = capture.value(QStringLiteral("crf")).toInt();
+    d->cameraProcessDelayMs = -1;
+
+    // The pointer sidecar is copied out of the work directory, which the
+    // normal finish deletes before the sidecar is installed.
+    d->recoveredSidecarPath.clear();
+    const QString pointerPath = dir.filePath(kPointerFileName);
+    if (QFileInfo::exists(pointerPath)) {
+        const QString holding = QDir(QDir::tempPath())
+                                    .filePath(QStringLiteral("apexshot-recovered-pointer-%1")
+                                                  .arg(QDateTime::currentMSecsSinceEpoch()));
+        if (QDir().mkpath(holding)) {
+            QFile::copy(pointerPath, QDir(holding).filePath(kPointerFileName));
+            const QDir cursors(pointerPath + QStringLiteral(".cursors"));
+            if (cursors.exists()) {
+                const QString target = QDir(holding).filePath(kPointerFileName + QStringLiteral(".cursors"));
+                QDir().mkpath(target);
+                for (const QString& file : cursors.entryList(QDir::Files))
+                    QFile::copy(cursors.filePath(file), QDir(target).filePath(file));
+            }
+            d->recoveredSidecarPath = QDir(holding).filePath(kPointerFileName);
+        }
+    }
+
+    d->processOutput.clear();
+    d->discardRequested = false;
+    d->resumeAfterPause = false;
+    d->finishedEmitted = false;
+    d->lowDiskStopped = true;
+    d->state = Private::State::Stopping;
+    recordingLog(QStringLiteral("recovery: %1 segments from %2 -> %3")
+                     .arg(d->segments.size())
+                     .arg(workDir, d->request.outputPath));
+    emit stateChanged();
+    QTimer::singleShot(0, this, [d = d] { d->finalize(); });
+    return true;
+}
+
+void RecordingSession::abandonForTesting()
+{
+    if (d->state != Private::State::Recording && d->state != Private::State::Paused)
+        return;
+    d->flushRecoveryState();
+    d->tick->stop();
+    if (d->windowCapture)
+        d->windowCapture->stop();
+    for (QProcess** target : {&d->process, &d->webcamProcess, &d->micProcess}) {
+        if (!*target)
+            continue;
+        QObject::disconnect(*target, nullptr, this, nullptr);
+        (*target)->kill();
+        (*target)->waitForFinished(2000);
+        delete *target;
+        *target = nullptr;
+    }
+    if (d->systemAudio)
+        d->systemAudio->stop();
+    d->systemAudio.reset();
+    d->pointerTracker.discard();
+    d->state = Private::State::Idle;
+    d->workDir.clear();
 }
 
 bool RecordingSession::webcamActive() const

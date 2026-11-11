@@ -2,6 +2,7 @@
 
 #include <QCryptographicHash>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QHash>
 #include <QImage>
@@ -1071,6 +1072,27 @@ void PointerTracker::closePresses(qint64 mediaTimeMs)
     }
 }
 
+namespace {
+
+QJsonObject webcamObject(const WebcamTrack& webcam)
+{
+    return QJsonObject{
+        {QStringLiteral("file"), QFileInfo(webcam.file).fileName()},
+        {QStringLiteral("width"), webcam.width},
+        {QStringLiteral("height"), webcam.height},
+        {QStringLiteral("duration"), webcam.duration},
+        {QStringLiteral("start"), webcam.start},
+        {QStringLiteral("x"), webcam.x},
+        {QStringLiteral("y"), webcam.y},
+        {QStringLiteral("w"), webcam.w},
+        {QStringLiteral("h"), webcam.h},
+        {QStringLiteral("shape"), webcam.shape},
+        {QStringLiteral("flip"), webcam.flip},
+    };
+}
+
+} // namespace
+
 bool PointerTracker::writeSidecar(const QString& videoPath,
                                   const WebcamTrack& webcam,
                                   QString* error) const
@@ -1081,7 +1103,13 @@ bool PointerTracker::writeSidecar(const QString& videoPath,
             *error = QStringLiteral("Could not canonicalize the recording path or find LOCALAPPDATA.");
         return false;
     }
+    return writeSidecarTo(path, webcam, error);
+}
 
+bool PointerTracker::writeSidecarTo(const QString& path,
+                                    const WebcamTrack& webcam,
+                                    QString* error) const
+{
     QJsonArray pointer;
     for (const PointerSample& sample : data_->pointer)
         pointer.append(pointerObject(sample));
@@ -1159,20 +1187,7 @@ bool PointerTracker::writeSidecar(const QString& videoPath,
     }
 
     if (webcam.is_valid()) {
-        QJsonObject camera{
-                            {QStringLiteral("file"), QFileInfo(webcam.file).fileName()},
-                            {QStringLiteral("width"), webcam.width},
-                            {QStringLiteral("height"), webcam.height},
-                            {QStringLiteral("duration"), webcam.duration},
-                            {QStringLiteral("start"), webcam.start},
-                            {QStringLiteral("x"), webcam.x},
-                            {QStringLiteral("y"), webcam.y},
-                            {QStringLiteral("w"), webcam.w},
-                            {QStringLiteral("h"), webcam.h},
-                            {QStringLiteral("shape"), webcam.shape},
-                            {QStringLiteral("flip"), webcam.flip},
-                        };
-        document.insert(QStringLiteral("webcam"), camera);
+        document.insert(QStringLiteral("webcam"), webcamObject(webcam));
         if (!webcam.screenFile.isEmpty())
             document.insert(QStringLiteral("screen_file"), QFileInfo(webcam.screenFile).fileName());
     }
@@ -1182,6 +1197,77 @@ bool PointerTracker::writeSidecar(const QString& videoPath,
         if (error)
             *error = QStringLiteral("Could not create the pointer sidecar directory.");
         return false;
+    }
+
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) {
+        if (error)
+            *error = file.errorString();
+        return false;
+    }
+    const QByteArray json = QJsonDocument(document).toJson(QJsonDocument::Indented);
+    if (file.write(json) != json.size() || !file.commit()) {
+        if (error)
+            *error = file.errorString();
+        return false;
+    }
+    return true;
+}
+
+bool PointerTracker::adoptSidecar(const QString& fromSidecarPath,
+                                  const QString& videoPath,
+                                  const WebcamTrack& webcam,
+                                  QString* error)
+{
+    QFile source(fromSidecarPath);
+    if (!source.open(QIODevice::ReadOnly)) {
+        if (error)
+            *error = source.errorString();
+        return false;
+    }
+    QJsonObject document = QJsonDocument::fromJson(source.readAll()).object();
+    source.close();
+    if (document.isEmpty()) {
+        if (error)
+            *error = QStringLiteral("The saved pointer data could not be read.");
+        return false;
+    }
+    const QString path = sidecarFilePath(videoPath);
+    if (path.isEmpty()) {
+        if (error)
+            *error = QStringLiteral("Could not canonicalize the recording path or find LOCALAPPDATA.");
+        return false;
+    }
+    if (!QDir().mkpath(QFileInfo(path).absolutePath())) {
+        if (error)
+            *error = QStringLiteral("Could not create the pointer sidecar directory.");
+        return false;
+    }
+
+    // The cursor catalog folder is named after the sidecar file, so it is
+    // copied under the new name and the document points at it.
+    const QString folderName = document.value(QStringLiteral("cursor_images")).toString();
+    const QString targetFolderName = QFileInfo(path).fileName() + QStringLiteral(".cursors");
+    const QString targetFolder = QFileInfo(path).dir().filePath(targetFolderName);
+    QDir(targetFolder).removeRecursively();
+    if (!folderName.isEmpty()) {
+        const QDir sourceFolder(QFileInfo(fromSidecarPath).dir().filePath(folderName));
+        if (sourceFolder.exists() && QDir().mkpath(targetFolder)) {
+            for (const QString& file : sourceFolder.entryList(QDir::Files))
+                QFile::copy(sourceFolder.filePath(file), QDir(targetFolder).filePath(file));
+            document.insert(QStringLiteral("cursor_images"), targetFolderName);
+        } else {
+            document.remove(QStringLiteral("cursor_images"));
+            document.remove(QStringLiteral("cursors"));
+        }
+    }
+
+    document.remove(QStringLiteral("webcam"));
+    document.remove(QStringLiteral("screen_file"));
+    if (webcam.is_valid()) {
+        document.insert(QStringLiteral("webcam"), webcamObject(webcam));
+        if (!webcam.screenFile.isEmpty())
+            document.insert(QStringLiteral("screen_file"), QFileInfo(webcam.screenFile).fileName());
     }
 
     QSaveFile file(path);

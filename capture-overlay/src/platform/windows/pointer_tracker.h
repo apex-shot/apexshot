@@ -83,6 +83,18 @@ public:
     bool writeSidecar(const QString& videoPath,
                       const WebcamTrack& webcam,
                       QString* error = nullptr) const;
+    /// Write the sidecar to an explicit path, for the copy a recording keeps
+    /// in its work directory while it runs.
+    bool writeSidecarTo(const QString& sidecarPath,
+                        const WebcamTrack& webcam,
+                        QString* error = nullptr) const;
+    /// Install a sidecar written by `writeSidecarTo` as the sidecar of
+    /// `videoPath`: its cursor images move with it and its camera block is
+    /// replaced by `webcam`.
+    static bool adoptSidecar(const QString& fromSidecarPath,
+                             const QString& videoPath,
+                             const WebcamTrack& webcam,
+                             QString* error = nullptr);
 
 private:
     struct Press {

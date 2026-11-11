@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QRect>
 #include <QString>
+#include <QVector>
 
 class QElapsedTimer;
 
@@ -95,6 +96,17 @@ struct RecordingRequest {
 /// application folder, or PATH. Empty when none is available.
 QString ffmpegPath();
 
+/// A recording whose recorder stopped without finishing, found in the temp
+/// folder by `RecordingSession::unfinishedRecordings`.
+struct UnfinishedRecording {
+    QString workDir;
+    /// Where the recording was going to be saved.
+    QString outputPath;
+    qint64 startedAtUnixMs = 0;
+    /// Recorded length when the state was last written, in milliseconds.
+    qint64 durationMs = 0;
+};
+
 class RecordingSession : public QObject
 {
     Q_OBJECT
@@ -130,6 +142,26 @@ public:
 
     /// Whether the current recording successfully opened a webcam.
     bool webcamActive() const;
+
+    /// Recordings whose recorder stopped without finishing. A work directory
+    /// whose recorder process is still running is skipped, and so is this
+    /// process's own unless `includeOwnProcess` is set (for tests). Work
+    /// directories that hold no captured video are deleted.
+    static QVector<UnfinishedRecording> unfinishedRecordings(bool includeOwnProcess = false);
+
+    /// Join what an unfinished recording captured and save it the way a
+    /// stopped recording is saved; `finished` reports the result. The video
+    /// goes to the recorded output path, or beside it with " (recovered)"
+    /// when that name is taken. Returns false with `error` when it cannot
+    /// start.
+    bool recover(const QString& workDir, QString& error);
+
+    /// Delete an unfinished recording's captured data.
+    static void discardUnfinished(const QString& workDir);
+
+    /// Test seam: stop every capture process and timer the way a crash would,
+    /// leaving the work directory and its state file behind.
+    void abandonForTesting();
 
 signals:
     void elapsedChanged(qint64 elapsedMs);
