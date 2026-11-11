@@ -4472,6 +4472,18 @@ msgstr "Intensité de l'inclinaison"
 msgid "Tilt with motion"
 msgstr "Incliner avec le mouvement"
 
+msgid "Backgrounds and style"
+msgstr "Arrière-plans et style"
+
+msgid "Wallpapers, padding, rounded corners, shadows and frames for stills."
+msgstr "Fonds d’écran, marges, coins arrondis, ombres et cadres pour les images fixes."
+
+msgid "Included with Studio"
+msgstr "Inclus dans Studio"
+
+msgid "Studio preview. A non-default rendered pose needs activation for final images."
+msgstr "Aperçu Studio. Une pose rendue non par défaut nécessite une activation pour les images finales."
+
 msgid "Automatic width"
 msgstr "Largeur automatique"
 

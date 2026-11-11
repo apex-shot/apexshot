@@ -4360,6 +4360,18 @@ msgstr "傾きの量"
 msgid "Tilt with motion"
 msgstr "動きに合わせて傾ける"
 
+msgid "Backgrounds and style"
+msgstr "背景とスタイル"
+
+msgid "Wallpapers, padding, rounded corners, shadows and frames for stills."
+msgstr "静止画の壁紙、余白、角丸、影、フレーム。"
+
+msgid "Included with Studio"
+msgstr "Studio に含まれます"
+
+msgid "Studio preview. A non-default rendered pose needs activation for final images."
+msgstr "Studioプレビュー。デフォルト以外のレンダリング済みポーズを最終画像にするには有効化が必要です。"
+
 msgid "Automatic width"
 msgstr "自動の幅"
 

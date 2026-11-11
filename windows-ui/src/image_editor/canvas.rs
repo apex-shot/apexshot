@@ -223,6 +223,21 @@ pub(super) fn build(scale: f64, dark: bool) -> Rc<Canvas> {
         }
     });
 
+    // Redraw when the Studio preview mark appears or goes away (a style was
+    // toggled elsewhere, or a licence was activated from Settings).
+    area.add_tick_callback({
+        let host = host.clone();
+        let last = Cell::new(false);
+        move |area, _clock| {
+            let now = host.studio_mark_active();
+            if now != last.get() {
+                last.set(now);
+                area.queue_draw();
+            }
+            glib::ControlFlow::Continue
+        }
+    });
+
     // Bottom-centre mode switch, mirroring the Linux floating motion control.
     let motion = GtkBox::new(Orientation::Horizontal, 0);
     motion.add_css_class("image-editor-motion-pill");
@@ -1173,6 +1188,31 @@ fn paint(
         (draw_height - 1.0).max(0.0),
     );
     let _ = context.stroke();
+
+    if host.has_document() && !crop_mode {
+        use crate::capture::editor::studio_watermark::ScreenRect;
+        host.paint_studio_mark(
+            context,
+            ScreenRect {
+                x,
+                y,
+                width: draw_width,
+                height: draw_height,
+            },
+            ScreenRect {
+                x: x + state.image_x * zoom,
+                y: y + state.image_y * zoom,
+                width: f64::from(state.width) * zoom,
+                height: f64::from(state.height) * zoom,
+            },
+            ScreenRect {
+                x: left,
+                y: top,
+                width: avail_width,
+                height: avail_height,
+            },
+        );
+    }
 
     Some(zoom)
 }

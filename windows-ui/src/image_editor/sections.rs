@@ -61,11 +61,40 @@ fn hint(text: &str) -> Label {
     label
 }
 
+/// The quiet tier marker on a Studio group's header. The controls stay
+/// usable; the badge only says which tier owns them.
+fn studio_badge() -> Label {
+    let badge = Label::new(Some(&t("Studio")));
+    badge.add_css_class("image-editor-studio-badge");
+    badge.set_valign(Align::Center);
+    badge.set_tooltip_text(Some(&t("Included with Studio")));
+    badge
+}
+
+/// [`section_card`] with a Studio badge at the end of its heading row.
+fn studio_section_card(title: &str, scale: f64) -> GtkBox {
+    let section = GtkBox::new(Orientation::Vertical, px(8.0, scale));
+    section.add_css_class("image-editor-section");
+    let header = GtkBox::new(Orientation::Horizontal, px(8.0, scale));
+    let heading = Label::new(Some(&t(title)));
+    heading.add_css_class("image-editor-section-title");
+    heading.set_xalign(0.0);
+    heading.set_hexpand(true);
+    header.append(&heading);
+    header.append(&studio_badge());
+    section.append(&header);
+    section
+}
+
+fn disclosure_row(title: &str, body: &GtkBox, scale: f64) -> GtkBox {
+    disclosure_row_with_badge(title, body, scale, false)
+}
+
 /// A tool group below the fill tabs: a clickable header row (title and
 /// chevron) over a revealer, collapsed by default. The fill tabs own the top
 /// of the panel; everything else opens on demand, so the sidebar never
 /// becomes one long scroll.
-fn disclosure_row(title: &str, body: &GtkBox, scale: f64) -> GtkBox {
+fn disclosure_row_with_badge(title: &str, body: &GtkBox, scale: f64, studio: bool) -> GtkBox {
     let card = GtkBox::new(Orientation::Vertical, px(8.0, scale));
     card.add_css_class("image-editor-section");
 
@@ -80,6 +109,9 @@ fn disclosure_row(title: &str, body: &GtkBox, scale: f64) -> GtkBox {
     chevron.set_valign(Align::Center);
     chevron.add_css_class("image-editor-disclosure-chevron");
     header.append(&heading);
+    if studio {
+        header.append(&studio_badge());
+    }
     header.append(&chevron);
     card.append(&header);
 
@@ -233,9 +265,8 @@ pub(super) fn transform_disclosure(
 ) -> (GtkBox, Rc<dyn Fn()>) {
     let body = GtkBox::new(Orientation::Vertical, px(8.0, scale));
 
-    let studio_hint = hint(
-        "Studio preview. A non-default rendered pose needs activation for final images; backgrounds and normal edits stay free.",
-    );
+    let studio_hint =
+        hint("Studio preview. A non-default rendered pose needs activation for final images.");
     body.append(&studio_hint);
 
     let yaw = unit_slider(&t("Yaw"), -24.0, 24.0, 0.0, "°", scale);
@@ -332,7 +363,7 @@ pub(super) fn transform_disclosure(
             }
         }));
     }
-    let card = disclosure_row("Transform", &body, scale);
+    let card = disclosure_row_with_badge("Transform", &body, scale, true);
     let sync = {
         let card = card.clone();
         let host = host.cloned();
@@ -684,7 +715,7 @@ pub(super) fn shadow_disclosure(
     let no_background_hint = hint("Add a background and padding to see the shadow.");
     body.append(&no_background_hint);
 
-    let card = disclosure_row("Shadow", &body, scale);
+    let card = disclosure_row_with_badge("Shadow", &body, scale, true);
     let sync = {
         let card = card.clone();
         let host = host.cloned();
@@ -930,6 +961,7 @@ fn paint_style_swatch(context: &CairoContext, width: f64, height: f64, style: Fr
     );
     geometry.border_unit = 0.32 * k;
     geometry.backing_unit = 0.32 * k;
+    geometry.over_fill = true;
     geometry.paint_backings(context);
     geometry.paint_underlay(context);
     context.set_source_rgba(0.82, 0.82, 0.84, 1.0);
@@ -1019,7 +1051,7 @@ pub(super) fn style_disclosure(
         grid.attach(&cell, (index % 3) as i32, (index / 3) as i32, 1, 1);
     }
     body.append(&grid);
-    let card = disclosure_row("Style", &body, scale);
+    let card = disclosure_row_with_badge("Style", &body, scale, true);
     let sync = {
         let card = card.clone();
         let host = host.cloned();
@@ -2034,7 +2066,7 @@ fn background_card(
     column: &GtkBox,
     window: &gtk4::ApplicationWindow,
 ) -> (GtkBox, Rc<dyn Fn()>, BackdropAction) {
-    let section = section_card("Background", scale);
+    let section = studio_section_card("Background", scale);
 
     // "None" clears the fill outright. It is not a fourth source tab, so it
     // sits under the tray on every tab rather than inside it, and it carries
@@ -2715,6 +2747,29 @@ mod tests {
                 confirmed_none: Rc::new(Cell::new(true)),
             };
             assert!(!empty.select_first(), "an empty catalog chooses nothing");
+        }) else {
+            return;
+        };
+    }
+
+    #[test]
+    fn studio_groups_carry_a_badge_and_free_ones_do_not() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let count = |widget: &gtk4::Widget| {
+                let mut found = Vec::new();
+                collect_class(widget, "image-editor-studio-badge", &mut found);
+                found.len()
+            };
+            let body = GtkBox::new(Orientation::Vertical, 0);
+            let studio = disclosure_row_with_badge("Style", &body, 1.0, true);
+            assert_eq!(count(studio.upcast_ref()), 1);
+            let body = GtkBox::new(Orientation::Vertical, 0);
+            let free = disclosure_row("Frame", &body, 1.0);
+            assert_eq!(count(free.upcast_ref()), 0);
+            let (shadow, _) = shadow_disclosure(1.0, None);
+            assert_eq!(count(shadow.upcast_ref()), 1);
+            let background = studio_section_card("Background", 1.0);
+            assert_eq!(count(background.upcast_ref()), 1);
         }) else {
             return;
         };

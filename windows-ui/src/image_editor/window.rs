@@ -163,9 +163,31 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
         let window = window.clone();
         let motion = motion.clone();
         let in_motion = in_motion.clone();
+        let button = inspector.copy_button.downgrade();
         move |_| {
             if !in_motion.get() {
                 copy_image(&window, &host);
+                return;
+            }
+            // A Motion frame of a Studio-styled composition is a styled still.
+            let Some(capabilities) =
+                host.read(|st| crate::studio_entitlement::StudioCapabilities {
+                    studio_style: st.uses_studio_style(),
+                    ..Default::default()
+                })
+            else {
+                return;
+            };
+            let retry_host = Rc::downgrade(&host);
+            let retry_button = button.clone();
+            if !crate::studio_upsell::gate(&window, capabilities, move || {
+                if let Some(host) = retry_host.upgrade() {
+                    host.invalidate_studio_cache();
+                }
+                if let Some(button) = retry_button.upgrade() {
+                    button.emit_clicked();
+                }
+            }) {
                 return;
             }
             match motion.current_frame_image() {
@@ -480,10 +502,14 @@ fn save_motion_video_dialog(
     let retry_exporting = exporting.clone();
     let retry_name = name.to_string();
     let retry_sync = sync_all.clone();
+    let retry_host_for_cache = Rc::downgrade(host);
     if !crate::studio_upsell::gate(
         window,
         crate::studio_entitlement::capabilities_for_motion_export(),
         move || {
+            if let Some(host) = retry_host_for_cache.upgrade() {
+                host.invalidate_studio_cache();
+            }
             if let (Some(window), Some(host), Some(motion)) = (
                 retry_window.upgrade(),
                 retry_host.upgrade(),
@@ -579,12 +605,16 @@ fn gate_image_output(
     host: &Rc<super::annotate::EditorHost>,
     retry: impl Fn() + 'static,
 ) -> bool {
-    let Some(capabilities) = host.read(|st| {
-        crate::studio_entitlement::capabilities_for_static_image(st.static_image_transform)
-    }) else {
+    let Some(capabilities) = host.read(|st| st.studio_capabilities()) else {
         return false;
     };
-    crate::studio_upsell::gate(window, capabilities, retry)
+    let retry_host = Rc::downgrade(host);
+    crate::studio_upsell::gate(window, capabilities, move || {
+        if let Some(host) = retry_host.upgrade() {
+            host.invalidate_studio_cache();
+        }
+        retry();
+    })
 }
 
 fn copy_image(window: &ApplicationWindow, host: &Rc<super::annotate::EditorHost>) {
@@ -602,8 +632,8 @@ fn copy_image(window: &ApplicationWindow, host: &Rc<super::annotate::EditorHost>
     }
 }
 
-/// Copy the already rendered Motion pose. The Motion composition is its own
-/// output path, so the static image gate does not apply.
+/// Copy the already rendered Motion pose. The caller runs the Studio style
+/// gate first; the static pose gate does not apply to Motion poses.
 fn copy_frame_image(host: &Rc<super::annotate::EditorHost>, frame: image::RgbaImage) {
     if !host.has_document() || host.background_loading() {
         return;
@@ -678,10 +708,14 @@ fn upload_motion_video(
     let retry_button = button.downgrade();
     let retry_uploading = uploading.clone();
     let retry_name = name.to_string();
+    let retry_host_for_cache = Rc::downgrade(host);
     if !crate::studio_upsell::gate(
         window,
         crate::studio_entitlement::capabilities_for_motion_export(),
         move || {
+            if let Some(host) = retry_host_for_cache.upgrade() {
+                host.invalidate_studio_cache();
+            }
             if let (Some(window), Some(host), Some(motion), Some(button)) = (
                 retry_window.upgrade(),
                 retry_host.upgrade(),

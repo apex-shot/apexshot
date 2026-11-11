@@ -4386,6 +4386,18 @@ msgstr "مقدار الميل"
 msgid "Tilt with motion"
 msgstr "الإمالة مع الحركة"
 
+msgid "Backgrounds and style"
+msgstr "الخلفيات والنمط"
+
+msgid "Wallpapers, padding, rounded corners, shadows and frames for stills."
+msgstr "خلفيات وهوامش وزوايا مستديرة وظلال وإطارات للصور الثابتة."
+
+msgid "Included with Studio"
+msgstr "مضمّن في Studio"
+
+msgid "Studio preview. A non-default rendered pose needs activation for final images."
+msgstr "معاينة Studio. يتطلب الوضع المعروض غير الافتراضي التفعيل للصور النهائية."
+
 msgid "Automatic width"
 msgstr "العرض التلقائي"
 
