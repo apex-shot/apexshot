@@ -3280,8 +3280,15 @@ mod tests {
             .ok()
             .and_then(|value| value.parse().ok())
             .unwrap_or(duration);
+        let stop_tail_ms = std::env::var("APEXSHOT_COMPARISON_STOP_TAIL_MS")
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(0.0);
+        let loop_ms = std::env::var("APEXSHOT_COMPARISON_LOOP_MS")
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok());
         eprintln!(
-            "export: theme {theme:?} rotation {rotation_mode:?} ratio {rotation_ratio} base {base_rotation_deg} default {always_use_default} trim {trim_start}..{trim_end} cuts {cuts:?}"
+            "export: theme {theme:?} rotation {rotation_mode:?} ratio {rotation_ratio} base {base_rotation_deg} default {always_use_default} trim {trim_start}..{trim_end} cuts {cuts:?} stop {stop_tail_ms} loop {loop_ms:?}"
         );
         if std::env::var("APEXSHOT_COMPARISON_DUMP").is_ok() {
             for t in [0.4, 0.8, 1.2, 2.2, 2.6, 2.9, 3.4, 3.9, 4.4] {
@@ -3348,6 +3355,8 @@ mod tests {
                 base_rotation_deg,
                 always_use_default,
                 remove_shake_threshold: shake_threshold,
+                stop_movement_in_last_part_ms: stop_tail_ms,
+                loop_position_before_end_ms: loop_ms,
                 ..CursorSettings::default()
             },
             sidecar: Some(sidecar),
