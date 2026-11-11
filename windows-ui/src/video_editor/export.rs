@@ -691,6 +691,7 @@ fn render_range(
         ),
         None => None,
     };
+    let mut cursor_scratch = CursorScratch::default();
     let webcam = model.webcam.clone();
     let layouts = webcam
         .as_ref()
@@ -703,7 +704,7 @@ fn render_range(
         .map(|webcam| f64::from(webcam.source_size.0) / f64::from(webcam.source_size.1))
         .unwrap_or(16.0 / 9.0);
     #[cfg(target_os = "windows")]
-    let mut gpu = if !plan.passthrough && model.sidecar.is_none() && webcam.is_none() {
+    let mut gpu = if !plan.passthrough && webcam.is_none() {
         match gpu::Scaler::new(model.source_size, size, space, fps) {
             Ok(scaler) => {
                 eprintln!(
@@ -924,11 +925,15 @@ fn render_range(
             });
             let cropped =
                 trail.is_some() || !(view_is_full(view, source) && size == model.source_size);
-            // The GPU path only crops and scales; a blurred frame takes the CPU path,
-            // and a moving card needs the footage around the video rect too, which
-            // only the CPU path draws.
+            let ripple = model.sidecar.as_ref().and_then(|sidecar| {
+                preview_ripple(sidecar, model.cursor, source_time, model.source_size, view)
+            });
+            // The GPU path crops and scales, and the cursor is drawn on the NV12
+            // frame afterwards. A blurred or rippled frame takes the CPU path, and
+            // so does a moving card, which needs the footage around the video rect
+            // that only the CPU path draws.
             #[cfg(target_os = "windows")]
-            if trail.is_none() && card.is_none() {
+            if trail.is_none() && ripple.is_none() && card.is_none() {
                 if let Some(scaler) = gpu.as_mut() {
                     let mut nv12 = match sink.buffer(done_index) {
                         Ok(buffer) => buffer,
@@ -946,6 +951,23 @@ fn render_range(
                     };
                     match rendered {
                         Ok(()) => {
+                            if let (Some(sidecar), Some(layer)) =
+                                (&model.sidecar, cursor_layer.as_mut())
+                            {
+                                draw_cursor_nv12(
+                                    &mut nv12,
+                                    size,
+                                    view,
+                                    sidecar,
+                                    model.source.as_path(),
+                                    model.cursor,
+                                    source_time,
+                                    model.source_size,
+                                    layer,
+                                    &converter,
+                                    &mut cursor_scratch,
+                                );
+                            }
                             if let Err(error) = sink.submit(nv12) {
                                 let _ = decoder.kill();
                                 let _ = decoder.wait();
@@ -1014,9 +1036,6 @@ fn render_range(
             });
             let base: &[u8] = if cropped { &scaled } else { &decoded };
 
-            let ripple = model.sidecar.as_ref().and_then(|sidecar| {
-                preview_ripple(sidecar, model.cursor, source_time, model.source_size, view)
-            });
             let mut warped = None;
             if let Some(ripple) = &ripple {
                 let pixels = ripple.warp_pixels(
@@ -1663,6 +1682,82 @@ fn overlay_half_extent(settings: CursorSettings, reference_width: f64) -> f64 {
     sprite.max(ring)
 }
 
+/// The box `draw_cursor` touches for this frame, in frame pixels: x, y,
+/// width, height. None when it draws nothing. Must stay in step with the box
+/// `draw_cursor` computes.
+#[allow(clippy::too_many_arguments)]
+fn cursor_box(
+    size: (u32, u32),
+    view: ViewRect,
+    sidecar: &PointerSidecar,
+    settings: CursorSettings,
+    source_time: f64,
+    source_size: (u32, u32),
+) -> Option<(u32, u32, u32, u32)> {
+    if !sidecar.can_render_cursor_overlay() {
+        return None;
+    }
+    let motion = CursorMotion {
+        smooth: settings.smooth,
+        hide_idle: settings.hide_idle,
+        idle_ms: settings.idle_ms,
+        speed: settings.speed,
+        rotation_mode: settings.rotation_mode,
+        rotation_ratio: settings.rotate_on_x_movement_ratio,
+        base_rotation_deg: settings.base_rotation_deg,
+    };
+    let frame = sidecar.presented_in_video_at(
+        source_time,
+        motion,
+        f64::from(source_size.0),
+        f64::from(source_size.1),
+    )?;
+    let settings = settings.clamped();
+    let map = |point| zoom::source_to_stage(point, view, f64::from(size.0), f64::from(size.1));
+    let cursor_point = map((frame.x, frame.y));
+    // A ripple is a footage warp in the export just as in the preview, so its
+    // ring is never drawn; every other effect is.
+    let rings: Vec<(f64, f64, f64)> = if settings.click_effect == ClickEffect::Ripple {
+        Vec::new()
+    } else {
+        sidecar
+            .click_ripples_in_video_at(
+                source_time,
+                settings.click_window_seconds(),
+                f64::from(source_size.0),
+                f64::from(source_size.1),
+            )
+            .into_iter()
+            .map(|(x, y, progress)| {
+                let (x, y) = map((x, y));
+                (x, y, progress)
+            })
+            .collect()
+    };
+
+    let half = overlay_half_extent(settings, f64::from(size.0));
+    let mut left = cursor_point.0 - half;
+    let mut top = cursor_point.1 - half;
+    let mut right = cursor_point.0 + half;
+    let mut bottom = cursor_point.1 + half;
+    for &(x, y, _) in &rings {
+        left = left.min(x - half);
+        top = top.min(y - half);
+        right = right.max(x + half);
+        bottom = bottom.max(y + half);
+    }
+    let x0 = left.floor().max(0.0) as u32;
+    let y0 = top.floor().max(0.0) as u32;
+    let x1 = (right.ceil() as i64).clamp(0, i64::from(size.0)) as u32;
+    let y1 = (bottom.ceil() as i64).clamp(0, i64::from(size.1)) as u32;
+    let width = x1.saturating_sub(x0);
+    let height = y1.saturating_sub(y0);
+    if width == 0 || height == 0 {
+        return None;
+    }
+    Some((x0, y0, width, height))
+}
+
 /// Draw the cursor, its press scale and any non-ripple click effect onto the
 /// composited frame, exactly as the preview's overlay does.
 ///
@@ -1825,6 +1920,99 @@ fn draw_cursor(
             }
         }
     }
+}
+
+/// Draw the cursor onto an NV12 frame: only the cursor's box, widened to
+/// even edges for the 4:2:0 chroma, is converted to RGBA, drawn by
+/// `draw_cursor`, and converted back, so a GPU-scaled frame never makes the
+/// whole-frame round trip.
+#[allow(clippy::too_many_arguments)]
+fn draw_cursor_nv12(
+    nv12: &mut [u8],
+    size: (u32, u32),
+    view: ViewRect,
+    sidecar: &PointerSidecar,
+    source_path: &Path,
+    settings: CursorSettings,
+    source_time: f64,
+    source_size: (u32, u32),
+    layer: &mut ImageSurface,
+    converter: &Nv12Converter,
+    scratch: &mut CursorScratch,
+) {
+    let Some((x, y, width, height)) =
+        cursor_box(size, view, sidecar, settings, source_time, source_size)
+    else {
+        return;
+    };
+    let x0 = x & !1;
+    let y0 = y & !1;
+    let x1 = ((x + width + 1) & !1).min(size.0 & !1);
+    let y1 = ((y + height + 1) & !1).min(size.1 & !1);
+    if x1 <= x0 || y1 <= y0 {
+        return;
+    }
+    let (bw, bh) = ((x1 - x0) as usize, (y1 - y0) as usize);
+    let (x0, y0) = (x0 as usize, y0 as usize);
+    let (fw, fh) = (size.0 as usize, size.1 as usize);
+    scratch.frame.resize(fw * fh * 4, 0);
+    scratch.box_nv12.resize(bw * bh * 3 / 2, 0);
+    scratch.box_rgba.resize(bw * bh * 4, 0);
+
+    let luma = bw * bh;
+    for row in 0..bh {
+        scratch.box_nv12[row * bw..(row + 1) * bw]
+            .copy_from_slice(&nv12[(y0 + row) * fw + x0..(y0 + row) * fw + x0 + bw]);
+    }
+    for row in 0..bh / 2 {
+        let start = fw * fh + (y0 / 2 + row) * fw + x0;
+        scratch.box_nv12[luma + row * bw..luma + (row + 1) * bw]
+            .copy_from_slice(&nv12[start..start + bw]);
+    }
+
+    converter.to_rgba_into(&scratch.box_nv12, (bw as u32, bh as u32), &mut scratch.box_rgba);
+    for row in 0..bh {
+        let start = ((y0 + row) * fw + x0) * 4;
+        scratch.frame[start..start + bw * 4]
+            .copy_from_slice(&scratch.box_rgba[row * bw * 4..(row + 1) * bw * 4]);
+    }
+
+    draw_cursor(
+        &mut scratch.frame,
+        size,
+        view,
+        sidecar,
+        source_path,
+        settings,
+        source_time,
+        source_size,
+        layer,
+    );
+
+    for row in 0..bh {
+        let start = ((y0 + row) * fw + x0) * 4;
+        scratch.box_rgba[row * bw * 4..(row + 1) * bw * 4]
+            .copy_from_slice(&scratch.frame[start..start + bw * 4]);
+    }
+    converter.convert_into(&scratch.box_rgba, (bw as u32, bh as u32), &mut scratch.box_nv12);
+    for row in 0..bh {
+        nv12[(y0 + row) * fw + x0..(y0 + row) * fw + x0 + bw]
+            .copy_from_slice(&scratch.box_nv12[row * bw..(row + 1) * bw]);
+    }
+    for row in 0..bh / 2 {
+        let start = fw * fh + (y0 / 2 + row) * fw + x0;
+        nv12[start..start + bw]
+            .copy_from_slice(&scratch.box_nv12[luma + row * bw..luma + (row + 1) * bw]);
+    }
+}
+
+/// Buffers `draw_cursor_nv12` reuses from frame to frame.
+#[derive(Default)]
+struct CursorScratch {
+    /// A full-frame RGBA canvas; only the cursor's box is ever filled.
+    frame: Vec<u8>,
+    box_nv12: Vec<u8>,
+    box_rgba: Vec<u8>,
 }
 
 #[cfg(test)]
@@ -2932,6 +3120,166 @@ mod tests {
                 max_delta == 0,
                 "{effect:?} overlay differs from the whole-frame draw by {max_delta}"
             );
+        }
+    }
+
+    #[test]
+    fn the_nv12_cursor_overlay_matches_the_rgba_draw() {
+        use super::{
+            cursor_box, draw_cursor, draw_cursor_nv12, CursorScratch, Nv12Converter, YuvSpace,
+        };
+        use crate::recording::editor::model::{ClickEffect, CursorSettings};
+        use crate::recording::editor::sidecar::{
+            CaptureRegion, ClickSample, CursorKind, PointerSample, PointerSidecar,
+        };
+        let size = (320, 180);
+        let mut frame = vec![0u8; size.0 as usize * size.1 as usize * 4];
+        for (index, pixel) in frame.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            let x = (index % size.0 as usize) as u8;
+            let y = (index / size.0 as usize) as u8;
+            pixel.copy_from_slice(&[x, y.wrapping_mul(3), 200 - x / 2, 255]);
+        }
+        let mut sidecar = PointerSidecar::new(
+            0,
+            CaptureRegion {
+                x: 0,
+                y: 0,
+                w: size.0,
+                h: size.1,
+            },
+        );
+        sidecar.pointer = (0..30)
+            .map(|step| PointerSample {
+                t: step as f64 / 30.0,
+                x: 180.0 + step as f64 * 2.0,
+                y: 60.0 + step as f64 * 2.0,
+                kind: CursorKind::Default,
+                cursor_id: None,
+            })
+            .collect();
+        sidecar.clicks = vec![ClickSample {
+            t: 0.2,
+            x: 190.0,
+            y: 72.0,
+            button: 1,
+            cursor_id: None,
+        }];
+        let view = (100.0, 40.0, 200.0, 120.0);
+        let converter = Nv12Converter::new(YuvSpace::from_probe(None, None));
+        let mut base_nv12 = vec![0u8; size.0 as usize * size.1 as usize * 3 / 2];
+        converter.convert_into(&frame, size, &mut base_nv12);
+        {
+            let mut rt_rgba = vec![0u8; size.0 as usize * size.1 as usize * 4];
+            converter.to_rgba_into(&base_nv12, size, &mut rt_rgba);
+            let mut rt = vec![0u8; size.0 as usize * size.1 as usize * 3 / 2];
+            converter.convert_into(&rt_rgba, size, &mut rt);
+            let max = rt
+                .iter()
+                .zip(base_nv12.iter())
+                .map(|(left, right)| left.abs_diff(*right))
+                .max()
+                .unwrap_or(0);
+            eprintln!("DEBUG plain round trip max delta {max}");
+        }
+        for effect in [ClickEffect::Circle, ClickEffect::None] {
+            let settings = CursorSettings {
+                click_effect: effect,
+                ..CursorSettings::default()
+            };
+            let mut rgba = vec![0u8; size.0 as usize * size.1 as usize * 4];
+            converter.to_rgba_into(&base_nv12, size, &mut rgba);
+            let mut layer = gtk4::cairo::ImageSurface::create(
+                gtk4::cairo::Format::ARgb32,
+                size.0 as i32,
+                size.1 as i32,
+            )
+            .unwrap();
+            draw_cursor(
+                &mut rgba,
+                size,
+                view,
+                &sidecar,
+                std::path::Path::new(""),
+                settings,
+                0.21,
+                size,
+                &mut layer,
+            );
+            let mut expected = vec![0u8; size.0 as usize * size.1 as usize * 3 / 2];
+            converter.convert_into(&rgba, size, &mut expected);
+            let mut fast = base_nv12.clone();
+            let mut layer2 = gtk4::cairo::ImageSurface::create(
+                gtk4::cairo::Format::ARgb32,
+                size.0 as i32,
+                size.1 as i32,
+            )
+            .unwrap();
+            draw_cursor_nv12(
+                &mut fast,
+                size,
+                view,
+                &sidecar,
+                std::path::Path::new(""),
+                settings,
+                0.21,
+                size,
+                &mut layer2,
+                &converter,
+                &mut CursorScratch::default(),
+            );
+            assert_ne!(fast, base_nv12, "{effect:?} drew nothing");
+            let max_delta = fast
+                .iter()
+                .zip(expected.iter())
+                .map(|(left, right)| left.abs_diff(*right))
+                .max()
+                .unwrap_or(0);
+            if let Some((index, delta)) = fast
+                .iter()
+                .zip(expected.iter())
+                .map(|(left, right)| left.abs_diff(*right))
+                .enumerate()
+                .max_by_key(|(_, delta)| *delta)
+            {
+                let luma = size.0 as usize * size.1 as usize;
+                let plane = if index < luma { "luma" } else { "chroma" };
+                let (row, col) = if index < luma {
+                    (index / size.0 as usize, index % size.0 as usize)
+                } else {
+                    let offset = index - luma;
+                    (offset / size.0 as usize, offset % size.0 as usize)
+                };
+                let (bx, by, bw, bh) =
+                    cursor_box(size, view, &sidecar, settings, 0.21, size).unwrap();
+                eprintln!(
+                    "DEBUG {effect:?}: max delta {delta} at {plane} row {row} col {col}; box {bx},{by} {bw}x{bh}"
+                );
+            }
+            assert!(
+                max_delta <= 3,
+                "{effect:?} NV12 overlay differs from the RGBA draw by {max_delta}"
+            );
+            let mean_delta = fast
+                .iter()
+                .zip(expected.iter())
+                .map(|(left, right)| f64::from(left.abs_diff(*right)))
+                .sum::<f64>()
+                / fast.len() as f64;
+            assert!(
+                mean_delta <= 1.0,
+                "{effect:?} NV12 overlay differs from the RGBA draw by {mean_delta} on average"
+            );
+            let (_, box_y, _, _) =
+                cursor_box(size, view, &sidecar, settings, 0.21, size).unwrap();
+            let top = (box_y & !1) as usize;
+            if top > 0 {
+                let end = top * size.0 as usize;
+                assert_eq!(
+                    fast[..end],
+                    base_nv12[..end],
+                    "{effect:?} touched luma rows above the cursor box"
+                );
+            }
         }
     }
 

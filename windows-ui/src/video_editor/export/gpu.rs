@@ -1,10 +1,11 @@
 //! GPU crop and scale for the export loop.
 //!
 //! The CPU path converts NV12 to RGBA, scales in software, and converts back.
-//! When the export has no cursor, ripple, or camera layer, the only compositing
-//! left is the camera view: a crop of the source scaled to the output. D3D11's
-//! video processor does that on the GPU and leaves the frame in NV12, removing
-//! both colour conversions and the software scale.
+//! When the export has no ripple or camera layer, the only full-frame
+//! compositing left is the camera view: a crop of the source scaled to the
+//! output. D3D11's video processor does that on the GPU and leaves the frame in
+//! NV12, removing both colour conversions and the software scale. The cursor is
+//! drawn afterwards on the NV12 frame, converting only the box it covers.
 //!
 //! The scaler is best-effort. A driver that cannot process NV12, a machine with
 //! no D3D11 device, or `APEXSHOT_EXPORT_GPU=0` leaves the export on the CPU
