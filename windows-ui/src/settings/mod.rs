@@ -670,6 +670,7 @@ fn build_settings_window(app: &Application) {
         rec_video_max_res: recordings.rec_video_max_res.clone(),
         rec_video_fps: recordings.rec_video_fps.clone(),
         rec_video_quality: recordings.rec_video_quality.clone(),
+        rec_video_codec: recordings.rec_video_codec.clone(),
         rec_video_mono: recordings.rec_video_mono.clone(),
         webcam: webcam.1,
         screenshot_quick_access: after_capture.screenshot_after_capture_checks[0].clone(),
@@ -922,6 +923,7 @@ fn install_save_dirty_tracking(inputs: &Rc<SaveInputs>, mark_dirty: Rc<dyn Fn()>
     wire_combo(&inputs.rec_video_max_res);
     wire_combo(&inputs.rec_video_fps);
     wire_combo(&inputs.rec_video_quality);
+    wire_combo(&inputs.rec_video_codec);
     wire_check(&inputs.rec_video_mono);
     inputs.webcam.install_dirty_tracking(Rc::clone(&mark_dirty));
     wire_check(&inputs.screenshot_quick_access);

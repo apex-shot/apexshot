@@ -18,6 +18,10 @@ pub struct RecordingSettingsWidgets {
     pub rec_video_max_res: SettingsSelect,
     pub rec_video_fps: SettingsSelect,
     pub rec_video_quality: SettingsSelect,
+    /// Windows only: the screen codec. Built on every platform so the struct
+    /// has one shape, but only the Windows settings window shows and reads it.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub rec_video_codec: SettingsSelect,
     pub rec_video_mono: CheckButton,
 }
 
@@ -252,6 +256,22 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
     quality_row.append(rec_video_quality.widget());
     video_frame.append(&build_row!(&quality_row, false));
 
+    let rec_video_codec = SettingsSelect::new(
+        [("0", t("H.264")), ("1", t("HEVC (smaller files)"))],
+        &config.rec_video_codec.to_string(),
+    );
+    // Only the Windows recorder has an HEVC path, so the row is Windows-only.
+    if cfg!(windows) {
+        let codec_row = GtkBox::new(Orientation::Horizontal, 12);
+        codec_row.set_hexpand(true);
+        let codec_label = Label::new(Some(&t("Codec")));
+        codec_label.set_xalign(0.0);
+        codec_label.set_hexpand(true);
+        codec_row.append(&codec_label);
+        codec_row.append(rec_video_codec.widget());
+        video_frame.append(&build_row!(&codec_row, false));
+    }
+
     let (mono_row, rec_video_mono) = build_toggle(
         "Record audio in mono",
         "Combine recorded audio channels into a single channel.",
@@ -287,6 +307,7 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
         rec_video_max_res,
         rec_video_fps,
         rec_video_quality,
+        rec_video_codec,
         rec_video_mono,
     }
 }

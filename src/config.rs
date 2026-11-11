@@ -71,6 +71,8 @@ pub struct AppConfig {
     pub rec_video_fps: u8,
     /// 0 = Balanced (CRF 23), 1 = High (CRF 20), 2 = Ultra (CRF 16).
     pub rec_video_quality: u8,
+    /// Windows screen codec: 0 = H.264, 1 = HEVC. The Linux recorder ignores it.
+    pub rec_video_codec: u8,
     pub rec_video_mono: bool,
     pub rec_video_open_editor: bool,
     /// webrtcdsp noise suppression on the recording mic (GStreamer audio path).
@@ -236,6 +238,7 @@ impl Default for AppConfig {
             rec_video_max_res: 0, // 0 = Original
             rec_video_fps: 1,     // 1 = 30fps
             rec_video_quality: 1, // 1 = High
+            rec_video_codec: 0,   // 0 = H.264
             rec_video_mono: false,
             rec_video_open_editor: false,
             rec_noise_suppression: false,
@@ -377,6 +380,7 @@ impl AppConfig {
             self.after_capture_show_quick_access = DEFAULT_AFTER_CAPTURE_SHOW_QUICK_ACCESS;
         }
         self.rec_video_format = self.rec_video_format.min(1);
+        self.rec_video_codec = self.rec_video_codec.min(1);
         // The webcam layer's tables have four entries each, and the recorder
         // and the editor both index them directly.
         self.rec_webcam_size = self.rec_webcam_size.min(3);
