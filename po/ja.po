@@ -1407,6 +1407,15 @@ msgstr "カーソルの揺れを除去"
 msgid "Hide when idle"
 msgstr "アイドル時に非表示にする"
 
+msgid "Loop cursor position"
+msgstr "カーソル位置をループ"
+
+msgid "Loop before end"
+msgstr "終了前のループ"
+
+msgid "Stop at the end"
+msgstr "終了時に停止"
+
 msgid "Hide zoom"
 msgstr "ズームを非表示にする"
 

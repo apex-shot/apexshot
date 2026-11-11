@@ -1434,6 +1434,15 @@ msgstr "Убирать дрожание курсора"
 msgid "Hide when idle"
 msgstr "Скрывать при бездействии"
 
+msgid "Loop cursor position"
+msgstr "Повторять позицию курсора"
+
+msgid "Loop before end"
+msgstr "Повтор перед концом"
+
+msgid "Stop at the end"
+msgstr "Остановка в конце"
+
 msgid "Hide zoom"
 msgstr "Скрыть масштаб"
 

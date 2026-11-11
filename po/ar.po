@@ -1417,6 +1417,15 @@ msgstr "إزالة اهتزاز المؤشر"
 msgid "Hide when idle"
 msgstr "إخفاء الشاشة عند عدم الاستخدام"
 
+msgid "Loop cursor position"
+msgstr "تكرار موضع المؤشر"
+
+msgid "Loop before end"
+msgstr "التكرار قبل النهاية"
+
+msgid "Stop at the end"
+msgstr "التوقف عند النهاية"
+
 msgid "Hide zoom"
 msgstr "إخفاء التكبير/التصغير"
 

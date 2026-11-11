@@ -1438,6 +1438,15 @@ msgstr "Supprimer les tremblements du curseur"
 msgid "Hide when idle"
 msgstr "Masquer en cas d'inactivité"
 
+msgid "Loop cursor position"
+msgstr "Répéter la position du curseur"
+
+msgid "Loop before end"
+msgstr "Boucle avant la fin"
+
+msgid "Stop at the end"
+msgstr "Arrêt à la fin"
+
 msgid "Hide zoom"
 msgstr "Masquer le zoom"
 

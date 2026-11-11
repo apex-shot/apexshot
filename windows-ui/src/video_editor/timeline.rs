@@ -2644,6 +2644,7 @@ impl Timeline {
     fn current_frame(&self) -> PreviewFrame {
         let data = self.data.borrow();
         self.cursor.set_cuts(&data.cuts);
+        self.cursor.set_end(data.trim_end);
         let placement = data.placement();
         let add_zoom = data.add_zoom_tool();
         let unzoomed = placement.is_some() || add_zoom.is_some();
