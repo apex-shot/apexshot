@@ -32,6 +32,7 @@ pub struct SaveInputs {
     pub rec_video_max_res: SettingsSelect,
     pub rec_video_fps: SettingsSelect,
     pub rec_video_quality: SettingsSelect,
+    pub rec_video_codec: SettingsSelect,
     pub rec_video_mono: CheckButton,
     pub webcam: super::webcam::WebcamInputs,
     pub screenshot_quick_access: CheckButton,
@@ -213,6 +214,11 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<SaveOutcome> {
         .active_id()
         .and_then(|value| value.parse().ok())
         .unwrap_or(1);
+    config.rec_video_codec = inputs
+        .rec_video_codec
+        .active_id()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0);
     config.rec_video_mono = inputs.rec_video_mono.is_active();
 
     config.rec_webcam_enabled = inputs.webcam.enabled.is_active();
@@ -444,6 +450,7 @@ fn write_shell_settings_to(path: &Path, config: &AppConfig) -> anyhow::Result<()
             "fps_index": config.rec_video_fps,
             "max_resolution_index": config.rec_video_max_res,
             "quality_index": config.rec_video_quality,
+            "codec_index": config.rec_video_codec,
             "mono_audio": config.rec_video_mono,
             "include_microphone": config.rec_mic,
             "include_speaker": config.rec_speaker,
@@ -606,6 +613,7 @@ mod tests {
             rec_video_fps: 3,
             rec_video_max_res: 6,
             rec_video_quality: 0,
+            rec_video_codec: 1,
             rec_video_mono: true,
             rec_countdown: false,
             rec_controls: false,
@@ -674,6 +682,7 @@ mod tests {
         assert_eq!(value["recording"]["fps_index"], 3);
         assert_eq!(value["recording"]["max_resolution_index"], 6);
         assert_eq!(value["recording"]["quality_index"], 0);
+        assert_eq!(value["recording"]["codec_index"], 1);
         assert_eq!(value["recording"]["mono_audio"], true);
         assert_eq!(value["recording"]["include_microphone"], true);
         assert_eq!(value["recording"]["include_speaker"], true);
