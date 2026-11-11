@@ -2899,6 +2899,36 @@ mod webcam_export_tests {
         matches!(status, Ok(status) if status.success())
     }
 
+    /// A clip whose left half is black and right half white, for edge checks.
+    fn halves_clip(path: &Path, size: (u32, u32), seconds: f64) -> bool {
+        let half = format!("{}x{}", size.0 / 2, size.1);
+        let status = crate::utils::hidden_command(ffmpeg::ffmpeg_executable())
+            .args(["-y", "-hide_banner", "-loglevel", "error"])
+            .args([
+                "-f",
+                "lavfi",
+                "-i",
+                &format!("color=c=black:s={half}:d={seconds}:r=30"),
+            ])
+            .args([
+                "-f",
+                "lavfi",
+                "-i",
+                &format!("color=c=white:s={half}:d={seconds}:r=30"),
+            ])
+            .args([
+                "-filter_complex",
+                "[0:v][1:v]hstack=inputs=2",
+                "-pix_fmt",
+                "yuv420p",
+            ])
+            .arg(path)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        matches!(status, Ok(status) if status.success())
+    }
+
     /// One frame of the file as RGB rows, for pixel checks.
     fn frame_rgb(path: &Path, seconds: f64, size: (u32, u32)) -> Option<Vec<u8>> {
         let output = crate::utils::hidden_command(ffmpeg::ffmpeg_executable())
@@ -4556,6 +4586,169 @@ mod webcam_export_tests {
             smeared,
             "a moving camera does not blur: t={} sharp={} blurred={}",
             last.0, last.1, last.2
+        );
+
+        let _ = fs::remove_file(&sidecar_path);
+        let _ = fs::remove_file(&track_path);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_fading_camera_blurs_in_the_export() {
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-webcam-fade-blur-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        if fs::create_dir_all(&dir).is_err() {
+            return;
+        }
+        let source = dir.join("screen.mp4");
+        if !solid_clip(&source, "0x404040", "1280x720", 3.0) {
+            eprintln!("skipping the camera fade blur test: ffmpeg is unavailable");
+            return;
+        }
+        let Some(track_path) = webcam_track_file(&source) else {
+            eprintln!("skipping the camera fade blur test: no sidecar directory");
+            return;
+        };
+        if let Some(parent) = track_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if !halves_clip(&track_path, (640, 640), 3.0) {
+            return;
+        }
+        let track = WebcamTrack {
+            file: track_path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            width: 640,
+            height: 640,
+            duration: 3.0,
+            start: 0.0,
+            x: 0.1,
+            y: 0.1,
+            w: 0.45,
+            h: 0.8,
+            shape: 1,
+            flip: false,
+        };
+        let mut sidecar = PointerSidecar::new(
+            0,
+            crate::recording::editor::sidecar::CaptureRegion::from_capture(None, None, None, None),
+        );
+        sidecar.webcam = Some(track);
+        let sidecar_path = PointerSidecar::sidecar_path(&source);
+        if sidecar.write(&sidecar_path).is_err() {
+            return;
+        }
+
+        let layouts = LayoutSettings {
+            default_layout: CameraLayout::CameraOverlay,
+            cues: Vec::new(),
+            ..LayoutSettings::default()
+        };
+        let export = |name: &str, hide: Option<f64>| -> PathBuf {
+            let output = dir.join(name);
+            let bubble = LayerSettings {
+                x: 0.1,
+                y: 0.1,
+                w: 0.45,
+                h: 0.8,
+                radius: 0.0,
+                mirror: false,
+                hide_during_silence: hide,
+                ..Default::default()
+            };
+            let model = ExportModel {
+                source: source.clone(),
+                source_size: (1280, 720),
+                trim_start: 0.0,
+                trim_end: 2.5,
+                cuts: Vec::new(),
+                zooms: Vec::new(),
+                zoom_camera: crate::video_editor::zoom::ZoomCameraSettings {
+                    motion_blur: 0.0,
+                    ..Default::default()
+                },
+                cursor: CursorSettings::default(),
+                sidecar: PointerSidecar::load_next_to_video(&source),
+                webcam: Some(webcam::WebcamExport {
+                    path: track_path.clone(),
+                    settings: bubble,
+                    layouts: layouts.clone(),
+                    split_gap: 0.0,
+                    pane_radius: 0.0,
+                    track_seconds: 3.0,
+                    start: 0.0,
+                    video_seconds: 3.0,
+                    last_frame: 2.95,
+                    source_size: (640, 640),
+                    silence: vec![(1.0, 3.0)],
+                }),
+                stage: None,
+                canvas: None,
+                crf: 30,
+            };
+            let handle = start_export(model, output.clone());
+            loop {
+                match handle.receiver.recv_timeout(Duration::from_secs(120)) {
+                    Ok(ExportUpdate::Progress { .. }) => {}
+                    Ok(ExportUpdate::Finished(path)) => {
+                        assert_eq!(path, output);
+                        break;
+                    }
+                    Ok(ExportUpdate::Failed(message)) => panic!("export failed: {message}"),
+                    Ok(ExportUpdate::Cancelled) => panic!("export cancelled itself"),
+                    Err(error) => panic!("export did not report back: {error}"),
+                }
+            }
+            output
+        };
+        let opaque = export("opaque.mp4", None);
+        let fading = export("fading.mp4", Some(1.0));
+
+        let opaque_frame = frame_rgb(&opaque, 1.6, (1280, 720)).expect("the opaque export decodes");
+        let fading_frame = frame_rgb(&fading, 1.6, (1280, 720)).expect("the export decodes");
+        let luma = |frame: &[u8], x: u32| {
+            let [red, green, blue] = pixel(frame, 1280, x, 360);
+            (f64::from(red) + f64::from(green) + f64::from(blue)) / 3.0
+        };
+        let mut seam = 150u32;
+        let mut widest = f64::MIN;
+        for x in 150..560 {
+            let step = luma(&opaque_frame, x + 1) - luma(&opaque_frame, x);
+            if step > widest {
+                widest = step;
+                seam = x;
+            }
+        }
+        let transition = |frame: &[u8]| {
+            let lo = luma(frame, seam - 20);
+            let hi = luma(frame, seam + 20);
+            let count = (seam - 15..=seam + 15)
+                .filter(|x| {
+                    let value = luma(frame, *x);
+                    lo + 0.2 * (hi - lo) < value && value < lo + 0.8 * (hi - lo)
+                })
+                .count();
+            (count, lo, hi)
+        };
+        let (opaque_t, opaque_lo, opaque_hi) = transition(&opaque_frame);
+        let (fading_t, fading_lo, fading_hi) = transition(&fading_frame);
+        eprintln!(
+            "fade blur edge: seam={seam} opaque={opaque_t} fading={fading_t} \
+             opaque_lo_hi=({opaque_lo},{opaque_hi}) fading_lo_hi=({fading_lo},{fading_hi})"
+        );
+        assert!(
+            fading_hi - fading_lo < 0.8 * (opaque_hi - opaque_lo),
+            "the camera fades during the silence"
+        );
+        assert!(
+            fading_t >= opaque_t + 2,
+            "a fading camera's picture blurs: opaque={opaque_t} fading={fading_t}"
         );
 
         let _ = fs::remove_file(&sidecar_path);
