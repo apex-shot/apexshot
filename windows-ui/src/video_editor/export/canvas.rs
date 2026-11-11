@@ -11,6 +11,7 @@
 use super::{crop_scale_into, End, Sink};
 use crate::video_editor::pixels::Nv12Converter;
 use crate::video_editor::zoom::StageRect;
+use rayon::prelude::*;
 use std::sync::Arc;
 
 /// The canvas the stage shows, measured at the editor's canvas size.
@@ -56,6 +57,80 @@ fn rounded_coverage(x: usize, y: usize, rect: StageRect, radius: f64) -> u32 {
     let qy = (y as f64 + 0.5 - (rect.1 + half_h)).abs() - (half_h - radius);
     let distance = qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - radius;
     ((0.5 - distance).clamp(0.0, 1.0) * 255.0).round() as u32
+}
+
+/// Blend `source` over `target` on one row between `from` and `to`, where
+/// `alpha(x)` is the coverage at column x. Coverage is convex along a row, so
+/// only the ends are evaluated until they reach full coverage; the middle is
+/// copied.
+fn blend_row(
+    target: &mut [u8],
+    source: &[u8],
+    from: usize,
+    to: usize,
+    alpha: impl Fn(usize) -> u32,
+) {
+    let mut start = from;
+    while start < to {
+        let a = alpha(start);
+        if a >= 255 {
+            break;
+        }
+        if a > 0 {
+            target[start] = blend(target[start], source[start], a);
+        }
+        start += 1;
+    }
+    let mut end = to;
+    while end > start {
+        let a = alpha(end - 1);
+        if a >= 255 {
+            break;
+        }
+        if a > 0 {
+            target[end - 1] = blend(target[end - 1], source[end - 1], a);
+        }
+        end -= 1;
+    }
+    target[start..end].copy_from_slice(&source[start..end]);
+}
+
+/// The same for an interleaved UV row: `alpha(pair)` covers bytes
+/// `2 * pair` and `2 * pair + 1`.
+fn blend_chroma_row(
+    target: &mut [u8],
+    source: &[u8],
+    from: usize,
+    to: usize,
+    alpha: impl Fn(usize) -> u32,
+) {
+    let mut start = from;
+    while start < to {
+        let a = alpha(start);
+        if a >= 255 {
+            break;
+        }
+        if a > 0 {
+            for byte in [start * 2, start * 2 + 1] {
+                target[byte] = blend(target[byte], source[byte], a);
+            }
+        }
+        start += 1;
+    }
+    let mut end = to;
+    while end > start {
+        let a = alpha(end - 1);
+        if a >= 255 {
+            break;
+        }
+        if a > 0 {
+            for byte in [(end - 1) * 2, (end - 1) * 2 + 1] {
+                target[byte] = blend(target[byte], source[byte], a);
+            }
+        }
+        end -= 1;
+    }
+    target[start * 2..end * 2].copy_from_slice(&source[start * 2..end * 2]);
 }
 
 /// The video rect at an export size. A resolution pick scales the canvas, so
@@ -294,67 +369,78 @@ impl Framer {
             .min(card.rect.3 / 2.0)
             .max(0.0);
 
+        let (width, height) = self.video;
+        let (left, top) = self.origin;
+
         let x0 = card.rect.0.floor().max(0.0) as usize;
         let x1 = ((card.rect.0 + card.rect.2).ceil().max(0.0) as usize).min(out_w);
         let y0 = card.rect.1.floor().max(0.0) as usize;
         let y1 = ((card.rect.1 + card.rect.3).ceil().max(0.0) as usize).min(out_h);
-        for y in y0..y1 {
-            for x in x0..x1 {
-                let alpha = rounded_coverage(x, y, card.rect, radius);
-                if alpha > 0 {
-                    let index = y * out_w + x;
-                    out[index] = blend(out[index], outer[index], alpha);
-                }
-            }
-        }
-        let pair_end = x1.div_ceil(2).min(out_w / 2);
-        for row in y0 / 2..y1.div_ceil(2).min(out_h / 2) {
-            let y = row * 2;
-            let lower = if y + 1 < out_h { y + 1 } else { y };
-            for pair in x0 / 2..pair_end {
-                let x = pair * 2;
-                let alpha = (rounded_coverage(x, y, card.rect, radius)
-                    + rounded_coverage(x + 1, y, card.rect, radius)
-                    + rounded_coverage(x + 1, lower, card.rect, radius)
-                    + rounded_coverage(x, lower, card.rect, radius)
-                    + 2)
-                    / 4;
-                if alpha > 0 {
-                    let index = base + row * out_w + x;
-                    out[index] = blend(out[index], outer[index], alpha);
-                    out[index + 1] = blend(out[index + 1], outer[index + 1], alpha);
-                }
-            }
-        }
 
-        let (width, height) = self.video;
-        let (left, top) = self.origin;
-        for y in 0..height {
-            for x in 0..width {
-                let cx = left + x;
-                let cy = top + y;
-                let alpha = rounded_coverage(cx, cy, card.rect, radius);
-                let index = cy * out_w + cx;
-                out[index] = blend(out[index], video[y * width + x], alpha);
-            }
-        }
-        let video_chroma = width * height;
-        for row in 0..height / 2 {
-            let y = row * 2;
-            for pair in 0..width / 2 {
-                let x = pair * 2;
-                let alpha = (rounded_coverage(left + x, top + y, card.rect, radius)
-                    + rounded_coverage(left + x + 1, top + y, card.rect, radius)
-                    + rounded_coverage(left + x, top + y + 1, card.rect, radius)
-                    + rounded_coverage(left + x + 1, top + y + 1, card.rect, radius)
-                    + 2)
-                    / 4;
-                let target = base + (top / 2 + row) * out_w + left + x;
-                let source = video_chroma + row * width + x;
-                out[target] = blend(out[target], video[source], alpha);
-                out[target + 1] = blend(out[target + 1], video[source + 1], alpha);
-            }
-        }
+        let rect = card.rect;
+        let (luma, chroma) = out.split_at_mut(base);
+        let (outer_luma, outer_chroma) = outer.split_at(base);
+        luma.par_chunks_mut(out_w)
+            .zip(outer_luma.par_chunks(out_w))
+            .enumerate()
+            .skip(y0)
+            .take(y1.saturating_sub(y0))
+            .for_each(|(y, (target, source))| {
+                blend_row(target, source, x0, x1, |x| rounded_coverage(x, y, rect, radius));
+            });
+
+        let (p0, p1) = (x0 / 2, x1.div_ceil(2).min(out_w / 2));
+        let (r0, r1) = (y0 / 2, y1.div_ceil(2).min(out_h / 2));
+        chroma
+            .par_chunks_mut(out_w)
+            .zip(outer_chroma.par_chunks(out_w))
+            .enumerate()
+            .skip(r0)
+            .take(r1.saturating_sub(r0))
+            .for_each(|(row, (target, source))| {
+                let y = row * 2;
+                let lower = if y + 1 < out_h { y + 1 } else { y };
+                blend_chroma_row(target, source, p0, p1, |pair| {
+                    let x = pair * 2;
+                    (rounded_coverage(x, y, rect, radius)
+                        + rounded_coverage(x + 1, y, rect, radius)
+                        + rounded_coverage(x, lower, rect, radius)
+                        + rounded_coverage(x + 1, lower, rect, radius)
+                        + 2)
+                        / 4
+                });
+            });
+
+        let (video_luma, video_chroma) = video.split_at(width * height);
+        luma.par_chunks_mut(out_w)
+            .enumerate()
+            .skip(top)
+            .take(height)
+            .for_each(|(cy, target)| {
+                let source = &video_luma[(cy - top) * width..(cy - top + 1) * width];
+                blend_row(&mut target[left..left + width], source, 0, width, |x| {
+                    rounded_coverage(left + x, cy, rect, radius)
+                });
+            });
+        chroma
+            .par_chunks_mut(out_w)
+            .enumerate()
+            .skip(top / 2)
+            .take(height / 2)
+            .for_each(|(row, target)| {
+                let r = row - top / 2;
+                let source = &video_chroma[r * width..(r + 1) * width];
+                let y = top + r * 2;
+                blend_chroma_row(&mut target[left..left + width], source, 0, width / 2, |pair| {
+                    let x = left + pair * 2;
+                    (rounded_coverage(x, y, rect, radius)
+                        + rounded_coverage(x + 1, y, rect, radius)
+                        + rounded_coverage(x, y + 1, rect, radius)
+                        + rounded_coverage(x + 1, y + 1, rect, radius)
+                        + 2)
+                        / 4
+                });
+            });
     }
 }
 
