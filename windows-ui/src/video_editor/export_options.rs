@@ -1,7 +1,7 @@
 //! MP4 export choices, shown before asking for an output path.
 
 use super::export::rate;
-use super::export::{ExportModel, ExportSettings};
+use super::export::{Codec, ExportModel, ExportSettings};
 use crate::capture::editor::window::icon_names::custom;
 use crate::i18n::{t, tfmt};
 use crate::settings::select::SettingsSelect;
@@ -160,6 +160,20 @@ pub(super) fn show(
     fields.attach(&size_group, 0, 0, 1, 1);
     fields.attach(&fps_group, 1, 0, 1, 1);
 
+    let codec_group = group("Codec", themed_icon(custom::VIDEO, custom::VIDEO_LIGHT), scale);
+    let codecs = SettingsSelect::new(
+        [("h264", "H.264".to_string()), ("hevc", "HEVC".to_string())],
+        "h264",
+    );
+    codecs.widget().set_hexpand(true);
+    let codec_note = Label::new(None);
+    codec_note.add_css_class("video-export-muted");
+    codec_note.set_xalign(0.0);
+    codec_note.set_wrap(true);
+    codec_group.append(codecs.widget());
+    codec_group.append(&codec_note);
+    fields.attach(&codec_group, 0, 1, 1, 1);
+
     let quality_group = group(
         "Quality",
         themed_icon(custom::SLIDERS_HORIZONTAL, custom::SLIDERS_HORIZONTAL_LIGHT),
@@ -271,8 +285,18 @@ pub(super) fn show(
             description.set_text(&t(QUALITIES[quality.get()].2));
             let output = selected.dimensions(frame_size);
             let fps = selected.fps.map_or(source_fps, f64::from);
-            let bps = rate::h264_bits_per_second(QUALITIES[quality.get()].0, output, fps);
-            let (low, _, high) = rate::bytes(bps, rate::MP4_AUDIO_BPS, seconds, rate::H264_SPREAD);
+            let crf = QUALITIES[quality.get()].0;
+            let (bps, spread) = match selected.codec {
+                Codec::H264 => (
+                    rate::h264_bits_per_second(crf, output, fps),
+                    rate::H264_SPREAD,
+                ),
+                Codec::Hevc => (
+                    rate::hevc_estimate_bits_per_second(crf, output, fps),
+                    rate::BITRATE_SPREAD,
+                ),
+            };
+            let (low, _, high) = rate::bytes(bps, rate::MP4_AUDIO_BPS, seconds, spread);
             let size = if high / low.max(1.0) < 1.5 {
                 rate::format_bytes((low + high) / 2.0)
             } else {
@@ -300,6 +324,28 @@ pub(super) fn show(
     sizes.connect_changed({
         let update = update.clone();
         move || update()
+    });
+    codecs.connect_changed({
+        let codecs = codecs.clone();
+        let settings = settings.clone();
+        let format = format.clone();
+        let codec_note = codec_note.clone();
+        let update = update.clone();
+        move || {
+            let hevc = codecs.active_id().as_deref() == Some("hevc");
+            settings.set(ExportSettings {
+                codec: if hevc { Codec::Hevc } else { Codec::H264 },
+                ..settings.get()
+            });
+            format.set_text(if hevc { "MP4 · HEVC" } else { "MP4 · H.264" });
+            let note = if hevc {
+                t("Smaller files at the same quality, but not every app or browser plays HEVC.")
+            } else {
+                String::new()
+            };
+            codec_note.set_text(&note);
+            update();
+        }
     });
     fps.connect_changed(move || update());
 
@@ -417,8 +463,8 @@ mod tests {
                 );
                 assert!(!editor.is_sensitive());
                 let pickers = widgets_with_class(shell.upcast_ref(), "settings-select");
-                assert_eq!(pickers.len(), 2);
-                for (picker, expected) in pickers.iter().zip([4, 8]) {
+                assert_eq!(pickers.len(), 3);
+                for (picker, expected) in pickers.iter().zip([4, 8, 2]) {
                     let options = widgets_with_class(picker, "history-action-btn");
                     assert_eq!(options.len(), expected);
                     options[1]
@@ -442,6 +488,7 @@ mod tests {
                 let (settings, crf, copied) = chosen.get().expect("the export action must run");
                 assert_eq!(settings.resolution, Some(720));
                 assert_eq!(settings.fps, Some(60));
+                assert_eq!(settings.codec, Codec::Hevc);
                 assert_eq!(crf, 24);
                 assert_eq!(copied, clipboard);
                 assert!(editor.is_sensitive());

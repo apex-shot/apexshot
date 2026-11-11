@@ -10,6 +10,11 @@ const REFERENCE_FPS: f64 = 60.0;
 pub(crate) const H264_SPREAD: (f64, f64) = (0.65, 1.5);
 /// The sound track's allowance in an MP4 estimate, in bits per second.
 pub(crate) const MP4_AUDIO_BPS: f64 = 165_000.0;
+/// Bits per pixel per frame for a bitrate-driven export, by quality tier
+/// (the tier's H.264 CRF): studio, social media, web, web (low).
+const BITS_PER_PIXEL: [(u32, f64); 4] = [(14, 0.3), (24, 0.05), (30, 0.0175), (42, 0.0075)];
+/// The low and high ends of a bitrate-mode size estimate.
+pub(crate) const BITRATE_SPREAD: (f64, f64) = (0.8, 1.1);
 /// How much slower than the reference model this exporter runs; measured on the
 /// development machine.
 const CALIBRATION: f64 = 1.0;
@@ -36,6 +41,22 @@ pub(crate) fn h264_bits_per_second(crf: u32, size: (u32, u32), fps: f64) -> f64 
         * REFERENCE_FPS
         * (pixels / REFERENCE_PIXELS).powf(0.78)
         * (fps / REFERENCE_FPS).powf(0.57)
+}
+
+/// The HEVC target bitrate for a tier: the tier nearest `crf`.
+pub(crate) fn hevc_bits_per_second(crf: u32, size: (u32, u32), fps: f64) -> f64 {
+    let bpp = BITS_PER_PIXEL
+        .iter()
+        .min_by_key(|(tier, _)| tier.abs_diff(crf))
+        .map_or(0.05, |(_, bpp)| *bpp);
+    (f64::from(size.0) * f64::from(size.1) * fps * bpp).floor()
+}
+
+/// What a bitrate-mode encode tends to produce: a little under the target,
+/// with a floor for very low targets.
+pub(crate) fn hevc_estimate_bits_per_second(crf: u32, size: (u32, u32), fps: f64) -> f64 {
+    let pixels = f64::from(size.0) * f64::from(size.1);
+    (hevc_bits_per_second(crf, size, fps) * 0.93).max(pixels * fps * 0.01)
 }
 
 /// The low, typical, and high sizes in bytes of a clip at this bitrate.
@@ -110,6 +131,27 @@ mod tests {
         assert!(lower.is_finite() && lower > 0.0);
         assert!(higher > studio);
         assert!(lower < smallest);
+    }
+
+    #[test]
+    fn hevc_tiers_follow_the_bits_per_pixel_table() {
+        let pixels = 1280.0 * 720.0 * 30.0;
+        assert_eq!(
+            hevc_bits_per_second(24, (1280, 720), 30.0),
+            (pixels * 0.05).floor()
+        );
+        assert_eq!(
+            hevc_bits_per_second(14, (1280, 720), 30.0),
+            (pixels * 0.3).floor()
+        );
+        assert_eq!(
+            hevc_bits_per_second(20, (1280, 720), 30.0),
+            (pixels * 0.05).floor()
+        );
+        assert_eq!(
+            hevc_estimate_bits_per_second(42, (1280, 720), 30.0),
+            pixels * 0.01
+        );
     }
 
     #[test]

@@ -28,7 +28,13 @@ pub(super) fn add(
     })?;
     let ranges = source_ranges(&plan.spans, plan.fps);
     let duration = plan.total as f64 / plan.fps;
-    mux(output, source, &ranges, duration)
+    mux(
+        output,
+        source,
+        &ranges,
+        duration,
+        settings.codec == super::Codec::Hevc,
+    )
 }
 
 /// The source-time ranges of the kept footage. Spans that continue where the
@@ -91,10 +97,17 @@ fn filter_graph(ranges: &[(f64, f64)]) -> String {
     }
 }
 
-fn mux(video: &Path, source: &Path, ranges: &[(f64, f64)], duration: f64) -> Result<(), String> {
+fn mux(
+    video: &Path,
+    source: &Path,
+    ranges: &[(f64, f64)],
+    duration: f64,
+    hevc: bool,
+) -> Result<(), String> {
     let temp = video.with_extension("sound.mp4");
     let _ = std::fs::remove_file(&temp);
-    let output = crate::utils::hidden_command(ffmpeg::ffmpeg_executable())
+    let mut command = crate::utils::hidden_command(ffmpeg::ffmpeg_executable());
+    command
         .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y"])
         .arg("-i")
         .arg(video)
@@ -103,7 +116,12 @@ fn mux(video: &Path, source: &Path, ranges: &[(f64, f64)], duration: f64) -> Res
         .arg("-filter_complex")
         .arg(filter_graph(ranges))
         .args(["-map", "0:v:0", "-map", "[a]"])
-        .args(["-c:v", "copy", "-c:a", "aac", "-b:a", "192k"])
+        .args(["-c:v", "copy"]);
+    if hevc {
+        command.args(["-tag:v", "hvc1"]);
+    }
+    let output = command
+        .args(["-c:a", "aac", "-b:a", "192k"])
         .arg("-t")
         .arg(format!("{duration:.6}"))
         .args(["-movflags", "+faststart", "-f", "mp4"])

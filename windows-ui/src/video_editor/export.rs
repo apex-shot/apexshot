@@ -41,6 +41,15 @@ use std::time::{Duration, Instant};
 
 const DEFAULT_FPS: f64 = 30.0;
 
+/// The video codec an export writes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub(super) enum Codec {
+    #[default]
+    H264,
+    /// Better quality per byte, but not every player decodes it.
+    Hevc,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(super) struct ExportSettings {
     /// None preserves the recording's frame rate.
@@ -49,6 +58,8 @@ pub(super) struct ExportSettings {
     pub resolution: Option<u32>,
     /// Use the GPU encoder when the machine has one that opens.
     pub hardware: bool,
+    /// H.264 or HEVC.
+    pub codec: Codec,
 }
 
 impl Default for ExportSettings {
@@ -57,6 +68,7 @@ impl Default for ExportSettings {
             fps: None,
             resolution: None,
             hardware: true,
+            codec: Codec::H264,
         }
     }
 }
@@ -223,20 +235,21 @@ pub(super) fn start_export_with_settings(
     }
     let thread_cancel = cancel.clone();
     std::thread::spawn(move || {
-        let encoder = Encoder::fastest();
+        let encoder = Encoder::fastest_for(settings.codec);
         let mut result = render(&model, &output, &sender, &thread_cancel, encoder, settings);
-        if encoder != Encoder::X264 {
+        if !encoder.is_software() {
             if let Err(End::Failed(message)) = &result {
                 eprintln!(
-                    "[export] {} failed ({message}); retrying with libx264",
-                    encoder.codec()
+                    "[export] {} failed ({message}); retrying with {}",
+                    encoder.codec(),
+                    Encoder::software(settings.codec).codec()
                 );
                 result = render(
                     &model,
                     &output,
                     &sender,
                     &thread_cancel,
-                    Encoder::X264,
+                    Encoder::software(settings.codec),
                     settings,
                 );
             }
@@ -266,27 +279,62 @@ pub(super) fn start_export_with_settings(
     ExportHandle { receiver, cancel }
 }
 
-/// The H.264 encoders an export can use, in the order they are tried: the
-/// GPU's own encoder when the machine has one that opens, then x264 on the
-/// CPU, which also takes over if a hardware encoder fails mid-export.
+/// The encoders an export can use: per codec, the GPU's own encoder when the
+/// machine has one that opens, then the CPU encoder, which also takes over if a
+/// hardware encoder fails mid-export.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Encoder {
     Nvenc,
     QuickSync,
     Amf,
     X264,
+    HevcNvenc,
+    HevcQuickSync,
+    HevcAmf,
+    X265,
 }
 
 impl Encoder {
-    /// The fastest encoder this machine can open, probed once per process.
-    fn fastest() -> Self {
-        static FASTEST: OnceLock<Encoder> = OnceLock::new();
-        *FASTEST.get_or_init(|| {
-            [Self::Nvenc, Self::QuickSync, Self::Amf]
+    /// The CPU encoder for a codec.
+    fn software(codec: Codec) -> Self {
+        match codec {
+            Codec::H264 => Self::X264,
+            Codec::Hevc => Self::X265,
+        }
+    }
+
+    fn is_software(self) -> bool {
+        matches!(self, Self::X264 | Self::X265)
+    }
+
+    fn is_hevc(self) -> bool {
+        matches!(
+            self,
+            Self::HevcNvenc | Self::HevcQuickSync | Self::HevcAmf | Self::X265
+        )
+    }
+
+    /// The fastest encoder this machine can open for a codec, probed once per process.
+    fn fastest_for(codec: Codec) -> Self {
+        static H264: OnceLock<Encoder> = OnceLock::new();
+        static HEVC: OnceLock<Encoder> = OnceLock::new();
+        let (cell, candidates) = match codec {
+            Codec::H264 => (&H264, [Self::Nvenc, Self::QuickSync, Self::Amf]),
+            Codec::Hevc => (&HEVC, [Self::HevcNvenc, Self::HevcQuickSync, Self::HevcAmf]),
+        };
+        *cell.get_or_init(|| {
+            candidates
                 .into_iter()
                 .find(|encoder| encoder.opens())
-                .unwrap_or(Self::X264)
+                .unwrap_or(Self::software(codec))
         })
+    }
+
+    /// The fastest encoder this machine can open, probed once per process.
+    #[cfg(test)]
+    #[allow(dead_code)]
+    fn fastest() -> Self {
+        Self::fastest_for(Codec::H264)
     }
 
     fn codec(self) -> &'static str {
@@ -295,6 +343,10 @@ impl Encoder {
             Self::QuickSync => "h264_qsv",
             Self::Amf => "h264_amf",
             Self::X264 => "libx264",
+            Self::HevcNvenc => "hevc_nvenc",
+            Self::HevcQuickSync => "hevc_qsv",
+            Self::HevcAmf => "hevc_amf",
+            Self::X265 => "libx265",
         }
     }
 
@@ -304,6 +356,9 @@ impl Encoder {
     /// with a 2x buffer, because the drivers map a quantiser to very different
     /// sizes.
     fn args(self, crf: u32, size: (u32, u32), fps: f64) -> Vec<String> {
+        if self.is_hevc() {
+            return self.hevc_args(crf, size, fps);
+        }
         let profile = if self == Self::X264 && crf == 0 {
             "high444"
         } else {
@@ -336,6 +391,7 @@ impl Encoder {
             .iter()
             .map(|value| value.to_string())
             .collect(),
+            _ => Vec::new(),
         };
         [
             "-c:v",
@@ -349,6 +405,35 @@ impl Encoder {
         .map(str::to_string)
         .chain(settings)
         .collect()
+    }
+
+    /// HEVC is always driven by a bitrate from the tier's bits per pixel, and
+    /// tagged `hvc1` so MP4 players accept it.
+    fn hevc_args(self, crf: u32, size: (u32, u32), fps: f64) -> Vec<String> {
+        let bitrate = rate::hevc_bits_per_second(crf, size, fps).round().max(1.0) as u64;
+        let (control, pix_fmt): (&[&str], &str) = match self {
+            Self::HevcNvenc => (&["-preset", "p4", "-tune", "hq", "-rc", "vbr"], "nv12"),
+            Self::HevcQuickSync => (&["-preset", "medium"], "nv12"),
+            Self::HevcAmf => (&["-quality", "balanced", "-rc", "vbr_peak"], "nv12"),
+            _ => (&["-preset", "veryfast", "-x265-params", "log-level=error"], "yuv420p"),
+        };
+        ["-c:v", self.codec(), "-profile:v", "main"]
+            .into_iter()
+            .chain(control.iter().copied())
+            .map(str::to_string)
+            .chain([
+                "-b:v".to_string(),
+                bitrate.to_string(),
+                "-maxrate".to_string(),
+                (bitrate * 3 / 2).to_string(),
+                "-bufsize".to_string(),
+                (bitrate * 2).to_string(),
+                "-pix_fmt".to_string(),
+                pix_fmt.to_string(),
+                "-tag:v".to_string(),
+                "hvc1".to_string(),
+            ])
+            .collect()
     }
 
     /// Whether ffmpeg can open this encoder here: a build lists every GPU
@@ -483,7 +568,11 @@ fn render_with_workers(
 ) -> Result<(), End> {
     let plan = plan_render(model, settings)?;
     let hardware = settings.hardware && !software_forced();
-    let primary = if hardware { encoder } else { Encoder::X264 };
+    let primary = if hardware {
+        encoder
+    } else {
+        Encoder::software(settings.codec)
+    };
     let workers = workers
         .or_else(worker_override)
         .unwrap_or_else(|| worker_count(&plan, primary))
@@ -564,7 +653,7 @@ fn render_range(
         model.crf,
         encoder,
         plan.total,
-        allow_hybrid && settings.hardware && encoder != Encoder::X264,
+        allow_hybrid && settings.hardware && !encoder.is_software(),
         faststart,
     )?;
     let framer = match &model.canvas {
@@ -966,7 +1055,7 @@ fn worker_count(plan: &RenderPlan, primary: Encoder) -> usize {
     } else {
         4
     };
-    let by_sessions = if primary == Encoder::X264 { 4 } else { 3 };
+    let by_sessions = if primary.is_software() { 4 } else { 3 };
     let by_frames = (plan.total / (plan.fps * 4.0).round().max(1.0) as u64).max(1) as usize;
     by_cores
         .clamp(1, 6)
@@ -1044,7 +1133,7 @@ fn render_parallel(
     if cancel.load(Ordering::Relaxed) {
         return Err(End::Cancelled);
     }
-    hybrid::join_segments(dir.path(), &parts, output)
+    hybrid::join_segments(dir.path(), &parts, output, encoder.is_hevc())
 }
 
 /// Where composited frames go: one encoder for the whole file, or the chunked
@@ -1617,8 +1706,8 @@ fn draw_cursor(
 mod tests {
     use super::{
         frame_plan, frame_source_time, h264_level, output_size, rate, render, render_with_workers,
-        split_ranges, start_export, total_frames, zoom, Encoder, End, ExportModel, ExportSettings,
-        ExportUpdate,
+        split_ranges, start_export, start_export_with_settings, total_frames, zoom, Codec, Encoder,
+        End, ExportModel, ExportSettings, ExportUpdate,
     };
     use crate::recording::editor::ffmpeg;
     use crate::recording::editor::model::{CursorRotationMode, CursorSettings};
@@ -1772,6 +1861,180 @@ mod tests {
         assert!(args.iter().any(|value| value == "-crf"));
         assert!(args.iter().any(|value| value == "24"));
         assert!(!args.iter().any(|value| value == "-b:v"));
+    }
+
+    #[test]
+    fn hevc_encoders_use_a_bitrate_and_the_hvc1_tag() {
+        let expected = (rate::hevc_bits_per_second(24, (1920, 1080), 60.0).round() as u64)
+            .to_string();
+        for encoder in [
+            Encoder::HevcNvenc,
+            Encoder::HevcQuickSync,
+            Encoder::HevcAmf,
+            Encoder::X265,
+        ] {
+            let args = encoder.args(24, (1920, 1080), 60.0);
+            let followed = |flag: &str| {
+                args.iter()
+                    .position(|value| value == flag)
+                    .map(|index| args[index + 1].as_str())
+            };
+            assert_eq!(followed("-tag:v"), Some("hvc1"));
+            assert_eq!(followed("-profile:v"), Some("main"));
+            assert_eq!(followed("-b:v"), Some(expected.as_str()));
+            assert!(!args.iter().any(|value| value == "-level:v"));
+            assert!(!args.iter().any(|value| value == "-crf"));
+        }
+        assert_eq!(Encoder::software(Codec::Hevc), Encoder::X265);
+        assert!(Encoder::X265.is_software());
+        assert!(!Encoder::HevcQuickSync.is_software());
+    }
+
+    #[test]
+    fn an_hevc_export_plays_as_hvc1_with_its_sound() {
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-export-hevc-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("src.mp4");
+        let generated = crate::utils::hidden_command(ffmpeg::ffmpeg_executable())
+            .args([
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=320x240:rate=30:duration=3",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=3",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:v",
+                "libx264",
+                "-c:a",
+                "aac",
+                "-shortest",
+            ])
+            .arg(&source)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        if !generated.is_ok_and(|status| status.success()) {
+            eprintln!("skipping the HEVC export test: ffmpeg is unavailable");
+            return;
+        }
+        let probe_stream = |path: &std::path::Path, stream: &str, entries: &str| -> String {
+            let probe = crate::utils::hidden_command(ffmpeg::ffprobe_executable())
+                .args([
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    stream,
+                    "-show_entries",
+                    entries,
+                    "-of",
+                    "csv=p=0",
+                ])
+                .arg(path)
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&probe.stdout).trim().to_string()
+        };
+        let model = ExportModel {
+            source: source.clone(),
+            source_size: (320, 240),
+            trim_start: 0.0,
+            trim_end: 3.0,
+            cuts: Vec::new(),
+            zooms: Vec::new(),
+            zoom_camera: zoom::ZoomCameraSettings::default(),
+            cursor: CursorSettings::default(),
+            sidecar: None,
+            webcam: None,
+            canvas: None,
+            crf: 24,
+            audio: Vec::new(),
+        };
+        let output = dir.join("out.mp4");
+        let handle = start_export_with_settings(
+            model,
+            output.clone(),
+            ExportSettings {
+                hardware: false,
+                codec: Codec::Hevc,
+                ..ExportSettings::default()
+            },
+        );
+        loop {
+            match handle.receiver.recv_timeout(Duration::from_secs(120)) {
+                Ok(ExportUpdate::Progress { .. }) => {}
+                Ok(ExportUpdate::Finished(path, sound)) => {
+                    assert_eq!(path, output);
+                    assert!(sound.is_none(), "{sound:?}");
+                    break;
+                }
+                Ok(ExportUpdate::Failed(message)) => panic!("export failed: {message}"),
+                Ok(ExportUpdate::Cancelled) => panic!("export cancelled itself"),
+                Err(error) => panic!("export did not report back: {error}"),
+            }
+        }
+        assert_eq!(
+            probe_stream(
+                &output,
+                "v:0",
+                "stream=codec_name,codec_tag_string,width,height"
+            ),
+            "hevc,hvc1,320,240"
+        );
+        assert_eq!(probe_stream(&output, "a", "stream=codec_name"), "aac");
+
+        let model2 = ExportModel {
+            source,
+            source_size: (320, 240),
+            trim_start: 0.0,
+            trim_end: 3.0,
+            cuts: Vec::new(),
+            zooms: Vec::new(),
+            zoom_camera: zoom::ZoomCameraSettings::default(),
+            cursor: CursorSettings::default(),
+            sidecar: None,
+            webcam: None,
+            canvas: None,
+            crf: 24,
+            audio: Vec::new(),
+        };
+        let joined = dir.join("joined.mp4");
+        let (sender, _receiver) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        render_with_workers(
+            &model2,
+            &joined,
+            &sender,
+            &cancel,
+            Encoder::X265,
+            ExportSettings {
+                hardware: false,
+                codec: Codec::Hevc,
+                ..ExportSettings::default()
+            },
+            Some(2),
+        )
+        .unwrap_or_else(|error| panic!("the parallel HEVC export failed: {error:?}"));
+        assert_eq!(
+            probe_stream(
+                &joined,
+                "v:0",
+                "stream=codec_name,codec_tag_string,width,height"
+            ),
+            "hevc,hvc1,320,240"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

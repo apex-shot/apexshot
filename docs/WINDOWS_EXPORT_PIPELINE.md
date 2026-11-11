@@ -110,6 +110,11 @@ If a hardware encoder fails at start or mid-export, the export retries once
 from the beginning with `libx264`, matching the previous behaviour. The UI
 progress bar resets because the retry starts over.
 
+HEVC: the dialog's Codec row picks H.264 (default) or HEVC. HEVC tries
+`hevc_nvenc`, `hevc_qsv`, then `hevc_amf`, falling back to `libx265`; every HEVC
+encoder gets a bitrate from the tier's bits per pixel (0.3, 0.05, 0.0175,
+0.0075) and the `hvc1` tag. The chunked two-encoder path stays H.264-only.
+
 ## Policy
 
 - The export dialog has a **Hardware acceleration** checkbox, on by default.

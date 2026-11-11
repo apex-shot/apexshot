@@ -37,7 +37,8 @@ const MAX_PENDING: usize = 4;
 
 /// Whether a hybrid export makes sense on this machine and timeline.
 pub(super) fn supported(primary: Encoder, total: u64, fps: f64) -> bool {
-    primary != Encoder::X264
+    !primary.is_software()
+        && !primary.is_hevc()
         && fps > 0.0
         && total as f64 >= fps * MIN_SECONDS
         && total >= 2
@@ -278,7 +279,7 @@ impl SegmentedSink {
             segment.finish()?;
         }
         let parts: Vec<PathBuf> = self.parts.iter().flatten().cloned().collect();
-        join_segments(&self.dir.0, &parts, &self.output)
+        join_segments(&self.dir.0, &parts, &self.output, false)
     }
 
     fn close_active(&mut self) {
@@ -431,7 +432,7 @@ fn probe_pair(dir: &Path, primary: Encoder) -> Result<bool, End> {
         parts.push(path);
     }
     let joined = dir.join("joined.mp4");
-    join_segments(dir, &parts, &joined)?;
+    join_segments(dir, &parts, &joined, false)?;
     let decoded = crate::utils::hidden_command(ffmpeg::ffmpeg_executable())
         .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-i"])
         .arg(&joined)
@@ -441,7 +442,12 @@ fn probe_pair(dir: &Path, primary: Encoder) -> Result<bool, End> {
     Ok(decoded.status.success() && decoded.stderr.is_empty())
 }
 
-pub(super) fn join_segments(dir: &Path, parts: &[PathBuf], output: &Path) -> Result<(), End> {
+pub(super) fn join_segments(
+    dir: &Path,
+    parts: &[PathBuf],
+    output: &Path,
+    hevc: bool,
+) -> Result<(), End> {
     if parts.is_empty() {
         return Err(End::Failed(
             "there are no export pieces to join".to_string(),
@@ -456,7 +462,8 @@ pub(super) fn join_segments(dir: &Path, parts: &[PathBuf], output: &Path) -> Res
     }
     fs::write(&list, text)
         .map_err(|error| End::Failed(format!("could not write the join list: {error}")))?;
-    let result = crate::utils::hidden_command(ffmpeg::ffmpeg_executable())
+    let mut command = crate::utils::hidden_command(ffmpeg::ffmpeg_executable());
+    command
         .args([
             "-hide_banner",
             "-loglevel",
@@ -470,7 +477,11 @@ pub(super) fn join_segments(dir: &Path, parts: &[PathBuf], output: &Path) -> Res
             "-i",
         ])
         .arg(&list)
-        .args(["-c", "copy", "-movflags", "+faststart"])
+        .args(["-c", "copy", "-movflags", "+faststart"]);
+    if hevc {
+        command.args(["-tag:v", "hvc1"]);
+    }
+    let result = command
         .arg(output)
         .output()
         .map_err(|error| End::Failed(format!("could not start the joiner: {error}")))?;
