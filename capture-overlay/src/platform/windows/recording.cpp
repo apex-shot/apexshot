@@ -389,10 +389,11 @@ CameraProbe probeCamera(const QString& device, const QSize& size, const QString&
     return probe;
 }
 
-/// The camera mode to open at: the shared picker's best at 24fps within its
-/// raw-size ceiling. Left alone, an integrated camera opens at 1080p in
-/// uncompressed YUY2, which USB bandwidth caps at five frames a second - the
-/// frozen picture a recording then carries.
+/// The camera mode to open at: the shared picker's best at 24fps. Raw modes
+/// stay within the picker's 720p ceiling and MJPEG modes may reach 1080p,
+/// the size the camera track is capped to anyway. Left alone, an integrated
+/// camera opens at 1080p in uncompressed YUY2, which USB bandwidth caps at
+/// five frames a second - the frozen picture a recording then carries.
 Platform::WebcamCameraFormat cameraCaptureFormat(const QString& device)
 {
     static QHash<QString, Platform::WebcamCameraFormat> formats;
@@ -414,7 +415,7 @@ Platform::WebcamCameraFormat cameraCaptureFormat(const QString& device)
                   QStringLiteral("video=%1").arg(device)},
                  &output,
                  nullptr);
-        best = Platform::webcamPreferredFormat(output, 24, qint64(1280) * 720);
+        best = Platform::webcamPreferredFormat(output, 24, qint64(1920) * 1080);
     }
     formats.insert(device, best);
     return best;
