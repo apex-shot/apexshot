@@ -3228,6 +3228,102 @@ mod webcam_export_tests {
     }
 
     #[test]
+    fn the_camera_casts_the_studied_shadow_down_right() {
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-webcam-shadow-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        if fs::create_dir_all(&dir).is_err() {
+            return;
+        }
+        let source = dir.join("screen.mp4");
+        if !solid_clip(&source, "0xd0d0d0", "320x240", 2.0) {
+            eprintln!("skipping the camera shadow export test: ffmpeg is unavailable");
+            return;
+        }
+        let Some(track_path) = webcam_track_file(&source) else {
+            eprintln!("skipping the webcam export test: no sidecar directory");
+            return;
+        };
+        if let Some(parent) = track_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if !split_clip(&track_path, "320x320", 2.0) {
+            return;
+        }
+
+        let track = WebcamTrack {
+            file: track_path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            width: 320,
+            height: 320,
+            duration: 2.0,
+            start: 0.0,
+            x: 0.6,
+            y: 0.6,
+            w: 0.35,
+            h: 0.35,
+            shape: 1,
+            flip: false,
+        };
+        let mut sidecar = PointerSidecar::new(
+            0,
+            crate::recording::editor::sidecar::CaptureRegion::from_capture(None, None, None, None),
+        );
+        sidecar.webcam = Some(track);
+        let sidecar_path = PointerSidecar::sidecar_path(&source);
+        if sidecar.write(&sidecar_path).is_err() {
+            return;
+        }
+
+        // A round 96px bubble centred at (144, 108). The studied light sits far
+        // up-left, so the shadow lies against the bubble's lower-right edge and
+        // is gone 150 stage units (33px at 240 tall) out; nothing up-left.
+        let bubble = LayerSettings {
+            x: 0.3,
+            y: 0.25,
+            w: 0.3,
+            h: 0.4,
+            radius: 1.0,
+            ..Default::default()
+        };
+        let frame = exported_frame(
+            &dir,
+            &source,
+            &track_path,
+            "shadow",
+            bubble,
+            LayoutSettings::default(),
+        );
+        let background = pixel(&frame, 320, 10, 10);
+        let lit = pixel(&frame, 320, 104, 68);
+        let shaded = pixel(&frame, 320, 184, 148);
+        let beyond = pixel(&frame, 320, 215, 179);
+        for channel in 0..3 {
+            assert!(
+                i32::from(shaded[channel]) < i32::from(background[channel]) - 8,
+                "the shadow should darken the background down-right of the bubble: {shaded:?} vs {background:?}"
+            );
+            assert!(
+                (i32::from(lit[channel]) - i32::from(background[channel])).abs() <= 4,
+                "nothing should darken up-left of the bubble: {lit:?} vs {background:?}"
+            );
+            assert!(
+                (i32::from(beyond[channel]) - i32::from(background[channel])).abs() <= 4,
+                "the shadow should be gone past its falloff: {beyond:?} vs {background:?}"
+            );
+        }
+
+        let _ = fs::remove_file(&sidecar_path);
+        let _ = fs::remove_file(&track_path);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn the_camera_exports_at_the_studied_size_and_shrinks_in_a_zoom() {
         let dir = std::env::temp_dir().join(format!(
             "apexshot-webcam-size-export-{}-{:?}",

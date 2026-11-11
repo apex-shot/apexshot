@@ -1873,6 +1873,8 @@ struct State {
     source_path: RefCell<Option<PathBuf>>,
     cache: RefCell<Option<(u64, ImageSurface)>>,
     cutout_cache: RefCell<Option<(u64, f64, ImageSurface)>>,
+    /// The camera shadow's surface, rebuilt only when its mask changes.
+    shadow_cache: RefCell<Option<(Rc<super::camera_shadow::ShadowMask>, ImageSurface)>>,
     requested: Cell<f64>,
     requested_cutout: Cell<bool>,
     requested_matte: Cell<(f64, f64)>,
@@ -1918,6 +1920,7 @@ impl WebcamModel {
                 source_path: RefCell::new(None),
                 cache: RefCell::new(None),
                 cutout_cache: RefCell::new(None),
+                shadow_cache: RefCell::new(None),
                 requested: Cell::new(-1.0),
                 requested_cutout: Cell::new(false),
                 requested_matte: Cell::new((0.0, 0.0)),
@@ -1945,6 +1948,7 @@ impl WebcamModel {
         *self.state.source_path.borrow_mut() = None;
         *self.state.cache.borrow_mut() = None;
         *self.state.cutout_cache.borrow_mut() = None;
+        *self.state.shadow_cache.borrow_mut() = None;
         self.state.requested.set(-1.0);
         self.state.requested_cutout.set(false);
         self.state.requested_matte.set((0.0, 0.0));
@@ -2395,6 +2399,7 @@ impl WebcamModel {
             return;
         };
         let radius = frame.camera_radius * rect.width.min(rect.height) / 2.0;
+        self.draw_shadow(context, video, rect, radius, &frame, &image);
         draw_camera_cover(
             context,
             rect,
@@ -2403,6 +2408,55 @@ impl WebcamModel {
             frame.camera_alpha,
             &image,
         );
+    }
+
+    /// Paint the camera's studied shadow under where the camera will be
+    /// drawn, cut to the stage, faded with the camera.
+    fn draw_shadow(
+        &self,
+        context: &Context,
+        stage: Rect,
+        rect: Rect,
+        radius: f64,
+        frame: &LayoutFrame,
+        image: &ImageSurface,
+    ) {
+        let Some(mask) = super::camera_shadow::camera_shadow(
+            stage,
+            rect,
+            radius,
+            frame.cutout,
+            &|context, rect, radius| {
+                draw_camera_cover(context, rect, radius, frame.mirror, 1.0, image)
+            },
+        ) else {
+            return;
+        };
+        let cached = self
+            .state
+            .shadow_cache
+            .borrow()
+            .as_ref()
+            .filter(|(cached, _)| Rc::ptr_eq(cached, &mask))
+            .map(|(_, surface)| surface.clone());
+        let surface = match cached {
+            Some(surface) => surface,
+            None => {
+                let Some(surface) = super::camera_shadow::preview_surface(&mask) else {
+                    return;
+                };
+                *self.state.shadow_cache.borrow_mut() = Some((mask.clone(), surface.clone()));
+                surface
+            }
+        };
+        let _ = context.save();
+        context.rectangle(stage.x, stage.y, stage.width, stage.height);
+        context.clip();
+        context.translate(rect.x + mask.offset_x, rect.y + mask.offset_y);
+        context.scale(mask.texel, mask.texel);
+        let _ = context.set_source_surface(&surface, 0.0, 0.0);
+        let _ = context.paint_with_alpha(frame.camera_alpha.clamp(0.0, 1.0));
+        let _ = context.restore();
     }
 
     fn target_seconds(&self, source_seconds: f64) -> Option<f64> {
@@ -3008,7 +3062,8 @@ pub(super) fn composite_into(
 /// footage genuinely fills its share instead of being masked over; the cursor
 /// and the ripple are already inside those pixels. The camera then covers its
 /// own rect from the raw camera aspect, with the person's matte blended in when
-/// a cutout is on screen.
+/// a cutout is on screen. The camera's studied shadow darkens the frame under
+/// it first, in the camera's shape or the person's outline.
 pub(super) fn composite_layout_into(
     pixels: &mut [u8],
     size: (u32, u32),
@@ -3034,6 +3089,7 @@ pub(super) fn composite_layout_into(
         return Ok(());
     }
     let camera_image = camera_surface(camera, camera_size, mask, frame.cutout)?;
+    let radius = frame.camera_radius * f64::from(width.min(height)) / 2.0;
     let mut layer = ImageSurface::create(Format::ARgb32, width as i32, height as i32)
         .map_err(|error| format!("could not allocate the camera layer: {error}"))?;
     {
@@ -3045,10 +3101,52 @@ pub(super) fn composite_layout_into(
             width: f64::from(width),
             height: f64::from(height),
         };
-        let radius = frame.camera_radius * f64::from(width.min(height)) / 2.0;
         draw_camera_cover(&context, rect, radius, frame.mirror, 1.0, &camera_image);
     }
     layer.mark_dirty();
+    // The studied camera casts its shadow onto whatever is under it, so it
+    // darkens the frame before the camera covers it.
+    let camera_rect = Rect {
+        x: f64::from(x0),
+        y: f64::from(y0),
+        width: f64::from(width),
+        height: f64::from(height),
+    };
+    let stage_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        width: f64::from(size.0),
+        height: f64::from(size.1),
+    };
+    let shadow = super::camera_shadow::camera_shadow(
+        stage_rect,
+        camera_rect,
+        radius,
+        frame.cutout,
+        &|context, rect, radius| {
+            draw_camera_cover(context, rect, radius, frame.mirror, 1.0, &camera_image)
+        },
+    );
+    if let Some(shadow) = shadow {
+        let stride = layer.stride() as usize;
+        let data = layer
+            .data()
+            .map_err(|error| format!("could not read the camera layer: {error}"))?;
+        super::camera_shadow::darken_rgba(
+            pixels,
+            size,
+            camera_rect,
+            &shadow,
+            frame.camera_alpha,
+            &|x, y| {
+                if x < x0 || y < y0 || x >= x1 || y >= y1 {
+                    return 0.0;
+                }
+                let offset = (y - y0) as usize * stride + (x - x0) as usize * 4 + 3;
+                f64::from(data[offset]) / 255.0
+            },
+        );
+    }
     blend_layer(
         pixels,
         size,

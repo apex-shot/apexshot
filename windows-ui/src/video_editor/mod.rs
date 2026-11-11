@@ -7,6 +7,7 @@
 use gtk4::prelude::*;
 use gtk4::Application;
 pub(crate) mod background;
+mod camera_shadow;
 mod cursor;
 pub(crate) mod custom_fill;
 mod cutout;
