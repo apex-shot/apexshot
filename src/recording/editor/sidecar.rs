@@ -2628,7 +2628,10 @@ mod tests {
         let filtered = peak(&sidecar);
         sidecar.set_shake_threshold(0.0);
         let unfiltered = peak(&sidecar);
-        assert!(filtered < 150.0, "the spike should be filtered out, peaked at {filtered}");
+        assert!(
+            filtered < 150.0,
+            "the spike should be filtered out, peaked at {filtered}"
+        );
         assert!(
             unfiltered > filtered + 50.0,
             "without the filter the spike should pull the cursor: {unfiltered} vs {filtered}"

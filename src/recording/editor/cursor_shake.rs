@@ -98,7 +98,10 @@ mod tests {
     #[test]
     fn the_last_two_events_are_always_kept() {
         let events = moves(&[(0.0, 0.0), (1000.0, 0.0)]);
-        assert_eq!(shake_keep_mask(&events, DEFAULT_REMOVE_SHAKE_THRESHOLD), vec![true, true]);
+        assert_eq!(
+            shake_keep_mask(&events, DEFAULT_REMOVE_SHAKE_THRESHOLD),
+            vec![true, true]
+        );
     }
 
     #[test]
