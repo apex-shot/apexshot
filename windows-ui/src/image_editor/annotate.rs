@@ -4015,68 +4015,75 @@ mod tests {
 
     #[test]
     fn arrow_style_swap_normalizes_control_points() {
-        let h = loaded(Tool::Arrow);
-        h.with_state(|st| {
-            st.push_action(AnnotationAction::Arrow {
-                start: crate::capture::editor::types::Point { x: 0.0, y: 0.0 },
-                end: crate::capture::editor::types::Point { x: 40.0, y: 0.0 },
-                color: st.selected_color,
-                stroke_size: 4.0,
-                shadow: false,
-                style: ArrowStyle::Standard,
-                reversed: false,
-                control_points: Some(vec![
-                    crate::capture::editor::types::Point { x: 0.0, y: 0.0 },
-                    crate::capture::editor::types::Point { x: 40.0, y: 0.0 },
-                ]),
+        // Undo rebuilds the effects through a GLib timeout, which needs the
+        // default main context: run on the test binary's GTK thread, which
+        // owns it, instead of racing that thread for it.
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let h = loaded(Tool::Arrow);
+            h.with_state(|st| {
+                st.push_action(AnnotationAction::Arrow {
+                    start: crate::capture::editor::types::Point { x: 0.0, y: 0.0 },
+                    end: crate::capture::editor::types::Point { x: 40.0, y: 0.0 },
+                    color: st.selected_color,
+                    stroke_size: 4.0,
+                    shadow: false,
+                    style: ArrowStyle::Standard,
+                    reversed: false,
+                    control_points: Some(vec![
+                        crate::capture::editor::types::Point { x: 0.0, y: 0.0 },
+                        crate::capture::editor::types::Point { x: 40.0, y: 0.0 },
+                    ]),
+                });
+                st.selected_action_index = Some(0);
             });
-            st.selected_action_index = Some(0);
-        });
-        h.with_state(|st| {
-            assert!(st.set_selected_arrow_style_with_controls(ArrowStyle::Curved));
-        });
-        // Style + midpoint normalize land in one undoable step.
-        h.with_state(|st| {
-            if let AnnotationAction::Arrow {
-                control_points,
-                style,
-                ..
-            } = &st.actions[0]
-            {
-                assert_eq!(*style, ArrowStyle::Curved);
-                assert_eq!(control_points.as_ref().map(Vec::len), Some(3));
-            } else {
-                panic!("expected arrow");
-            }
-        });
-        h.undo();
-        h.with_state(|st| {
-            if let AnnotationAction::Arrow {
-                control_points,
-                style,
-                ..
-            } = &st.actions[0]
-            {
-                assert_eq!(*style, ArrowStyle::Standard);
-                assert_eq!(control_points.as_ref().map(Vec::len), Some(2));
-            } else {
-                panic!("expected arrow");
-            }
-        });
-        h.redo();
-        h.with_state(|st| {
-            if let AnnotationAction::Arrow {
-                control_points,
-                style,
-                ..
-            } = &st.actions[0]
-            {
-                assert_eq!(*style, ArrowStyle::Curved);
-                assert_eq!(control_points.as_ref().map(Vec::len), Some(3));
-            } else {
-                panic!("expected arrow");
-            }
-        });
+            h.with_state(|st| {
+                assert!(st.set_selected_arrow_style_with_controls(ArrowStyle::Curved));
+            });
+            // Style + midpoint normalize land in one undoable step.
+            h.with_state(|st| {
+                if let AnnotationAction::Arrow {
+                    control_points,
+                    style,
+                    ..
+                } = &st.actions[0]
+                {
+                    assert_eq!(*style, ArrowStyle::Curved);
+                    assert_eq!(control_points.as_ref().map(Vec::len), Some(3));
+                } else {
+                    panic!("expected arrow");
+                }
+            });
+            h.undo();
+            h.with_state(|st| {
+                if let AnnotationAction::Arrow {
+                    control_points,
+                    style,
+                    ..
+                } = &st.actions[0]
+                {
+                    assert_eq!(*style, ArrowStyle::Standard);
+                    assert_eq!(control_points.as_ref().map(Vec::len), Some(2));
+                } else {
+                    panic!("expected arrow");
+                }
+            });
+            h.redo();
+            h.with_state(|st| {
+                if let AnnotationAction::Arrow {
+                    control_points,
+                    style,
+                    ..
+                } = &st.actions[0]
+                {
+                    assert_eq!(*style, ArrowStyle::Curved);
+                    assert_eq!(control_points.as_ref().map(Vec::len), Some(3));
+                } else {
+                    panic!("expected arrow");
+                }
+            });
+        }) else {
+            return;
+        };
     }
 
     #[test]
