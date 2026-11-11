@@ -12,7 +12,6 @@
 mod audio;
 mod canvas;
 #[cfg(target_os = "windows")]
-#[allow(dead_code)]
 mod compose_gpu;
 #[cfg(target_os = "windows")]
 mod gpu;
@@ -555,6 +554,12 @@ fn hardware_decode() -> bool {
         && std::env::var("APEXSHOT_EXPORT_HWDECODE").ok().as_deref() == Some("1")
 }
 
+/// The GPU stage composites every frame on the GPU when the machine can;
+/// `APEXSHOT_EXPORT_GPU_STAGE=0` keeps the CPU compositor.
+fn stage_requested() -> bool {
+    std::env::var("APEXSHOT_EXPORT_GPU_STAGE").ok().as_deref() != Some("0")
+}
+
 fn worker_override() -> Option<usize> {
     std::env::var("APEXSHOT_EXPORT_WORKERS")
         .ok()?
@@ -717,8 +722,55 @@ fn render_range(
         .filter(|webcam| webcam.source_size.0 > 0 && webcam.source_size.1 > 0)
         .map(|webcam| f64::from(webcam.source_size.0) / f64::from(webcam.source_size.1))
         .unwrap_or(16.0 / 9.0);
+    // The whole frame on the GPU: crop, card, background, rounded corners and
+    // motion blur in one pass. The scaler and the CPU compositor stay as the
+    // fallbacks for a machine without a fitting GPU, a camera layer, a ripple,
+    // or a stage that fails mid-export.
     #[cfg(target_os = "windows")]
-    let mut gpu = if !plan.passthrough && webcam.is_none() {
+    let mut stage = if !plan.passthrough
+        && webcam.is_none()
+        && stage_requested()
+        && machine::gpu_stage_fits(machine::current(), model.source_size, plan.output)
+    {
+        match compose_gpu::GpuStage::new(
+            model.source_size,
+            plan.output,
+            space,
+            sink.background_rgba(),
+        ) {
+            Ok(stage) => {
+                eprintln!(
+                    "[export] GPU stage: {}x{} -> {}x{}",
+                    model.source_size.0, model.source_size.1, plan.output.0, plan.output.1
+                );
+                Some(stage)
+            }
+            Err(error) => {
+                eprintln!("[export] GPU stage unavailable: {error}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    #[cfg(target_os = "windows")]
+    let radius_fraction = sink.radius_fraction();
+    // The stage draws the cursor on the whole output frame, which is larger
+    // than the video rect when the export has a canvas.
+    #[cfg(target_os = "windows")]
+    let mut stage_cursor_layer = match (&model.sidecar, stage.is_some()) {
+        (Some(_), true) => Some(
+            ImageSurface::create(Format::ARgb32, plan.output.0 as i32, plan.output.1 as i32)
+                .map_err(|error| {
+                    End::Failed(format!("could not allocate the cursor layer: {error}"))
+                })?,
+        ),
+        _ => None,
+    };
+    #[cfg(target_os = "windows")]
+    let mut stage_cursor_scratch = CursorScratch::default();
+    #[cfg(target_os = "windows")]
+    let mut gpu = if !plan.passthrough && webcam.is_none() && stage.is_none() {
         match gpu::Scaler::new(model.source_size, size, space, fps) {
             Ok(scaler) => {
                 eprintln!(
@@ -943,6 +995,122 @@ fn render_range(
             let ripple = model.sidecar.as_ref().and_then(|sidecar| {
                 preview_ripple(sidecar, model.cursor, source_time, model.source_size, view)
             });
+            #[cfg(target_os = "windows")]
+            if ripple.is_none() {
+                if let Some(gpu_stage) = stage.as_mut() {
+                    let screen = card_layout.is_none();
+                    // Where the whole source lands in the output for a camera value:
+                    // the card on a canvas, or the crop stretched over the frame.
+                    let place = |value: zoom::Camera| -> [f32; 4] {
+                        let rect = match card_for(value) {
+                            Some((rect, _)) => rect,
+                            None => {
+                                let view = view_for(value);
+                                let (w, h) = (f64::from(size.0), f64::from(size.1));
+                                (
+                                    -view.0 * w / view.2,
+                                    -view.1 * h / view.3,
+                                    source.0 * w / view.2,
+                                    source.1 * h / view.3,
+                                )
+                            }
+                        };
+                        [rect.0 as f32, rect.1 as f32, rect.2 as f32, rect.3 as f32]
+                    };
+                    let card_now = place(camera_value);
+                    // The trail starts where the motion blur's strength puts the
+                    // previous frame, as ScreenTrail and CardTrail compute it.
+                    let strength =
+                        (model.zoom_camera.motion_blur.clamp(0.0, 1.0) * fps / 60.0) as f32;
+                    let before = match previous_value {
+                        Some(previous) if model.zoom_camera.motion_blur > 0.0 => {
+                            let previous = place(previous);
+                            std::array::from_fn(|i| {
+                                card_now[i] + (previous[i] - card_now[i]) * strength
+                            })
+                        }
+                        _ => card_now,
+                    };
+                    let mut nv12 = match sink.canvas_buffer(done_index) {
+                        Ok(buffer) => buffer,
+                        Err(error) => {
+                            let _ = decoder.kill();
+                            let _ = decoder.wait();
+                            return Err(error);
+                        }
+                    };
+                    // An unzoomed, unblurred frame that fills the output needs no
+                    // compositing: it goes to the encoder as decoded.
+                    let rendered = if screen && !cropped {
+                        std::mem::swap(&mut packed, &mut nv12);
+                        Ok(())
+                    } else {
+                        gpu_stage.render(
+                            &packed,
+                            compose_gpu::StageFrame {
+                                card: card_now,
+                                before,
+                                radius_fraction: if screen { 0.0 } else { radius_fraction },
+                                background_zoom: if screen {
+                                    1.0
+                                } else {
+                                    zoom::background_zoom(camera_value.0) as f32
+                                },
+                                pivot: [
+                                    (camera_value.1 .0 / source.0.max(1.0)).clamp(0.0, 1.0) as f32,
+                                    (camera_value.1 .1 / source.1.max(1.0)).clamp(0.0, 1.0) as f32,
+                                ],
+                                screen,
+                            },
+                            &mut nv12,
+                        )
+                    };
+                    match rendered {
+                        Ok(()) => {
+                            if let (Some(sidecar), Some(layer)) =
+                                (&model.sidecar, stage_cursor_layer.as_mut())
+                            {
+                                // The cursor maps through the same placement: the
+                                // source rect at `card_now` over the whole output.
+                                let whole =
+                                    (0.0, 0.0, f64::from(plan.output.0), f64::from(plan.output.1));
+                                let placed = (
+                                    f64::from(card_now[0]),
+                                    f64::from(card_now[1]),
+                                    f64::from(card_now[2]),
+                                    f64::from(card_now[3]),
+                                );
+                                draw_cursor_nv12(
+                                    &mut nv12,
+                                    plan.output,
+                                    zoom::card_view(whole, placed, source),
+                                    sidecar,
+                                    model.source.as_path(),
+                                    model.cursor,
+                                    source_time,
+                                    model.source_size,
+                                    layer,
+                                    &converter,
+                                    &mut stage_cursor_scratch,
+                                );
+                            }
+                            if let Err(error) = sink.submit_canvas(nv12) {
+                                let _ = decoder.kill();
+                                let _ = decoder.wait();
+                                return Err(error);
+                            }
+                            done_index += 1;
+                            done.fetch_add(1, Ordering::Relaxed);
+                            log_frame(done_index);
+                            continue;
+                        }
+                        Err(error) => {
+                            eprintln!("[export] GPU stage failed: {error}; continuing on the CPU");
+                            stage = None;
+                        }
+                    }
+                }
+            }
             // The GPU path crops and scales, and the cursor is drawn on the NV12
             // frame afterwards. A blurred or rippled frame takes the CPU path, and
             // so does a moving card, which needs the footage around the video rect

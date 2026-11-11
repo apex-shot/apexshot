@@ -497,6 +497,31 @@ impl FramedSink {
         }
     }
 
+    /// The canvas background at the export size, opaque RGBA, when the export
+    /// has a canvas.
+    pub(super) fn background_rgba(&self) -> Option<&[u8]> {
+        self.framer
+            .as_ref()
+            .map(|framer| framer.background_rgba.as_slice())
+    }
+
+    /// The resting card's corner radius as a fraction of its width.
+    pub(super) fn radius_fraction(&self) -> f32 {
+        self.framer.as_ref().map_or(0.0, |framer| {
+            (framer.radius as f64 / framer.rest.2.max(1.0)) as f32
+        })
+    }
+
+    /// A buffer for a whole output frame the caller composites itself.
+    pub(super) fn canvas_buffer(&mut self, index: u64) -> Result<Vec<u8>, End> {
+        self.sink.buffer(index)
+    }
+
+    /// Submit a whole output frame, bypassing the framer.
+    pub(super) fn submit_canvas(&mut self, frame: Vec<u8>) -> Result<(), End> {
+        self.sink.submit(frame)
+    }
+
     pub(super) fn buffer(&mut self, index: u64) -> Result<Vec<u8>, End> {
         let Some(framer) = self.framer.as_ref() else {
             return self.sink.buffer(index);

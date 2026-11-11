@@ -18,14 +18,13 @@ use windows::Win32::Foundation::HMODULE;
 use windows::Win32::Graphics::Direct3D::Fxc::{D3DCompile, D3DCOMPILE_OPTIMIZATION_LEVEL3};
 use windows::Win32::Graphics::Direct3D::{
     ID3DBlob, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST, D3D_DRIVER_TYPE_HARDWARE,
-    D3D_FEATURE_LEVEL_11_0, D3D_SRV_DIMENSION_TEXTURE2D,
+    D3D_DRIVER_TYPE_UNKNOWN, D3D_FEATURE_LEVEL_11_0, D3D_SRV_DIMENSION_TEXTURE2D,
 };
 use windows::Win32::Graphics::Direct3D11::*;
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_FORMAT, DXGI_FORMAT_NV12, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8G8_UNORM,
     DXGI_FORMAT_R8_UNORM, DXGI_SAMPLE_DESC,
 };
-use windows::Win32::Graphics::Dxgi::IDXGIAdapter;
 
 use super::super::pixels::{YuvMatrix, YuvSpace};
 
@@ -57,9 +56,9 @@ pub(super) struct GpuStage {
     chroma_shader: ID3D11PixelShader,
     upload: ID3D11Texture2D,
     nv12: ID3D11Texture2D,
-    rgb: ID3D11Texture2D,
-    background: ID3D11Texture2D,
-    composite: ID3D11Texture2D,
+    _rgb: ID3D11Texture2D,
+    _background: ID3D11Texture2D,
+    _composite: ID3D11Texture2D,
     luma: ID3D11Texture2D,
     chroma: ID3D11Texture2D,
     luma_read: ID3D11Texture2D,
@@ -77,7 +76,7 @@ pub(super) struct GpuStage {
     params: ID3D11Buffer,
     source: (u32, u32),
     output: (u32, u32),
-    levels: u32,
+    _levels: u32,
     full_range: f32,
     decode_coef: [f32; 4],
     luma_coef: [f32; 4],
@@ -102,12 +101,25 @@ impl GpuStage {
             return Err("NV12 needs even frame dimensions".to_string());
         }
 
+        let machine = super::machine::current();
+        let Some(chosen) = machine.gpu.as_ref() else {
+            return Err("no hardware GPU".to_string());
+        };
+        if !super::machine::gpu_stage_fits(machine, source, output) {
+            return Err(format!("the GPU stage does not fit {}", chosen.name));
+        }
+        let adapter = super::machine::adapter(chosen);
+
         unsafe {
             let mut device = None;
             let mut context = None;
             D3D11CreateDevice(
-                None::<&IDXGIAdapter>,
-                D3D_DRIVER_TYPE_HARDWARE,
+                adapter.as_ref(),
+                if adapter.is_some() {
+                    D3D_DRIVER_TYPE_UNKNOWN
+                } else {
+                    D3D_DRIVER_TYPE_HARDWARE
+                },
                 HMODULE(ptr::null_mut()),
                 D3D11_CREATE_DEVICE_BGRA_SUPPORT,
                 Some(&[D3D_FEATURE_LEVEL_11_0]),
@@ -296,9 +308,9 @@ impl GpuStage {
                 chroma_shader: chroma,
                 upload,
                 nv12,
-                rgb,
-                background,
-                composite,
+                _rgb: rgb,
+                _background: background,
+                _composite: composite,
                 luma: luma_texture,
                 chroma: chroma_texture,
                 luma_read,
@@ -316,7 +328,7 @@ impl GpuStage {
                 params,
                 source,
                 output,
-                levels,
+                _levels: levels,
                 full_range: if space.full_range { 1.0 } else { 0.0 },
                 decode_coef,
                 luma_coef,
