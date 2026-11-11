@@ -41,6 +41,10 @@ impl CursorModel {
         let mut state = self.state.borrow_mut();
         state.sidecar = path.and_then(PointerSidecar::load_next_to_video);
         state.video_path = path.map(Path::to_path_buf);
+        let threshold = state.settings.remove_shake_threshold;
+        if let Some(sidecar) = state.sidecar.as_mut() {
+            sidecar.set_shake_threshold(threshold);
+        }
     }
 
     pub fn settings(&self) -> CursorSettings {
@@ -52,7 +56,12 @@ impl CursorModel {
     }
 
     pub fn set_settings(&self, settings: CursorSettings) {
-        self.state.borrow_mut().settings = settings.clamped();
+        let mut state = self.state.borrow_mut();
+        state.settings = settings.clamped();
+        let threshold = state.settings.remove_shake_threshold;
+        if let Some(sidecar) = state.sidecar.as_mut() {
+            sidecar.set_shake_threshold(threshold);
+        }
     }
 
     /// Where the timeline cuts the footage. The cursor plan leads the cursor

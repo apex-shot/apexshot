@@ -200,8 +200,10 @@ pub(super) fn start_export_with_settings(
     settings: ExportSettings,
 ) -> ExportHandle {
     let cuts = model.cuts.clone();
+    let shake_threshold = model.cursor.remove_shake_threshold;
     if let Some(sidecar) = model.sidecar.as_mut() {
         sidecar.set_cut_times(&cuts);
+        sidecar.set_shake_threshold(shake_threshold);
     }
     let (sender, receiver) = mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));

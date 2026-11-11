@@ -1,5 +1,6 @@
 use super::cursor_path::SpringConfig;
 use super::cursor_planner::{self, PlannedPath, PlannerPoint, SyncPoint};
+use super::cursor_shake::{self, ShakeEvent, ShakeEventKind, DEFAULT_REMOVE_SHAKE_THRESHOLD};
 use super::model::CursorRotationMode;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -664,6 +665,14 @@ struct CachedPlan {
     path: Option<Arc<PlannedPath>>,
 }
 
+/// The output of [`PointerSidecar::shake_survivors`]: one flag per pointer
+/// sample and per press end.
+struct ShakeSurvivors {
+    pointer: Vec<bool>,
+    press_down: Vec<bool>,
+    press_up: Vec<bool>,
+}
+
 /// Runtime-only cache. Two sidecars compare equal regardless of what each
 /// planned, and a clone starts cold so a copied sidecar never shows another's
 /// recording.
@@ -729,6 +738,10 @@ pub struct PointerSidecar {
     /// before it draws or exports; runtime-only, like the plan built from it.
     #[serde(skip)]
     cuts_seconds: Vec<f64>,
+    /// The studied shake filter's threshold in pixels; zero turns it off.
+    /// Pushed in by the editor from the cursor settings; runtime-only.
+    #[serde(skip, default = "default_shake_threshold")]
+    shake_threshold: f64,
     /// The planned cursor path for the current spring and speed.
     #[serde(skip)]
     plan_cache: PlanCache,
@@ -753,6 +766,7 @@ impl PointerSidecar {
             screen_file: None,
             sidecar_directory: None,
             cuts_seconds: Vec::new(),
+            shake_threshold: DEFAULT_REMOVE_SHAKE_THRESHOLD,
             plan_cache: PlanCache::default(),
         }
     }
@@ -1157,6 +1171,90 @@ impl PointerSidecar {
         self.cuts_seconds.dedup();
     }
 
+    /// The studied shake filter's threshold, in pixels. Zero or a negative
+    /// value turns it off. The plan is rebuilt for the new value.
+    pub fn set_shake_threshold(&mut self, threshold: f64) {
+        self.shake_threshold = if threshold.is_finite() {
+            threshold.max(0.0)
+        } else {
+            0.0
+        };
+    }
+
+    /// Which pointer samples and press ends survive the studied shake filter.
+    /// Press ends are placed at the pointer's interpolated position at their
+    /// instant, since the sidecar stores presses as times only.
+    fn shake_survivors(&self) -> ShakeSurvivors {
+        let mut survivors = ShakeSurvivors {
+            pointer: vec![true; self.pointer.len()],
+            press_down: vec![true; self.presses.len()],
+            press_up: vec![true; self.presses.len()],
+        };
+        if self.shake_threshold <= 0.0 {
+            return survivors;
+        }
+        enum Origin {
+            Pointer(usize),
+            Down(usize),
+            Up(usize),
+        }
+        let mut events: Vec<(ShakeEvent, Origin)> = self
+            .pointer
+            .iter()
+            .enumerate()
+            .map(|(index, sample)| {
+                (
+                    ShakeEvent {
+                        time_ms: sample.t * 1000.0,
+                        x: sample.x,
+                        y: sample.y,
+                        kind: ShakeEventKind::Move,
+                    },
+                    Origin::Pointer(index),
+                )
+            })
+            .collect();
+        for (index, press) in self.presses.iter().enumerate() {
+            for (time, kind) in [
+                (press.down, ShakeEventKind::Down),
+                (press.up, ShakeEventKind::Up),
+            ] {
+                let Some((x, y, _, _)) = Self::interpolated_in(&self.pointer, time) else {
+                    continue;
+                };
+                let origin = if kind == ShakeEventKind::Down {
+                    Origin::Down(index)
+                } else {
+                    Origin::Up(index)
+                };
+                events.push((
+                    ShakeEvent {
+                        time_ms: time * 1000.0,
+                        x,
+                        y,
+                        kind,
+                    },
+                    origin,
+                ));
+            }
+        }
+        // A stable sort keeps a move ahead of a press end at the same instant.
+        events.sort_by(|left, right| left.0.time_ms.total_cmp(&right.0.time_ms));
+        let stream: Vec<ShakeEvent> = events.iter().map(|(event, _)| *event).collect();
+        let keep = cursor_shake::shake_keep_mask(&stream, self.shake_threshold);
+        for ((_, origin), kept) in events.iter().zip(keep) {
+            if kept {
+                continue;
+            }
+            match origin {
+                Origin::Pointer(index) => survivors.pointer[*index] = false,
+                Origin::Down(index) => survivors.press_down[*index] = false,
+                Origin::Up(index) => survivors.press_up[*index] = false,
+            }
+        }
+        survivors
+    }
+
     /// Plan the cursor path once per spring and speed, then answer frames from
     /// it. The moments the plan must be exact are the recorded clicks and the
     /// cursor-image changes, matching the reference's sync points.
@@ -1171,8 +1269,14 @@ impl PointerSidecar {
                 }
             }
         }
-        let points: Vec<PlannerPoint> = self
+        let survivors = self.shake_survivors();
+        let kept_pointer: Vec<&PointerSample> = self
             .pointer
+            .iter()
+            .zip(&survivors.pointer)
+            .filter_map(|(sample, kept)| kept.then_some(sample))
+            .collect();
+        let points: Vec<PlannerPoint> = kept_pointer
             .iter()
             .map(|sample| PlannerPoint {
                 time_ms: sample.t * 1000.0,
@@ -1180,15 +1284,28 @@ impl PointerSidecar {
                 y: sample.y,
             })
             .collect();
+        // A click whose press the filter dropped is no longer a moment the
+        // plan must meet.
+        let dropped_downs: Vec<f64> = self
+            .presses
+            .iter()
+            .zip(&survivors.press_down)
+            .filter_map(|(press, kept)| (!kept).then_some(press.down))
+            .collect();
         let mut sync: Vec<SyncPoint> = self
             .clicks
             .iter()
+            .filter(|click| {
+                !dropped_downs
+                    .iter()
+                    .any(|down| (down - click.t).abs() < 0.0015)
+            })
             .map(|click| SyncPoint {
                 time_ms: click.t * 1000.0,
                 tolerance: 2.0,
             })
             .collect();
-        for pair in self.pointer.windows(2) {
+        for pair in kept_pointer.windows(2) {
             if pair[0].cursor_id != pair[1].cursor_id {
                 sync.push(SyncPoint {
                     time_ms: pair[1].t * 1000.0,
@@ -1199,17 +1316,22 @@ impl PointerSidecar {
         // A held button is a sync point twice over: at the press and release
         // the studied planner must meet the pointer exactly, and while the
         // pointer is dragged every recorded move carries the same demand.
-        for press in &self.presses {
-            sync.push(SyncPoint {
-                time_ms: press.down * 1000.0,
-                tolerance: 2.0,
-            });
-            sync.push(SyncPoint {
-                time_ms: press.up * 1000.0,
-                tolerance: 2.0,
-            });
-            if press.dragged {
-                for sample in &self.pointer {
+        for (index, press) in self.presses.iter().enumerate() {
+            let down_kept = survivors.press_down[index];
+            if down_kept {
+                sync.push(SyncPoint {
+                    time_ms: press.down * 1000.0,
+                    tolerance: 2.0,
+                });
+            }
+            if survivors.press_up[index] {
+                sync.push(SyncPoint {
+                    time_ms: press.up * 1000.0,
+                    tolerance: 2.0,
+                });
+            }
+            if press.dragged && down_kept {
+                for sample in &kept_pointer {
                     if press.contains(sample.t) {
                         sync.push(SyncPoint {
                             time_ms: sample.t * 1000.0,
@@ -1269,6 +1391,7 @@ impl PointerSidecar {
             spring.damping.to_bits(),
             spring.mass.to_bits(),
             speed.to_bits(),
+            self.shake_threshold.to_bits(),
         ];
         values.push(self.cuts_seconds.len() as u64);
         values.extend(self.cuts_seconds.iter().map(|cut| cut.to_bits()));
@@ -1478,6 +1601,10 @@ fn compact_to_limit<T: Clone>(samples: &mut Vec<T>, limit: usize) {
         compacted.push(samples[last].clone());
         *samples = compacted;
     }
+}
+
+fn default_shake_threshold() -> f64 {
+    DEFAULT_REMOVE_SHAKE_THRESHOLD
 }
 
 fn pointer_sidecars_directory() -> PathBuf {
@@ -2467,6 +2594,41 @@ mod tests {
         assert!(
             (again - cut).abs() < 1e-9,
             "the cached plan must stay cut-aware: {again} vs {cut}"
+        );
+    }
+
+    #[test]
+    fn the_shake_filter_removes_a_lone_spike_from_the_planned_cursor() {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        for index in 0_u32..=20 {
+            let t = index as f64 * 0.05;
+            let x = if index == 10 { 1500.0 } else { 100.0 };
+            sidecar.pointer.push(PointerSample {
+                t,
+                x,
+                y: 100.0,
+                kind: CursorKind::Default,
+                cursor_id: None,
+            });
+        }
+        let motion = CursorMotion {
+            smooth: 0.8,
+            speed: 1.0,
+            ..CursorMotion::default()
+        };
+        let peak = |sidecar: &PointerSidecar| {
+            (40..=80)
+                .map(|step| sidecar.presented_at(step as f64 * 0.01, motion).unwrap().x)
+                .fold(f64::MIN, f64::max)
+        };
+        let filtered = peak(&sidecar);
+        sidecar.set_shake_threshold(0.0);
+        let unfiltered = peak(&sidecar);
+        assert!(filtered < 150.0, "the spike should be filtered out, peaked at {filtered}");
+        assert!(
+            unfiltered > filtered + 50.0,
+            "without the filter the spike should pull the cursor: {unfiltered} vs {filtered}"
         );
     }
 
