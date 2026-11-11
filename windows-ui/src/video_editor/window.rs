@@ -1885,6 +1885,14 @@ fn export_canvas(stage: &Stage, source_size: (u32, u32)) -> Option<super::export
     }
     let size = output_dimensions(aspect, source_size, padding, has_fill);
     let video = video_rect_dimensions(aspect, source_size, padding, has_fill);
+    let canvas = canvas_dimensions(aspect, source_size);
+    let pad = padding_px(canvas, padding, has_fill).round().max(0.0) as u32;
+    let area = (
+        pad.min(size.0 / 2),
+        pad.min(size.1 / 2),
+        size.0.saturating_sub(pad * 2),
+        size.1.saturating_sub(pad * 2),
+    );
     let mut surface = gtk4::cairo::ImageSurface::create(
         gtk4::cairo::Format::ARgb32,
         size.0 as i32,
@@ -1922,6 +1930,7 @@ fn export_canvas(stage: &Stage, source_size: (u32, u32)) -> Option<super::export
         size,
         video,
         radius,
+        area,
         background: std::sync::Arc::new(background),
     })
 }

@@ -746,6 +746,12 @@ fn render_range(
     };
     let mut span_base = 0u64;
 
+    // The rest rect and zoom area when the export has a canvas: a zoom then
+    // grows the card over the padding, as the preview does.
+    let card_layout = sink.card_geometry();
+    let mut outer_rgba: Vec<u8> = Vec::new();
+    let mut outer_nv12: Vec<u8> = Vec::new();
+
     for span in &plan.spans {
         let span_end = span_base + span.frames;
         if span_end <= first {
@@ -850,32 +856,79 @@ fn render_range(
                 composition_time,
                 || model.sidecar.clone(),
             );
-            let view = zoom::view_rect(camera_value.0, camera_value.1, source);
-            let trail = if zoom::instant_blur_disabled(&model.zooms, composition_time) {
-                None
-            } else {
-                let previous = camera.evaluate(
-                    &model.zooms,
-                    source,
-                    &plan.mapping,
-                    camera_settings,
-                    (composition_time - 1.0 / fps).max(0.0),
-                    || model.sidecar.clone(),
-                );
+            let early_layout = webcam.as_ref().map(|webcam| {
+                layouts.frame_at(
+                    composition_time,
+                    webcam.settings,
+                    source_aspect,
+                    camera_aspect,
+                )
+            });
+            // The card for a camera value, as the preview frames it: none
+            // without a canvas or while a split layout crops inside its pane.
+            let card_for = |value: zoom::Camera| -> Option<(zoom::StageRect, zoom::StageRect)> {
+                let (rest, area) = card_layout?;
+                if early_layout.is_some_and(|layout| !layout.screen.is_full()) {
+                    return None;
+                }
+                let centre = (area.0 + area.2 / 2.0, area.1 + area.3 / 2.0);
+                let focal = match early_layout.filter(|layout| layout.camera_alpha > 0.0) {
+                    Some(layout) => {
+                        let camera = (
+                            rest.0 + layout.camera.x * rest.2,
+                            rest.1 + layout.camera.y * rest.3,
+                            layout.camera.width * rest.2,
+                            layout.camera.height * rest.3,
+                        );
+                        let aim = zoom::focal_point(area, Some(camera));
+                        let alpha = layout.camera_alpha.clamp(0.0, 1.0);
+                        (
+                            centre.0 + (aim.0 - centre.0) * alpha,
+                            centre.1 + (aim.1 - centre.1) * alpha,
+                        )
+                    }
+                    None => centre,
+                };
+                let target01 = (value.1 .0 / source.0.max(1.0), value.1 .1 / source.1.max(1.0));
+                Some((
+                    zoom::card_rect(rest, area, focal, value.0, target01),
+                    rest,
+                ))
+            };
+            let view_for = |value: zoom::Camera| match card_for(value) {
+                Some((card, rest)) => zoom::card_view(rest, card, source),
+                None => zoom::view_rect(value.0, value.1, source),
+            };
+            let view = view_for(camera_value);
+            let card = card_for(camera_value).filter(|(card, rest)| canvas::card_moved(*card, *rest));
+            let previous_value =
+                (!zoom::instant_blur_disabled(&model.zooms, composition_time)).then(|| {
+                    camera.evaluate(
+                        &model.zooms,
+                        source,
+                        &plan.mapping,
+                        camera_settings,
+                        (composition_time - 1.0 / fps).max(0.0),
+                        || model.sidecar.clone(),
+                    )
+                });
+            let trail = previous_value.and_then(|previous| {
                 super::motion_blur::ScreenTrail::new(
                     view,
-                    zoom::view_rect(previous.0, previous.1, source),
+                    view_for(previous),
                     source,
                     size,
                     fps,
                     model.zoom_camera.motion_blur,
                 )
-            };
+            });
             let cropped =
                 trail.is_some() || !(view_is_full(view, source) && size == model.source_size);
-            // The GPU path only crops and scales; a blurred frame takes the CPU path.
+            // The GPU path only crops and scales; a blurred frame takes the CPU path,
+            // and a moving card needs the footage around the video rect too, which
+            // only the CPU path draws.
             #[cfg(target_os = "windows")]
-            if trail.is_none() {
+            if trail.is_none() && card.is_none() {
                 if let Some(scaler) = gpu.as_mut() {
                     let mut nv12 = match sink.buffer(done_index) {
                         Ok(buffer) => buffer,
@@ -918,6 +971,47 @@ fn render_range(
             } else if cropped {
                 crop_scale_into(&decoded, model.source_size, view, size, &mut scaled);
             }
+            let card_frame = card.map(|(rect, _)| {
+                let out = plan.output;
+                let whole = (0.0, 0.0, f64::from(out.0), f64::from(out.1));
+                let outer_view = zoom::card_view(whole, rect, source);
+                outer_rgba.resize(out.0 as usize * out.1 as usize * 4, 0);
+                let outer_trail = previous_value.and_then(|previous| {
+                    let previous_card = card_for(previous).map_or(rect, |(card, _)| card);
+                    super::motion_blur::ScreenTrail::new(
+                        outer_view,
+                        zoom::card_view(whole, previous_card, source),
+                        source,
+                        out,
+                        fps,
+                        model.zoom_camera.motion_blur,
+                    )
+                });
+                match outer_trail {
+                    Some(outer_trail) => outer_trail.render(
+                        &decoded,
+                        model.source_size,
+                        out,
+                        &mut outer_rgba,
+                        16,
+                        4.0,
+                        4,
+                    ),
+                    None => {
+                        crop_scale_into(&decoded, model.source_size, outer_view, out, &mut outer_rgba)
+                    }
+                }
+                outer_nv12.resize(out.0 as usize * out.1 as usize * 3 / 2, 0);
+                converter.convert_into(&outer_rgba, out, &mut outer_nv12);
+                canvas::CardFrame {
+                    rect,
+                    background_zoom: zoom::background_zoom(camera_value.0),
+                    pivot: (
+                        (camera_value.1 .0 / source.0.max(1.0)).clamp(0.0, 1.0),
+                        (camera_value.1 .1 / source.1.max(1.0)).clamp(0.0, 1.0),
+                    ),
+                }
+            });
             let base: &[u8] = if cropped { &scaled } else { &decoded };
 
             let ripple = model.sidecar.as_ref().and_then(|sidecar| {
@@ -1021,7 +1115,11 @@ fn render_range(
                 }
             };
             converter.convert_into(frame, size, &mut nv12);
-            if let Err(error) = sink.submit(nv12) {
+            let submitted = match card_frame {
+                Some(card_frame) => sink.submit_card(nv12, card_frame, &outer_nv12, &converter),
+                None => sink.submit(nv12),
+            };
+            if let Err(error) = submitted {
                 let _ = decoder.kill();
                 let _ = decoder.wait();
                 return Err(error);
@@ -3981,6 +4079,7 @@ mod webcam_export_tests {
                 size,
                 video: (320, 180),
                 radius: 24.0,
+                area: (40, 40, 320, 180),
                 background: Arc::new(background),
             }),
             crf: 18,
@@ -4016,6 +4115,103 @@ mod webcam_export_tests {
         assert!(
             red > 150 && green < 80,
             "the video's top edge is missing: {red}, {green}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[ignore = "integration: shells out to ffmpeg"]
+    fn a_zoomed_canvas_export_grows_the_card_over_the_padding() {
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-zoomed-canvas-export-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("source.mp4");
+        let generated = crate::utils::hidden_command(ffmpeg::ffmpeg_executable())
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=red:s=320x180:r=30:d=2",
+                "-pix_fmt",
+                "yuv420p",
+            ])
+            .arg(&source)
+            .status()
+            .expect("ffmpeg should be available");
+        assert!(generated.success());
+        let size = (400u32, 260u32);
+        let mut background = vec![0u8; size.0 as usize * size.1 as usize * 4];
+        for pixel in background.as_chunks_mut::<4>().0 {
+            pixel.copy_from_slice(&[0, 200, 0, 255]);
+        }
+        let output = dir.join("zoomed.mp4");
+        let mut model = ExportModel {
+            source,
+            source_size: (320, 180),
+            trim_start: 0.0,
+            trim_end: 2.0,
+            cuts: Vec::new(),
+            zooms: vec![crate::video_editor::timeline::ZoomClip {
+                start: 0.0,
+                end: 2.0,
+                scale: 2.0,
+                center: (160.0, 90.0),
+                hidden: false,
+                mode: crate::video_editor::timeline::ZoomMode::Manual,
+                instant: true,
+                anchor: None,
+            }],
+            zoom_camera: crate::video_editor::zoom::ZoomCameraSettings::default(),
+            cursor: CursorSettings::default(),
+            sidecar: None,
+            webcam: None,
+            canvas: Some(CanvasLayout {
+                size,
+                video: (320, 180),
+                radius: 24.0,
+                area: (10, 10, 380, 240),
+                background: Arc::new(background),
+            }),
+            crf: 18,
+            audio: Vec::new(),
+        };
+        let settings = ExportSettings {
+            fps: Some(30),
+            hardware: false,
+            ..ExportSettings::default()
+        };
+        let (sender, _receiver) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        render(&model, &output, &sender, &cancel, Encoder::X264, settings)
+            .unwrap_or_else(|error| panic!("export failed: {error:?}"));
+        let frame = frame_rgb(&output, 1.0, size).expect("the export should decode");
+        let [red, green, _] = pixel(&frame, size.0, 20, 130);
+        assert!(
+            red > 150 && green < 80,
+            "the card did not grow over the padding: {red}, {green}"
+        );
+        let [red, green, _] = pixel(&frame, size.0, 200, 130);
+        assert!(
+            red > 150 && green < 80,
+            "the video centre is not the video: {red}, {green}"
+        );
+
+        model.zooms = Vec::new();
+        let plain = dir.join("plain.mp4");
+        render(&model, &plain, &sender, &cancel, Encoder::X264, settings)
+            .unwrap_or_else(|error| panic!("export failed: {error:?}"));
+        let frame = frame_rgb(&plain, 1.0, size).expect("the export should decode");
+        let [red, green, _] = pixel(&frame, size.0, 20, 130);
+        assert!(
+            green > 150 && red < 80,
+            "the padding lost its fill: {red}, {green}"
         );
         let _ = fs::remove_dir_all(&dir);
     }
