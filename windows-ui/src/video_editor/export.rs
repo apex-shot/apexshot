@@ -539,10 +539,13 @@ fn software_forced() -> bool {
     std::env::var("APEXSHOT_EXPORT_HARDWARE").ok().as_deref() == Some("0")
 }
 
-/// A recovery switch for drivers whose hardware decoder misbehaves.
+/// D3D11 decoding, opt-in. Copying each decoded frame back from the GPU for
+/// the filters costs more than multithreaded software decoding saves (a 4K
+/// H.264 clip decoded at 10 ms/frame against 3.4 ms/frame in software on the
+/// development machine), so it only pays once frames stay on the GPU.
 fn hardware_decode() -> bool {
     cfg!(target_os = "windows")
-        && std::env::var("APEXSHOT_EXPORT_HWDECODE").ok().as_deref() != Some("0")
+        && std::env::var("APEXSHOT_EXPORT_HWDECODE").ok().as_deref() == Some("1")
 }
 
 fn worker_override() -> Option<usize> {

@@ -122,9 +122,11 @@ encoder gets a bitrate from the tier's bits per pixel (0.3, 0.05, 0.0175,
 - `APEXSHOT_EXPORT_HARDWARE=0` forces software encoding without changing the
   dialog. This is the recovery switch for a driver whose encoder passes the
   probe but produces bad output.
-- Decoding uses D3D11 (`-hwaccel d3d11va`); ffmpeg falls back to software for a
-  stream the GPU cannot decode. `APEXSHOT_EXPORT_HWDECODE=0` forces software
-  decoding.
+- Decoding stays in software by default. `APEXSHOT_EXPORT_HWDECODE=1` decodes
+  with D3D11 (`-hwaccel d3d11va`, falling back to software for a stream the GPU
+  cannot decode), but copying each frame back for the filters made a 4K H.264
+  decode three times slower (10 ms/frame against 3.4) on the development
+  machine. It becomes worth enabling once decoded frames stay on the GPU.
 - `APEXSHOT_EXPORT_WORKERS=1` disables parallel ranges. Values from 1 to 6 are
   clamped.
 - `APEXSHOT_EXPORT_HYBRID=1` enables the chunked two-encoder path.
