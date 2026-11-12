@@ -1,3 +1,4 @@
+use super::keystrokes::{self, Caption};
 use crate::recording::editor::click_effect::{ripple_bounce_at_ms, RIPPLE_VISIBLE_DURATION_MS};
 use crate::recording::editor::model::{ClickEffect, CursorSettings};
 use crate::recording::editor::ripple_preview::{PreviewRipple, PreviewRippleClick};
@@ -17,6 +18,17 @@ struct State {
     video_path: Option<std::path::PathBuf>,
     settings: CursorSettings,
     end_seconds: Option<f64>,
+    caption_settings: keystrokes::Settings,
+    captions: Vec<Caption>,
+    captions_active: bool,
+}
+
+fn rebuild_captions(state: &mut State) {
+    let show_single_letters = state.caption_settings.show_single_letters;
+    state.captions = match state.sidecar.as_ref() {
+        Some(sidecar) => keystrokes::captions(&sidecar.keys, show_single_letters),
+        None => Vec::new(),
+    };
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -35,6 +47,9 @@ impl CursorModel {
                 video_path: None,
                 settings: CursorSettings::default(),
                 end_seconds: None,
+                caption_settings: keystrokes::Settings::default(),
+                captions: Vec::new(),
+                captions_active: true,
             })),
         }
     }
@@ -43,6 +58,7 @@ impl CursorModel {
         let mut state = self.state.borrow_mut();
         state.sidecar = path.and_then(PointerSidecar::load_next_to_video);
         state.video_path = path.map(Path::to_path_buf);
+        rebuild_captions(&mut state);
         let threshold = state.settings.remove_shake_threshold;
         let settings = state.settings;
         let end = state.end_seconds;
@@ -64,6 +80,40 @@ impl CursorModel {
         self.state.borrow().sidecar.clone()
     }
 
+    /// Give a test cursor a recording with one key press and nothing else.
+    #[cfg(test)]
+    pub(super) fn set_keys_for_test(&self) {
+        let mut sidecar = PointerSidecar::new(
+            0,
+            crate::recording::editor::sidecar::CaptureRegion {
+                x: 0,
+                y: 0,
+                w: 0,
+                h: 0,
+            },
+        );
+        sidecar
+            .keys
+            .push(crate::recording::editor::sidecar::KeySample {
+                t: 1.0,
+                kind: "key_down".to_owned(),
+                key: 46,
+                scan_code: 0,
+                modifiers: Vec::new(),
+                cursor_id: None,
+            });
+        self.state.borrow_mut().sidecar = Some(sidecar);
+    }
+
+    /// Whether the open recording carries key presses, without cloning it.
+    pub fn has_keys(&self) -> bool {
+        self.state
+            .borrow()
+            .sidecar
+            .as_ref()
+            .is_some_and(|sidecar| !sidecar.keys.is_empty())
+    }
+
     pub fn set_settings(&self, settings: CursorSettings) {
         let mut state = self.state.borrow_mut();
         state.settings = settings.clamped();
@@ -78,6 +128,15 @@ impl CursorModel {
                 end,
             );
         }
+    }
+
+    pub fn set_caption_settings(&self, settings: keystrokes::Settings) {
+        let mut state = self.state.borrow_mut();
+        if state.caption_settings == settings {
+            return;
+        }
+        state.caption_settings = settings;
+        rebuild_captions(&mut state);
     }
 
     /// Where the edit ends, in source seconds. The cursor's tail behaviours
@@ -125,6 +184,31 @@ impl CursorModel {
         )
     }
 
+    /// Whether the frame at the playhead is footage the edit keeps.
+    ///
+    /// Captions are placed by the source clock, and that clock holds its last
+    /// value across a cut, a removed span or the freeze tail, so the caller
+    /// says when there is no picture for them to decorate. Loading a recording
+    /// leaves the flag alone: only the playhead moving decides.
+    pub fn set_captions_active(&self, active: bool) {
+        self.state.borrow_mut().captions_active = active;
+    }
+
+    /// Keyboard shortcut captions over the whole stage, outside the video
+    /// transform, the way the export decorates the final picture.
+    pub fn draw_captions(&self, cr: &Context, width: i32, height: i32, source_seconds: f64) {
+        let state = self.state.borrow();
+        if state.caption_settings.shortcuts && state.captions_active {
+            keystrokes::draw(
+                cr,
+                f64::from(width),
+                f64::from(height),
+                &state.captions,
+                source_seconds,
+            );
+        }
+    }
+
     pub fn draw(
         &self,
         cr: &Context,
@@ -142,6 +226,15 @@ impl CursorModel {
         else {
             return;
         };
+        let typing_alpha = super::typing::typing_alpha(
+            &sidecar.keys,
+            &sidecar.pointer,
+            &sidecar.presses,
+            source_seconds,
+        );
+        if typing_alpha <= 0.001 {
+            return;
+        }
         let settings = state.settings;
         let Some((video_width, video_height)) = source_size else {
             return;
@@ -168,11 +261,12 @@ impl CursorModel {
             rotation_ratio: settings.rotate_on_x_movement_ratio,
             base_rotation_deg: settings.base_rotation_deg,
         };
-        let Some(frame) =
+        let Some(mut frame) =
             sidecar.presented_in_video_at(source_seconds, motion, video_width, video_height)
         else {
             return;
         };
+        frame.alpha *= typing_alpha;
         let map_point = |point| {
             let (x, y) = super::zoom::source_to_stage(point, view, rect.width, rect.height);
             (rect.x + x, rect.y + y)
@@ -322,8 +416,113 @@ mod tests {
     use super::{source_to_stage, video_rect_for, CursorModel, VideoRect};
     use crate::recording::editor::model::{ClickEffect, CursorSettings, CursorTheme};
     use crate::recording::editor::sidecar::{
-        CaptureRegion, ClickSample, CursorKind, PointerSample, PointerSidecar,
+        CaptureRegion, ClickSample, CursorKind, KeySample, PointerSample, PointerSidecar,
     };
+
+    fn key_down(t: f64, key: i32, modifiers: &[&str]) -> KeySample {
+        KeySample {
+            t,
+            kind: "key_down".to_owned(),
+            key,
+            scan_code: 0,
+            modifiers: modifiers.iter().map(|name| (*name).to_owned()).collect(),
+            cursor_id: None,
+        }
+    }
+
+    fn cursor_with_keys(keys: Vec<KeySample>) -> CursorModel {
+        let cursor = CursorModel::new();
+        let mut sidecar = PointerSidecar::new(
+            0,
+            CaptureRegion {
+                x: 0,
+                y: 0,
+                w: 0,
+                h: 0,
+            },
+        );
+        sidecar.keys = keys;
+        cursor.state.borrow_mut().sidecar = Some(sidecar);
+        cursor
+    }
+
+    #[test]
+    fn caption_settings_rebuild_the_captions_only_when_they_change() {
+        let cursor = cursor_with_keys(vec![key_down(1.0, 65, &[]), key_down(3.0, 46, &[])]);
+        cursor.set_caption_settings(crate::video_editor::keystrokes::Settings {
+            shortcuts: true,
+            show_single_letters: false,
+        });
+        assert_eq!(cursor.state.borrow().captions.len(), 1);
+
+        cursor.set_caption_settings(crate::video_editor::keystrokes::Settings {
+            shortcuts: true,
+            show_single_letters: true,
+        });
+        assert_eq!(cursor.state.borrow().captions.len(), 2);
+    }
+
+    #[test]
+    fn shortcut_captions_paint_without_pointer_samples_or_a_video() {
+        let Some((with_keys, without_keys)) = crate::test_support::with_gtk(|| {
+            use gtk4::cairo::{Context, Format, ImageSurface};
+
+            let paints = |cursor: &CursorModel| {
+                let mut surface = ImageSurface::create(Format::ARgb32, 320, 180).unwrap();
+                {
+                    let cr = Context::new(&surface).unwrap();
+                    cursor.draw_captions(&cr, 320, 180, 1.5);
+                }
+                surface.flush();
+                let pixels = surface.data().unwrap().to_vec();
+                pixels.iter().any(|byte| *byte != 0)
+            };
+            let settings = crate::video_editor::keystrokes::Settings {
+                shortcuts: true,
+                show_single_letters: false,
+            };
+            let keyed = cursor_with_keys(vec![key_down(1.0, 75, &["control"])]);
+            keyed.set_caption_settings(settings);
+            let bare = cursor_with_keys(Vec::new());
+            bare.set_caption_settings(settings);
+            (paints(&keyed), paints(&bare))
+        }) else {
+            return;
+        };
+        assert!(with_keys);
+        assert!(!without_keys);
+    }
+
+    #[test]
+    fn captions_paint_only_while_the_source_clock_holds_footage() {
+        let Some((showing, hidden)) = crate::test_support::with_gtk(|| {
+            use gtk4::cairo::{Context, Format, ImageSurface};
+
+            let paints = |cursor: &CursorModel| {
+                let mut surface = ImageSurface::create(Format::ARgb32, 320, 180).unwrap();
+                {
+                    let cr = Context::new(&surface).unwrap();
+                    cursor.draw_captions(&cr, 320, 180, 1.5);
+                }
+                surface.flush();
+                let pixels = surface.data().unwrap().to_vec();
+                pixels.iter().any(|byte| *byte != 0)
+            };
+            let cursor = cursor_with_keys(vec![key_down(1.0, 75, &["control"])]);
+            cursor.set_caption_settings(crate::video_editor::keystrokes::Settings {
+                shortcuts: true,
+                show_single_letters: false,
+            });
+            let showing = paints(&cursor);
+            cursor.set_captions_active(false);
+            let hidden = paints(&cursor);
+            (showing, hidden)
+        }) else {
+            return;
+        };
+        assert!(showing);
+        assert!(!hidden);
+    }
 
     fn rippling_cursor() -> CursorModel {
         let cursor = CursorModel::new();

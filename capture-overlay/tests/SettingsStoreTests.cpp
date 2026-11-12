@@ -76,6 +76,7 @@ void checkDefaults(const QTemporaryDir& dir)
     CHECK(settings.recording.values.qualityIndex == 1);
     CHECK(settings.recording.values.codecIndex == 0);
     CHECK(!settings.recording.values.monoAudio);
+    CHECK(!settings.recording.captureKeystrokes);
     CHECK(!settings.recording.includeMicrophone);
     CHECK(!settings.recording.afterCopyToClipboard);
     CHECK(settings.recording.afterSave);
@@ -130,6 +131,7 @@ void checkParsing(const QTemporaryDir& dir)
     "quality_index": 0,
     "codec_index": 1,
     "mono_audio": true,
+    "capture_keystrokes": true,
     "include_microphone": true,
     "include_speaker": true,
     "show_cursor": false,
@@ -193,6 +195,7 @@ void checkParsing(const QTemporaryDir& dir)
     CHECK(settings.recording.values.qualityIndex == 0);
     CHECK(settings.recording.values.codecIndex == 1);
     CHECK(settings.recording.values.monoAudio);
+    CHECK(settings.recording.captureKeystrokes);
     CHECK(settings.recording.includeMicrophone);
     CHECK(settings.recording.includeSpeaker);
     CHECK(!settings.recording.afterShowResult);

@@ -31,9 +31,7 @@ const IMAGE_EDITOR_CSS: &str = include_str!("image_editor.css");
 /// metrics [`install_css`] scales by the display.
 ///
 /// The sizes are the Settings window's — a 14px base, 15px row titles, 13px
-/// hints and buttons, and 11px eyebrow labels. DM Sans runs a little lighter at
-/// the same size than the Inter the editor was tuned for, so the body roles sit
-/// a step above the sheet's authored sizes and the windows read alike.
+/// hints and buttons, and 11px eyebrow labels — so the two windows read alike.
 const IMAGE_EDITOR_TYPE_CSS: &str = r#"
         /* Base */
         .image-editor-root {

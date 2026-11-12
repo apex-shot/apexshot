@@ -2,7 +2,7 @@
 //!
 //! Settings, onboarding and the image editor each author their type at 100%
 //! and let [`crate::platform::ui_scale`] carry it to the display. This is the
-//! History window's sheet: the same DM Sans stack, the same 14px base, and the
+//! History window's sheet: the same Inter stack, the same 14px base, and the
 //! same roles the Settings pages use — a 28px page heading, 15px row and nav
 //! titles, 14px card titles and body text, 13px hints, and 11px badges.
 //!
@@ -16,7 +16,7 @@ use gtk4::CssProvider;
 const HISTORY_TYPE_CSS: &str = r#"
         /* Base */
         .history-root {
-            font-family: 'DM Sans', 'Noto Sans', system-ui, sans-serif;
+            font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
             font-size: 14px;
         }
 

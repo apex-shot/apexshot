@@ -51,6 +51,8 @@ mod tests {
             trim_start: 0.0,
             trim_end: 10.0,
             cuts: vec![],
+            segment_speeds: Vec::new(),
+            freeze_tail: 0.0,
             zooms: vec![ZoomClip {
                 start: 2.0,
                 end: 4.0,
@@ -69,6 +71,7 @@ mod tests {
             canvas: None,
             crf: 23,
             audio: Vec::new(),
+            effects: Default::default(),
         }
     }
 

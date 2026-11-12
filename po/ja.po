@@ -4490,3 +4490,141 @@ msgstr "スプリットがフレームの端から端までを占めます。"
 
 msgid "Transitions"
 msgstr "トランジション"
+
+msgid "1:1"
+msgstr "1:1"
+
+msgid "4:3"
+msgstr "4:3"
+
+msgid "All typing suggestions are handled. Undo brings them back."
+msgstr "入力の提案はすべて処理済みです。元に戻すと復元されます。"
+
+msgid "Apply all suggestions"
+msgstr "すべての提案を適用"
+
+msgid "Apply suggestion"
+msgstr "提案を適用"
+
+msgid "Apply to this project"
+msgstr "このプロジェクトに適用"
+
+msgid "Built-in defaults"
+msgstr "組み込みの既定値"
+
+msgid "Could not open the preset's folder."
+msgstr "プリセットのフォルダーを開けませんでした。"
+
+msgid "Create"
+msgstr "作成"
+
+msgid "Default for new recordings"
+msgstr "新しい録画の既定"
+
+msgid "Default video preset"
+msgstr "既定の動画プリセット"
+
+msgid "Editor"
+msgstr "エディター"
+
+msgid "Keyboard"
+msgstr "キーボード"
+
+msgid "Movement"
+msgstr "動き"
+
+msgid "Name the preset before saving it."
+msgstr "保存する前にプリセットに名前を付けてください。"
+
+msgid "New preset from this project"
+msgstr "このプロジェクトから新しいプリセットを作成"
+
+msgid "No presets yet"
+msgstr "プリセットはまだありません"
+
+msgid "No typing to speed up in this recording."
+msgstr "この録画には早送りできる入力区間がありません。"
+
+msgid "Preset name"
+msgstr "プリセット名"
+
+msgid "Preset options"
+msgstr "プリセットのオプション"
+
+msgid "Presets"
+msgstr "プリセット"
+
+msgid "Press + to save this project's background, cursor, camera and captions as a preset."
+msgstr "+ を押すと、このプロジェクトの背景、カーソル、カメラ、キャプションをプリセットとして保存できます。"
+
+msgid "Preview"
+msgstr "プレビュー"
+
+msgid "Put every zoom animation setting back to its default."
+msgstr "ズームアニメーションの設定をすべて既定に戻します。"
+
+msgid "Record keystrokes"
+msgstr "キー入力を記録"
+
+msgid "Remove as default"
+msgstr "既定から外す"
+
+msgid "Remove suggestion"
+msgstr "提案を削除"
+
+msgid "Rename"
+msgstr "名前を変更"
+
+msgid "Renamed to {name}."
+msgstr "{name} に名前を変更しました。"
+
+msgid "Set as default"
+msgstr "既定に設定"
+
+msgid "Show in folder"
+msgstr "フォルダーで表示"
+
+msgid "Show keyboard shortcuts"
+msgstr "キーボードショートカットを表示"
+
+msgid "Show single letters"
+msgstr "単独の文字を表示"
+
+msgid "Soft"
+msgstr "ソフト"
+
+msgid "Sound"
+msgstr "サウンド"
+
+msgid "That preset is no longer on disk."
+msgstr "そのプリセットはディスク上にありません。"
+
+msgid "This recording has no keystrokes. Turn on Record keystrokes in Settings, under Recording, then record again."
+msgstr "この録画にはキー入力がありません。設定の「録画」で「キー入力を記録」をオンにしてから、もう一度録画してください。"
+
+msgid "This zoom"
+msgstr "このズーム"
+
+msgid "Typing"
+msgstr "入力"
+
+msgid "Unavailable preset"
+msgstr "利用できないプリセット"
+
+msgid "Update with current look"
+msgstr "現在の外観で更新"
+
+msgid "Visibility"
+msgstr "表示"
+
+msgid "Volume"
+msgstr "音量"
+
+msgid "{name} deleted."
+msgstr "{name} を削除しました。"
+
+msgid "{name} now holds the current look."
+msgstr "{name} を現在の外観に更新しました。"
+
+msgid "{name} saved."
+msgstr "{name} を保存しました。"

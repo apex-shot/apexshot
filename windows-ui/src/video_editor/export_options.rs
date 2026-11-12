@@ -447,6 +447,8 @@ mod tests {
                     trim_start: 0.0,
                     trim_end: 10.0,
                     cuts: Vec::new(),
+                    segment_speeds: Vec::new(),
+                    freeze_tail: 0.0,
                     zooms: Vec::new(),
                     zoom_camera: super::super::zoom::ZoomCameraSettings::default(),
                     cursor: crate::recording::editor::model::CursorSettings::default(),
@@ -456,6 +458,7 @@ mod tests {
                     canvas: None,
                     crf: 20,
                     audio: Vec::new(),
+                    effects: Default::default(),
                 };
                 let chosen = Rc::new(Cell::new(None));
                 show(

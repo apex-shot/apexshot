@@ -9,6 +9,7 @@ pub struct AfterCaptureWidgets {
     pub rec_copy_to_clipboard: CheckButton,
     pub rec_save: CheckButton,
     pub rec_open_video_editor: CheckButton,
+    pub rec_auto_zoom_on_import: CheckButton,
 }
 
 pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
@@ -67,7 +68,7 @@ pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
     after_capture_header_row.attach(&action_header, 2, 0, 1, 1);
     after_capture_table.append(&after_capture_header_row);
 
-    let screenshot_after_capture_rows = [
+    let after_capture_rows = [
         (
             "Show Quick Access overlay",
             config.after_capture_show_quick_access,
@@ -80,12 +81,25 @@ pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
         ("Open Annotate tool", config.after_capture_open_annotate),
         ("Open Video Editor", config.rec_video_open_editor),
     ];
+    #[cfg(target_os = "windows")]
+    let windows_after_capture_rows = [(
+        "Automatic zoom on import",
+        config.rec_video_auto_zoom_on_import,
+    )];
+    #[cfg(not(target_os = "windows"))]
+    let windows_after_capture_rows: [(&str, bool); 0] = [];
     let mut screenshot_after_capture_checks = Vec::new();
     let mut rec_copy_to_clipboard = CheckButton::new();
     let mut rec_save = CheckButton::new();
     let mut rec_open_video_editor = CheckButton::new();
+    let mut rec_auto_zoom_on_import = CheckButton::new();
+    rec_auto_zoom_on_import.set_active(config.rec_video_auto_zoom_on_import);
 
-    for (index, (action, active)) in screenshot_after_capture_rows.into_iter().enumerate() {
+    for (index, (action, active)) in after_capture_rows
+        .into_iter()
+        .chain(windows_after_capture_rows)
+        .enumerate()
+    {
         let row = Grid::new();
         row.add_css_class("settings-table-row");
         if index % 2 == 1 {
@@ -97,7 +111,7 @@ pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
         let screenshot_cell = GtkBox::new(Orientation::Horizontal, 0);
         screenshot_cell.set_size_request(108, -1);
         screenshot_cell.set_halign(Align::Center);
-        if action != "Open Video Editor" {
+        if action != "Open Video Editor" && action != "Automatic zoom on import" {
             let screenshot_check = CheckButton::new();
             screenshot_check.set_active(active);
             screenshot_after_capture_checks.push(screenshot_check.clone());
@@ -121,6 +135,10 @@ pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
                 "Open Video Editor" => {
                     recording_check.set_active(active);
                     rec_open_video_editor = recording_check.clone();
+                }
+                "Automatic zoom on import" => {
+                    recording_check.set_active(active);
+                    rec_auto_zoom_on_import = recording_check.clone();
                 }
                 _ => {}
             }
@@ -157,6 +175,7 @@ pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
         rec_copy_to_clipboard,
         rec_save,
         rec_open_video_editor,
+        rec_auto_zoom_on_import,
     }
 }
 

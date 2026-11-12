@@ -11,7 +11,7 @@ use gtk4::prelude::*;
 use gtk4::{
     Align, Application, ApplicationWindow, AspectFrame, Box as GtkBox, Button, CssProvider,
     DrawingArea, DropTarget, FileChooserAction, FileChooserNative, FileFilter, Image, Label,
-    Orientation, Overlay, Picture, Popover, ResponseType, Separator,
+    Orientation, Overlay, Picture, Popover, PositionType, ResponseType, Separator,
 };
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
@@ -73,7 +73,8 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     }
 
     let document_title = Rc::new(RefCell::new(document_title(initial)));
-    let (title_bar, export_button) = build_title_bar(&window, document_title.clone(), scale);
+    let (title_bar, export_button, presets_button) =
+        build_title_bar(&window, document_title.clone(), scale);
 
     let workspace = GtkBox::new(Orientation::Horizontal, 0);
     workspace.add_css_class("recording-editor-workspace");
@@ -81,7 +82,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     workspace.set_vexpand(true);
 
     let background = super::background::Background::default();
-    let stage = build_stage(scale, background.clone(), export_button);
+    let stage = build_stage(scale, background.clone(), export_button, presets_button);
     workspace.append(&stage.root);
 
     let cursor_layer = stage.cursor_layer.clone();
@@ -96,8 +97,10 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
         prefers_dark,
         stage.cursor.clone(),
         stage.webcam.clone(),
+        background.clone(),
         stage.source_size.clone(),
     );
+    super::presets_popover::attach(&stage.presets_button, &timeline, scale);
 
     let tools_column = super::side_panel::build_tools_column(
         scale,
@@ -141,18 +144,20 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
             });
             // With the studied framing, the moving card's whole trail is drawn
             // over the stage so its edges smear across the background.
-            let card = trail.and_then(|_| {
-                let (now, _, stage_size) = stage.card_geometry(frame.camera)?;
-                let (previous, _, _) = stage.card_geometry(frame.camera_before)?;
-                Some(super::preview::CardLayer {
-                    now,
-                    previous,
-                    stage: stage_size,
-                    radius: stage.clip.radius_ratio(),
-                    fps: frame.fps,
-                    amount: frame.motion_blur,
+            let card = (frame.motion_blur.is_finite() && frame.motion_blur > 0.0)
+                .then(|| {
+                    let (now, _, stage_size) = stage.card_geometry(frame.camera)?;
+                    let (previous, _, _) = stage.card_geometry(frame.camera_before)?;
+                    Some(super::preview::CardLayer {
+                        now,
+                        previous,
+                        stage: stage_size,
+                        radius: stage.clip.radius_ratio(),
+                        fps: frame.fps,
+                        amount: frame.motion_blur,
+                    })
                 })
-            });
+                .flatten();
             stage.preview.set_trail(trail, card, frame.playing);
             stage.apply_webcam_layout();
             let ripple = stage
@@ -201,6 +206,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
                 timeline.source_duration(),
                 timeline.composition_duration(),
             );
+            timeline.notify_typing_changed();
         })
     };
     update_document(initial);
@@ -266,7 +272,7 @@ fn build_title_bar(
     window: &ApplicationWindow,
     document_title: Rc<RefCell<String>>,
     scale: f64,
-) -> (GtkBox, Button) {
+) -> (GtkBox, Button, Button) {
     let bar = GtkBox::new(Orientation::Horizontal, 0);
     bar.add_css_class("settings-window-controls");
     bar.add_css_class("video-editor-titlebar");
@@ -358,9 +364,11 @@ fn build_title_bar(
     export_button.set_sensitive(false);
     export_button.set_margin_end((8.0 * scale).round() as i32);
 
+    let presets_button = super::presets_popover::title_button(scale);
     let actions = GtkBox::new(Orientation::Horizontal, 0);
     actions.set_halign(Align::End);
     actions.set_valign(Align::Fill);
+    actions.append(&presets_button);
     actions.append(&export_button);
     actions.append(&minimize);
     actions.append(&maximize);
@@ -379,9 +387,11 @@ fn build_title_bar(
     right_balance.append(&actions);
     bar.append(&right_balance);
 
-    windowing::install_window_drag(&left_spacer, window);
-    windowing::install_window_drag(&right_spacer, window);
-    (bar, export_button)
+    // The whole bar moves the window: the title is click-through and the
+    // spacers have no handlers of their own, while every button claims its
+    // own press before the bar sees it.
+    windowing::install_window_drag(&bar, window);
+    (bar, export_button, presets_button)
 }
 
 fn set_title_bar_text(bar: &GtkBox, title: &str) {
@@ -398,11 +408,13 @@ fn set_title_bar_text(bar: &GtkBox, title: &str) {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FrameAspect {
     Original,
     Wide,
     Portrait,
+    Square,
+    Classic,
 }
 
 impl FrameAspect {
@@ -411,8 +423,40 @@ impl FrameAspect {
             Self::Original => t("Original"),
             Self::Wide => t("16:9"),
             Self::Portrait => t("9:16"),
+            Self::Square => t("1:1"),
+            Self::Classic => t("4:3"),
         }
     }
+
+    /// How the project file names this frame.
+    fn id(self) -> &'static str {
+        match self {
+            Self::Original => "original",
+            Self::Wide => "16:9",
+            Self::Portrait => "9:16",
+            Self::Square => "1:1",
+            Self::Classic => "4:3",
+        }
+    }
+
+    /// The frame a project file names; anything unknown keeps the recording's own shape.
+    fn from_id(id: Option<&str>) -> Self {
+        match id {
+            Some("16:9") => Self::Wide,
+            Some("9:16") => Self::Portrait,
+            Some("1:1") => Self::Square,
+            Some("4:3") => Self::Classic,
+            _ => Self::Original,
+        }
+    }
+
+    const ALL: [FrameAspect; 5] = [
+        Self::Original,
+        Self::Wide,
+        Self::Portrait,
+        Self::Square,
+        Self::Classic,
+    ];
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -471,6 +515,8 @@ fn frame_ratio(aspect: FrameAspect, source: Option<f32>) -> f32 {
     match aspect {
         FrameAspect::Wide => 16.0 / 9.0,
         FrameAspect::Portrait => 9.0 / 16.0,
+        FrameAspect::Square => 1.0,
+        FrameAspect::Classic => 4.0 / 3.0,
         FrameAspect::Original => source.unwrap_or(16.0 / 9.0),
     }
 }
@@ -484,6 +530,8 @@ fn canvas_dimensions(aspect: FrameAspect, source: (u32, u32)) -> (u32, u32) {
         FrameAspect::Original => (source.0.max(1), source.1.max(1)),
         FrameAspect::Wide => (1920, 1080),
         FrameAspect::Portrait => (1080, 1920),
+        FrameAspect::Square => (1080, 1080),
+        FrameAspect::Classic => (1440, 1080),
     }
 }
 
@@ -755,6 +803,7 @@ struct Stage {
     estimate: Estimate,
     quality: Rc<Cell<QualityTier>>,
     export_button: Button,
+    presets_button: Button,
     background: super::background::BackgroundState,
     background_layer: DrawingArea,
     cursor_layer: DrawingArea,
@@ -1328,6 +1377,7 @@ impl Stage {
         let preview_source = clean_source.as_deref().or(path);
         let Some((texture, width, height)) = preview_source.and_then(poster_texture) else {
             self.export_button.set_sensitive(false);
+            self.presets_button.set_sensitive(false);
             self.picture.set_visible(false);
             self.hint.set_visible(true);
             self.source_size.set(None);
@@ -1342,6 +1392,7 @@ impl Stage {
         self.hint.set_visible(false);
         self.source_size.set(Some((width, height)));
         self.export_button.set_sensitive(true);
+        self.presets_button.set_sensitive(true);
         self.apply_geometry();
         self.apply_webcam_layout();
         self.set_camera((1.0, (f64::from(width) / 2.0, f64::from(height) / 2.0)));
@@ -1500,6 +1551,7 @@ fn build_stage(
     scale: f64,
     background: super::background::Background,
     export_button: Button,
+    presets_button: Button,
 ) -> Stage {
     let root = GtkBox::new(Orientation::Vertical, 0);
     root.add_css_class("recording-editor-stage");
@@ -1674,6 +1726,7 @@ fn build_stage(
                     height: video.height,
                 }),
             );
+            cursor.draw_captions(context, width, height, source_seconds.get());
             draw_in_video(
                 context,
                 video,
@@ -1808,6 +1861,7 @@ fn build_stage(
         estimate: estimate.clone(),
         quality: quality.clone(),
         export_button: export_button.clone(),
+        presets_button: presets_button.clone(),
         background: background.state(),
         background_layer: background_layer.clone(),
         cursor_layer,
@@ -1849,7 +1903,16 @@ fn build_stage(
             stage.apply_geometry();
         })
     };
-    wire_aspect_menu(&aspect_chip, aspect.get(), apply_aspect);
+    wire_aspect_menu(&aspect_chip, aspect.clone(), {
+        let background = background.clone();
+        Rc::new(move |choice| {
+            background.set_aspect(if choice == FrameAspect::Original {
+                None
+            } else {
+                Some(choice.id().to_owned())
+            });
+        })
+    });
 
     background_layer.connect_resize({
         let stage = stage.clone();
@@ -1857,34 +1920,63 @@ fn build_stage(
     });
     background.connect({
         let stage = stage.clone();
-        Rc::new(move || stage.apply_background())
+        let apply_aspect = apply_aspect.clone();
+        let model = background.clone();
+        Rc::new(move || {
+            // The frame follows the model, so a project load, an undo, or a
+            // preset all reach the stage through this one path.
+            let next = FrameAspect::from_id(model.aspect().as_deref());
+            if next != stage.aspect.get() {
+                apply_aspect(next);
+            }
+            stage.apply_background();
+        })
     });
     stage
 }
 
-fn wire_aspect_menu(button: &Button, active: FrameAspect, choose: Rc<dyn Fn(FrameAspect)>) {
+/// A single-choice menu in the shared settings style. The check sits on the
+/// active row only; the caller sets its opacity each time the menu opens so the
+/// marker is never stale, while every row keeps the same label alignment.
+fn choice_menu<T: Copy + PartialEq + 'static>(
+    button: &Button,
+    choices: &[T],
+    label: impl Fn(T) -> String,
+    choose: Rc<dyn Fn(T)>,
+) -> (Popover, Vec<(T, Image)>) {
     let popover = Popover::new();
+    popover.add_css_class("history-action-popover");
+    popover.add_css_class("settings-select-popover");
     popover.set_has_arrow(false);
-    popover.set_position(gtk4::PositionType::Top);
-    popover.add_css_class("recording-editor-stage-aspect");
-    let list = GtkBox::new(Orientation::Vertical, 0);
-    list.add_css_class("recording-editor-stage-aspect-list");
-    popover.set_child(Some(&list));
+    popover.set_autohide(true);
+    popover.set_position(PositionType::Top);
+    popover.set_offset(0, -4);
     popover.set_parent(button);
 
-    for choice in [
-        FrameAspect::Original,
-        FrameAspect::Wide,
-        FrameAspect::Portrait,
-    ] {
+    let list = GtkBox::new(Orientation::Vertical, 2);
+    list.add_css_class("settings-select-menu");
+    list.set_size_request(160, -1);
+    popover.set_child(Some(&list));
+
+    let mut rows = Vec::with_capacity(choices.len());
+    for &choice in choices {
         let item = Button::new();
+        item.add_css_class("history-action-btn");
         item.set_has_frame(false);
-        item.add_css_class("recording-editor-stage-aspect-item");
-        if choice == active {
-            item.add_css_class("recording-editor-stage-aspect-item-active");
-        }
-        item.set_hexpand(true);
-        item.set_child(Some(&Label::new(Some(&choice.label()))));
+        item.set_focus_on_click(false);
+        item.set_size_request(-1, 32);
+
+        let row = GtkBox::new(Orientation::Horizontal, 10);
+        let check = Image::from_icon_name(icon_names::custom::CHECK_SYMBOLIC);
+        check.set_pixel_size(15);
+        check.set_opacity(0.0);
+        let text = Label::new(Some(&label(choice)));
+        text.set_xalign(0.0);
+        text.set_hexpand(true);
+        row.append(&check);
+        row.append(&text);
+        item.set_child(Some(&row));
+
         let choose = choose.clone();
         let popover = popover.clone();
         item.connect_clicked(move |_| {
@@ -1892,9 +1984,25 @@ fn wire_aspect_menu(button: &Button, active: FrameAspect, choose: Rc<dyn Fn(Fram
             popover.popdown();
         });
         list.append(&item);
+        rows.push((choice, check));
     }
 
-    button.connect_clicked(move |_| popover.popup());
+    (popover, rows)
+}
+
+fn wire_aspect_menu(
+    button: &Button,
+    aspect: Rc<Cell<FrameAspect>>,
+    choose: Rc<dyn Fn(FrameAspect)>,
+) {
+    let (popover, rows) = choice_menu(button, &FrameAspect::ALL, FrameAspect::label, choose);
+    button.connect_clicked(move |_| {
+        let active = aspect.get();
+        for (choice, check) in &rows {
+            check.set_opacity(if *choice == active { 1.0 } else { 0.0 });
+        }
+        popover.popup();
+    });
 }
 
 fn wire_quality_menu(
@@ -1902,36 +2010,27 @@ fn wire_quality_menu(
     quality: Rc<Cell<QualityTier>>,
     on_change: Rc<dyn Fn(QualityTier)>,
 ) {
-    let popover = Popover::new();
-    popover.set_has_arrow(false);
-    popover.set_position(gtk4::PositionType::Top);
-    popover.add_css_class("recording-editor-stage-aspect");
-    let list = GtkBox::new(Orientation::Vertical, 0);
-    list.add_css_class("recording-editor-stage-aspect-list");
-    popover.set_child(Some(&list));
-    popover.set_parent(button);
-
-    for tier in [QualityTier::Balanced, QualityTier::High, QualityTier::Ultra] {
-        let item = Button::new();
-        item.set_has_frame(false);
-        item.add_css_class("recording-editor-stage-aspect-item");
-        if tier == quality.get() {
-            item.add_css_class("recording-editor-stage-aspect-item-active");
-        }
-        item.set_hexpand(true);
-        item.set_child(Some(&Label::new(Some(&tier.label()))));
+    let choose = {
         let quality = quality.clone();
         let on_change = on_change.clone();
-        let popover = popover.clone();
-        item.connect_clicked(move |_| {
+        Rc::new(move |tier| {
             quality.set(tier);
             on_change(tier);
-            popover.popdown();
-        });
-        list.append(&item);
-    }
-
-    button.connect_clicked(move |_| popover.popup());
+        })
+    };
+    let (popover, rows) = choice_menu(
+        button,
+        &[QualityTier::Balanced, QualityTier::High, QualityTier::Ultra],
+        QualityTier::label,
+        choose,
+    );
+    button.connect_clicked(move |_| {
+        let active = quality.get();
+        for (tier, check) in &rows {
+            check.set_opacity(if *tier == active { 1.0 } else { 0.0 });
+        }
+        popover.popup();
+    });
 }
 
 fn stage_rule() -> Separator {
@@ -2087,8 +2186,11 @@ fn export_model(
         trim_start: footage.trim_start,
         trim_end: footage.trim_end,
         cuts: footage.cuts,
+        segment_speeds: footage.segment_speeds,
+        freeze_tail: footage.freeze_tail,
         zooms: footage.zooms,
         zoom_camera: footage.zoom_camera,
+        effects: footage.effects,
         cursor: stage.cursor.settings(),
         sidecar,
         webcam: stage.webcam.export(),
@@ -2748,6 +2850,27 @@ mod tests {
         assert_eq!(
             canvas_dimensions(FrameAspect::Wide, (1280, 720)),
             (1920, 1080)
+        );
+    }
+
+    #[test]
+    fn every_frame_round_trips_through_its_file_name() {
+        for aspect in FrameAspect::ALL {
+            assert_eq!(FrameAspect::from_id(Some(aspect.id())), aspect);
+        }
+        assert_eq!(FrameAspect::from_id(None), FrameAspect::Original);
+        assert_eq!(FrameAspect::from_id(Some("weird")), FrameAspect::Original);
+    }
+
+    #[test]
+    fn square_and_classic_frames_export_at_their_own_pixels() {
+        assert_eq!(
+            canvas_dimensions(FrameAspect::Square, (1280, 720)),
+            (1080, 1080)
+        );
+        assert_eq!(
+            canvas_dimensions(FrameAspect::Classic, (1280, 720)),
+            (1440, 1080)
         );
     }
 

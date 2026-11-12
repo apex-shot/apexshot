@@ -4572,3 +4572,141 @@ msgstr "Сплит заполняет кадр от края до края."
 
 msgid "Transitions"
 msgstr "Переходы"
+
+msgid "1:1"
+msgstr "1:1"
+
+msgid "4:3"
+msgstr "4:3"
+
+msgid "All typing suggestions are handled. Undo brings them back."
+msgstr "Все подсказки по набору текста обработаны. Отмена вернёт их."
+
+msgid "Apply all suggestions"
+msgstr "Применить все подсказки"
+
+msgid "Apply suggestion"
+msgstr "Применить подсказку"
+
+msgid "Apply to this project"
+msgstr "Применить к этому проекту"
+
+msgid "Built-in defaults"
+msgstr "Встроенные значения по умолчанию"
+
+msgid "Could not open the preset's folder."
+msgstr "Не удалось открыть папку предустановки."
+
+msgid "Create"
+msgstr "Создать"
+
+msgid "Default for new recordings"
+msgstr "По умолчанию для новых записей"
+
+msgid "Default video preset"
+msgstr "Предустановка видео по умолчанию"
+
+msgid "Editor"
+msgstr "Редактор"
+
+msgid "Keyboard"
+msgstr "Клавиатура"
+
+msgid "Movement"
+msgstr "Движение"
+
+msgid "Name the preset before saving it."
+msgstr "Назовите предустановку перед сохранением."
+
+msgid "New preset from this project"
+msgstr "Новая предустановка из этого проекта"
+
+msgid "No presets yet"
+msgstr "Предустановок пока нет"
+
+msgid "No typing to speed up in this recording."
+msgstr "В этой записи нет набора текста для ускорения."
+
+msgid "Preset name"
+msgstr "Название предустановки"
+
+msgid "Preset options"
+msgstr "Параметры предустановки"
+
+msgid "Presets"
+msgstr "Предустановки"
+
+msgid "Press + to save this project's background, cursor, camera and captions as a preset."
+msgstr "Нажмите +, чтобы сохранить фон, курсор, камеру и подписи этого проекта как предустановку."
+
+msgid "Preview"
+msgstr "Предпросмотр"
+
+msgid "Put every zoom animation setting back to its default."
+msgstr "Вернуть все настройки анимации зума к значениям по умолчанию."
+
+msgid "Record keystrokes"
+msgstr "Записывать нажатия клавиш"
+
+msgid "Remove as default"
+msgstr "Больше не использовать по умолчанию"
+
+msgid "Remove suggestion"
+msgstr "Убрать подсказку"
+
+msgid "Rename"
+msgstr "Переименовать"
+
+msgid "Renamed to {name}."
+msgstr "Переименовано в {name}."
+
+msgid "Set as default"
+msgstr "Использовать по умолчанию"
+
+msgid "Show in folder"
+msgstr "Показать в папке"
+
+msgid "Show keyboard shortcuts"
+msgstr "Показывать сочетания клавиш"
+
+msgid "Show single letters"
+msgstr "Показывать отдельные буквы"
+
+msgid "Soft"
+msgstr "Мягкий"
+
+msgid "Sound"
+msgstr "Звук"
+
+msgid "That preset is no longer on disk."
+msgstr "Этой предустановки больше нет на диске."
+
+msgid "This recording has no keystrokes. Turn on Record keystrokes in Settings, under Recording, then record again."
+msgstr "В этой записи нет нажатий клавиш. Включите «Записывать нажатия клавиш» в настройках, в разделе «Запись», и запишите снова."
+
+msgid "This zoom"
+msgstr "Этот зум"
+
+msgid "Typing"
+msgstr "Набор текста"
+
+msgid "Unavailable preset"
+msgstr "Недоступная предустановка"
+
+msgid "Update with current look"
+msgstr "Обновить текущим видом"
+
+msgid "Visibility"
+msgstr "Видимость"
+
+msgid "Volume"
+msgstr "Громкость"
+
+msgid "{name} deleted."
+msgstr "Удалено: {name}."
+
+msgid "{name} now holds the current look."
+msgstr "{name} теперь содержит текущий вид."
+
+msgid "{name} saved."
+msgstr "Сохранено: {name}."

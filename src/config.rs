@@ -23,6 +23,7 @@ pub const DEFAULT_AFTER_CAPTURE_SAVE: bool = true;
 pub const DEFAULT_AFTER_CAPTURE_OPEN_ANNOTATE: bool = false;
 pub const DEFAULT_REC_AFTER_CAPTURE_COPY_TO_CLIPBOARD: bool = false;
 pub const DEFAULT_REC_AFTER_CAPTURE_SAVE: bool = true;
+const VIDEO_PRESET_ID_MAX_BYTES: usize = 80;
 pub const QUICK_ACCESS_OVERLAY_SCALE_MIN: f64 = 0.5;
 pub const QUICK_ACCESS_OVERLAY_SCALE_BASELINE: f64 = 1.0;
 pub const QUICK_ACCESS_OVERLAY_SCALE_MAX: f64 = 1.5;
@@ -75,6 +76,15 @@ pub struct AppConfig {
     pub rec_video_codec: u8,
     pub rec_video_mono: bool,
     pub rec_video_open_editor: bool,
+    /// Place the recorded clicks' automatic zooms on a fresh import.
+    pub rec_video_auto_zoom_on_import: bool,
+    /// Record key presses beside a Windows recording so the editor can show
+    /// keyboard shortcuts. Off by default: keystrokes are only collected when
+    /// the user asks for them.
+    pub rec_capture_keystrokes: bool,
+    /// Video preset the editor applies to a recording it opens. `None` keeps
+    /// the built-in defaults.
+    pub rec_video_default_preset: Option<String>,
     /// webrtcdsp noise suppression on the recording mic (GStreamer audio path).
     pub rec_noise_suppression: bool,
     pub rec_mic: bool,
@@ -247,6 +257,9 @@ impl Default for AppConfig {
             rec_video_codec: 0,   // 0 = H.264
             rec_video_mono: false,
             rec_video_open_editor: false,
+            rec_video_auto_zoom_on_import: true,
+            rec_capture_keystrokes: false,
+            rec_video_default_preset: None,
             rec_noise_suppression: false,
             rec_mic: false,
             rec_speaker: false,
@@ -390,6 +403,10 @@ impl AppConfig {
         }
         self.rec_video_format = self.rec_video_format.min(1);
         self.rec_video_codec = self.rec_video_codec.min(1);
+        self.rec_video_default_preset = self
+            .rec_video_default_preset
+            .as_deref()
+            .and_then(sanitize_video_preset_id);
         // The webcam layer's tables have four entries each, and the recorder
         // and the editor both index them directly.
         self.rec_webcam_size = self.rec_webcam_size.min(3);
@@ -525,6 +542,15 @@ fn sanitize_shutter_sound(value: String) -> String {
         "Camera" | "Classic" | "Pop" | "None" => value.trim().to_string(),
         _ => DEFAULT_SHUTTER_SOUND.to_string(),
     }
+}
+
+fn sanitize_video_preset_id(value: &str) -> Option<String> {
+    let is_stored_id = !value.is_empty()
+        && value.len() <= VIDEO_PRESET_ID_MAX_BYTES
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_');
+    is_stored_id.then(|| value.to_string())
 }
 
 fn sanitize_quick_access_overlay_size(value: f64) -> f64 {
@@ -1548,6 +1574,117 @@ mod tests {
         assert!(cfg.rec_cursor);
         assert!(cfg.rec_hidpi);
         assert_eq!(cfg.rec_video_format, 0);
+    }
+
+    #[test]
+    fn automatic_zoom_on_import_defaults_on_when_the_key_is_missing() {
+        let yaml = "preview_auto_close_seconds: 12\n";
+        let cfg: AppConfig = serde_yml::from_str(yaml).unwrap();
+        assert!(cfg.rec_video_auto_zoom_on_import);
+    }
+
+    #[test]
+    fn automatic_zoom_on_import_survives_a_yaml_round_trip_when_off() {
+        let original = AppConfig {
+            rec_video_auto_zoom_on_import: false,
+            ..AppConfig::default()
+        };
+
+        let yaml = serde_yml::to_string(&original).unwrap();
+        let loaded: AppConfig = serde_yml::from_str(&yaml).unwrap();
+
+        assert!(!loaded.rec_video_auto_zoom_on_import);
+    }
+
+    #[test]
+    fn capture_keystrokes_defaults_off_when_the_key_is_missing() {
+        let yaml = "preview_auto_close_seconds: 12\n";
+        let cfg: AppConfig = serde_yml::from_str(yaml).unwrap();
+        assert!(!cfg.rec_capture_keystrokes);
+    }
+
+    #[test]
+    fn capture_keystrokes_survives_a_yaml_round_trip_when_on() {
+        let original = AppConfig {
+            rec_capture_keystrokes: true,
+            ..AppConfig::default()
+        };
+
+        let yaml = serde_yml::to_string(&original).unwrap();
+        let loaded: AppConfig = serde_yml::from_str(&yaml).unwrap();
+
+        assert!(loaded.rec_capture_keystrokes);
+    }
+
+    #[test]
+    fn default_video_preset_is_unset_when_the_key_is_missing() {
+        let yaml = "preview_auto_close_seconds: 12\nrec_video_open_editor: true\n";
+        let cfg: AppConfig = serde_yml::from_str(yaml).unwrap();
+
+        assert!(cfg.rec_video_default_preset.is_none());
+    }
+
+    #[test]
+    fn default_video_preset_survives_a_sanitized_save_round_trip() {
+        let original = AppConfig {
+            rec_video_default_preset: Some("bubble_zoom-v2".to_string()),
+            ..AppConfig::default()
+        };
+
+        let yaml = serde_yml::to_string(&original.clone().sanitized()).unwrap();
+        let loaded = serde_yml::from_str::<AppConfig>(&yaml).unwrap().sanitized();
+
+        assert_eq!(
+            loaded.rec_video_default_preset.as_deref(),
+            Some("bubble_zoom-v2")
+        );
+    }
+
+    #[test]
+    fn default_video_preset_stays_unset_through_a_saved_config() {
+        let yaml = serde_yml::to_string(&AppConfig::default().sanitized()).unwrap();
+        let cfg = serde_yml::from_str::<AppConfig>(&yaml).unwrap().sanitized();
+
+        assert!(cfg.rec_video_default_preset.is_none());
+    }
+
+    #[test]
+    fn video_preset_ids_that_could_leave_the_preset_folder_are_dropped() {
+        let too_long = "a".repeat(VIDEO_PRESET_ID_MAX_BYTES + 1);
+        for invalid in [
+            "",
+            "../presets",
+            "presets/../other",
+            "preset name",
+            "preset.json",
+            "naïve",
+            too_long.as_str(),
+        ] {
+            let cfg = AppConfig {
+                rec_video_default_preset: Some(invalid.to_string()),
+                ..AppConfig::default()
+            }
+            .sanitized();
+
+            assert!(
+                cfg.rec_video_default_preset.is_none(),
+                "{invalid:?} survived sanitizing"
+            );
+        }
+    }
+
+    #[test]
+    fn video_preset_ids_keep_the_characters_a_stored_preset_uses() {
+        let longest = "a".repeat(VIDEO_PRESET_ID_MAX_BYTES);
+        for valid in ["Interview", "bubble_zoom-v2", longest.as_str()] {
+            let cfg = AppConfig {
+                rec_video_default_preset: Some(valid.to_string()),
+                ..AppConfig::default()
+            }
+            .sanitized();
+
+            assert_eq!(cfg.rec_video_default_preset.as_deref(), Some(valid));
+        }
     }
 
     #[test]

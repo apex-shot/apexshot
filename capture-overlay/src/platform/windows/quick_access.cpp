@@ -146,7 +146,7 @@ QString uiFamily()
     static const QString family = [] {
         const QStringList families = QFontDatabase().families();
         for (const QString& candidate :
-             {QStringLiteral("DM Sans"), QStringLiteral("Inter"), QStringLiteral("Segoe UI")}) {
+             {QStringLiteral("Inter"), QStringLiteral("DM Sans"), QStringLiteral("Segoe UI")}) {
             if (families.contains(candidate))
                 return candidate;
         }
@@ -201,10 +201,10 @@ void registerBundledFonts()
 
     QFile log(QDir(QDir::tempPath()).filePath(QStringLiteral("apexshot-quickaccess.log")));
     if (log.open(QIODevice::Append | QIODevice::WriteOnly)) {
-        log.write(QStringLiteral("fonts: %1/8 from %2; DM Sans present=%3; family=%4\n")
+        log.write(QStringLiteral("fonts: %1/8 from %2; Inter present=%3; family=%4\n")
                       .arg(loaded)
                       .arg(fontDir)
-                      .arg(QFontDatabase().families().contains(QStringLiteral("DM Sans")) ? 1 : 0)
+                      .arg(QFontDatabase().families().contains(QStringLiteral("Inter")) ? 1 : 0)
                       .arg(uiFamily())
                       .toUtf8());
     }
@@ -215,7 +215,9 @@ QFont uiFont(int pixelSize, bool bold = false)
     QFont font(uiFamily());
     font.setPixelSize(pixelSize);
     font.setWeight(bold ? QFont::Medium : QFont::Normal);
-    font.setHintingPreference(QFont::PreferNoHinting);
+    // Slight hinting: glyph stems land on whole pixels, which reads crisper at
+    // ordinary display scales than Qt's unhinted default.
+    font.setHintingPreference(QFont::PreferVerticalHinting);
     font.setLetterSpacing(QFont::PercentageSpacing, 98.0);
     return font;
 }
@@ -2783,6 +2785,7 @@ private:
         // pointer that would double up with the one the editor paints.
         request.includeCursor = false;
         request.includeMicrophone = options.microphone;
+        request.captureKeystrokes = settings.recording.captureKeystrokes;
         request.microphoneDevice = options.microphoneDevice;
         request.systemAudio = options.systemAudio;
         request.systemAudioProcessId = options.systemAudioProcessId;

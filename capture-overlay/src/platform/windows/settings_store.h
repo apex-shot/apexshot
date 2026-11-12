@@ -85,6 +85,9 @@ struct ShellSettings {
         bool afterCopyToClipboard = false;
         bool afterSave = true;
         bool afterOpenEditor = false;
+        /// Record key presses beside the video for the editor's shortcut
+        /// captions. Off unless the user turns it on.
+        bool captureKeystrokes = false;
         Webcam webcam;
     } recording;
 

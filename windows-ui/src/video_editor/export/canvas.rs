@@ -8,9 +8,11 @@
 //! anti-aliased corner pixels are blended. Passthrough and the GPU crop keep
 //! working with a background, because neither ever sees the canvas.
 
-use super::{crop_scale_into, End, Sink};
-use crate::video_editor::pixels::Nv12Converter;
+use super::{crop_scale_into, frame_source_time, End, ExportModel, RenderPlan, Sink, SourceSpan};
+use crate::video_editor::keystrokes::{self, Caption};
+use crate::video_editor::pixels::{Nv12Converter, YuvSpace};
 use crate::video_editor::zoom::StageRect;
+use gtk4::cairo::{Context, Format, ImageSurface};
 use rayon::prelude::*;
 use std::sync::Arc;
 
@@ -509,6 +511,7 @@ fn blend(background: u8, video: u8, alpha: u32) -> u8 {
 pub(super) struct FramedSink {
     sink: Sink,
     framer: Option<Framer>,
+    captions: Option<CaptionOverlay>,
     pending: u64,
     spare: Vec<Vec<u8>>,
 }
@@ -518,9 +521,14 @@ impl FramedSink {
         Self {
             sink,
             framer,
+            captions: None,
             pending: 0,
             spare: Vec::new(),
         }
+    }
+
+    pub(super) fn set_captions(&mut self, captions: Option<CaptionOverlay>) {
+        self.captions = captions;
     }
 
     /// The canvas background at the export size, opaque RGBA, when the export
@@ -540,19 +548,20 @@ impl FramedSink {
 
     /// A buffer for a whole output frame the caller composites itself.
     pub(super) fn canvas_buffer(&mut self, index: u64) -> Result<Vec<u8>, End> {
+        self.pending = index;
         self.sink.buffer(index)
     }
 
     /// Submit a whole output frame, bypassing the framer.
     pub(super) fn submit_canvas(&mut self, frame: Vec<u8>) -> Result<(), End> {
-        self.sink.submit(frame)
+        self.submit_output(frame)
     }
 
     pub(super) fn buffer(&mut self, index: u64) -> Result<Vec<u8>, End> {
+        self.pending = index;
         let Some(framer) = self.framer.as_ref() else {
             return self.sink.buffer(index);
         };
-        self.pending = index;
         let bytes = framer.video_bytes();
         Ok(self
             .spare
@@ -563,12 +572,21 @@ impl FramedSink {
 
     pub(super) fn submit(&mut self, frame: Vec<u8>) -> Result<(), End> {
         let Some(framer) = self.framer.as_ref() else {
-            return self.sink.submit(frame);
+            return self.submit_output(frame);
         };
         let mut canvas = self.sink.buffer(self.pending)?;
         framer.compose(&frame, &mut canvas);
         self.spare.push(frame);
-        self.sink.submit(canvas)
+        self.submit_output(canvas)
+    }
+
+    /// Every output frame goes through here once, so the captions reach every
+    /// render path after framing.
+    fn submit_output(&mut self, mut frame: Vec<u8>) -> Result<(), End> {
+        if let Some(captions) = self.captions.as_mut() {
+            captions.apply(self.pending, &mut frame)?;
+        }
+        self.sink.submit(frame)
     }
 
     /// The rest rect and the zoom area of the canvas, when the export has one.
@@ -588,12 +606,12 @@ impl FramedSink {
         converter: &Nv12Converter,
     ) -> Result<(), End> {
         let Some(framer) = self.framer.as_mut() else {
-            return self.sink.submit(frame);
+            return self.submit_output(frame);
         };
         let mut canvas = self.sink.buffer(self.pending)?;
         framer.compose_card(&frame, card, outer, converter, &mut canvas);
         self.spare.push(frame);
-        self.sink.submit(canvas)
+        self.submit_output(canvas)
     }
 
     pub(super) fn finish(self) -> Result<(), End> {
@@ -601,9 +619,184 @@ impl FramedSink {
     }
 }
 
+/// Where the caption strip starts, as a share of the frame height. The pill
+/// is 7.5% of the height plus its padding and sits 3.3% above the bottom, so
+/// it reaches about 13.5% up; the strip leaves room above that.
+const CAPTION_TOP_SHARE: f64 = 0.82;
+const CAPTION_MARGIN_ROWS: usize = 2;
+
+/// Keyboard captions drawn onto the bottom strip of each output frame whose
+/// source time shows one. The strip is converted to RGBA and back, so the
+/// rows above it are never touched.
+pub(super) struct CaptionOverlay {
+    captions: Vec<Caption>,
+    spans: Vec<SourceSpan>,
+    fps: f64,
+    size: (u32, u32),
+    converter: Nv12Converter,
+    strip: Vec<u8>,
+    rgba: Vec<u8>,
+    layer: Option<ImageSurface>,
+}
+
+impl CaptionOverlay {
+    pub(super) fn new(model: &ExportModel, plan: &RenderPlan, space: YuvSpace) -> Option<Self> {
+        let settings = model.effects.captions;
+        if !settings.shortcuts {
+            return None;
+        }
+        let sidecar = model.sidecar.as_ref()?;
+        let captions: Vec<Caption> =
+            keystrokes::captions(&sidecar.keys, settings.show_single_letters)
+                .into_iter()
+                .filter(|caption| {
+                    plan.spans.iter().any(|span| {
+                        caption.start < span.source_end && span.source_start < caption.end
+                    })
+                })
+                .collect();
+        (!captions.is_empty())
+            .then(|| Self::from_captions(captions, &plan.spans, plan.fps, plan.output, space))
+    }
+
+    pub(super) fn from_captions(
+        captions: Vec<Caption>,
+        spans: &[SourceSpan],
+        fps: f64,
+        size: (u32, u32),
+        space: YuvSpace,
+    ) -> Self {
+        Self {
+            captions,
+            spans: spans.to_vec(),
+            fps,
+            size,
+            converter: Nv12Converter::new(space),
+            strip: Vec::new(),
+            rgba: Vec::new(),
+            layer: None,
+        }
+    }
+
+    pub(super) fn apply(&mut self, index: u64, frame: &mut [u8]) -> Result<(), End> {
+        if held_frame(&self.spans, index) {
+            return Ok(());
+        }
+        let Some(time) = frame_source_time(&self.spans, index, self.fps) else {
+            return Ok(());
+        };
+        if !self
+            .captions
+            .iter()
+            .any(|caption| caption.start <= time && time < caption.end)
+        {
+            return Ok(());
+        }
+        let width = self.size.0 as usize;
+        let height = self.size.1 as usize;
+        let top = ((height as f64 * CAPTION_TOP_SHARE).floor() as usize) & !1;
+        let strip_start = top.saturating_sub(CAPTION_MARGIN_ROWS);
+        let strip_rows = height - strip_start;
+        let luma_len = width * strip_rows;
+        let uv_start = width * height;
+
+        self.strip.resize(luma_len * 3 / 2, 0);
+        let (strip_luma, strip_chroma) = self.strip.split_at_mut(luma_len);
+        strip_luma.copy_from_slice(&frame[strip_start * width..uv_start]);
+        strip_chroma.copy_from_slice(
+            &frame[uv_start + (strip_start / 2) * width..uv_start + (height / 2) * width],
+        );
+        self.rgba.resize(luma_len * 4, 0);
+        self.converter.to_rgba_into(
+            &self.strip,
+            (self.size.0, strip_rows as u32),
+            &mut self.rgba,
+        );
+
+        let mut layer =
+            match self.layer.take().filter(|layer| {
+                layer.width() == width as i32 && layer.height() == strip_rows as i32
+            }) {
+                Some(layer) => layer,
+                None => ImageSurface::create(Format::ARgb32, width as i32, strip_rows as i32)
+                    .map_err(caption_error)?,
+            };
+        let stride = layer.stride() as usize;
+        {
+            let mut data = layer.data().map_err(caption_error)?;
+            for (row, source) in self.rgba.chunks_exact(width * 4).enumerate() {
+                let line = &mut data[row * stride..row * stride + width * 4];
+                for (pixel, rgba) in line
+                    .as_chunks_mut::<4>()
+                    .0
+                    .iter_mut()
+                    .zip(source.as_chunks::<4>().0)
+                {
+                    pixel.copy_from_slice(&[rgba[2], rgba[1], rgba[0], 255]);
+                }
+            }
+        }
+        layer.mark_dirty();
+        {
+            let context = Context::new(&layer).map_err(caption_error)?;
+            context.translate(0.0, -(strip_start as f64));
+            keystrokes::draw(&context, width as f64, height as f64, &self.captions, time);
+        }
+        layer.flush();
+        {
+            let data = layer.data().map_err(caption_error)?;
+            for (row, target) in self.rgba.chunks_exact_mut(width * 4).enumerate() {
+                let line = &data[row * stride..row * stride + width * 4];
+                for (rgba, pixel) in target
+                    .as_chunks_mut::<4>()
+                    .0
+                    .iter_mut()
+                    .zip(line.as_chunks::<4>().0)
+                {
+                    rgba.copy_from_slice(&[pixel[2], pixel[1], pixel[0], 255]);
+                }
+            }
+        }
+        self.layer = Some(layer);
+
+        self.converter.convert_into(
+            &self.rgba,
+            (self.size.0, strip_rows as u32),
+            &mut self.strip,
+        );
+        let rest = top - strip_start;
+        frame[top * width..uv_start].copy_from_slice(&self.strip[rest * width..luma_len]);
+        frame[uv_start + (top / 2) * width..uv_start + (height / 2) * width]
+            .copy_from_slice(&self.strip[luma_len + (rest / 2) * width..]);
+        Ok(())
+    }
+}
+
+fn caption_error(error: impl std::fmt::Display) -> End {
+    End::Failed(format!("could not draw the captions: {error}"))
+}
+
+/// Whether the global composition frame sits in a span that holds its first
+/// source frame. A hold replays footage the captions have already played, so
+/// painting them again would leave the last caption on screen for the whole
+/// freeze.
+fn held_frame(spans: &[SourceSpan], index: u64) -> bool {
+    let mut remaining = index;
+    for span in spans {
+        if remaining < span.frames {
+            return span.speed <= 0.0 || !span.speed.is_finite();
+        }
+        remaining -= span.frames;
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{corner_coverage, rounded_coverage, video_size, CanvasLayout, CardFrame, Framer};
+    use super::{
+        corner_coverage, rounded_coverage, video_size, CanvasLayout, CaptionOverlay, CardFrame,
+        Framer,
+    };
     use crate::video_editor::pixels::{Nv12Converter, YuvSpace};
     use std::sync::Arc;
 
@@ -630,6 +823,109 @@ mod tests {
         assert_eq!(corner[0], 0);
         assert_eq!(corner[7 * 8 + 7], 255);
         assert!(corner.iter().any(|value| *value > 0 && *value < 255));
+    }
+
+    #[test]
+    fn captions_redraw_only_the_bottom_strip_while_active() {
+        let Some(frames) = crate::test_support::with_gtk(|| {
+            let space = crate::video_editor::pixels::YuvSpace::from_probe(None, None);
+            let spans = [super::SourceSpan {
+                composition_start: 0.0,
+                source_start: 0.0,
+                source_end: 3.0,
+                speed: 1.0,
+                frames: 90,
+            }];
+            let captions = vec![super::Caption {
+                start: 0.0,
+                end: 1.0,
+                keys: vec!["Ctrl".to_owned(), "S".to_owned()],
+                count: 1,
+            }];
+            let mut overlay =
+                CaptionOverlay::from_captions(captions, &spans, 30.0, (320, 240), space);
+            let luma = 320 * 240;
+            let plain = vec![128u8; luma * 3 / 2];
+            let canvas: Vec<u8> = (0..luma * 3 / 2)
+                .map(|index| {
+                    if index < luma {
+                        (40 + index % 200) as u8
+                    } else {
+                        128
+                    }
+                })
+                .collect();
+            [plain, canvas]
+                .into_iter()
+                .map(|source| {
+                    let mut active = source.clone();
+                    overlay.apply(0, &mut active).unwrap();
+                    let mut inactive = source.clone();
+                    overlay.apply(45, &mut inactive).unwrap();
+                    (source, active, inactive)
+                })
+                .collect::<Vec<_>>()
+        }) else {
+            return;
+        };
+        let luma = 320 * 240;
+        for (source, active, inactive) in frames {
+            assert_eq!(inactive, source);
+            assert_eq!(active[..194 * 320], source[..194 * 320]);
+            assert_eq!(active[luma..luma + 97 * 320], source[luma..luma + 97 * 320]);
+            assert_ne!(active[212 * 320..luma], source[212 * 320..luma]);
+        }
+    }
+
+    #[test]
+    fn a_held_frame_does_not_paint_the_captions_again() {
+        let Some(frames) = crate::test_support::with_gtk(|| {
+            let space = crate::video_editor::pixels::YuvSpace::from_probe(None, None);
+            let spans = [
+                super::SourceSpan {
+                    composition_start: 0.0,
+                    source_start: 0.0,
+                    source_end: 1.0,
+                    speed: 1.0,
+                    frames: 30,
+                },
+                super::SourceSpan {
+                    composition_start: 1.0,
+                    source_start: 0.966_667,
+                    source_end: 0.966_667,
+                    speed: 0.0,
+                    frames: 30,
+                },
+            ];
+            let captions = vec![super::Caption {
+                start: 0.0,
+                end: 1.0,
+                keys: vec!["Ctrl".to_owned(), "S".to_owned()],
+                count: 1,
+            }];
+            let mut overlay =
+                CaptionOverlay::from_captions(captions, &spans, 30.0, (320, 240), space);
+            let luma = 320 * 240;
+            let canvas: Vec<u8> = (0..luma * 3 / 2)
+                .map(|index| {
+                    if index < luma {
+                        (40 + index % 200) as u8
+                    } else {
+                        128
+                    }
+                })
+                .collect();
+            let mut kept = canvas.clone();
+            overlay.apply(10, &mut kept).unwrap();
+            let mut held = canvas.clone();
+            overlay.apply(45, &mut held).unwrap();
+            (canvas, kept, held)
+        }) else {
+            return;
+        };
+        let (canvas, kept, held) = frames;
+        assert_eq!(held, canvas, "the held frame repainted the captions");
+        assert_ne!(kept, canvas, "the kept frame should paint its caption");
     }
 
     #[test]

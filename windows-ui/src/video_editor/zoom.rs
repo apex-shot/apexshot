@@ -138,7 +138,9 @@ impl TimeMapping {
     }
 
     /// The recorded source time shown at `composition` seconds, or `None`
-    /// between segments and past the end.
+    /// between segments and past the end. A segment whose source runs slower
+    /// or faster than composition time is followed at that rate, and a held
+    /// segment answers its first source frame throughout.
     pub(super) fn source_at(&self, composition: f64) -> Option<f64> {
         if !composition.is_finite() {
             return None;
@@ -146,8 +148,9 @@ impl TimeMapping {
         self.segments
             .iter()
             .find(|&&(start, end, _, _)| composition >= start && composition < end)
-            .map(|&(start, _, source_start, source_end)| {
-                (source_start + (composition - start)).min(source_end)
+            .map(|&(start, end, source_start, source_end)| {
+                let rate = segment_rate(start, end, source_start, source_end);
+                (source_start + (composition - start) * rate).min(source_end)
             })
     }
 
@@ -163,10 +166,23 @@ impl TimeMapping {
                 if end <= start {
                     return None;
                 }
-                let source_start = source_start + (start - comp_start);
-                let source_end = (source_start + (end - start)).min(source_end);
+                let rate = segment_rate(comp_start, comp_end, source_start, source_end);
+                let source_start = source_start + (start - comp_start) * rate;
+                let source_end = (source_start + (end - start) * rate).min(source_end);
                 Some((start, end, source_start, source_end))
             })
+    }
+}
+
+/// How many source seconds a composition second covers in one segment: the
+/// held segment answers 0, and a segment whose ends cannot give a usable ratio
+/// (the identity mapping's infinities) stays at 1x.
+fn segment_rate(comp_start: f64, comp_end: f64, source_start: f64, source_end: f64) -> f64 {
+    let rate = (source_end - source_start) / (comp_end - comp_start);
+    if rate.is_finite() {
+        rate.max(0.0)
+    } else {
+        1.0
     }
 }
 
@@ -1537,6 +1553,31 @@ mod tests {
             (actual.1 .1 - expected.1 .1).abs() < 0.5,
             "{actual:?} vs {expected:?}"
         );
+    }
+
+    #[test]
+    fn the_mapping_follows_a_sped_segment_and_holds_a_frozen_one() {
+        let mapping = TimeMapping::new(vec![(0.0, 2.0, 1.0, 5.0), (2.0, 3.0, 6.0, 6.0)]);
+        assert_eq!(mapping.source_at(0.0), Some(1.0));
+        assert_eq!(mapping.source_at(1.0), Some(3.0));
+        assert_eq!(mapping.source_at(1.9), Some(4.8));
+        assert_eq!(mapping.source_at(2.5), Some(6.0));
+        assert_eq!(mapping.source_at(3.0), None);
+        assert_eq!(TimeMapping::default().source_at(4.0), Some(4.0));
+        assert_eq!(TimeMapping::default().source_at(0.25), Some(0.25));
+    }
+
+    #[test]
+    fn a_sped_window_maps_its_clip_onto_the_source_it_covers() {
+        let mapping = TimeMapping::new(vec![(0.0, 2.0, 2.0, 6.0)]);
+        let windows: Vec<(f64, f64, f64, f64)> = mapping
+            .windows(auto_clip(0.5, 1.5, 2.0, (0.0, 0.0)))
+            .collect();
+        assert_eq!(windows.len(), 1);
+        assert!((windows[0].0 - 0.5).abs() < 1e-9);
+        assert!((windows[0].1 - 1.5).abs() < 1e-9);
+        assert!((windows[0].2 - 3.0).abs() < 1e-9);
+        assert!((windows[0].3 - 5.0).abs() < 1e-9);
     }
 
     #[test]

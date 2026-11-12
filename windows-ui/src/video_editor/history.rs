@@ -75,6 +75,16 @@ impl<T: PartialEq> EditHistory<T> {
         self.redo.clear();
     }
 
+    /// The step the next undo would hand back, without taking it.
+    pub(super) fn peek_undo(&self) -> Option<&T> {
+        self.undo.last()
+    }
+
+    /// The step the next redo would replay, without taking it.
+    pub(super) fn peek_redo(&self) -> Option<&T> {
+        self.redo.last()
+    }
+
     /// Hand back the state before the last step, taking `current` for redo.
     pub(super) fn undo(&mut self, current: T) -> Option<T> {
         // An edit that changed nothing still leaves its step behind; skip the

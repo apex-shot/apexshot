@@ -9,11 +9,14 @@
 //! The file carries what the Windows editor models, under the names the shared
 //! editor's `VideoProjectFile` already uses for the same concepts —
 //! `trim_start_seconds`, `cuts`, `segment_starts`, `freeze_tail`, `zoom_clips`,
-//! `zoom_camera`, `cursor_hide_clips`, and the three view fields. Merging the
-//! two schemas later is then a promotion rather than a translation. What this
-//! editor does not model — background, crop, dimension, quality, audio, extra
-//! media — has no key here, so the file never claims a feature the editor would
-//! not honour.
+//! `zoom_camera`, `cursor_hide_clips`, and the three view fields. The stage is
+//! three plain keys: the wallpaper the user picked, the inset around the video
+//! and its corner radius. A fill the panel paints itself has no key, because
+//! the Windows model holds it as a closure and a schema for gradients is a
+//! separate design. Merging the two schemas later is then a promotion rather
+//! than a translation. What this editor does not model — crop, dimension,
+//! quality, audio, extra media — has no key here, so the file never claims a
+//! feature the editor would not honour.
 //!
 //! The directory is its own rather than the shared `video-projects` one: the
 //! shared editor parses every file in that folder with its own loader, and a
@@ -34,7 +37,23 @@ use sha2::{Digest, Sha256};
 /// Version 2 gives the camera layer's `enabled` switch its own meaning — the
 /// layer draws at all — where version 1 files used it to say the default
 /// layout was the screen alone.
-pub(super) const PROJECT_VERSION: u32 = 2;
+///
+/// Version 3 adds the stage: the wallpaper behind the video, its padding and
+/// its corner radius. All three read back as a flat stage in a version 2 file.
+pub(super) const PROJECT_VERSION: u32 = 3;
+
+/// The stage behind the video as the file stores it: the wallpaper the user
+/// picked, by its bundled catalog name. A recording opened with no fill reads
+/// back with no selection, which is also how a fill the panel paints itself
+/// comes back, since that painter has no serialised form.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub(super) struct StageFile {
+    #[serde(default)]
+    pub selection: Option<String>,
+    /// The frame the project was saved with; absent means the recording's own shape.
+    #[serde(default)]
+    pub aspect: Option<String>,
+}
 
 /// The camera layer as the project file stores it: fractions of the frame, a
 /// corner radius as a fraction of the shorter side, and the two switches.
@@ -139,6 +158,14 @@ pub(super) struct EditorProjectFile {
     pub cuts: Vec<f64>,
     #[serde(default)]
     pub segment_starts: Vec<f64>,
+    /// Playback speed of each cut piece, one entry per segment. A file written
+    /// before speeds existed reads as every piece at 1×.
+    #[serde(default)]
+    pub segment_speeds: Vec<f64>,
+    /// Source starts of typing suggestions the user applied or removed. A
+    /// suggestion whose start is listed here is not offered again.
+    #[serde(default)]
+    pub typing_suggestions_resolved: Vec<f64>,
     #[serde(default)]
     pub freeze_tail: f64,
     #[serde(default)]
@@ -151,15 +178,102 @@ pub(super) struct EditorProjectFile {
     /// captured. Absent means the recording's own placement is still in use.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub webcam: Option<WebcamLayerFile>,
+    /// The wallpaper behind the video. Absent in a file written before the
+    /// stage was modelled, which opens with no fill.
+    #[serde(default)]
+    pub background: StageFile,
+    /// The inset around the video, against a 400px long edge. Absent reads as
+    /// the panel's own starting padding rather than a square stage.
+    #[serde(default = "default_padding")]
+    pub background_padding: f64,
+    /// The video card's corner radius, in the same units as the padding.
+    /// Absent reads as square corners.
+    #[serde(default)]
+    pub background_radius: f64,
     #[serde(default)]
     pub playhead_seconds: f64,
     #[serde(default)]
     pub timeline_scale: f64,
     #[serde(default)]
     pub timeline_scroll_seconds: f64,
+    /// The click sound by its catalog name. Absent means no sound.
+    #[serde(default)]
+    pub cursor_click_sound: Option<String>,
+    /// The click sound's volume, from 0 to 1.
+    #[serde(default = "default_click_sound_volume")]
+    pub cursor_click_sound_volume: f64,
+    /// Whether keyboard shortcuts are captioned over the video.
+    #[serde(default)]
+    pub captions_shortcuts: bool,
+    /// Whether single letters and digits are captioned on their own.
+    #[serde(default)]
+    pub captions_show_single_letters: bool,
+    /// The cursor look the project applies. Absent reads as the panel's own
+    /// starting look, which is what a file written before the editor stored a
+    /// cursor carries.
+    #[serde(default)]
+    pub cursor: super::presets::CursorFile,
+}
+
+const DEFAULT_CLICK_SOUND_VOLUME: f64 = 0.25;
+
+fn default_click_sound_volume() -> f64 {
+    DEFAULT_CLICK_SOUND_VOLUME
+}
+
+fn default_padding() -> f64 {
+    super::background::DEFAULT_PADDING
+}
+
+/// The effects a project carries beyond the cursor and the camera: the click
+/// sound and the keyboard captions.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct EffectsSettings {
+    pub click_sound: Option<String>,
+    pub click_sound_volume: f64,
+    pub captions: super::keystrokes::Settings,
+}
+
+impl Default for EffectsSettings {
+    fn default() -> Self {
+        Self {
+            click_sound: None,
+            click_sound_volume: DEFAULT_CLICK_SOUND_VOLUME,
+            captions: super::keystrokes::Settings::default(),
+        }
+    }
+}
+
+impl EffectsSettings {
+    /// Only the sound this editor ships is kept, and a volume that is not a
+    /// number or is out of range falls back to the default level.
+    pub(super) fn clamped(self) -> Self {
+        Self {
+            click_sound: self.click_sound.filter(|sound| sound == "soft"),
+            click_sound_volume: if self.click_sound_volume.is_finite() {
+                self.click_sound_volume.clamp(0.0, 1.0)
+            } else {
+                DEFAULT_CLICK_SOUND_VOLUME
+            },
+            captions: self.captions,
+        }
+    }
 }
 
 impl EditorProjectFile {
+    /// The effects this file carries, in the form the editor applies them.
+    pub(super) fn effects(&self) -> EffectsSettings {
+        EffectsSettings {
+            click_sound: self.cursor_click_sound.clone(),
+            click_sound_volume: self.cursor_click_sound_volume,
+            captions: super::keystrokes::Settings {
+                shortcuts: self.captions_shortcuts,
+                show_single_letters: self.captions_show_single_letters,
+            },
+        }
+        .clamped()
+    }
+
     /// Whether the file on disk is still the footage this project was written
     /// against. A recording replaced in place keeps its path, so size and
     /// modification time are what tell the two apart.
@@ -467,6 +581,8 @@ mod tests {
             trim_end_seconds: 12.0,
             cuts: vec![4.0, 8.0],
             segment_starts: vec![0.0, 2.5, 6.5],
+            segment_speeds: vec![1.0, 2.0, 1.0],
+            typing_suggestions_resolved: vec![4.0],
             freeze_tail: 0.75,
             zoom_clips: vec![ZoomClipFile {
                 start: 0.5,
@@ -532,9 +648,17 @@ mod tests {
                     ..LayoutSettings::default()
                 }),
             }),
+            background: StageFile::default(),
+            background_padding: default_padding(),
+            background_radius: 0.0,
             playhead_seconds: 3.5,
             timeline_scale: 42.0,
             timeline_scroll_seconds: 1.25,
+            cursor_click_sound: None,
+            cursor_click_sound_volume: DEFAULT_CLICK_SOUND_VOLUME,
+            captions_shortcuts: false,
+            captions_show_single_letters: false,
+            cursor: super::super::presets::CursorFile::default(),
         }
     }
 
@@ -565,6 +689,116 @@ mod tests {
         assert_eq!(layouts.cues[2].layout, CameraLayout::ScreenOnly);
         assert_eq!(layouts.default_layout, CameraLayout::SplitScreen);
         assert_eq!(loaded, file);
+    }
+
+    #[test]
+    fn the_stage_round_trips_through_the_project_file() {
+        let directory = scratch("stage");
+        let video = recording(&directory);
+        let path = directory.join("stage.json");
+        let mut file = project(&video);
+        file.background = StageFile {
+            selection: Some("wallpaper-004.jpg".to_owned()),
+            aspect: None,
+        };
+        file.background_padding = 48.0;
+        file.background_radius = 6.0;
+
+        write_at(&path, &file).unwrap();
+        let loaded = read_at(&path, &video).expect("project loads");
+
+        assert_eq!(
+            loaded.background.selection.as_deref(),
+            Some("wallpaper-004.jpg")
+        );
+        assert!((loaded.background_padding - 48.0).abs() < 1e-9);
+        assert!((loaded.background_radius - 6.0).abs() < 1e-9);
+        assert_eq!(loaded, file);
+    }
+
+    #[test]
+    fn the_stage_frame_round_trips_through_the_project_file() {
+        let directory = scratch("stage-aspect");
+        let video = recording(&directory);
+        let path = directory.join("stage-aspect.json");
+        let mut file = project(&video);
+        file.background = StageFile {
+            selection: None,
+            aspect: Some("9:16".to_owned()),
+        };
+
+        write_at(&path, &file).unwrap();
+        let loaded = read_at(&path, &video).expect("project loads");
+
+        assert_eq!(loaded.background.aspect.as_deref(), Some("9:16"));
+        assert_eq!(loaded, file);
+    }
+
+    #[test]
+    fn a_stage_without_a_frame_keeps_the_recording_shape() {
+        let stage: StageFile =
+            serde_json::from_str(r#"{"selection":null}"#).expect("a stage without a frame reads");
+        assert_eq!(stage.aspect, None);
+    }
+
+    #[test]
+    fn a_version_two_file_opens_on_a_flat_stage() {
+        let directory = scratch("stage-legacy");
+        let video = recording(&directory);
+        let path = directory.join("stage-legacy.json");
+        let mut json: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&project(&video)).unwrap()).unwrap();
+        let object = json.as_object_mut().unwrap();
+        object.insert("version".to_owned(), serde_json::json!(2));
+        for key in ["background", "background_padding", "background_radius"] {
+            assert!(
+                object.remove(key).is_some(),
+                "the fixture writes the stage key {key}"
+            );
+        }
+        fs::write(&path, serde_json::to_string(&json).unwrap()).unwrap();
+
+        let loaded = read_at(&path, &video).expect("project loads");
+        assert_eq!(loaded.background.selection, None);
+        assert_eq!(loaded.background_padding, 24.0);
+        assert_eq!(loaded.background_radius, 0.0);
+    }
+
+    #[test]
+    fn the_stage_is_content_where_the_view_is_not() {
+        let directory = scratch("stage-content");
+        let video = recording(&directory);
+        let saved = EditorProjectFile {
+            background: StageFile {
+                selection: Some("wallpaper-004.jpg".to_owned()),
+                aspect: None,
+            },
+            background_padding: 48.0,
+            background_radius: 6.0,
+            ..project(&video)
+        };
+
+        assert!(saved.same_content(&EditorProjectFile {
+            playhead_seconds: 9.0,
+            timeline_scale: 80.0,
+            timeline_scroll_seconds: 4.0,
+            ..saved.clone()
+        }));
+
+        assert!(!saved.same_content(&EditorProjectFile {
+            background: StageFile::default(),
+            ..saved.clone()
+        }));
+
+        assert!(!saved.same_content(&EditorProjectFile {
+            background_padding: 24.0,
+            ..saved.clone()
+        }));
+
+        assert!(!saved.same_content(&EditorProjectFile {
+            background_radius: 0.0,
+            ..saved.clone()
+        }));
     }
 
     #[test]
@@ -934,5 +1168,137 @@ mod tests {
         assert!(!on_disk.exists());
 
         let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn a_seeded_project_is_saved_at_once_and_not_rewritten() {
+        let directory = scratch("seed");
+        let video = recording(&directory);
+        let mut file = project(&video);
+        super::super::import::seed_with_preset(&mut file, None);
+        let sync = ProjectSync::default();
+        sync.adopt(None);
+
+        assert!(sync.sync(Some(file.clone()), true));
+        let saved = load_project(&video).expect("the seeded project reloads");
+        assert_eq!(
+            saved.background.selection.as_deref(),
+            Some("wallpaper-004.jpg")
+        );
+        assert!((saved.background_padding - super::super::import::IMPORT_PADDING).abs() < 1e-9);
+
+        assert!(!sync.sync(Some(file), true));
+
+        delete_project(&video);
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn the_effects_round_trip_through_their_flat_fields() {
+        let directory = scratch("effects-round-trip");
+        let video = recording(&directory);
+        let path = directory.join("effects-round-trip.json");
+        let mut file = project(&video);
+        file.cursor_click_sound = Some("soft".to_owned());
+        file.cursor_click_sound_volume = 0.6;
+        file.captions_shortcuts = true;
+        file.captions_show_single_letters = true;
+
+        write_at(&path, &file).unwrap();
+        let loaded = read_at(&path, &video).expect("project loads");
+
+        assert_eq!(loaded.cursor_click_sound.as_deref(), Some("soft"));
+        assert!((loaded.cursor_click_sound_volume - 0.6).abs() < 1e-9);
+        assert_eq!(
+            loaded.effects(),
+            EffectsSettings {
+                click_sound: Some("soft".to_owned()),
+                click_sound_volume: 0.6,
+                captions: super::super::keystrokes::Settings {
+                    shortcuts: true,
+                    show_single_letters: true,
+                },
+            }
+        );
+        assert_eq!(loaded, file);
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn a_version_two_file_opens_with_no_effects() {
+        let directory = scratch("effects-legacy");
+        let video = recording(&directory);
+        let path = directory.join("effects-legacy.json");
+        let mut json: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&project(&video)).unwrap()).unwrap();
+        let object = json.as_object_mut().unwrap();
+        object.insert("version".to_owned(), serde_json::json!(2));
+        for key in [
+            "cursor_click_sound",
+            "cursor_click_sound_volume",
+            "captions_shortcuts",
+            "captions_show_single_letters",
+        ] {
+            assert!(
+                object.remove(key).is_some(),
+                "the fixture writes the effect key {key}"
+            );
+        }
+        fs::write(&path, serde_json::to_string(&json).unwrap()).unwrap();
+
+        let loaded = read_at(&path, &video).expect("project loads");
+        assert_eq!(loaded.effects(), EffectsSettings::default());
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn the_cursor_look_round_trips_and_reads_the_starting_look_before_it_existed() {
+        let directory = scratch("cursor-look");
+        let video = recording(&directory);
+        let path = directory.join("cursor-look.json");
+        let cursor = super::super::presets::CursorFile {
+            theme: "white".to_owned(),
+            size: 1.6,
+            click_effect: "circle".to_owned(),
+            ..super::super::presets::CursorFile::default()
+        };
+        let file = EditorProjectFile {
+            cursor: cursor.clone(),
+            ..project(&video)
+        };
+
+        write_at(&path, &file).unwrap();
+        let loaded = read_at(&path, &video).expect("project loads");
+        assert_eq!(loaded.cursor, cursor);
+
+        let mut json: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&project(&video)).unwrap()).unwrap();
+        assert!(
+            json.as_object_mut().unwrap().remove("cursor").is_some(),
+            "the fixture writes the cursor key"
+        );
+        fs::write(&path, serde_json::to_string(&json).unwrap()).unwrap();
+        let legacy = read_at(&path, &video).expect("project loads");
+        assert_eq!(legacy.cursor, super::super::presets::CursorFile::default());
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn effects_keep_only_the_shipped_sound_and_a_usable_volume() {
+        let clamped = |sound: &str, volume: f64| {
+            EffectsSettings {
+                click_sound: Some(sound.to_owned()),
+                click_sound_volume: volume,
+                captions: Default::default(),
+            }
+            .clamped()
+        };
+        assert_eq!(clamped("soft", 0.5).click_sound.as_deref(), Some("soft"));
+        assert_eq!(clamped("hard", 0.5).click_sound, None);
+        assert_eq!(clamped("soft", 3.0).click_sound_volume, 1.0);
+        assert_eq!(clamped("soft", -1.0).click_sound_volume, 0.0);
+        assert_eq!(clamped("soft", f64::NAN).click_sound_volume, 0.25);
+        assert_eq!(EffectsSettings::default().click_sound, None);
+        assert_eq!(EffectsSettings::default().click_sound_volume, 0.25);
     }
 }

@@ -36,6 +36,40 @@ pub fn prepare_process() {
     register_bundled_fonts();
 }
 
+/// Draw text hinted to the pixel grid instead of GTK's automatic mode, which
+/// leaves glyphs unhinted and at fractional positions and reads soft at
+/// ordinary display scales. Slight hinting keeps the face's shapes, and hinted
+/// metrics keep letters on whole pixels.
+///
+/// Call this from an application's activate handler: it needs a display, and
+/// the setting is process-wide, so each window process installs it itself.
+pub fn sharpen_text() {
+    use gtk4::prelude::ObjectExt;
+    let Some(settings) = gtk4::Settings::default() else {
+        return;
+    };
+    // An enum this build's bindings do not name, so it is set by its nick.
+    if let Some(spec) = settings.find_property("gtk-font-rendering") {
+        let manual = gtk4::glib::EnumClass::with_type(spec.value_type())
+            .and_then(|class| class.to_value_by_nick("manual"));
+        if let Some(manual) = manual {
+            settings.set_property_from_value("gtk-font-rendering", &manual);
+        }
+    }
+    if settings.find_property("gtk-xft-hintstyle").is_some() {
+        settings.set_property("gtk-xft-hintstyle", "hintslight");
+    }
+    if settings.find_property("gtk-xft-antialias").is_some() {
+        settings.set_property("gtk-xft-antialias", 1i32);
+    }
+    if settings.find_property("gtk-xft-hinting").is_some() {
+        settings.set_property("gtk-xft-hinting", 1i32);
+    }
+    if settings.find_property("gtk-hint-font-metrics").is_some() {
+        settings.set_property("gtk-hint-font-metrics", true);
+    }
+}
+
 /// Make the bundled faces available to both text stacks: GDI for the text
 /// cairo draws on canvases, and Pango for every GTK label. Pango's
 /// DirectWrite font map never sees fonts added privately through GDI, so
@@ -61,7 +95,7 @@ fn register_bundled_fonts() {
         "Inter-Medium.ttf",
         "Inter-SemiBold.ttf",
         "Inter-Bold.ttf",
-        // The Settings, History, image editor and video editor typeface.
+        // The video editor's timeline still draws its labels through cairo.
         "DMSans-Regular.ttf",
         "DMSans-Medium.ttf",
         "DMSans-SemiBold.ttf",

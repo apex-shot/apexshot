@@ -1271,9 +1271,8 @@ fn frame_disclosure(scale: f64, host: Option<&Rc<EditorHost>>) -> (GtkBox, Rc<dy
     let expand_button = Button::new();
     expand_button.set_has_frame(false);
     expand_button.add_css_class("image-editor-frame-expand");
-    // A bundled chevron replaces the arrow character the Linux panel uses: the
-    // Windows UI's DM Sans has no U+2304/U+2303, so the glyph fell back to the
-    // missing-glyph box whenever the row opened.
+    // A bundled chevron keeps the disclosure marker on the panel's icon grid,
+    // so it follows the theme and never depends on the face carrying U+2304.
     let expand_icon = Image::from_icon_name("chevron-down-regular");
     expand_icon.set_pixel_size(px(12.0, scale));
     expand_button.set_child(Some(&expand_icon));

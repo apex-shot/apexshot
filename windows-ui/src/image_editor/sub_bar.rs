@@ -85,8 +85,8 @@ fn pill(scale: f64, options: &[&str], on_pick: Rc<dyn Fn(usize)>) -> Pill {
     let selected = Rc::new(Cell::new(0usize));
     let checks = Rc::new(RefCell::new(Vec::<Image>::new()));
     for (index, option) in options.iter().enumerate() {
-        // A bundled check rather than U+2713: the editor's DM Sans has no
-        // check mark, so the text glyph fell back to a missing-glyph box.
+        // A bundled check keeps the menu marker on the panel's icon grid
+        // instead of a text glyph.
         let check = Image::from_icon_name(custom::CHECK_SYMBOLIC);
         check.set_pixel_size(px(12.0, scale));
         check.add_css_class("image-editor-subbar-check");

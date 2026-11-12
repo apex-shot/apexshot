@@ -165,6 +165,7 @@ pub fn show(release: Release) -> anyhow::Result<()> {
         .build();
 
     app.connect_activate(move |application| {
+        crate::platform::sharpen_text();
         if let Some(existing) = application.windows().first() {
             existing.present();
             return;

@@ -455,7 +455,15 @@ fn effect_loop(queue: Arc<EffectQueue>, sender: mpsc::SyncSender<EffectFrame>) {
                 card.fps,
                 card.amount,
                 card.radius,
-            ) {
+            )
+            .or_else(|| {
+                super::motion_blur::CardTrail::stationary(
+                    card.now,
+                    card.stage,
+                    output_size,
+                    card.radius,
+                )
+            }) {
                 let mut rendered = vec![0; output_size.0 as usize * output_size.1 as usize * 4];
                 let (quality, span, anisotropy) = if job.playing {
                     (6, 16.0, 1)
@@ -667,6 +675,79 @@ mod tests {
             queue.ready.notify_one();
         }
         worker.join().unwrap();
+    }
+
+    #[test]
+    fn card_layer_stays_stage_sized_while_the_card_rests_or_nudges() {
+        let queue = std::sync::Arc::new(super::EffectQueue::default());
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        let worker_queue = queue.clone();
+        let worker = std::thread::spawn(move || super::effect_loop(worker_queue, sender));
+        let source = (64, 32);
+        let pixels = std::sync::Arc::new(vec![255u8; 64 * 32 * 4]);
+        let rest = (16.0, 8.0, 64.0, 48.0);
+        let nudged = (16.4, 8.0, 64.0, 48.0);
+        let shifted = (8.0, 8.0, 64.0, 48.0);
+        let stage_card =
+            |now: (f64, f64, f64, f64), previous: (f64, f64, f64, f64)| super::CardLayer {
+                now,
+                previous,
+                stage: (128.0, 96.0),
+                radius: 0.0,
+                fps: 60.0,
+                amount: 1.0,
+            };
+        let cards = [
+            Some(stage_card(rest, shifted)),
+            Some(stage_card(rest, rest)),
+            Some(stage_card(nudged, rest)),
+            Some(stage_card(rest, shifted)),
+            None,
+        ];
+        let mut frames = Vec::new();
+        for (index, card) in cards.into_iter().enumerate() {
+            *queue.job.lock().unwrap() = Some(super::EffectJob {
+                generation: 3,
+                revision: index as u64 + 1,
+                size: source,
+                pixels: pixels.clone(),
+                ripple: None,
+                trail: None,
+                card,
+                playing: true,
+            });
+            queue.ready.notify_one();
+            frames.push(
+                receiver
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .ok(),
+            );
+        }
+        drop(receiver);
+        {
+            let _slot = queue.job.lock().unwrap();
+            queue
+                .stopped
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            queue.ready.notify_one();
+        }
+        worker.join().unwrap();
+        let expected = [
+            ((128, 96), true),
+            ((128, 96), true),
+            ((128, 96), true),
+            ((128, 96), true),
+            ((64, 32), false),
+        ];
+        for (index, (frame, (size, layer))) in frames.iter().zip(expected).enumerate() {
+            let Some(frame) = frame else {
+                panic!("job {} never completed", index + 1);
+            };
+            assert_eq!((frame.generation, frame.revision), (3, index as u64 + 1));
+            assert_eq!(frame.size, size, "job {}", index + 1);
+            assert_eq!(frame.layer, layer, "job {}", index + 1);
+            assert_eq!(frame.pixels.len(), size.0 as usize * size.1 as usize * 4);
+        }
     }
 
     #[test]

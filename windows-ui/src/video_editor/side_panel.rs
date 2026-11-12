@@ -15,7 +15,6 @@ use crate::recording::editor::model::{
     ClickEffect, CursorMotionStyle, CursorRotationMode, CursorSettings, CursorTheme,
 };
 use crate::settings::select::SettingsSelect;
-use gtk4::cairo::{FontSlant, FontWeight};
 use gtk4::gdk;
 use gtk4::gdk_pixbuf::Pixbuf;
 use gtk4::prelude::*;
@@ -41,6 +40,14 @@ pub(super) fn build_tools_column(
     cursor_repaint: Rc<dyn Fn()>,
     timeline: &super::timeline::Timeline,
 ) -> GtkBox {
+    let cursor_repaint: Rc<dyn Fn()> = {
+        let timeline = timeline.clone();
+        let paint = cursor_repaint;
+        Rc::new(move || {
+            timeline.mark_cursor_changed();
+            paint();
+        })
+    };
     let column = GtkBox::new(Orientation::Vertical, 0);
     column.add_css_class("recording-editor-tools-column");
     column.set_hexpand(false);
@@ -56,15 +63,12 @@ pub(super) fn build_tools_column(
     pages.set_hexpand(false);
     pages.set_vexpand(true);
     pages.set_size_request((TOOL_COLUMN_WIDTH as f64 * scale).round() as i32, -1);
+    let (background_panel, _, _, _) = build_background_panel(scale, window, background, &column);
+    pages.add_named(&background_panel, Some("background"));
     pages.add_named(
-        &build_background_panel(scale, window, background, &column),
-        Some("background"),
-    );
-    pages.add_named(
-        &build_cursor_panel(scale, cursor, cursor_repaint),
+        &build_cursor_panel(scale, cursor, cursor_repaint, timeline.clone()),
         Some("cursor"),
     );
-    pages.add_named(&build_frames_panel(scale), Some("frames"));
     let (webcam_page, refresh_webcam) = build_webcam_panel(scale, timeline.clone());
     pages.add_named(&webcam_page, Some("webcam"));
 
@@ -96,11 +100,6 @@ pub(super) fn build_tools_column(
             t("Background"),
         ),
         ("cursor", icon_names::POINTER_PRIMARY_CLICK, t("Cursor")),
-        (
-            "frames",
-            icon_names::custom::OVERLAPPING_WINDOWS_SYMBOLIC,
-            t("Frames"),
-        ),
         ("webcam", icon_names::custom::WEBCAM_SYMBOLIC, t("Webcam")),
     ];
 
@@ -178,23 +177,31 @@ pub(super) fn build_tools_column(
     column
 }
 
+/// The Background page, with the Padding and Radius sliders it keeps in step
+/// with the model: a recording opened over this one replaces the stage, and the
+/// controls follow it through silent value and toggle writes, so nothing is
+/// reported back to the model they just read.
 fn build_background_panel(
     scale: f64,
     window: &ApplicationWindow,
     background: Background,
     column: &GtkBox,
-) -> GtkBox {
+) -> (GtkBox, GtkBox, FilledSlider, FilledSlider) {
     let body = panel_body();
     body.set_vexpand(false);
     body.set_valign(Align::Start);
     let choice_buttons = Rc::new(RefCell::new(Vec::<ToggleButton>::new()));
 
     let source_tabs = GtkBox::new(Orientation::Horizontal, 0);
-    source_tabs.add_css_class("recording-editor-bg-tabs");
+    source_tabs.add_css_class("recording-editor-webcam-scope");
     source_tabs.set_homogeneous(true);
-    let wallpaper_tab = tab_button(&t("Wallpaper"), "recording-editor-bg-tab");
-    let custom_tab = tab_button(&t("Custom"), "recording-editor-bg-tab");
-    let image_tab = tab_button(&t("Image"), "recording-editor-bg-tab");
+    source_tabs.set_hexpand(true);
+    let wallpaper_tab = webcam_scope_button(&t("Wallpaper")).0;
+    let custom_tab = webcam_scope_button(&t("Custom")).0;
+    let image_tab = webcam_scope_button(&t("Image")).0;
+    wallpaper_tab.set_hexpand(true);
+    custom_tab.set_hexpand(true);
+    image_tab.set_hexpand(true);
     custom_tab.set_group(Some(&wallpaper_tab));
     image_tab.set_group(Some(&wallpaper_tab));
     wallpaper_tab.set_active(true);
@@ -320,14 +327,12 @@ fn build_background_panel(
         adjustment.set_value(adjustment.lower());
     });
 
-    let options = GtkBox::new(Orientation::Vertical, 8);
-    options.add_css_class("recording-editor-bg-options");
-    let padding = background.padding();
-    options.append(&value_slider_row_with(
+    let frame_section = webcam_section(scale, &t("Frame"), true);
+    let padding_slider = value_slider_control(
         &t("Padding"),
         0.0,
         80.0,
-        padding,
+        background.padding(),
         1.0,
         0,
         scale,
@@ -335,8 +340,9 @@ fn build_background_panel(
             let background = background.clone();
             move |value| background.set_padding(value)
         },
-    ));
-    options.append(&value_slider_row_with(
+    );
+    frame_section.body.append(&padding_slider.widget());
+    let radius_slider = value_slider_control(
         &t("Radius"),
         0.0,
         40.0,
@@ -348,9 +354,28 @@ fn build_background_panel(
             let background = background.clone();
             move |value| background.set_radius(value)
         },
-    ));
-    body.append(&options);
-    panel_frame(&t("Background"), body)
+    );
+    frame_section.body.append(&radius_slider.widget());
+    body.append(&frame_section.root);
+
+    {
+        let state = background.state();
+        let choices = choice_buttons.clone();
+        let padding = padding_slider.clone();
+        let radius = radius_slider.clone();
+        background.connect(Rc::new(move || {
+            padding.set_value(state.padding());
+            radius.set_value(state.radius());
+            let selection = state.selection();
+            let cards = choices.borrow();
+            for (card, file_name) in cards.iter().zip(background::WALLPAPERS) {
+                card.set_active(selection.as_deref() == Some(file_name));
+            }
+        }));
+    }
+
+    let panel = panel_frame(&t("Background"), body.clone());
+    (panel, body, padding_slider, radius_slider)
 }
 
 fn build_wallpaper_page(
@@ -525,6 +550,7 @@ fn build_cursor_panel(
     scale: f64,
     cursor: super::cursor::CursorModel,
     repaint: Rc<dyn Fn()>,
+    timeline: super::timeline::Timeline,
 ) -> GtkBox {
     let panel = GtkBox::new(Orientation::Vertical, 0);
     panel.add_css_class("recording-editor-zoom-panel");
@@ -533,12 +559,18 @@ fn build_cursor_panel(
     panel.append(&panel_header(&t("Cursor")));
 
     let tabs = GtkBox::new(Orientation::Horizontal, 0);
-    tabs.add_css_class("recording-editor-cursor-tabs");
-    tabs.set_hexpand(true);
+    tabs.add_css_class("recording-editor-webcam-scope");
     tabs.set_homogeneous(true);
-    let style_tab = tab_button(&t("Style"), "recording-editor-cursor-tab");
-    let follow_tab = tab_button(&t("Follow"), "recording-editor-cursor-tab");
-    let effects_tab = tab_button(&t("Effects"), "recording-editor-cursor-tab");
+    tabs.set_hexpand(true);
+    tabs.set_margin_start((12.0 * scale).round() as i32);
+    tabs.set_margin_end((12.0 * scale).round() as i32);
+    tabs.set_margin_bottom((8.0 * scale).round() as i32);
+    let (style_tab, _) = webcam_scope_button(&t("Style"));
+    let (follow_tab, _) = webcam_scope_button(&t("Follow"));
+    let (effects_tab, _) = webcam_scope_button(&t("Effects"));
+    for tab in [&style_tab, &follow_tab, &effects_tab] {
+        tab.set_hexpand(true);
+    }
     follow_tab.set_group(Some(&style_tab));
     effects_tab.set_group(Some(&style_tab));
     style_tab.set_active(true);
@@ -550,25 +582,92 @@ fn build_cursor_panel(
     let pages = Stack::new();
     pages.set_transition_type(StackTransitionType::Crossfade);
     pages.set_transition_duration(120);
-    let (style_page, size_slider) = build_cursor_style_page(scale, cursor.clone(), repaint.clone());
+    pages.set_vhomogeneous(false);
+    let style_page = panel_body();
+    let follow_page = panel_body();
+    let effects_page = panel_body();
+    for page in [&style_page, &follow_page, &effects_page] {
+        page.set_valign(Align::Start);
+    }
     pages.add_named(&style_page, Some("style"));
-    pages.add_named(
-        &build_cursor_follow_page(scale, cursor.clone(), repaint.clone(), size_slider),
-        Some("follow"),
-    );
-    pages.add_named(
-        &build_cursor_effects_page(scale, cursor, repaint),
-        Some("effects"),
-    );
-    pages.set_visible_child_name("style");
-    connect_tabs(
-        &pages,
-        [
-            (&style_tab, "style"),
-            (&follow_tab, "follow"),
-            (&effects_tab, "effects"),
-        ],
-    );
+    pages.add_named(&follow_page, Some("follow"));
+    pages.add_named(&effects_page, Some("effects"));
+    for (tab, name) in [
+        (&style_tab, "style"),
+        (&follow_tab, "follow"),
+        (&effects_tab, "effects"),
+    ] {
+        let pages = pages.clone();
+        tab.connect_toggled(move |tab| {
+            if tab.is_active() {
+                pages.set_visible_child_name(name);
+            }
+        });
+    }
+
+    let states: SectionStates = Rc::new(RefCell::new(std::collections::HashMap::new()));
+
+    let rebuild: Rc<dyn Fn()> = {
+        let style_page = style_page.clone();
+        let follow_page = follow_page.clone();
+        let effects_page = effects_page.clone();
+        let cursor = cursor.clone();
+        let repaint = repaint.clone();
+        let timeline = timeline.clone();
+        let states = states.clone();
+        Rc::new(move || {
+            for page in [&style_page, &follow_page, &effects_page] {
+                while let Some(child) = page.first_child() {
+                    page.remove(&child);
+                }
+            }
+            let picker = GtkBox::new(Orientation::Vertical, (8.0 * scale).round() as i32);
+            picker.set_hexpand(true);
+            style_page.append(&picker);
+            let style = remembered_section(scale, &states, "style", &t("Style"), true);
+            let clicks = remembered_section(scale, &states, "clicks", &t("Clicks"), true);
+            let movement = remembered_section(scale, &states, "movement", &t("Movement"), true);
+            let rotation = remembered_section(scale, &states, "rotation", &t("Rotation"), true);
+            let visibility =
+                remembered_section(scale, &states, "visibility", &t("Visibility"), true);
+            let keyboard = remembered_section(scale, &states, "keyboard", &t("Keyboard"), true);
+            let typing = remembered_section(scale, &states, "typing", &t("Typing"), true);
+            style_page.append(&style.root);
+            follow_page.append(&movement.root);
+            follow_page.append(&rotation.root);
+            follow_page.append(&visibility.root);
+            effects_page.append(&clicks.root);
+            effects_page.append(&keyboard.root);
+            effects_page.append(&typing.root);
+            let size_slider = build_cursor_style_page(
+                scale,
+                cursor.clone(),
+                repaint.clone(),
+                &picker,
+                &style.body,
+            );
+            build_cursor_follow_page(
+                scale,
+                cursor.clone(),
+                repaint.clone(),
+                size_slider,
+                &style.body,
+                &movement.body,
+                &rotation.body,
+                &visibility.body,
+            );
+            build_cursor_effects_page(
+                scale,
+                cursor.clone(),
+                repaint.clone(),
+                timeline.clone(),
+                &clicks.body,
+                &keyboard.body,
+                &typing,
+            );
+        })
+    };
+    timeline.set_cursor_listener(rebuild);
 
     let scroll = ScrolledWindow::new();
     scroll.add_css_class("recording-editor-zoom-scroll");
@@ -585,14 +684,9 @@ fn build_cursor_style_page(
     scale: f64,
     cursor: super::cursor::CursorModel,
     repaint: Rc<dyn Fn()>,
-) -> (GtkBox, FilledSlider) {
-    let page = tab_body();
-    let hint = Label::new(Some(&t("Shown over the recording in preview and export")));
-    hint.add_css_class("recording-editor-zoom-hint");
-    hint.set_wrap(true);
-    hint.set_xalign(0.0);
-    page.append(&hint);
-
+    picker: &GtkBox,
+    style: &GtkBox,
+) -> FilledSlider {
     let grid = Grid::new();
     grid.add_css_class("recording-editor-cursor-grid");
     grid.set_column_spacing((8.0 * scale).round() as u32);
@@ -620,7 +714,7 @@ fn build_cursor_style_page(
         });
         grid.attach(&card, (index % 2) as i32, (index / 2) as i32, 1, 1);
     }
-    page.append(&grid);
+    picker.append(&grid);
     // The sprite art is 48 pixels across, so anything past 2x is a magnified
     // picture; the shared model still clamps to 3.0 for platforms with finer
     // art.
@@ -636,8 +730,8 @@ fn build_cursor_style_page(
         repaint.clone(),
         |settings, value| settings.size = value,
     );
-    page.append(&size_slider.widget());
-    page.append(
+    style.append(&size_slider.widget());
+    style.append(
         &cursor_slider(
             &t("Shadow"),
             0.0,
@@ -652,21 +746,21 @@ fn build_cursor_style_page(
         )
         .widget(),
     );
-    (page, size_slider)
+    size_slider
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_cursor_follow_page(
     scale: f64,
     cursor: super::cursor::CursorModel,
     repaint: Rc<dyn Fn()>,
     size_slider: FilledSlider,
-) -> GtkBox {
-    let page = tab_body();
+    style: &GtkBox,
+    movement: &GtkBox,
+    rotation: &GtkBox,
+    visibility: &GtkBox,
+) {
     let settings = cursor.settings();
-    let preset_label = Label::new(Some(&t("PRESET")));
-    preset_label.add_css_class("recording-editor-zoom-kicker");
-    preset_label.set_xalign(0.0);
-    page.append(&preset_label);
 
     let presets = GtkBox::new(Orientation::Horizontal, 8);
     presets.set_homogeneous(true);
@@ -678,7 +772,7 @@ fn build_cursor_follow_page(
     smooth.set_active(active_preset == Some(CursorMotionStyle::Smooth));
     presets.append(&focused);
     presets.append(&smooth);
-    page.append(&presets);
+    movement.append(&presets);
     let smoothing_slider = cursor_slider(
         &t("Smoothing"),
         0.0,
@@ -691,7 +785,7 @@ fn build_cursor_follow_page(
         repaint.clone(),
         |settings, value| settings.smooth = value,
     );
-    page.append(&smoothing_slider.widget());
+    movement.append(&smoothing_slider.widget());
     let speed_slider = cursor_slider(
         &t("Speed"),
         0.25,
@@ -704,12 +798,8 @@ fn build_cursor_follow_page(
         repaint.clone(),
         |settings, value| settings.speed = value,
     );
-    page.append(&speed_slider.widget());
+    movement.append(&speed_slider.widget());
 
-    let rotation_header = Label::new(Some(&t("Rotation")));
-    rotation_header.add_css_class("recording-editor-zoom-classic-label");
-    rotation_header.set_xalign(0.0);
-    page.append(&rotation_header);
     let rotation_modes = SettingsSelect::new(
         [
             ("velocity", t("Tilt with motion")),
@@ -718,7 +808,7 @@ fn build_cursor_follow_page(
         settings.rotation_mode.as_str(),
     );
     rotation_modes.widget().set_hexpand(true);
-    page.append(rotation_modes.widget());
+    rotation.append(rotation_modes.widget());
     let tilt_slider = cursor_slider(
         &t("Tilt amount"),
         0.0,
@@ -731,7 +821,7 @@ fn build_cursor_follow_page(
         repaint.clone(),
         |settings, value| settings.rotate_on_x_movement_ratio = value,
     );
-    page.append(&tilt_slider.widget());
+    rotation.append(&tilt_slider.widget());
     let tilt_widget = tilt_slider.widget().clone();
     tilt_widget.set_sensitive(settings.rotation_mode == CursorRotationMode::Velocity);
     rotation_modes.connect_changed({
@@ -748,7 +838,7 @@ fn build_cursor_follow_page(
             tilt_widget.set_sensitive(mode == CursorRotationMode::Velocity);
         }
     });
-    page.append(
+    rotation.append(
         &cursor_slider(
             &t("Base angle"),
             -180.0,
@@ -811,7 +901,7 @@ fn build_cursor_follow_page(
     });
     default_row.append(&default_label);
     default_row.append(&always_default);
-    page.append(&default_row);
+    style.append(&default_row);
 
     let shake_row = GtkBox::new(Orientation::Horizontal, 8);
     shake_row.add_css_class("recording-editor-zoom-classic");
@@ -841,7 +931,7 @@ fn build_cursor_follow_page(
     });
     shake_row.append(&shake_label);
     shake_row.append(&remove_shake);
-    page.append(&shake_row);
+    movement.append(&shake_row);
 
     let idle_row = GtkBox::new(Orientation::Horizontal, 8);
     idle_row.add_css_class("recording-editor-zoom-classic");
@@ -863,8 +953,8 @@ fn build_cursor_follow_page(
     });
     idle_row.append(&idle_label);
     idle_row.append(&idle);
-    page.append(&idle_row);
-    page.append(
+    visibility.append(&idle_row);
+    visibility.append(
         &cursor_slider(
             &t("Idle delay"),
             120.0,
@@ -903,8 +993,8 @@ fn build_cursor_follow_page(
     });
     loop_row.append(&loop_label);
     loop_row.append(&loop_switch);
-    page.append(&loop_row);
-    page.append(
+    visibility.append(&loop_row);
+    visibility.append(
         &cursor_slider(
             &t("Loop before end"),
             1000.0,
@@ -923,7 +1013,7 @@ fn build_cursor_follow_page(
         )
         .widget(),
     );
-    page.append(
+    visibility.append(
         &cursor_slider(
             &t("Stop at the end"),
             0.0,
@@ -938,16 +1028,17 @@ fn build_cursor_follow_page(
         )
         .widget(),
     );
-    page
 }
 
 fn build_cursor_effects_page(
     scale: f64,
     cursor: super::cursor::CursorModel,
     repaint: Rc<dyn Fn()>,
-) -> GtkBox {
-    let page = tab_body();
-
+    timeline: super::timeline::Timeline,
+    clicks: &GtkBox,
+    keyboard: &GtkBox,
+    typing: &WebcamSection,
+) {
     let anim_t = Rc::new(Cell::new(0.0));
     let live = DrawingArea::new();
     live.add_css_class("recording-editor-click-live-preview");
@@ -968,12 +1059,7 @@ fn build_cursor_effects_page(
             );
         });
     }
-    page.append(&live);
-
-    let label = Label::new(Some(&t("CLICK EFFECT")));
-    label.add_css_class("recording-editor-zoom-kicker");
-    label.set_xalign(0.0);
-    page.append(&label);
+    clicks.append(&live);
 
     let click_row = GtkBox::new(Orientation::Horizontal, (6.0 * scale).round() as i32);
     click_row.add_css_class("recording-editor-click-effect-row");
@@ -993,7 +1079,7 @@ fn build_cursor_effects_page(
     click_row.append(&none_btn);
     click_row.append(&ripple_btn);
     click_row.append(&circle_btn);
-    page.append(&click_row);
+    clicks.append(&click_row);
 
     for (button, choice) in [
         (none_btn, ClickEffect::None),
@@ -1025,7 +1111,289 @@ fn build_cursor_effects_page(
         gtk4::glib::ControlFlow::Continue
     });
 
-    page
+    build_sound_and_caption_controls(scale, cursor.clone(), timeline.clone(), clicks, keyboard);
+    build_typing_suggestions(scale, cursor, timeline, typing);
+}
+
+fn switch_row(label: &str) -> (GtkBox, Switch) {
+    let row = GtkBox::new(Orientation::Horizontal, 8);
+    row.add_css_class("recording-editor-zoom-classic");
+    let text = Label::new(Some(label));
+    text.add_css_class("recording-editor-zoom-classic-label");
+    text.set_xalign(0.0);
+    text.set_hexpand(true);
+    let switch = Switch::new();
+    switch.add_css_class("recording-editor-zoom-switch");
+    switch.set_valign(Align::Center);
+    switch.set_halign(Align::End);
+    row.append(&text);
+    row.append(&switch);
+    (row, switch)
+}
+
+/// The click sound and keyboard caption controls. Each change is written
+/// through the timeline, so it is an undo step and reaches the preview and the
+/// export, and the controls follow the document on load and undo.
+fn build_sound_and_caption_controls(
+    scale: f64,
+    cursor: super::cursor::CursorModel,
+    timeline: super::timeline::Timeline,
+    clicks: &GtkBox,
+    keyboard: &GtkBox,
+) {
+    clicks.append(&webcam_kicker(&t("Sound")));
+
+    let syncing = Rc::new(Cell::new(false));
+
+    let sound_row = GtkBox::new(Orientation::Horizontal, (6.0 * scale).round() as i32);
+    sound_row.add_css_class("recording-editor-click-effect-row");
+    sound_row.set_hexpand(true);
+    sound_row.set_homogeneous(true);
+    let sound_card = |label: &str| {
+        let card = ToggleButton::new();
+        card.add_css_class("recording-editor-click-effect-card");
+        card.set_has_frame(false);
+        card.set_hexpand(true);
+        let name = Label::new(Some(label));
+        name.add_css_class("recording-editor-click-effect-label");
+        name.set_xalign(0.5);
+        card.set_child(Some(&name));
+        card
+    };
+    let sound_off = sound_card(&t("Off"));
+    let sound_soft = sound_card(&t("Soft"));
+    sound_soft.set_group(Some(&sound_off));
+    sound_row.append(&sound_off);
+    sound_row.append(&sound_soft);
+    clicks.append(&sound_row);
+
+    sound_off.connect_toggled({
+        let timeline = timeline.clone();
+        let syncing = syncing.clone();
+        move |card| {
+            if !card.is_active() || syncing.get() {
+                return;
+            }
+            timeline.update_effects(|effects| effects.click_sound = None);
+        }
+    });
+    sound_soft.connect_toggled({
+        let timeline = timeline.clone();
+        let syncing = syncing.clone();
+        move |card| {
+            if !card.is_active() || syncing.get() {
+                return;
+            }
+            timeline.update_effects(|effects| effects.click_sound = Some("soft".to_owned()));
+        }
+    });
+
+    let volume = value_slider_control(&t("Volume"), 0.0, 100.0, 25.0, 1.0, 0, scale, {
+        let timeline = timeline.clone();
+        move |value| timeline.update_effects(|effects| effects.click_sound_volume = value / 100.0)
+    });
+
+    let preview = Button::with_label(&t("Preview"));
+    preview.connect_clicked({
+        let timeline = timeline.clone();
+        move |_| super::click_sound::preview(timeline.effects_settings().click_sound_volume)
+    });
+
+    let volume_row = GtkBox::new(Orientation::Horizontal, (8.0 * scale).round() as i32);
+    volume_row.set_hexpand(true);
+    volume.widget().set_hexpand(true);
+    volume_row.append(&volume.widget());
+    preview.add_css_class("recording-editor-secondary-button");
+    preview.set_valign(Align::Center);
+    preview.set_halign(Align::End);
+    volume_row.append(&preview);
+    clicks.append(&volume_row);
+
+    let (shortcuts_row, shortcuts) = switch_row(&t("Show keyboard shortcuts"));
+    keyboard.append(&shortcuts_row);
+    let (letters_row, letters) = switch_row(&t("Show single letters"));
+    keyboard.append(&letters_row);
+    let no_keys = Label::new(Some(&t(
+        "This recording has no keystrokes. Turn on Record keystrokes in Settings, under Recording, then record again.",
+    )));
+    no_keys.add_css_class("recording-editor-zoom-hint");
+    no_keys.set_wrap(true);
+    no_keys.set_xalign(0.0);
+    keyboard.append(&no_keys);
+
+    shortcuts.connect_state_set({
+        let timeline = timeline.clone();
+        let syncing = syncing.clone();
+        move |_, active| {
+            if !syncing.get() {
+                timeline.update_effects(|effects| effects.captions.shortcuts = active);
+            }
+            gtk4::glib::Propagation::Proceed
+        }
+    });
+    letters.connect_state_set({
+        let timeline = timeline.clone();
+        let syncing = syncing.clone();
+        move |_, active| {
+            if !syncing.get() {
+                timeline.update_effects(|effects| effects.captions.show_single_letters = active);
+            }
+            gtk4::glib::Propagation::Proceed
+        }
+    });
+
+    let last = Rc::new(RefCell::new(
+        None::<(super::project::EffectsSettings, bool)>,
+    ));
+    let refresh: Rc<dyn Fn()> = {
+        let volume = volume.clone();
+        let volume_row = volume_row.clone();
+        let sound_off = sound_off.clone();
+        let sound_soft = sound_soft.clone();
+        let shortcuts_row = shortcuts_row.clone();
+        let shortcuts = shortcuts.clone();
+        let letters_row = letters_row.clone();
+        let letters = letters.clone();
+        let no_keys = no_keys.clone();
+        let cursor = cursor.clone();
+        let syncing = syncing.clone();
+        let timeline = timeline.clone();
+        Rc::new(move || {
+            let effects = timeline.effects_settings();
+            let has_keys = cursor.has_keys();
+            let current = (effects.clone(), has_keys);
+            if last.borrow().as_ref() == Some(&current) {
+                return;
+            }
+            *last.borrow_mut() = Some(current);
+            syncing.set(true);
+            let sound_on = effects.click_sound.is_some();
+            sound_off.set_active(!sound_on);
+            sound_soft.set_active(sound_on);
+            volume.set_value(effects.click_sound_volume * 100.0);
+            volume_row.set_visible(sound_on);
+            shortcuts_row.set_sensitive(has_keys);
+            shortcuts.set_active(effects.captions.shortcuts);
+            letters_row.set_sensitive(has_keys && effects.captions.shortcuts);
+            letters.set_active(effects.captions.show_single_letters);
+            no_keys.set_visible(!has_keys);
+            syncing.set(false);
+        })
+    };
+    timeline.set_effects_listener(refresh);
+}
+
+/// The typing suggestions the recording's key stream offers: one card per
+/// pause, a speed the apply buttons use, and a control that takes them all.
+/// The cards follow the document on load, undo and removal; the speed is the
+/// panel's own and is not written to the file.
+fn build_typing_suggestions(
+    scale: f64,
+    cursor: super::cursor::CursorModel,
+    timeline: super::timeline::Timeline,
+    typing: &WebcamSection,
+) {
+    let speed = Rc::new(Cell::new(super::timeline::DEFAULT_TYPING_SPEED));
+    let slider = value_slider_control(
+        &t("Speed"),
+        super::timeline::MIN_TYPING_SPEED,
+        super::timeline::MAX_TYPING_SPEED,
+        super::timeline::DEFAULT_TYPING_SPEED,
+        0.1,
+        1,
+        scale,
+        {
+            let speed = speed.clone();
+            move |value| speed.set(value)
+        },
+    );
+    typing.body.append(&slider.widget());
+    let speed_widget = slider.widget();
+
+    let cards = GtkBox::new(Orientation::Vertical, (6.0 * scale).round() as i32);
+    cards.set_hexpand(true);
+    typing.body.append(&cards);
+
+    let empty = Label::new(Some(&t("No typing to speed up in this recording.")));
+    empty.add_css_class("recording-editor-zoom-hint");
+    empty.set_wrap(true);
+    empty.set_xalign(0.0);
+    typing.body.append(&empty);
+
+    let apply_all = Button::with_label(&t("Apply all suggestions"));
+    apply_all.add_css_class("recording-editor-secondary-button");
+    apply_all.set_halign(Align::Start);
+    typing.body.append(&apply_all);
+    apply_all.connect_clicked({
+        let timeline = timeline.clone();
+        let speed = speed.clone();
+        move |_| timeline.apply_all_typing_suggestions(speed.get())
+    });
+
+    let last = Rc::new(RefCell::new(None::<(u64, u64, u64, u64, Vec<f64>)>));
+    let refresh: Rc<dyn Fn()> = {
+        let timeline = timeline.clone();
+        let cursor = cursor.clone();
+        let typing_root = typing.root.clone();
+        let cards = cards.clone();
+        let speed_widget = speed_widget.clone();
+        let empty = empty.clone();
+        let apply_all = apply_all.clone();
+        let speed = speed.clone();
+        let last = last.clone();
+        Rc::new(move || {
+            let signature = timeline.typing_signature();
+            if last.borrow().as_ref() == Some(&signature) {
+                return;
+            }
+            *last.borrow_mut() = Some(signature);
+            let suggestions = timeline.typing_suggestions();
+            while let Some(child) = cards.first_child() {
+                cards.remove(&child);
+            }
+            for &(start, end) in &suggestions {
+                let card = GtkBox::new(Orientation::Vertical, (6.0 * scale).round() as i32);
+                card.add_css_class("recording-editor-zoom-classic");
+                let range = Label::new(Some(&format!("{} · {start:.1}s – {end:.1}s", t("Typing"))));
+                range.add_css_class("recording-editor-zoom-classic-label");
+                range.set_xalign(0.0);
+                card.append(&range);
+                let buttons = GtkBox::new(Orientation::Horizontal, (6.0 * scale).round() as i32);
+                buttons.set_homogeneous(true);
+                let apply = Button::with_label(&t("Apply suggestion"));
+                apply.add_css_class("recording-editor-primary-button");
+                let dismiss = Button::with_label(&t("Remove suggestion"));
+                dismiss.add_css_class("recording-editor-secondary-button");
+                apply.connect_clicked({
+                    let timeline = timeline.clone();
+                    let speed = speed.clone();
+                    move |_| timeline.apply_typing_suggestion(start, end, speed.get())
+                });
+                dismiss.connect_clicked({
+                    let timeline = timeline.clone();
+                    move |_| timeline.dismiss_typing_suggestion(start)
+                });
+                buttons.append(&apply);
+                buttons.append(&dismiss);
+                card.append(&buttons);
+                cards.append(&card);
+            }
+            let has_suggestions = !suggestions.is_empty();
+            let has_keys = cursor.has_keys();
+            typing_root.set_visible(has_keys);
+            cards.set_visible(has_suggestions);
+            speed_widget.set_visible(has_suggestions);
+            empty.set_visible(!has_suggestions);
+            let resolved_any = !timeline.typing_signature().4.is_empty();
+            empty.set_text(&if resolved_any {
+                t("All typing suggestions are handled. Undo brings them back.")
+            } else {
+                t("No typing to speed up in this recording.")
+            });
+            apply_all.set_visible(suggestions.len() >= 2);
+        })
+    };
+    timeline.set_typing_listener(refresh);
 }
 
 /// The Zoom panel: how the selected clip frames, and the camera settings that
@@ -1040,29 +1408,46 @@ fn build_zoom_panel(
     panel.add_css_class("recording-editor-zoom-panel");
     panel.set_hexpand(true);
     panel.set_vexpand(true);
-    panel.append(&panel_header(&t("Zoom")));
+    let reset = Button::with_label(&t("Reset"));
+    reset.add_css_class("recording-editor-zoom-reset");
+    reset.set_has_frame(false);
+    reset.set_halign(Align::End);
+    reset.set_tooltip_text(Some(&t(
+        "Put every zoom animation setting back to its default.",
+    )));
+    let header = panel_header(&t("Zoom"));
+    header.append(&reset);
+    panel.append(&header);
 
     let body = panel_body();
     body.add_css_class("recording-editor-zoom-slider-spacing");
     let syncing = Rc::new(Cell::new(false));
 
+    let selected = webcam_section(scale, &t("This zoom"), true);
+    let animation = webcam_section(scale, &t("Animation"), true);
+    animation
+        .root
+        .set_tooltip_text(Some(&t("These settings apply to every zoom.")));
+
     let mode_row = GtkBox::new(Orientation::Horizontal, 0);
-    mode_row.add_css_class("recording-editor-zoom-mode");
+    mode_row.add_css_class("recording-editor-webcam-scope");
     mode_row.set_hexpand(true);
     mode_row.set_homogeneous(true);
-    let auto_button = tab_button(&t("Auto"), "recording-editor-zoom-mode-btn");
-    let manual_button = tab_button(&t("Manual"), "recording-editor-zoom-mode-btn");
+    let auto_button = webcam_scope_button(&t("Auto")).0;
+    let manual_button = webcam_scope_button(&t("Manual")).0;
+    auto_button.set_hexpand(true);
+    manual_button.set_hexpand(true);
     manual_button.set_group(Some(&auto_button));
     mode_row.append(&auto_button);
     mode_row.append(&manual_button);
-    body.append(&mode_row);
+    selected.body.append(&mode_row);
 
     let hint = Label::new(None);
     hint.add_css_class("recording-editor-zoom-hint");
     hint.set_wrap(true);
     hint.set_xalign(0.0);
     hint.set_max_width_chars(34);
-    body.append(&hint);
+    selected.body.append(&hint);
 
     let chips = Grid::new();
     chips.add_css_class("recording-editor-zoom-chips");
@@ -1092,22 +1477,7 @@ fn build_zoom_panel(
             chip
         })
         .collect();
-    body.append(&chips);
-
-    let animation_header = GtkBox::new(Orientation::Horizontal, 8);
-    animation_header.add_css_class("recording-editor-zoom-section-row");
-    animation_header.set_hexpand(true);
-    let animation_label = Label::new(Some(&t("Animation")));
-    animation_label.add_css_class("recording-editor-zoom-kicker");
-    animation_label.set_xalign(0.0);
-    animation_label.set_hexpand(true);
-    let reset = Button::with_label(&t("Reset"));
-    reset.add_css_class("recording-editor-zoom-reset");
-    reset.set_has_frame(false);
-    reset.set_halign(Align::End);
-    animation_header.append(&animation_label);
-    animation_header.append(&reset);
-    body.append(&animation_header);
+    selected.body.append(&chips);
 
     let instant_row = GtkBox::new(Orientation::Horizontal, 8);
     instant_row.add_css_class("recording-editor-zoom-classic");
@@ -1125,14 +1495,7 @@ fn build_zoom_panel(
     )));
     instant_row.append(&instant_label);
     instant_row.append(&instant);
-    body.append(&instant_row);
-
-    let camera_hint = Label::new(Some(&t("These settings apply to every zoom.")));
-    camera_hint.add_css_class("recording-editor-zoom-hint");
-    camera_hint.set_wrap(true);
-    camera_hint.set_xalign(0.0);
-    camera_hint.set_max_width_chars(34);
-    body.append(&camera_hint);
+    animation.body.append(&instant_row);
 
     let camera = timeline.zoom_panel_state().camera;
     let speed_slider = value_slider_control(
@@ -1148,7 +1511,7 @@ fn build_zoom_panel(
             move |value| timeline.update_zoom_camera(|settings| settings.speed = value)
         },
     );
-    body.append(&speed_slider.widget());
+    animation.body.append(&speed_slider.widget());
     let smoothness_slider = value_slider_control(
         &t("Smoothness"),
         0.0,
@@ -1162,7 +1525,7 @@ fn build_zoom_panel(
             move |value| timeline.update_zoom_camera(|settings| settings.smoothness = value)
         },
     );
-    body.append(&smoothness_slider.widget());
+    animation.body.append(&smoothness_slider.widget());
     let blur_slider = value_slider_control(
         &t("Motion blur"),
         0.0,
@@ -1176,7 +1539,7 @@ fn build_zoom_panel(
             move |value| timeline.update_zoom_camera(|settings| settings.motion_blur = value)
         },
     );
-    body.append(&blur_slider.widget());
+    animation.body.append(&blur_slider.widget());
 
     let early_row = GtkBox::new(Orientation::Horizontal, 8);
     early_row.add_css_class("recording-editor-zoom-classic");
@@ -1195,7 +1558,10 @@ fn build_zoom_panel(
     )));
     early_row.append(&early_label);
     early_row.append(&start_early);
-    body.append(&early_row);
+    animation.body.append(&early_row);
+
+    body.append(&selected.root);
+    body.append(&animation.root);
 
     let scroll = ScrolledWindow::new();
     scroll.add_css_class("recording-editor-zoom-scroll");
@@ -2055,6 +2421,7 @@ fn webcam_kicker(label: &str) -> Label {
 struct WebcamSection {
     root: GtkBox,
     body: GtkBox,
+    revealer: Revealer,
 }
 
 fn webcam_section(scale: f64, title: &str, open: bool) -> WebcamSection {
@@ -2095,6 +2462,7 @@ fn webcam_section(scale: f64, title: &str, open: bool) -> WebcamSection {
     revealer.set_reveal_child(open);
     root.append(&revealer);
 
+    let revealer_handle = revealer.clone();
     let click = GestureClick::new();
     click.connect_pressed(move |_, _, _, _| {
         let open = !revealer.reveals_child();
@@ -2102,7 +2470,34 @@ fn webcam_section(scale: f64, title: &str, open: bool) -> WebcamSection {
         chevron.set_icon_name(Some(chevron_name(open)));
     });
     header.add_controller(click);
-    WebcamSection { root, body }
+    WebcamSection {
+        root,
+        body,
+        revealer: revealer_handle,
+    }
+}
+
+/// Which of a panel's sections are open, by key, so a panel that rebuilds its
+/// controls keeps the sections the user opened or closed.
+type SectionStates = Rc<RefCell<std::collections::HashMap<&'static str, bool>>>;
+
+/// A section whose open state survives the panel rebuilding its controls.
+fn remembered_section(
+    scale: f64,
+    states: &SectionStates,
+    key: &'static str,
+    title: &str,
+    default_open: bool,
+) -> WebcamSection {
+    let open = states.borrow().get(key).copied().unwrap_or(default_open);
+    let section = webcam_section(scale, title, open);
+    let states = states.clone();
+    section
+        .revealer
+        .connect_reveal_child_notify(move |revealer| {
+            states.borrow_mut().insert(key, revealer.reveals_child());
+        });
+    section
 }
 
 /// The camera's placement: a field you drag the dot around inside, with a
@@ -3778,95 +4173,6 @@ fn setting_switch_row(label: &str, tooltip: &str) -> (GtkBox, Switch) {
     (row, switch)
 }
 
-fn build_frames_panel(scale: f64) -> GtkBox {
-    let body = panel_body();
-
-    let kicker = Label::new(Some(&t("FRAME")));
-    kicker.add_css_class("recording-editor-zoom-kicker");
-    kicker.set_xalign(0.0);
-    body.append(&kicker);
-
-    let aspect = GtkBox::new(Orientation::Horizontal, 0);
-    aspect.add_css_class("recording-editor-zoom-mode");
-    aspect.set_homogeneous(true);
-    let original = tab_button(&t("Original"), "recording-editor-zoom-mode-btn");
-    let wide = tab_button(&t("16:9"), "recording-editor-zoom-mode-btn");
-    let portrait = tab_button(&t("9:16"), "recording-editor-zoom-mode-btn");
-    wide.set_group(Some(&original));
-    portrait.set_group(Some(&original));
-    original.set_active(true);
-    aspect.append(&original);
-    aspect.append(&wide);
-    aspect.append(&portrait);
-    body.append(&aspect);
-
-    let hint = Label::new(Some(&t(
-        "Frame changes keep the source footage centred in the preview.",
-    )));
-    hint.add_css_class("recording-editor-zoom-hint");
-    hint.set_wrap(true);
-    hint.set_xalign(0.0);
-    body.append(&hint);
-
-    let zoom_label = Label::new(Some(&t("ZOOM")));
-    zoom_label.add_css_class("recording-editor-zoom-kicker");
-    zoom_label.add_css_class("recording-editor-zoom-easing-kicker");
-    zoom_label.set_xalign(0.0);
-    body.append(&zoom_label);
-
-    let zoom = GtkBox::new(Orientation::Horizontal, 6);
-    zoom.add_css_class("recording-editor-zoom-chips");
-    zoom.set_homogeneous(true);
-    let zoom_1 = tab_button("1×", "recording-editor-zoom-chip");
-    let zoom_15 = tab_button("1.5×", "recording-editor-zoom-chip");
-    let zoom_2 = tab_button("2×", "recording-editor-zoom-chip");
-    zoom_15.set_group(Some(&zoom_1));
-    zoom_2.set_group(Some(&zoom_1));
-    zoom_1.set_active(true);
-    zoom.append(&zoom_1);
-    zoom.append(&zoom_15);
-    zoom.append(&zoom_2);
-    body.append(&zoom);
-    body.append(&value_slider_row(
-        &t("Strength"),
-        1.0,
-        3.0,
-        1.5,
-        0.1,
-        1,
-        scale,
-    ));
-
-    let easing_label = Label::new(Some(&t("TRANSITION")));
-    easing_label.add_css_class("recording-editor-zoom-kicker");
-    easing_label.add_css_class("recording-editor-zoom-easing-kicker");
-    easing_label.set_xalign(0.0);
-    body.append(&easing_label);
-
-    let easing = GtkBox::new(Orientation::Horizontal, 6);
-    easing.set_homogeneous(true);
-    let smooth = tab_button(&t("Smooth"), "recording-editor-zoom-easing-btn");
-    let snappy = tab_button(&t("Snappy"), "recording-editor-zoom-easing-btn");
-    let instant = tab_button(&t("Instant"), "recording-editor-zoom-easing-btn");
-    snappy.set_group(Some(&smooth));
-    instant.set_group(Some(&smooth));
-    smooth.set_active(true);
-    easing.append(&smooth);
-    easing.append(&snappy);
-    easing.append(&instant);
-    body.append(&easing);
-    body.append(&value_slider_row(
-        &t("Transition"),
-        0.0,
-        1.2,
-        0.45,
-        0.05,
-        2,
-        scale,
-    ));
-    panel_frame(&t("Frames"), body)
-}
-
 fn panel_header(title: &str) -> GtkBox {
     let header = GtkBox::new(Orientation::Horizontal, 8);
     header.add_css_class("recording-editor-zoom-header");
@@ -3902,62 +4208,6 @@ fn panel_body() -> GtkBox {
     body.add_css_class("recording-editor-zoom-body");
     body.set_hexpand(true);
     body
-}
-
-fn tab_body() -> GtkBox {
-    let body = GtkBox::new(Orientation::Vertical, 8);
-    body.add_css_class("recording-editor-zoom-body");
-    body.add_css_class("recording-editor-cursor-tab-body");
-    body.set_hexpand(true);
-    body
-}
-
-fn tab_button(label: &str, class: &str) -> ToggleButton {
-    let button = ToggleButton::with_label(label);
-    button.add_css_class(class);
-    button.set_has_frame(false);
-    button.set_hexpand(true);
-    button
-}
-
-fn connect_tabs(stack: &Stack, tabs: [(&ToggleButton, &str); 3]) {
-    for (tab, name) in tabs {
-        let stack = stack.clone();
-        let name = name.to_owned();
-        tab.connect_toggled(move |tab| {
-            if tab.is_active() {
-                stack.set_visible_child_name(&name);
-            }
-        });
-    }
-}
-
-fn value_slider_row(
-    label: &str,
-    min: f64,
-    max: f64,
-    initial: f64,
-    step: f64,
-    decimals: usize,
-    scale: f64,
-) -> DrawingArea {
-    FilledSlider::new(label, min, max, initial, step, decimals, scale).widget()
-}
-
-/// A slider row whose value is reported as it is dragged, for controls the
-/// preview reacts to immediately.
-#[allow(clippy::too_many_arguments)]
-fn value_slider_row_with(
-    label: &str,
-    min: f64,
-    max: f64,
-    initial: f64,
-    step: f64,
-    decimals: usize,
-    scale: f64,
-    on_change: impl Fn(f64) + 'static,
-) -> DrawingArea {
-    value_slider_control(label, min, max, initial, step, decimals, scale, on_change).widget()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -4325,25 +4575,43 @@ impl FilledSlider {
             let _ = context.fill();
         }
 
-        context.select_font_face("DM Sans", FontSlant::Normal, FontWeight::Normal);
-        context.set_font_size(13.0 * self.scale);
+        // The label and value go through Pango with the widget's own font
+        // settings, so they are hinted and spaced like every GTK label rather
+        // than drawn by cairo's basic text path.
+        let text_layout = |text: &str| {
+            let layout = widget.create_pango_layout(Some(text));
+            let mut font = gtk4::pango::FontDescription::new();
+            font.set_family("Inter");
+            font.set_weight(gtk4::pango::Weight::Medium);
+            font.set_absolute_size(13.0 * self.scale * f64::from(gtk4::pango::SCALE));
+            layout.set_font_description(Some(&font));
+            layout
+        };
         if light {
             context.set_source_rgba(0.15, 0.16, 0.18, text_alpha);
         } else {
             context.set_source_rgba(1.0, 1.0, 1.0, text_alpha);
         }
-        context.move_to(14.0 * self.scale, height * 0.66);
-        let _ = context.show_text(label);
+        let label_layout = text_layout(label);
+        let (_, label_height) = label_layout.pixel_size();
+        context.move_to(
+            14.0 * self.scale,
+            ((height - f64::from(label_height)) / 2.0).round(),
+        );
+        pangocairo::functions::show_layout(context, &label_layout);
 
         let value_text = format!(
             "{}{}",
             format_value(self.value.get(), self.decimals),
             self.suffix.get()
         );
-        if let Ok(extents) = context.text_extents(&value_text) {
-            context.move_to(width - 14.0 * self.scale - extents.width(), height * 0.66);
-            let _ = context.show_text(&value_text);
-        }
+        let value_layout = text_layout(&value_text);
+        let (value_width, value_height) = value_layout.pixel_size();
+        context.move_to(
+            (width - 14.0 * self.scale - f64::from(value_width)).round(),
+            ((height - f64::from(value_height)) / 2.0).round(),
+        );
+        pangocairo::functions::show_layout(context, &value_layout);
 
         let handle_x = (fill_width - radius).clamp(radius, (width - radius).max(radius));
         context.set_line_width(if hot { 2.0 } else { 1.5 });
@@ -4592,7 +4860,7 @@ fn is_picture(path: &Path) -> bool {
         })
 }
 
-fn draw_wallpaper_fallback(context: &gtk4::cairo::Context, width: i32, height: i32) {
+pub(super) fn draw_wallpaper_fallback(context: &gtk4::cairo::Context, width: i32, height: i32) {
     let width = f64::from(width);
     let height = f64::from(height);
     rounded_rect(context, 0.5, 0.5, width - 1.0, height - 1.0, 8.0);
@@ -4600,7 +4868,7 @@ fn draw_wallpaper_fallback(context: &gtk4::cairo::Context, width: i32, height: i
     let _ = context.fill();
 }
 
-fn draw_wallpaper_thumbnail(
+pub(super) fn draw_wallpaper_thumbnail(
     context: &gtk4::cairo::Context,
     width: i32,
     height: i32,
@@ -4727,6 +4995,17 @@ pub(super) fn install_css() {
         button.video-editor-color-swatch:checked:hover {{
             border: 2px solid #ff670d;
             background: alpha(#ff670d, 0.12);
+        }}
+        /* Section cards stand clear of the column behind them, so a closed
+           card still reads as a card. */
+        .recording-editor-tools-column .video-editor-section {{
+            padding: 12px;
+            margin-bottom: 4px;
+            border-radius: 10px;
+            background: alpha(white, 0.045);
+        }}
+        .editor-theme-light .recording-editor-tools-column .video-editor-section {{
+            background: alpha(#111827, 0.05);
         }}
         .video-editor-value-row {{
             min-height: {value_h}px;
@@ -4987,7 +5266,7 @@ mod tests {
         WebcamControlUse, WebcamLayoutCard,
     };
     use gtk4::prelude::*;
-    use gtk4::Orientation;
+    use gtk4::{Box as GtkBox, Orientation};
 
     const WIDE: f64 = 16.0 / 9.0;
 
@@ -5076,6 +5355,60 @@ mod tests {
             eprintln!("skipping: GTK unavailable");
             return;
         };
+    }
+
+    #[test]
+    fn opening_a_project_puts_its_stage_on_the_controls() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let app = gtk4::Application::builder()
+                .application_id("com.apexshot.Tests.StagePersistence")
+                .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+                .build();
+            app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+            let window = gtk4::ApplicationWindow::new(&app);
+            let background = super::Background::default();
+            let column = gtk4::Box::new(Orientation::Vertical, 0);
+            let (panel, _, padding, radius) =
+                super::build_background_panel(1.0, &window, background.clone(), &column);
+
+            background.apply(Some("wallpaper-004.jpg"), 48.0, 6.0);
+            assert_eq!(padding.value.get(), 48.0);
+            assert_eq!(radius.value.get(), 6.0);
+            assert_eq!(active_wallpaper_cards(&panel), 1);
+            assert_eq!(
+                background.state().selection().as_deref(),
+                Some("wallpaper-004.jpg"),
+                "the controls follow the model, never the other way round"
+            );
+
+            background.apply(
+                None,
+                super::background::DEFAULT_PADDING,
+                super::background::DEFAULT_RADIUS,
+            );
+            assert_eq!(padding.value.get(), super::background::DEFAULT_PADDING);
+            assert_eq!(radius.value.get(), super::background::DEFAULT_RADIUS);
+            assert_eq!(active_wallpaper_cards(&panel), 0);
+            assert!(background.state().selection().is_none());
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
+    }
+
+    /// How many wallpaper cards are switched on in `widget`'s subtree.
+    fn active_wallpaper_cards(widget: &impl IsA<gtk4::Widget>) -> usize {
+        let card = widget.as_ref().downcast_ref::<gtk4::ToggleButton>();
+        let shown = card.is_some_and(|card| {
+            card.has_css_class("video-editor-wallpaper-card") && card.is_active()
+        });
+        let mut active = usize::from(shown);
+        let mut child = widget.first_child();
+        while let Some(current) = child {
+            active += active_wallpaper_cards(&current);
+            child = current.next_sibling();
+        }
+        active
     }
 
     #[test]
@@ -5548,5 +5881,72 @@ mod tests {
             );
             return;
         };
+    }
+
+    #[test]
+    fn effects_controls_write_the_timeline_and_follow_undo() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let app = gtk4::Application::builder()
+                .application_id("com.apexshot.Tests.EffectsControls")
+                .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+                .build();
+            app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+            let window = gtk4::ApplicationWindow::new(&app);
+            let canvas = gtk4::AspectFrame::new(0.5, 0.5, 1.0, false);
+            let timeline = super::super::timeline::build(
+                &window,
+                &canvas,
+                1.0,
+                false,
+                super::super::cursor::CursorModel::new(),
+                super::super::webcam::WebcamModel::new(Rc::new(|| {})),
+                super::Background::default(),
+                Rc::new(Cell::new(None)),
+            );
+            // The switches only enable for a recording that carries keys.
+            let cursor = super::super::cursor::CursorModel::new();
+            cursor.set_keys_for_test();
+            let clicks = GtkBox::new(Orientation::Vertical, 0);
+            let keyboard = GtkBox::new(Orientation::Vertical, 0);
+            let typing = super::webcam_section(1.0, "Typing", true);
+            super::build_cursor_effects_page(
+                1.0,
+                cursor,
+                Rc::new(|| {}),
+                timeline.clone(),
+                &clicks,
+                &keyboard,
+                &typing,
+            );
+            let mut switches = Vec::new();
+            collect_switches(keyboard.upcast_ref(), &mut switches);
+            let (shortcuts, letters) = (&switches[0], &switches[1]);
+            assert!(!letters.is_sensitive());
+
+            shortcuts.emit_by_name::<bool>("state-set", &[&true]);
+            assert!(timeline.effects_settings().captions.shortcuts);
+            assert!(letters.is_sensitive());
+
+            assert!(timeline.undo());
+            assert!(!timeline.effects_settings().captions.shortcuts);
+            assert!(!shortcuts.is_active());
+            assert!(!letters.is_sensitive());
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
+    }
+
+    fn collect_switches(widget: &gtk4::Widget, found: &mut Vec<gtk4::Switch>) {
+        if let Some(switch) = widget.downcast_ref::<gtk4::Switch>() {
+            found.push(switch.clone());
+        }
+        let mut child = widget.first_child();
+        while let Some(current) = child {
+            collect_switches(&current, found);
+            child = current.next_sibling();
+        }
     }
 }

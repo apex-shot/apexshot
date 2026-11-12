@@ -4,10 +4,12 @@
 //! playback, the editing model and export are their own slices, and the saved
 //! edit list is [`project`].
 
+use crate::i18n::t;
 use gtk4::prelude::*;
 use gtk4::Application;
 pub(crate) mod background;
 mod camera_shadow;
+mod click_sound;
 mod cursor;
 pub(crate) mod custom_fill;
 mod cutout;
@@ -15,9 +17,13 @@ mod export;
 mod export_card;
 mod export_options;
 mod history;
+mod import;
+mod keystrokes;
 mod motion_blur;
 mod pixels;
 mod pointer_path;
+mod presets;
+mod presets_popover;
 mod press;
 mod preview;
 mod project;
@@ -28,6 +34,7 @@ mod split_rest;
 mod studio;
 mod timeline;
 mod type_scale;
+mod typing;
 pub(crate) mod ui_support;
 mod webcam;
 mod window;
@@ -45,6 +52,7 @@ pub fn show_video_editor_window(initial: Option<PathBuf>) -> anyhow::Result<()> 
 
     app.connect_activate(move |application| {
         crate::capture::editor::ui_support::apply_theme_to_gtk();
+        crate::platform::sharpen_text();
         if let Some(existing) = application.windows().first() {
             existing.present();
             return;
@@ -71,6 +79,18 @@ pub(crate) fn saved_edits() -> Vec<SavedEdit> {
             source_path: file.source_path,
         })
         .collect()
+}
+
+/// The preset choices a settings page lists: the built-in opening look under
+/// an empty id, then every saved preset by its own id and name.
+pub(crate) fn preset_choices() -> Vec<(String, String)> {
+    let mut choices = vec![(String::new(), t("Built-in defaults"))];
+    choices.extend(
+        presets::list()
+            .into_iter()
+            .map(|preset| (preset.id, preset.name)),
+    );
+    choices
 }
 
 /// The first non-option argument is the recording path, matching the shared

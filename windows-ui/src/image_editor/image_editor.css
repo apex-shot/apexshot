@@ -14,7 +14,7 @@ window.image-editor-window {
     background-color: #141414;
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 12px;
-    font-family: 'DM Sans', 'Noto Sans', system-ui, sans-serif;
+    font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
 }
 
 .image-editor-root.editor-theme-light {
