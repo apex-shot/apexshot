@@ -413,7 +413,7 @@ pub(super) fn install_css() {
         .video-export-scrim {{ background: alpha(#05070c, 0.64); }}
         .video-export-options, .video-export-screen {{
             color: #e8e8e8;
-            font-family: 'DM Sans', 'Noto Sans', system-ui, sans-serif;
+            font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
             font-size: {font}px;
         }}
         .video-export-options {{

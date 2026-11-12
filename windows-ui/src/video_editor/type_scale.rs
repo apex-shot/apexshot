@@ -2,7 +2,8 @@
 //!
 //! Settings, onboarding, the image editor and History each author their type
 //! at 100% and let [`crate::platform::ui_scale`] carry it to the display. This
-//! is the video editor's sheet: the same DM Sans stack, the same 14px base,
+//! is the video editor's sheet: an Inter stack (the other windows still use DM
+//! Sans), the same 14px base,
 //! 15px headings, 13px body and controls, and 11px eyebrows and badges.
 //!
 //! Only `font-size` values are scaled here. The window, side-panel and export
@@ -15,7 +16,7 @@ use gtk4::CssProvider;
 const VIDEO_EDITOR_TYPE_CSS: &str = r#"
         /* Base */
         .video-editor-root {
-            font-family: 'DM Sans', 'Noto Sans', system-ui, sans-serif;
+            font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
             /* Medium reads closer to the reference body text than Regular. */
             font-weight: 500;
             font-size: 14px;
@@ -121,7 +122,7 @@ const VIDEO_EDITOR_TYPE_CSS: &str = r#"
         /* Export dialog */
         .video-editor-root .video-export-options,
         .video-editor-root .video-export-screen {
-            font-family: 'DM Sans', 'Noto Sans', system-ui, sans-serif;
+            font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
             font-size: 14px;
         }
         .video-editor-root .video-export-dialog-title {
@@ -151,7 +152,7 @@ const VIDEO_EDITOR_TYPE_CSS: &str = r#"
         popover.recording-editor-custom-popover,
         popover.settings-select-popover,
         popover.gradient-type-menu {
-            font-family: 'DM Sans', 'Noto Sans', system-ui, sans-serif;
+            font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
             /* Medium reads closer to the reference body text than Regular. */
             font-weight: 500;
             font-size: 14px;
