@@ -442,11 +442,6 @@ fn build_settings_window(app: &Application) {
     general.show_icon_check.set_tooltip_text(Some(&t(
         "The Windows shell uses its tray icon to open capture, Settings, and Quit.",
     )));
-    general.ui_language_input.widget().set_sensitive(false);
-    general
-        .ui_language_input
-        .widget()
-        .set_tooltip_text(Some(&t("Windows UI translations are not available yet.")));
     screenshots
         .timer_interval_input
         .widget()

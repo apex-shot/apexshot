@@ -2,8 +2,7 @@
 """Fail if a registered UI message is missing from any shipped PO catalog.
 
 Both UIs are checked: the Linux app in `src/` and the Windows app in
-`windows-ui/src/`, which reuses the same catalogs even though the Windows
-package does not yet ship them.
+`windows-ui/src/`, which embeds the same catalogs.
 """
 
 from __future__ import annotations
