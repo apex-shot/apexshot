@@ -21,6 +21,7 @@
 #include "platform/windows/screenshot_scale.h"
 #include "platform/windows/settings_store.h"
 
+#include <QAbstractButton>
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
@@ -29,8 +30,9 @@
 #include <QCursor>
 #include <QDateTime>
 #include <QDebug>
-#include <QDesktopServices>
 #include <QDir>
+#include <QDrag>
+#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QFileDialog>
 #include <QEventLoop>
@@ -40,10 +42,8 @@
 #include <QFontInfo>
 #include <QFontMetrics>
 #include <QGuiApplication>
-#include <QHBoxLayout>
 #include <QIcon>
 #include <QKeyEvent>
-#include <QLabel>
 #include <QMenu>
 #include <QLocalServer>
 #include <QLocalSocket>
@@ -62,9 +62,7 @@
 #include <QTextStream>
 #include <QSystemTrayIcon>
 #include <QTimer>
-#include <QToolButton>
 #include <QUrl>
-#include <QVBoxLayout>
 #include <QWidget>
 
 #include <algorithm>
@@ -80,7 +78,6 @@ namespace {
 const QColor kPanel(20, 20, 20, 250);
 const QColor kAccent(255, 102, 0);
 const QColor kText(245, 245, 247);
-const QColor kCard(18, 18, 18, 235);
 const QColor kRim(255, 255, 255, 26);
 const QColor kDim(0, 0, 0, 140);
 
@@ -380,17 +377,6 @@ QString settingsExecutable()
     return executable;
 }
 
-/// Hand a capture to the Rust helper, which owns the Cloud transport. The
-/// helper exits after the request and its notification.
-bool startCloudUpload(const QString& path)
-{
-    if (path.isEmpty())
-        return false;
-    return QProcess::startDetached(settingsExecutable(),
-                                   {QStringLiteral("--upload"),
-                                    QDir::toNativeSeparators(path)});
-}
-
 void openSettingsWindow()
 {
     const QString executable = settingsExecutable();
@@ -530,30 +516,110 @@ QIcon appIcon()
     return QIcon(pixmap);
 }
 
-void paintPanel(QPainter& painter, const QRectF& rect, const QColor& fill, qreal radius)
+/// A Lucide glyph centred in `rect` at `pixelSize`.
+void drawCardGlyph(QPainter& painter, ushort glyph, const QRectF& rect, const QColor& color,
+                   int pixelSize)
 {
-    painter.setRenderHint(QPainter::Antialiasing, true);
-
-    QPainterPath shadow;
-    shadow.addRoundedRect(rect.translated(0, 3), radius, radius);
-    painter.fillPath(shadow, QColor(0, 0, 0, 105));
-
-    QPainterPath body;
-    body.addRoundedRect(rect, radius, radius);
-    painter.fillPath(body, fill);
-    painter.setPen(QPen(kRim, 1.2));
-    painter.setBrush(Qt::NoBrush);
-    painter.drawPath(body);
+    const QString family = areaIconFamily();
+    if (family.isEmpty())
+        return;
+    QFont font(family);
+    font.setPixelSize(pixelSize);
+    QPainterPath path;
+    path.addText(0, 0, font, QString(QChar(glyph)));
+    const QRectF bounds = path.boundingRect();
+    painter.save();
+    painter.translate(rect.center() - bounds.center());
+    painter.fillPath(path, color);
+    painter.restore();
 }
 
-QString sizeLabel(const QImage& image, const QString& path, const QSize& originalSize = QSize())
+/// The capture scaled to cover `size` and centred, the overflow cropped away.
+QPixmap coverPixmap(const QImage& image, const QSize& size)
 {
-    const QSize size = originalSize.isValid() ? originalSize : image.size();
-    const qint64 bytes = path.isEmpty() ? 0 : QFileInfo(path).size();
-    return QStringLiteral("%1 \u00D7 %2   -   %3 KB")
-        .arg(size.width())
-        .arg(size.height())
-        .arg(bytes / 1024);
+    QPixmap pixmap(size);
+    pixmap.fill(QColor(0x1f, 0x1f, 0x1f));
+    if (image.isNull() || size.isEmpty())
+        return pixmap;
+    const qreal scale = std::max(qreal(size.width()) / image.width(),
+                                 qreal(size.height()) / image.height());
+    const QSize scaled(std::max(size.width(), static_cast<int>(std::ceil(image.width() * scale))),
+                       std::max(size.height(), static_cast<int>(std::ceil(image.height() * scale))));
+    const QImage cover = image.scaled(scaled, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    const QRect crop((cover.width() - size.width()) / 2,
+                     (cover.height() - size.height()) / 2,
+                     size.width(),
+                     size.height());
+    return QPixmap::fromImage(cover.copy(crop));
+}
+
+/// A capture written to the temporary folder because Settings does not keep it.
+bool isTemporaryCapture(const QString& path)
+{
+    if (path.isEmpty())
+        return false;
+    const QString temporary =
+        QDir::cleanPath(QDir(QDir::tempPath()).filePath(QStringLiteral("ApexShot")));
+    return QDir::cleanPath(QFileInfo(path).absolutePath())
+               .compare(temporary, Qt::CaseInsensitive)
+        == 0;
+}
+
+/// Ask where to keep a screenshot and write it there in the chosen format.
+void promptSaveScreenshot(QWidget* parent, const QImage& image, const QString& suggestedName)
+{
+    const Platform::ShellSettings settings = Platform::loadShellSettings();
+    QString filter = settings.screenshots.format == QLatin1String("JPEG")
+        ? QStringLiteral("JPEG image (*.jpg *.jpeg)")
+        : settings.screenshots.format == QLatin1String("WebP")
+            ? QStringLiteral("WebP image (*.webp)")
+            : QStringLiteral("PNG image (*.png)");
+    QString path = QFileDialog::getSaveFileName(
+        parent,
+        QStringLiteral("Save screenshot"),
+        QDir(Platform::shellScreenshotOutputDir(settings)).filePath(suggestedName),
+        QStringLiteral("PNG image (*.png);;JPEG image (*.jpg *.jpeg);;WebP image (*.webp)"),
+        &filter);
+    if (!path.isEmpty() && QFileInfo(path).suffix().isEmpty()) {
+        path += filter.startsWith(QLatin1String("JPEG")) ? QStringLiteral(".jpg")
+            : filter.startsWith(QLatin1String("WebP")) ? QStringLiteral(".webp")
+                                                       : QStringLiteral(".png");
+        if (QFileInfo::exists(path)
+            && QMessageBox::question(parent, QStringLiteral("Save screenshot"),
+                                     QStringLiteral("Replace the existing file?\n%1").arg(path))
+                != QMessageBox::Yes)
+            return;
+    }
+    if (!path.isEmpty() && !image.save(path))
+        QMessageBox::warning(parent, QStringLiteral("Save screenshot"),
+                             QStringLiteral("Could not save the screenshot."));
+}
+
+/// Ask where to keep a recording and copy the video there.
+void promptSaveRecording(QWidget* parent, const QString& source)
+{
+    if (source.isEmpty())
+        return;
+    const Platform::ShellSettings settings = Platform::loadShellSettings();
+    QString path = QFileDialog::getSaveFileName(
+        parent,
+        QStringLiteral("Save recording"),
+        QDir(Platform::shellRecordingOutputDir(settings)).filePath(QFileInfo(source).fileName()),
+        QStringLiteral("MP4 video (*.mp4)"));
+    if (path.isEmpty())
+        return;
+    if (QFileInfo(path).suffix().isEmpty())
+        path += QStringLiteral(".mp4");
+    if (QFileInfo(path).absoluteFilePath().compare(QFileInfo(source).absoluteFilePath(),
+                                                   Qt::CaseInsensitive)
+        == 0)
+        return;
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    if (QFileInfo::exists(path))
+        QFile::remove(path);
+    if (!QFile::copy(source, path))
+        QMessageBox::warning(parent, QStringLiteral("Save recording"),
+                             QStringLiteral("Could not save the recording."));
 }
 
 // ------------------------------------------------------------- top bar ------
@@ -1332,146 +1398,476 @@ private:
     std::function<void()> m_onFinished;
 };
 
-// --------------------------------------------------------- result card ------
+// ----------------------------------------------------- quick access card ---
+// The card after a capture, dressed like the Linux preview card: the capture
+// fills a 190x135 frame (times Overlay size), Close and Pin ride the top
+// corners, Upload and Edit the bottom ones, and Copy and Save sit centred.
+constexpr int kCardPreviewWidth = 190;
+constexpr int kCardPreviewHeight = 135;
+constexpr int kCardEdgeMargin = 24;
+constexpr int kCardBottomSafeOffset = 80;
+constexpr int kCardFrameInset = 5;
+constexpr int kCardCornerMargin = 6;
+constexpr int kCardShadowPad = 10;
+constexpr int kCardButtonSize = 30;
+constexpr ushort kGlyphCardClose = 0xE1B2;  // x
+constexpr ushort kGlyphCardPin = 0xE259;    // pin
+constexpr ushort kGlyphCardUpload = 0xE19E; // upload
+constexpr ushort kGlyphCardEdit = 0xE1F9;   // pencil
+
+class CardButton : public QAbstractButton
+{
+public:
+    enum class Kind { Corner, Close, Pill };
+
+    CardButton(Kind kind, ushort glyph, const QString& label, qreal scale, QWidget* parent)
+        : QAbstractButton(parent), m_kind(kind), m_glyph(glyph), m_scale(scale)
+    {
+        setText(label);
+        setToolTip(label);
+        setCursor(Qt::PointingHandCursor);
+        setFocusPolicy(Qt::NoFocus);
+        setAttribute(Qt::WA_Hover, true);
+    }
+
+    void setActive(bool active)
+    {
+        m_active = active;
+        update();
+    }
+
+protected:
+    void enterEvent(QEvent* event) override
+    {
+        QAbstractButton::enterEvent(event);
+        update();
+    }
+
+    void leaveEvent(QEvent* event) override
+    {
+        QAbstractButton::leaveEvent(event);
+        update();
+    }
+
+    void paintEvent(QPaintEvent*) override
+    {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        const QRectF r = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
+        const bool hovered = underMouse() && isEnabled();
+        const bool pressed = isDown();
+
+        if (m_kind == Kind::Pill) {
+            QColor fill = pressed ? QColor(0xe5, 0xe7, 0xeb)
+                : hovered         ? QColor(0xff, 0xff, 0xff)
+                                  : QColor(0xf3, 0xf4, 0xf6);
+            if (!isEnabled())
+                fill.setAlpha(140);
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(fill);
+            painter.drawRoundedRect(r, r.height() / 2.0, r.height() / 2.0);
+            QFont font = uiFont(qRound(13 * m_scale), true);
+            font.setWeight(QFont::DemiBold);
+            painter.setFont(font);
+            painter.setPen(QColor(0x11, 0x11, 0x11));
+            painter.drawText(rect(), Qt::AlignCenter, text());
+            return;
+        }
+
+        QColor fill = m_active ? QColor(255, 255, 255, 41) : QColor(18, 18, 18, 235);
+        QColor border(255, 255, 255, 31);
+        QColor glyph(255, 255, 255, isEnabled() ? 235 : 90);
+        if (pressed) {
+            fill = m_kind == Kind::Close ? QColor(0xc5, 0x0f, 0x1f) : QColor(12, 12, 12, 245);
+            glyph = m_kind == Kind::Close ? QColor(Qt::white) : QColor(255, 255, 255, 224);
+        } else if (hovered) {
+            fill = m_kind == Kind::Close ? QColor(0xe8, 0x11, 0x23) : QColor(42, 42, 42, 245);
+            glyph = QColor(Qt::white);
+        }
+        if (m_kind == Kind::Close && (hovered || pressed))
+            border = QColor(Qt::transparent);
+        const qreal radius = 10 * m_scale;
+        painter.setPen(QPen(border, 1.0));
+        painter.setBrush(fill);
+        painter.drawRoundedRect(r, radius, radius);
+        drawCardGlyph(painter, m_glyph, r, glyph, qRound(16 * m_scale));
+    }
+
+private:
+    Kind m_kind;
+    ushort m_glyph;
+    qreal m_scale;
+    bool m_active = false;
+};
+
 class ResultCard : public QWidget
 {
 public:
-    ResultCard(const QImage& image, const QString& path, const QString& ocrText,
-               const QString& hintText, const QSize& originalSize = QSize())
+    ResultCard(const QImage& image, const QString& path, bool video)
+        : m_image(image), m_path(path), m_video(video)
     {
-        setWindowFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
+        setWindowFlags(Qt::Tool | Qt::FramelessWindowHint);
         setAttribute(Qt::WA_TranslucentBackground, true);
         setAttribute(Qt::WA_DeleteOnClose, true);
+        setAttribute(Qt::WA_ShowWithoutActivating, true);
+        setWindowTitle(QStringLiteral("ApexShot Preview"));
 
         const Platform::ShellSettings settings = Platform::loadShellSettings();
-        const qreal scale = settings.quickAccess.overlayScale;
-        const int previewWidth = qMax(180, qRound(420 * scale));
-        const int previewHeight = qMax(100, qRound(240 * scale));
+        m_scale = uiScale();
+        // Without auto-close the card stays until dismissed, so it starts pinned.
+        m_pinned = !settings.quickAccess.autoCloseEnabled;
+        m_autoCloseSeconds = settings.quickAccess.autoCloseSeconds;
+        m_hideOnDismiss = settings.quickAccess.autoCloseAction == QLatin1String("Hide");
+        m_closeAfterDragging = settings.quickAccess.closeAfterDragging;
+        m_leftSide = settings.quickAccess.position == QLatin1String("Left");
 
-        auto* layout = new QVBoxLayout(this);
-        layout->setContentsMargins(24, 22, 24, 24);
-        layout->setSpacing(8);
+        const qreal overlay = settings.quickAccess.overlayScale;
+        const int previewWidth = std::max(1, qRound(kCardPreviewWidth * overlay * m_scale));
+        const int previewHeight = std::max(1, qRound(kCardPreviewHeight * overlay * m_scale));
+        const int inset = qRound(kCardFrameInset * m_scale);
+        const int pad = qRound(kCardShadowPad * m_scale);
+        m_frameRect = QRect(pad + inset, pad + inset, previewWidth, previewHeight);
+        m_cardRect = m_frameRect.adjusted(-inset, -inset, inset, inset);
+        setFixedSize(m_cardRect.width() + 2 * pad, m_cardRect.height() + 2 * pad);
+        m_thumb = coverPixmap(image, m_frameRect.size());
 
-        auto* thumb = new QLabel;
-        QImage preview = image;
-        // A scrolling capture is much taller than it is wide; showing all of
-        // it in the card turns into a hairline. Preview its first screenful.
-        if (image.height() > image.width() * 2) {
-            const int previewHeightPixels =
-                std::min(image.height(), std::max(1, image.width() * 9 / 16));
-            preview = image.copy(0, 0, image.width(), previewHeightPixels);
-        }
-        thumb->setPixmap(QPixmap::fromImage(preview).scaled(
-            previewWidth, previewHeight, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-        thumb->setAlignment(Qt::AlignCenter);
-        layout->addWidget(thumb);
+        const int button = qRound(kCardButtonSize * m_scale);
+        const int corner = qRound(kCardCornerMargin * m_scale);
+        const int left = m_cardRect.left() + corner;
+        const int right = m_cardRect.left() + m_cardRect.width() - corner - button;
+        const int top = m_cardRect.top() + corner;
+        const int bottom = m_cardRect.top() + m_cardRect.height() - corner - button;
 
-        auto* info = new QLabel(sizeLabel(image, path, originalSize));
-        info->setFont(uiFont(13));
-        info->setStyleSheet(QStringLiteral("color:#a4a4ac;"));
-        layout->addWidget(info);
+        auto* close = new CardButton(CardButton::Kind::Close, kGlyphCardClose,
+                                     QStringLiteral("Close"), m_scale, this);
+        close->setGeometry(left, top, button, button);
+        connect(close, &QAbstractButton::clicked, this, &QWidget::close);
 
-        auto* hint = new QLabel(hintText);
-        hint->setFont(uiFont(13, true));
-        hint->setStyleSheet(QStringLiteral("color:#7fd18b;"));
-        layout->addWidget(hint);
+        m_pin = new CardButton(CardButton::Kind::Corner, kGlyphCardPin, QStringLiteral("Pin"),
+                               m_scale, this);
+        m_pin->setGeometry(right, top, button, button);
+        connect(m_pin, &QAbstractButton::clicked, this, [this] { setPinned(!m_pinned); });
 
-        if (!ocrText.isEmpty()) {
-            auto* text = new QLabel(ocrText);
-            text->setWordWrap(true);
-            text->setFont(uiFont(13));
-            text->setTextInteractionFlags(Qt::TextSelectableByMouse);
-            text->setMaximumHeight(140);
-            text->setStyleSheet(QStringLiteral(
-                "color:#e8e8ec; background:rgba(255,255,255,14); "
-                "border-radius:8px; padding:8px;"));
-            layout->addWidget(text);
-        }
+        m_upload = new CardButton(CardButton::Kind::Corner, kGlyphCardUpload,
+                                  QStringLiteral("Upload to cloud"), m_scale, this);
+        m_upload->setGeometry(left, bottom, button, button);
+        m_upload->setEnabled(!m_path.isEmpty());
+        connect(m_upload, &QAbstractButton::clicked, this, [this] { upload(); });
 
-        auto* row = new QHBoxLayout;
-        row->setSpacing(8);
+        auto* edit = new CardButton(CardButton::Kind::Corner, kGlyphCardEdit,
+                                    QStringLiteral("Edit"), m_scale, this);
+        edit->setGeometry(right, bottom, button, button);
+        edit->setEnabled(!m_path.isEmpty());
+        connect(edit, &QAbstractButton::clicked, this, [this] { openEditor(); });
 
-        auto* open = new QToolButton;
-        open->setObjectName(QStringLiteral("primary"));
-        open->setText(QStringLiteral("Open"));
-        open->setEnabled(!path.isEmpty());
-        open->setCursor(Qt::PointingHandCursor);
-        open->setFont(uiFont(13, true));
-        connect(open, &QToolButton::clicked, this, [path] {
-            QDesktopServices::openUrl(QUrl::fromLocalFile(path));
-        });
-        row->addWidget(open);
+        auto* copy = new CardButton(CardButton::Kind::Pill, 0, QStringLiteral("Copy"), m_scale,
+                                    this);
+        auto* save = new CardButton(CardButton::Kind::Pill, 0, QStringLiteral("Save"), m_scale,
+                                    this);
+        save->setToolTip(m_video ? QStringLiteral("Select recording save location")
+                                 : QStringLiteral("Select screenshot save location"));
+        QFont pillFont = uiFont(qRound(13 * m_scale), true);
+        pillFont.setWeight(QFont::DemiBold);
+        const QFontMetrics metrics(pillFont);
+        const int minPill = qRound(52 * m_scale);
+        const int pillPadding = qRound(10 * m_scale);
+        const int copyWidth =
+            std::max(minPill, metrics.horizontalAdvance(copy->text()) + 2 * pillPadding);
+        const int saveWidth =
+            std::max(minPill, metrics.horizontalAdvance(save->text()) + 2 * pillPadding);
+        const int gap = qRound(6 * m_scale);
+        const int pillsLeft =
+            m_cardRect.left() + (m_cardRect.width() - (copyWidth + gap + saveWidth)) / 2;
+        const int pillsTop = m_cardRect.top() + (m_cardRect.height() - button) / 2;
+        copy->setGeometry(pillsLeft, pillsTop, copyWidth, button);
+        save->setGeometry(pillsLeft + copyWidth + gap, pillsTop, saveWidth, button);
+        const bool hasContent = m_video ? !m_path.isEmpty() : !m_image.isNull();
+        copy->setEnabled(hasContent);
+        save->setEnabled(hasContent);
+        connect(copy, &QAbstractButton::clicked, this, [this] { copyToClipboard(); });
+        connect(save, &QAbstractButton::clicked, this, [this] { saveAs(); });
 
-        auto* folder = new QToolButton;
-        folder->setText(QStringLiteral("Show in folder"));
-        folder->setEnabled(!path.isEmpty());
-        folder->setCursor(Qt::PointingHandCursor);
-        folder->setFont(uiFont(13, true));
-        connect(folder, &QToolButton::clicked, this, [path] {
-            QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(path).absolutePath()));
-        });
-        row->addWidget(folder);
+        m_pin->setActive(m_pinned);
+        m_pin->setToolTip(m_pinned ? QStringLiteral("Unpin") : QStringLiteral("Pin"));
 
-        if (!path.isEmpty() && settings.cloud.configured) {
-            auto* upload = new QToolButton;
-            upload->setText(QStringLiteral("Upload"));
-            upload->setCursor(Qt::PointingHandCursor);
-            upload->setFont(uiFont(13, true));
-            const bool closeAfter = settings.quickAccess.closeAfterUploading;
-            connect(upload, &QToolButton::clicked, this, [this, path, closeAfter] {
-                if (startCloudUpload(path) && closeAfter)
-                    close();
-            });
-            row->addWidget(upload);
-        }
+        m_tick.setInterval(1000);
+        connect(&m_tick, &QTimer::timeout, this, [this] { tick(); });
+    }
 
-        row->addStretch();
-
-        auto* dismiss = new QToolButton;
-        dismiss->setObjectName(QStringLiteral("danger"));
-        dismiss->setText(QStringLiteral("Dismiss"));
-        dismiss->setCursor(Qt::PointingHandCursor);
-        dismiss->setFont(uiFont(13, true));
-        connect(dismiss, &QToolButton::clicked, this, &QWidget::close);
-        row->addWidget(dismiss);
-
-        layout->addLayout(row);
-
-        setStyleSheet(QStringLiteral(
-            "QToolButton { color:#f5f5f7; background:transparent; border:none; "
-            "border-radius:10px; padding:7px 16px; } "
-            "QToolButton#primary { background:#f3f4f6; color:#111111; } "
-            "QToolButton#primary:hover { background:#ffffff; } "
-            "QToolButton#danger { color:#ffffff; background:rgba(232,17,35,190); "
-            "border-radius:999px; } "
-            "QToolButton#danger:hover { background:#e81123; }"));
-
-        adjustSize();
-
-        QScreen* screen = QGuiApplication::screenAt(QCursor::pos());
-        if (!screen)
-            screen = QGuiApplication::primaryScreen();
-        if (screen) {
-            const QRect work = screen->availableGeometry();
-            const int x = settings.quickAccess.position == QLatin1String("Left")
-                ? work.left() + 20
-                : work.right() - width() - 20;
-            move(x, work.top() + 20);
-        }
-
-        if (settings.quickAccess.autoCloseEnabled) {
-            QTimer::singleShot(settings.quickAccess.autoCloseSeconds * 1000,
-                               this,
-                               &QWidget::close);
-        }
+    /// Show the card in its corner, or bring a hidden one back.
+    void reveal()
+    {
+        place();
+        show();
+        raise();
+        Platform::setTopmost(static_cast<quintptr>(winId()), m_pinned);
+        m_autoCloseClock.restart();
+        m_tick.start();
     }
 
 protected:
     void paintEvent(QPaintEvent*) override
     {
         QPainter painter(this);
-        paintPanel(painter, QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), kCard, 16);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        const QRectF card = QRectF(m_cardRect).adjusted(0.5, 0.5, -0.5, -0.5);
+        const qreal radius = 16 * m_scale;
+
+        // A soft shadow inside the window's transparent margin.
+        for (int i = 4; i >= 1; --i) {
+            const qreal grow = i * 2.0 * m_scale;
+            QPainterPath shadow;
+            shadow.addRoundedRect(card.adjusted(-grow, -grow, grow, grow).translated(0, 3 * m_scale),
+                                  radius + grow, radius + grow);
+            painter.fillPath(shadow, QColor(0, 0, 0, 14));
+        }
+
+        QPainterPath body;
+        body.addRoundedRect(card, radius, radius);
+        painter.fillPath(body, QColor(0x14, 0x14, 0x14));
+        painter.setPen(QPen(QColor(255, 255, 255, 26), 1.0));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawPath(body);
+
+        const qreal frameRadius = 12 * m_scale;
+        QPainterPath frame;
+        frame.addRoundedRect(QRectF(m_frameRect), frameRadius, frameRadius);
+        painter.save();
+        painter.setClipPath(frame);
+        painter.drawPixmap(m_frameRect, m_thumb);
+        painter.restore();
+        painter.setPen(QPen(QColor(255, 255, 255, 10), 1.0));
+        painter.drawPath(frame);
     }
+
+    void mousePressEvent(QMouseEvent* event) override
+    {
+        if (event->button() == Qt::LeftButton && m_cardRect.contains(event->pos())) {
+            m_pressPos = event->pos();
+            m_pressed = true;
+        }
+        QWidget::mousePressEvent(event);
+    }
+
+    void mouseMoveEvent(QMouseEvent* event) override
+    {
+        if (m_pressed && (event->buttons() & Qt::LeftButton)
+            && (event->pos() - m_pressPos).manhattanLength() >= QApplication::startDragDistance()) {
+            m_pressed = false;
+            startDrag();
+            return;
+        }
+        QWidget::mouseMoveEvent(event);
+    }
+
+    void mouseReleaseEvent(QMouseEvent* event) override
+    {
+        m_pressed = false;
+        QWidget::mouseReleaseEvent(event);
+    }
+
+    void keyPressEvent(QKeyEvent* event) override
+    {
+        switch (event->key()) {
+        case Qt::Key_Escape:
+            close();
+            return;
+        case Qt::Key_Return:
+        case Qt::Key_Enter:
+        case Qt::Key_Space:
+            return;
+        default:
+            QWidget::keyPressEvent(event);
+        }
+    }
+
+private:
+    void place()
+    {
+        QScreen* screen = QGuiApplication::screenAt(QCursor::pos());
+        if (!screen)
+            screen = QGuiApplication::primaryScreen();
+        if (!screen)
+            return;
+        const QRect work = screen->availableGeometry();
+        const int side = qRound(kCardEdgeMargin * m_scale);
+        const int bottom = qRound((kCardEdgeMargin + kCardBottomSafeOffset) * m_scale);
+        const int x = m_leftSide ? work.left() + side
+                                 : work.left() + work.width() - side - width();
+        move(x, work.top() + work.height() - bottom - height());
+    }
+
+    void setPinned(bool pinned)
+    {
+        m_pinned = pinned;
+        if (!pinned)
+            m_autoCloseClock.restart();
+        m_pin->setActive(pinned);
+        m_pin->setToolTip(pinned ? QStringLiteral("Unpin") : QStringLiteral("Pin"));
+        Platform::setTopmost(static_cast<quintptr>(winId()), pinned);
+    }
+
+    void tick()
+    {
+        if (m_editOpened) {
+            m_tick.stop();
+            return;
+        }
+        if (m_saveDialogOpen || m_dragging) {
+            m_autoCloseClock.restart();
+            return;
+        }
+        if (!m_pinned && m_autoCloseClock.elapsed() >= qint64(m_autoCloseSeconds) * 1000) {
+            m_tick.stop();
+            dismiss();
+        }
+    }
+
+    /// Auto-close, a finished drag, and a finished upload all follow the
+    /// Settings action: Hide keeps the card for the tray, Close removes it.
+    void dismiss()
+    {
+        if (m_hideOnDismiss) {
+            m_tick.stop();
+            hide();
+            return;
+        }
+        close();
+    }
+
+    void startDrag()
+    {
+        if (m_path.isEmpty())
+            return;
+        auto* mime = new QMimeData;
+        mime->setUrls({QUrl::fromLocalFile(m_path)});
+        auto* drag = new QDrag(this);
+        drag->setMimeData(mime);
+        drag->setPixmap(grab(m_cardRect));
+        drag->setHotSpot(QPoint(qRound(24 * m_scale), qRound(24 * m_scale)));
+        QPointer<ResultCard> self(this);
+        m_dragging = true;
+        drag->exec(Qt::CopyAction);
+        if (!self)
+            return;
+        m_dragging = false;
+        if (m_editOpened)
+            return;
+        if (m_closeAfterDragging || !m_pinned)
+            dismiss();
+    }
+
+    void copyToClipboard()
+    {
+        if (m_video) {
+            if (m_path.isEmpty())
+                return;
+            auto* mime = new QMimeData;
+            mime->setUrls({QUrl::fromLocalFile(m_path)});
+            QGuiApplication::clipboard()->setMimeData(mime);
+            return;
+        }
+        // Live Settings value: the clipboard mode may change while the card is open.
+        QString mode = Platform::loadShellSettings().screenshots.clipboardMode;
+        // A temporary capture is offered as an image, not as a file to keep.
+        if (isTemporaryCapture(m_path) && mode == QLatin1String("File & Image (default)"))
+            mode = QStringLiteral("Image Only");
+        Platform::copyCaptureToClipboard(m_image, m_path, mode);
+    }
+
+    void saveAs()
+    {
+        if (m_saveDialogOpen)
+            return;
+        m_saveDialogOpen = true;
+        QPointer<ResultCard> self(this);
+        if (m_video)
+            promptSaveRecording(this, m_path);
+        else
+            promptSaveScreenshot(this,
+                                 m_image,
+                                 m_path.isEmpty() ? QStringLiteral("ApexShot")
+                                                  : QFileInfo(m_path).completeBaseName());
+        if (self)
+            m_saveDialogOpen = false;
+    }
+
+    void upload()
+    {
+        if (m_uploading || m_path.isEmpty())
+            return;
+        m_uploading = true;
+        m_upload->setEnabled(false);
+        // The Rust helper owns the Cloud transport and reports the outcome in
+        // a notification; its exit code says whether the upload went through.
+        auto* process = new QProcess(qApp);
+        QPointer<ResultCard> card(this);
+        connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), qApp,
+                [process, card](int exitCode, QProcess::ExitStatus status) {
+                    process->deleteLater();
+                    if (card)
+                        card->uploadFinished(status == QProcess::NormalExit && exitCode == 0);
+                });
+        connect(process, &QProcess::errorOccurred, qApp,
+                [process, card](QProcess::ProcessError error) {
+                    if (error != QProcess::FailedToStart)
+                        return;
+                    process->deleteLater();
+                    if (card)
+                        card->uploadFinished(false);
+                });
+        process->start(settingsExecutable(),
+                       {QStringLiteral("--upload"), QDir::toNativeSeparators(m_path)});
+    }
+
+    void uploadFinished(bool succeeded)
+    {
+        m_uploading = false;
+        m_upload->setEnabled(true);
+        // Live Settings value, so the toggle applies without reopening the card.
+        if (succeeded && Platform::loadShellSettings().quickAccess.closeAfterUploading)
+            dismiss();
+    }
+
+    void openEditor()
+    {
+        if (m_path.isEmpty())
+            return;
+        if (m_video) {
+            openVideoEditorWindow(m_path);
+        } else {
+            // A temporary capture may have been cleaned away while the card was up.
+            if (!QFileInfo::exists(m_path) && !m_image.isNull())
+                m_image.save(m_path);
+            openImageEditorWindow(m_path);
+        }
+        m_editOpened = true;
+        close();
+    }
+
+    QImage m_image;
+    QString m_path;
+    bool m_video = false;
+    QPixmap m_thumb;
+    QRect m_cardRect;
+    QRect m_frameRect;
+    qreal m_scale = 1.0;
+    CardButton* m_pin = nullptr;
+    CardButton* m_upload = nullptr;
+    QTimer m_tick;
+    QElapsedTimer m_autoCloseClock;
+    int m_autoCloseSeconds = 30;
+    bool m_pinned = false;
+    bool m_hideOnDismiss = false;
+    bool m_closeAfterDragging = true;
+    bool m_leftSide = true;
+    bool m_editOpened = false;
+    bool m_saveDialogOpen = false;
+    bool m_dragging = false;
+    bool m_uploading = false;
+    bool m_pressed = false;
+    QPoint m_pressPos;
 };
 
 // --------------------------------------------------------------- shell ------
@@ -1690,17 +2086,35 @@ public:
         });
     }
 
+    /// One card at a time: a new capture replaces whatever card is up.
+    void showResultCard(const QImage& image, const QString& path, bool video)
+    {
+        if (m_card)
+            m_card->close();
+        m_card = new ResultCard(image, path, video);
+        m_card->reveal();
+    }
+
+    /// A card the auto-close Hide action put away, waiting in the tray.
+    bool hasHiddenCard() const { return m_card && m_card->isHidden(); }
+
+    void revealHiddenCard()
+    {
+        if (hasHiddenCard())
+            m_card->reveal();
+    }
+
     void shortcutShowLastPreview()
     {
+        if (hasHiddenCard()) {
+            revealHiddenCard();
+            return;
+        }
         if (m_lastScreenshot.isNull()) {
             notify(QStringLiteral("No screenshot is available to preview."));
             return;
         }
-        auto* card = new ResultCard(m_lastScreenshot, m_lastScreenshotPath, m_lastScreenshotText,
-                                    QStringLiteral("Last screenshot"));
-        card->show();
-        card->raise();
-        card->activateWindow();
+        showResultCard(m_lastScreenshot, m_lastScreenshotPath, false);
     }
 
     void shortcutSaveLastScreenshot()
@@ -1712,33 +2126,9 @@ public:
         if (m_saveDialogOpen)
             return;
         const QImage screenshot = m_lastScreenshot;
-        const Platform::ShellSettings settings = Platform::loadShellSettings();
         m_saveDialogOpen = true;
-        QString filter = settings.screenshots.format == QLatin1String("JPEG")
-            ? QStringLiteral("JPEG image (*.jpg *.jpeg)")
-            : settings.screenshots.format == QLatin1String("WebP")
-                ? QStringLiteral("WebP image (*.webp)")
-                : QStringLiteral("PNG image (*.png)");
-        QString path = QFileDialog::getSaveFileName(
-            nullptr,
-            QStringLiteral("Save screenshot"),
-            QDir(Platform::shellScreenshotOutputDir(settings)).filePath(QStringLiteral("ApexShot")),
-            QStringLiteral("PNG image (*.png);;JPEG image (*.jpg *.jpeg);;WebP image (*.webp)"),
-            &filter);
+        promptSaveScreenshot(nullptr, screenshot, QStringLiteral("ApexShot"));
         m_saveDialogOpen = false;
-        if (!path.isEmpty() && QFileInfo(path).suffix().isEmpty()) {
-            path += filter.startsWith(QLatin1String("JPEG")) ? QStringLiteral(".jpg")
-                : filter.startsWith(QLatin1String("WebP")) ? QStringLiteral(".webp")
-                                                           : QStringLiteral(".png");
-            if (QFileInfo::exists(path)
-                && QMessageBox::question(nullptr, QStringLiteral("Save screenshot"),
-                                         QStringLiteral("Replace the existing file?\n%1").arg(path))
-                    != QMessageBox::Yes)
-                return;
-        }
-        if (!path.isEmpty() && !screenshot.save(path))
-            QMessageBox::warning(nullptr, QStringLiteral("Save screenshot"),
-                                 QStringLiteral("Could not save the screenshot."));
     }
 
     bool shortcutInteractionOpen() const
@@ -3161,7 +3551,6 @@ private:
                                  QStringLiteral("Could not save the screenshot: %1").arg(saveError));
         m_lastScreenshot = image;
         m_lastScreenshotPath = path;
-        m_lastScreenshotText.clear();
         if (!path.isEmpty())
             QSettings().setValue(QStringLiteral("shortcuts/last_screenshot"), path);
         maybeAutoUpload(path, settings);
@@ -3184,10 +3573,7 @@ private:
             return;
         }
 
-        auto* card = new ResultCard(image, path, QString(), hint, image.size());
-        card->show();
-        card->raise();
-        card->activateWindow();
+        showResultCard(image, path, false);
     }
 
     void presentRecording(const QImage& thumbnail,
@@ -3213,13 +3599,7 @@ private:
             return;
         }
 
-        const QImage thumb = thumbnail.isNull()
-            ? QImage(2, 2, QImage::Format_ARGB32)
-            : thumbnail;
-        auto* card = new ResultCard(thumb, path, QString(), hint);
-        card->show();
-        card->raise();
-        card->activateWindow();
+        showResultCard(thumbnail, path, true);
     }
 
     void present(const QImage& image, const CaptureOptions& options, const QRect& region)
@@ -3288,7 +3668,6 @@ private:
 
         m_lastScreenshot = image;
         m_lastScreenshotPath = path;
-        m_lastScreenshotText = text;
         if (!path.isEmpty())
             QSettings().setValue(QStringLiteral("shortcuts/last_screenshot"), path);
         maybeAutoUpload(path, settings);
@@ -3304,10 +3683,7 @@ private:
             return;
         }
 
-        auto* card = new ResultCard(image, path, text, hint);
-        card->show();
-        card->raise();
-        card->activateWindow();
+        showResultCard(image, path, false);
     }
 
     bool m_menuOpen = false;
@@ -3316,7 +3692,7 @@ private:
     bool m_saveDialogOpen = false;
     QImage m_lastScreenshot;
     QString m_lastScreenshotPath;
-    QString m_lastScreenshotText;
+    QPointer<ResultCard> m_card;
     Platform::RecordingSession* m_activeSession = nullptr;
     /// Throws the running take away and starts the same recording again; set
     /// while a recording runs, for the restart button and shortcut.
@@ -3509,6 +3885,9 @@ int run(QApplication& app)
         decoratePopupMenu(submenu, menuStyle, menuFont);
     };
 
+    // Present only while the auto-close Hide action is holding a card.
+    QAction* showHiddenCard = menu->addAction(QStringLiteral("Show hidden capture"));
+    showHiddenCard->setVisible(false);
     QAction* capture = menu->addAction(QStringLiteral("Capture..."));
     QAction* crosshair = menu->addAction(QStringLiteral("Crosshair capture"));
 
@@ -3557,8 +3936,9 @@ int run(QApplication& app)
     // The Rust settings window can turn the countdown off entirely; keep the
     // submenu honest without restarting the shell.
     QObject::connect(menu, &QMenu::aboutToShow, menu,
-                     [countdownMenu, countdownGroup, stopRecording, shell] {
+                     [countdownMenu, countdownGroup, stopRecording, showHiddenCard, shell] {
         const Platform::ShellSettings settings = Platform::loadShellSettings();
+        showHiddenCard->setVisible(shell->hasHiddenCard());
         stopRecording->setVisible(shell->hasActiveRecording());
         countdownMenu->setEnabled(settings.recording.showCountdown);
         const int current = recordingCountdownSeconds();
@@ -3596,6 +3976,8 @@ int run(QApplication& app)
         openVideoEditorWindow();
     });
 
+    QObject::connect(showHiddenCard, &QAction::triggered, shell,
+                     [shell] { shell->revealHiddenCard(); });
     QObject::connect(capture, &QAction::triggered, shell, [shell] { shell->openMenu(); });
     QObject::connect(crosshair, &QAction::triggered, shell,
                      [shell] { shell->shortcutCaptureCrosshair(); });

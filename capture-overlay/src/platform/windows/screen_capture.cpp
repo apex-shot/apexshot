@@ -606,4 +606,17 @@ void keepTopmost(quintptr nativeId)
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
+void setTopmost(quintptr nativeId, bool topmost)
+{
+    if (!nativeId)
+        return;
+    SetWindowPos(reinterpret_cast<HWND>(nativeId),
+                 topmost ? HWND_TOPMOST : HWND_NOTOPMOST,
+                 0,
+                 0,
+                 0,
+                 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
 } // namespace Platform

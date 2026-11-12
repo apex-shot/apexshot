@@ -95,6 +95,10 @@ bool captureVirtualDesktop(bool includeCursor, CaptureResult& out, QString& outE
 /// floating surface stays above windows opened after it was shown.
 void keepTopmost(quintptr nativeId);
 
+/// Put a native window into the topmost band or take it out again, without
+/// activating it.
+void setTopmost(quintptr nativeId, bool topmost);
+
 /// Best-effort exclusion of a native window from screen capture, used so the
 /// recorder's own controls do not appear in the video. No-op where the
 /// platform cannot do it.
