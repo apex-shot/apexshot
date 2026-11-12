@@ -96,6 +96,9 @@ struct ShellSettings {
         double overlayScale = 1.0;
         bool autoCloseEnabled = false;
         int autoCloseSeconds = 30;
+        /// "Close" destroys the card when it times out; "Hide" keeps it for the tray.
+        QString autoCloseAction = QStringLiteral("Close");
+        bool closeAfterDragging = true;
         bool closeAfterUploading = false;
     } quickAccess;
 

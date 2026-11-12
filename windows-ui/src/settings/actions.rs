@@ -490,6 +490,8 @@ fn write_shell_settings_to(path: &Path, config: &AppConfig) -> anyhow::Result<()
             "overlay_scale": config.quick_access_overlay_size,
             "auto_close_enabled": config.quick_access_auto_close_enabled,
             "auto_close_seconds": config.quick_access_auto_close_interval,
+            "auto_close_action": config.quick_access_auto_close_action,
+            "close_after_dragging": config.quick_access_close_after_dragging,
             "close_after_uploading": config.quick_access_close_after_uploading,
         },
         "cloud": {
@@ -762,6 +764,8 @@ mod tests {
         assert_eq!(updated["telemetry"]["enabled"], false);
         assert_eq!(updated["cloud"]["configured"], false);
         assert_eq!(updated["quick_access"]["close_after_uploading"], true);
+        assert_eq!(updated["quick_access"]["auto_close_action"], "Close");
+        assert_eq!(updated["quick_access"]["close_after_dragging"], true);
 
         std::fs::remove_dir_all(&root).ok();
     }

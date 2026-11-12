@@ -92,6 +92,8 @@ void checkDefaults(const QTemporaryDir& dir)
     CHECK(qFuzzyCompare(settings.quickAccess.overlayScale, 1.0));
     CHECK(!settings.quickAccess.autoCloseEnabled);
     CHECK(settings.quickAccess.autoCloseSeconds == 30);
+    CHECK(settings.quickAccess.autoCloseAction == QStringLiteral("Close"));
+    CHECK(settings.quickAccess.closeAfterDragging);
     CHECK(!settings.quickAccess.closeAfterUploading);
     CHECK(!settings.cloud.autoUploadAfterCapture);
     CHECK(!settings.cloud.configured);
@@ -154,6 +156,8 @@ void checkParsing(const QTemporaryDir& dir)
     "overlay_scale": 1.2,
     "auto_close_enabled": true,
     "auto_close_seconds": 45,
+    "auto_close_action": "Hide",
+    "close_after_dragging": false,
     "close_after_uploading": true
   },
   "cloud": {
@@ -213,6 +217,8 @@ void checkParsing(const QTemporaryDir& dir)
     CHECK(qFuzzyCompare(settings.quickAccess.overlayScale, 1.2));
     CHECK(settings.quickAccess.autoCloseEnabled);
     CHECK(settings.quickAccess.autoCloseSeconds == 45);
+    CHECK(settings.quickAccess.autoCloseAction == QStringLiteral("Hide"));
+    CHECK(!settings.quickAccess.closeAfterDragging);
     CHECK(settings.quickAccess.closeAfterUploading);
     CHECK(settings.cloud.autoUploadAfterCapture);
     CHECK(settings.cloud.configured);
@@ -231,7 +237,7 @@ void checkSanitizing(const QTemporaryDir& dir)
                  "webcam": { "size_index": 9, "shape_index": -4,
                              "rel_x": 4.5, "rel_y": -1.0 } },
   "quick_access": { "position": "Middle", "overlay_scale": 9,
-                    "auto_close_seconds": 1 },
+                    "auto_close_seconds": 1, "auto_close_action": "Minimize" },
   "ocr": { "language": "  " }
 })");
 
@@ -251,6 +257,7 @@ void checkSanitizing(const QTemporaryDir& dir)
     CHECK(settings.quickAccess.position == QStringLiteral("Right"));
     CHECK(qFuzzyCompare(settings.quickAccess.overlayScale, 1.5));
     CHECK(settings.quickAccess.autoCloseSeconds == 5);
+    CHECK(settings.quickAccess.autoCloseAction == QStringLiteral("Close"));
     CHECK(settings.ocr.language.isEmpty());
 }
 

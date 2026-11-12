@@ -459,17 +459,6 @@ fn build_settings_window(app: &Application) {
     recordings.rec_notifications.set_tooltip_text(Some(&t(
         "Do Not Disturb integration is not available on Windows yet.",
     )));
-    quick_access.close_after_dragging_check.set_sensitive(false);
-    quick_access
-        .close_after_dragging_check
-        .set_tooltip_text(Some(&t(
-            "Dragging the result card out of the app is not available on Windows yet.",
-        )));
-    quick_access
-        .close_after_uploading_check
-        .set_tooltip_text(Some(&t(
-            "Close the result card when its Upload action starts an upload.",
-        )));
     advanced
         .telemetry_enabled_check
         .set_active(config.windows_telemetry_enabled);
