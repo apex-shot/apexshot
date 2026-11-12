@@ -565,38 +565,87 @@ fn build_cursor_panel(
     panel.set_vexpand(true);
     panel.append(&panel_header(&t("Cursor")));
 
+    let tabs = GtkBox::new(Orientation::Horizontal, 0);
+    tabs.add_css_class("recording-editor-webcam-scope");
+    tabs.set_homogeneous(true);
+    tabs.set_hexpand(true);
+    tabs.set_margin_start((12.0 * scale).round() as i32);
+    tabs.set_margin_end((12.0 * scale).round() as i32);
+    tabs.set_margin_bottom((8.0 * scale).round() as i32);
+    let (style_tab, _) = webcam_scope_button(&t("Style"));
+    let (follow_tab, _) = webcam_scope_button(&t("Follow"));
+    let (effects_tab, _) = webcam_scope_button(&t("Effects"));
+    for tab in [&style_tab, &follow_tab, &effects_tab] {
+        tab.set_hexpand(true);
+    }
+    follow_tab.set_group(Some(&style_tab));
+    effects_tab.set_group(Some(&style_tab));
+    style_tab.set_active(true);
+    tabs.append(&style_tab);
+    tabs.append(&follow_tab);
+    tabs.append(&effects_tab);
+    panel.append(&tabs);
+
+    let pages = Stack::new();
+    pages.set_transition_type(StackTransitionType::Crossfade);
+    pages.set_transition_duration(120);
+    pages.set_vhomogeneous(false);
+    let style_page = panel_body();
+    let follow_page = panel_body();
+    let effects_page = panel_body();
+    for page in [&style_page, &follow_page, &effects_page] {
+        page.set_valign(Align::Start);
+    }
+    pages.add_named(&style_page, Some("style"));
+    pages.add_named(&follow_page, Some("follow"));
+    pages.add_named(&effects_page, Some("effects"));
+    for (tab, name) in [
+        (&style_tab, "style"),
+        (&follow_tab, "follow"),
+        (&effects_tab, "effects"),
+    ] {
+        let pages = pages.clone();
+        tab.connect_toggled(move |tab| {
+            if tab.is_active() {
+                pages.set_visible_child_name(name);
+            }
+        });
+    }
+
     let states: SectionStates = Rc::new(RefCell::new(std::collections::HashMap::new()));
-    let body = panel_body();
-    body.set_valign(Align::Start);
 
     let rebuild: Rc<dyn Fn()> = {
-        let body = body.clone();
+        let style_page = style_page.clone();
+        let follow_page = follow_page.clone();
+        let effects_page = effects_page.clone();
         let cursor = cursor.clone();
         let repaint = repaint.clone();
         let timeline = timeline.clone();
         let states = states.clone();
         Rc::new(move || {
-            while let Some(child) = body.first_child() {
-                body.remove(&child);
+            for page in [&style_page, &follow_page, &effects_page] {
+                while let Some(child) = page.first_child() {
+                    page.remove(&child);
+                }
             }
             let picker = GtkBox::new(Orientation::Vertical, (8.0 * scale).round() as i32);
             picker.set_hexpand(true);
-            body.append(&picker);
+            style_page.append(&picker);
             let style = remembered_section(scale, &states, "style", &t("Style"), true);
             let clicks = remembered_section(scale, &states, "clicks", &t("Clicks"), true);
-            let movement = remembered_section(scale, &states, "movement", &t("Movement"), false);
-            let rotation = remembered_section(scale, &states, "rotation", &t("Rotation"), false);
+            let movement = remembered_section(scale, &states, "movement", &t("Movement"), true);
+            let rotation = remembered_section(scale, &states, "rotation", &t("Rotation"), true);
             let visibility =
-                remembered_section(scale, &states, "visibility", &t("Visibility"), false);
-            let keyboard = remembered_section(scale, &states, "keyboard", &t("Keyboard"), false);
+                remembered_section(scale, &states, "visibility", &t("Visibility"), true);
+            let keyboard = remembered_section(scale, &states, "keyboard", &t("Keyboard"), true);
             let typing = remembered_section(scale, &states, "typing", &t("Typing"), true);
-            body.append(&style.root);
-            body.append(&clicks.root);
-            body.append(&movement.root);
-            body.append(&rotation.root);
-            body.append(&visibility.root);
-            body.append(&keyboard.root);
-            body.append(&typing.root);
+            style_page.append(&style.root);
+            follow_page.append(&movement.root);
+            follow_page.append(&rotation.root);
+            follow_page.append(&visibility.root);
+            effects_page.append(&clicks.root);
+            effects_page.append(&keyboard.root);
+            effects_page.append(&typing.root);
             let size_slider = build_cursor_style_page(
                 scale,
                 cursor.clone(),
@@ -633,7 +682,7 @@ fn build_cursor_panel(
     scroll.set_policy(PolicyType::Never, PolicyType::Automatic);
     scroll.set_vexpand(true);
     scroll.set_hexpand(true);
-    scroll.set_child(Some(&body));
+    scroll.set_child(Some(&pages));
     panel.append(&scroll);
     panel
 }
