@@ -619,7 +619,10 @@ impl FramedSink {
     }
 }
 
-const CAPTION_TOP_SHARE: f64 = 0.88;
+/// Where the caption strip starts, as a share of the frame height. The pill
+/// is 7.5% of the height plus its padding and sits 3.3% above the bottom, so
+/// it reaches about 13.5% up; the strip leaves room above that.
+const CAPTION_TOP_SHARE: f64 = 0.82;
 const CAPTION_MARGIN_ROWS: usize = 2;
 
 /// Keyboard captions drawn onto the bottom strip of each output frame whose
@@ -868,11 +871,8 @@ mod tests {
         let luma = 320 * 240;
         for (source, active, inactive) in frames {
             assert_eq!(inactive, source);
-            assert_eq!(active[..210 * 320], source[..210 * 320]);
-            assert_eq!(
-                active[luma..luma + 105 * 320],
-                source[luma..luma + 105 * 320]
-            );
+            assert_eq!(active[..194 * 320], source[..194 * 320]);
+            assert_eq!(active[luma..luma + 97 * 320], source[luma..luma + 97 * 320]);
             assert_ne!(active[212 * 320..luma], source[212 * 320..luma]);
         }
     }

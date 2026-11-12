@@ -15,13 +15,27 @@ const SHIFT_TYPING_GAP: f64 = 1.0;
 /// Two plain letters or digits this close are typing while single letters are shown.
 const LETTER_RUN_GAP: f64 = 1.0;
 
-const KEY_HEIGHT: f64 = 0.05;
+/// A key's height as a share of the frame height.
+const KEY_HEIGHT: f64 = 0.075;
 const BOTTOM_INSET: f64 = 0.033;
-const PADDING: f64 = 0.3;
-const GAP: f64 = 0.2;
-const FONT_SIZE: f64 = 0.5;
-const CORNER: f64 = 0.2;
-const KEY_FILL_ALPHA: f64 = 0.6;
+/// Space between the pill's edge and its keys.
+const PILL_PADDING: f64 = 6.0 / 34.0;
+/// The pill's corner radius.
+const PILL_RADIUS: f64 = 9.0 / 34.0;
+/// A key's corner radius.
+const KEY_RADIUS: f64 = 5.0 / 34.0;
+/// Space either side of a key's label.
+const KEY_PADDING: f64 = 14.0 / 34.0;
+/// Space between two keys.
+const GAP: f64 = 6.0 / 34.0;
+/// The label's size.
+const FONT_SIZE: f64 = 12.0 / 34.0 * 1.25;
+/// The pill's fill, `#0f0f0f`, slightly see-through over footage.
+const PILL_FILL: (f64, f64, f64, f64) = (15.0 / 255.0, 15.0 / 255.0, 15.0 / 255.0, 0.92);
+/// A key's fill over the pill.
+const KEY_FILL: (f64, f64, f64, f64) = (1.0, 1.0, 1.0, 0.08);
+/// The label colour.
+const LABEL_COLOR: (f64, f64, f64, f64) = (1.0, 1.0, 1.0, 0.86);
 const ROW_WIDTH_SHARE: f64 = 0.9;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -323,33 +337,51 @@ fn draw_row(cr: &Context, width: f64, height: f64, caption: &Caption) {
 
     let base_height = KEY_HEIGHT * height;
     let natural = keycaps(cr, &items, base_height);
-    let scale = (ROW_WIDTH_SHARE * width / row_width(&natural, base_height * GAP)).min(1.0);
+    let natural_pill_width =
+        row_width(&natural, base_height * GAP) + 2.0 * base_height * PILL_PADDING;
+    let scale = (ROW_WIDTH_SHARE * width / natural_pill_width).min(1.0);
 
     let key_height = base_height * scale;
-    let gap = key_height * GAP;
     let caps = keycaps(cr, &items, key_height);
-    let total = row_width(&caps, gap);
-    let top = height * (1.0 - BOTTOM_INSET) - key_height;
+    let gap = key_height * GAP;
+    let pad = key_height * PILL_PADDING;
+    let pill_width = row_width(&caps, gap) + 2.0 * pad;
+    let pill_height = key_height + 2.0 * pad;
 
-    let mut x = (width - total) / 2.0;
+    let pill_top = height * (1.0 - BOTTOM_INSET) - pill_height;
+    let pill_left = (width - pill_width) / 2.0;
+
+    rounded_rect(
+        cr,
+        pill_left,
+        pill_top,
+        pill_width,
+        pill_height,
+        key_height * PILL_RADIUS,
+    );
+    cr.set_source_rgba(PILL_FILL.0, PILL_FILL.1, PILL_FILL.2, PILL_FILL.3);
+    let _ = cr.fill();
+
+    let mut x = pill_left + pad;
+    let y = pill_top + pad;
     for (label, cap_width) in &caps {
-        rounded_rect(cr, x, top, *cap_width, key_height, key_height * CORNER);
-        cr.set_source_rgba(0.0, 0.0, 0.0, KEY_FILL_ALPHA);
+        rounded_rect(cr, x, y, *cap_width, key_height, key_height * KEY_RADIUS);
+        cr.set_source_rgba(KEY_FILL.0, KEY_FILL.1, KEY_FILL.2, KEY_FILL.3);
         let _ = cr.fill();
 
         let (text_width, text_height) = label.size(cr);
-        cr.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+        cr.set_source_rgba(LABEL_COLOR.0, LABEL_COLOR.1, LABEL_COLOR.2, LABEL_COLOR.3);
         label.show(
             cr,
             x + (cap_width - text_width) / 2.0,
-            top + (key_height - text_height) / 2.0,
+            y + (key_height - text_height) / 2.0,
         );
         x += cap_width + gap;
     }
 }
 
 fn keycaps(cr: &Context, items: &[String], key_height: f64) -> Vec<(Label, f64)> {
-    let padding = key_height * PADDING;
+    let padding = key_height * KEY_PADDING;
     items
         .iter()
         .map(|item| {
@@ -389,6 +421,7 @@ impl Label {
         let layout = pangocairo::functions::create_layout(cr);
         let mut font = gtk4::pango::FontDescription::new();
         font.set_family("Segoe UI");
+        font.set_weight(gtk4::pango::Weight::Semibold);
         font.set_absolute_size(font_px * f64::from(gtk4::pango::SCALE));
         layout.set_font_description(Some(&font));
         layout.set_text(text);
@@ -425,7 +458,7 @@ impl Label {
         cr.select_font_face(
             "Sans",
             gtk4::cairo::FontSlant::Normal,
-            gtk4::cairo::FontWeight::Normal,
+            gtk4::cairo::FontWeight::Bold,
         );
         cr.set_font_size(self.font_px);
     }
