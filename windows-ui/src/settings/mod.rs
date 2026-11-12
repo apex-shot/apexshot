@@ -162,6 +162,7 @@ pub fn show_settings_window() -> anyhow::Result<()> {
 
     app.connect_activate(|application| {
         crate::capture::editor::ui_support::apply_theme_to_gtk();
+        crate::platform::sharpen_text();
         let windows = application.windows();
         if let Some(existing_window) = windows.first() {
             existing_window.present();

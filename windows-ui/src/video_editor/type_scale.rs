@@ -2,8 +2,7 @@
 //!
 //! Settings, onboarding, the image editor and History each author their type
 //! at 100% and let [`crate::platform::ui_scale`] carry it to the display. This
-//! is the video editor's sheet: an Inter stack (the other windows still use DM
-//! Sans), the same 14px base,
+//! is the video editor's sheet: the same Inter stack, the same 14px base,
 //! 15px headings, 13px body and controls, and 11px eyebrows and badges.
 //!
 //! Only `font-size` values are scaled here. The window, side-panel and export

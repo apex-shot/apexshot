@@ -45,6 +45,7 @@ pub fn show_image_editor_window(initial: Option<PathBuf>) -> anyhow::Result<()> 
 
     app.connect_activate(move |application| {
         crate::capture::editor::ui_support::apply_theme_to_gtk();
+        crate::platform::sharpen_text();
         if let Some(existing) = application.windows().first() {
             existing.present();
             return;

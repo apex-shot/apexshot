@@ -52,7 +52,7 @@ pub fn show_video_editor_window(initial: Option<PathBuf>) -> anyhow::Result<()> 
 
     app.connect_activate(move |application| {
         crate::capture::editor::ui_support::apply_theme_to_gtk();
-        sharpen_text();
+        crate::platform::sharpen_text();
         if let Some(existing) = application.windows().first() {
             existing.present();
             return;
@@ -62,37 +62,6 @@ pub fn show_video_editor_window(initial: Option<PathBuf>) -> anyhow::Result<()> 
 
     let _ = app.run_with_args::<String>(&[]);
     Ok(())
-}
-
-/// Draw text hinted to the pixel grid instead of GTK's automatic mode, which
-/// leaves glyphs unhinted and at fractional positions and reads soft at
-/// ordinary display scales. Slight hinting keeps the face's shapes, and hinted
-/// metrics keep letters on whole pixels.
-fn sharpen_text() {
-    use gtk4::prelude::ObjectExt;
-    let Some(settings) = gtk4::Settings::default() else {
-        return;
-    };
-    // An enum this build's bindings do not name, so it is set by its nick.
-    if let Some(spec) = settings.find_property("gtk-font-rendering") {
-        let manual = gtk4::glib::EnumClass::with_type(spec.value_type())
-            .and_then(|class| class.to_value_by_nick("manual"));
-        if let Some(manual) = manual {
-            settings.set_property_from_value("gtk-font-rendering", &manual);
-        }
-    }
-    if settings.find_property("gtk-xft-hintstyle").is_some() {
-        settings.set_property("gtk-xft-hintstyle", "hintslight");
-    }
-    if settings.find_property("gtk-xft-antialias").is_some() {
-        settings.set_property("gtk-xft-antialias", 1i32);
-    }
-    if settings.find_property("gtk-xft-hinting").is_some() {
-        settings.set_property("gtk-xft-hinting", 1i32);
-    }
-    if settings.find_property("gtk-hint-font-metrics").is_some() {
-        settings.set_property("gtk-hint-font-metrics", true);
-    }
 }
 
 /// One saved edit list, as the History window sees it.

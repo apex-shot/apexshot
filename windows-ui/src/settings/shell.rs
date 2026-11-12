@@ -434,7 +434,7 @@ pub fn install_css() {
 
     let mut css = format!(
         "\
-         .editor-root {{ background-color:#0f0f0f; font-family:'DM Sans','Noto Sans',system-ui,sans-serif; }}          .editor-root.editor-theme-light {{ background-color:#ffffff; }}          .settings-window-controls {{ background-color:transparent; border-bottom:none; }} \n         .editor-root.editor-theme-light .settings-window-controls {{ background-color:transparent; }} \n         .settings-sidebar-wrapper {{ background-color:transparent; border-right:none; min-width:0; }} \
+         .editor-root {{ background-color:#0f0f0f; font-family:'Inter','Noto Sans',system-ui,sans-serif; }}          .editor-root.editor-theme-light {{ background-color:#ffffff; }}          .settings-window-controls {{ background-color:transparent; border-bottom:none; }} \n         .editor-root.editor-theme-light .settings-window-controls {{ background-color:transparent; }} \n         .settings-sidebar-wrapper {{ background-color:transparent; border-right:none; min-width:0; }} \
          .settings-sidebar-head {{ padding-left:{}px; }} \
          .settings-search-row {{ padding:0 {}px {}px {}px; }} \
          .editor-root entry.settings-search {{ min-height:{}px; border-radius:{}px; background-color:rgba(255,255,255,0.055); padding:0 {}px; font-size:{}px; }} \
@@ -613,10 +613,9 @@ pub(crate) fn install_select_menu_css() {
 
 /// The Settings window's type scale.
 ///
-/// The shared sheets were tuned for Inter at the sizes the Linux build uses.
-/// DM Sans runs a little lighter at the same size, so this provider restates
-/// every role once — page heading, section heading, row title, row hint and
-/// control text — and the pages stop carrying per-page weights of their own.
+/// The shared sheets set the family and the Linux sizes. This provider restates
+/// every Windows role once — page heading, section heading, row title, row hint
+/// and control text — and the pages stop carrying per-page weights of their own.
 /// It is installed by the Settings window only, after the shell and page
 /// sheets, so the History and editor windows keep their own typography.
 ///

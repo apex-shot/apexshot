@@ -208,6 +208,7 @@ pub fn run() -> anyhow::Result<Outcome> {
     let outcome_for_app = Rc::clone(&outcome);
 
     app.connect_activate(move |application| {
+        crate::platform::sharpen_text();
         if let Some(existing) = application.windows().first() {
             existing.present();
             return;
@@ -646,7 +647,7 @@ mod tests {
         // Measure the form with the faces the app registers before it opens
         // onboarding. Without them the fixture falls back to whatever the
         // machine has installed, and a wider fallback can fail the fit checks
-        // on a runner that has no DM Sans.
+        // on a runner that has no Inter.
         static FONTS: std::sync::Once = std::sync::Once::new();
         FONTS.call_once(crate::platform::prepare_process);
 
