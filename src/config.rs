@@ -1632,7 +1632,7 @@ mod tests {
         };
 
         let yaml = serde_yml::to_string(&original.clone().sanitized()).unwrap();
-        let loaded: AppConfig = serde_yml::from_str(&yaml).unwrap().sanitized();
+        let loaded = serde_yml::from_str::<AppConfig>(&yaml).unwrap().sanitized();
 
         assert_eq!(
             loaded.rec_video_default_preset.as_deref(),
@@ -1643,7 +1643,7 @@ mod tests {
     #[test]
     fn default_video_preset_stays_unset_through_a_saved_config() {
         let yaml = serde_yml::to_string(&AppConfig::default().sanitized()).unwrap();
-        let cfg: AppConfig = serde_yml::from_str(&yaml).unwrap().sanitized();
+        let cfg = serde_yml::from_str::<AppConfig>(&yaml).unwrap().sanitized();
 
         assert!(cfg.rec_video_default_preset.is_none());
     }
