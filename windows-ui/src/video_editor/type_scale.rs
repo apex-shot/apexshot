@@ -28,6 +28,11 @@ const VIDEO_EDITOR_TYPE_CSS: &str = r#"
         .video-editor-root checkbutton label {
             font-size: 13px;
         }
+        /* Choice cards (click effect, click sound): one step under the 13px
+           controls instead of the shared sheet's 11px eyebrow size. */
+        .video-editor-root .recording-editor-click-effect-label {
+            font-size: 12px;
+        }
 
         /* Title bar and section headings */
         .video-editor-root .video-editor-document-title,

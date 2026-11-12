@@ -15,7 +15,6 @@ use crate::recording::editor::model::{
     ClickEffect, CursorMotionStyle, CursorRotationMode, CursorSettings, CursorTheme,
 };
 use crate::settings::select::SettingsSelect;
-use gtk4::cairo::{FontSlant, FontWeight};
 use gtk4::gdk;
 use gtk4::gdk_pixbuf::Pixbuf;
 use gtk4::prelude::*;
@@ -4576,25 +4575,43 @@ impl FilledSlider {
             let _ = context.fill();
         }
 
-        context.select_font_face("DM Sans", FontSlant::Normal, FontWeight::Normal);
-        context.set_font_size(13.0 * self.scale);
+        // The label and value go through Pango with the widget's own font
+        // settings, so they are hinted and spaced like every GTK label rather
+        // than drawn by cairo's basic text path.
+        let text_layout = |text: &str| {
+            let layout = widget.create_pango_layout(Some(text));
+            let mut font = gtk4::pango::FontDescription::new();
+            font.set_family("Inter");
+            font.set_weight(gtk4::pango::Weight::Medium);
+            font.set_absolute_size(13.0 * self.scale * f64::from(gtk4::pango::SCALE));
+            layout.set_font_description(Some(&font));
+            layout
+        };
         if light {
             context.set_source_rgba(0.15, 0.16, 0.18, text_alpha);
         } else {
             context.set_source_rgba(1.0, 1.0, 1.0, text_alpha);
         }
-        context.move_to(14.0 * self.scale, height * 0.66);
-        let _ = context.show_text(label);
+        let label_layout = text_layout(label);
+        let (_, label_height) = label_layout.pixel_size();
+        context.move_to(
+            14.0 * self.scale,
+            ((height - f64::from(label_height)) / 2.0).round(),
+        );
+        pangocairo::functions::show_layout(context, &label_layout);
 
         let value_text = format!(
             "{}{}",
             format_value(self.value.get(), self.decimals),
             self.suffix.get()
         );
-        if let Ok(extents) = context.text_extents(&value_text) {
-            context.move_to(width - 14.0 * self.scale - extents.width(), height * 0.66);
-            let _ = context.show_text(&value_text);
-        }
+        let value_layout = text_layout(&value_text);
+        let (value_width, value_height) = value_layout.pixel_size();
+        context.move_to(
+            (width - 14.0 * self.scale - f64::from(value_width)).round(),
+            ((height - f64::from(value_height)) / 2.0).round(),
+        );
+        pangocairo::functions::show_layout(context, &value_layout);
 
         let handle_x = (fill_width - radius).clamp(radius, (width - radius).max(radius));
         context.set_line_width(if hot { 2.0 } else { 1.5 });
