@@ -56,6 +56,11 @@ QString normalizedPosition(const QString& value)
     return value == QLatin1String("Left") ? QStringLiteral("Left") : QStringLiteral("Right");
 }
 
+QString normalizedAutoCloseAction(const QString& value)
+{
+    return value == QLatin1String("Hide") ? QStringLiteral("Hide") : QStringLiteral("Close");
+}
+
 QString screenshotExtension(const QString& format)
 {
     const QString normalized = normalizedFormat(format);
@@ -336,6 +341,12 @@ ShellSettings loadShellSettings()
     out.quickAccess.autoCloseSeconds =
         quickAccess.value(QStringLiteral("auto_close_seconds"))
             .toInt(out.quickAccess.autoCloseSeconds);
+    out.quickAccess.autoCloseAction =
+        quickAccess.value(QStringLiteral("auto_close_action"))
+            .toString(out.quickAccess.autoCloseAction);
+    out.quickAccess.closeAfterDragging =
+        quickAccess.value(QStringLiteral("close_after_dragging"))
+            .toBool(out.quickAccess.closeAfterDragging);
     out.quickAccess.closeAfterUploading =
         quickAccess.value(QStringLiteral("close_after_uploading"))
             .toBool(out.quickAccess.closeAfterUploading);
@@ -375,6 +386,7 @@ ShellSettings loadShellSettings()
     out.quickAccess.overlayScale =
         std::round(std::clamp(out.quickAccess.overlayScale, 0.5, 1.5) * 10.0) / 10.0;
     out.quickAccess.autoCloseSeconds = std::clamp(out.quickAccess.autoCloseSeconds, 5, 120);
+    out.quickAccess.autoCloseAction = normalizedAutoCloseAction(out.quickAccess.autoCloseAction);
 
     return out;
 }
