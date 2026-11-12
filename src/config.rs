@@ -71,6 +71,8 @@ pub struct AppConfig {
     pub rec_video_fps: u8,
     /// 0 = Balanced (CRF 23), 1 = High (CRF 20), 2 = Ultra (CRF 16).
     pub rec_video_quality: u8,
+    /// Windows screen codec: 0 = H.264, 1 = HEVC. The Linux recorder ignores it.
+    pub rec_video_codec: u8,
     pub rec_video_mono: bool,
     pub rec_video_open_editor: bool,
     /// webrtcdsp noise suppression on the recording mic (GStreamer audio path).
@@ -150,6 +152,12 @@ pub struct AppConfig {
     pub shortcut_open_recording_ui: String,
     pub shortcut_record_screen: String,
     pub shortcut_recording_stop_save: String,
+    /// Windows only: pause or resume the running recording.
+    pub shortcut_recording_pause: String,
+    /// Windows only: restart the running recording, after a confirmation.
+    pub shortcut_recording_restart: String,
+    /// Windows only: mark the current moment of the running recording.
+    pub shortcut_recording_marker: String,
     // Cloud settings
     pub cloud_screenshot_quality: String,
     pub cloud_copy_to_clipboard: String,
@@ -236,6 +244,7 @@ impl Default for AppConfig {
             rec_video_max_res: 0, // 0 = Original
             rec_video_fps: 1,     // 1 = 30fps
             rec_video_quality: 1, // 1 = High
+            rec_video_codec: 0,   // 0 = H.264
             rec_video_mono: false,
             rec_video_open_editor: false,
             rec_noise_suppression: false,
@@ -314,6 +323,9 @@ impl Default for AppConfig {
             shortcut_open_recording_ui: String::new(),
             shortcut_record_screen: String::new(),
             shortcut_recording_stop_save: "Ctrl+Alt+Shift+S".to_string(),
+            shortcut_recording_pause: "Ctrl+Alt+Shift+P".to_string(),
+            shortcut_recording_restart: "Ctrl+Alt+Shift+R".to_string(),
+            shortcut_recording_marker: "Ctrl+Alt+Shift+K".to_string(),
             cloud_screenshot_quality: "Optimized for sharing".to_string(),
             cloud_copy_to_clipboard: "ApexShot Cloud link".to_string(),
             cloud_show_recently_uploaded: true,
@@ -377,6 +389,7 @@ impl AppConfig {
             self.after_capture_show_quick_access = DEFAULT_AFTER_CAPTURE_SHOW_QUICK_ACCESS;
         }
         self.rec_video_format = self.rec_video_format.min(1);
+        self.rec_video_codec = self.rec_video_codec.min(1);
         // The webcam layer's tables have four entries each, and the recorder
         // and the editor both index them directly.
         self.rec_webcam_size = self.rec_webcam_size.min(3);

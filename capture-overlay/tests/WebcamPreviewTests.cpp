@@ -6,6 +6,7 @@
 #include "platform/windows/webcam_preview.h"
 
 #include <QApplication>
+#include <QDir>
 #include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
@@ -224,7 +225,10 @@ bool checkRecording(const QString& fakeCamera)
         ~Cleanup()
         {
             QFile::remove(Platform::webcamTrackPathFor(video));
-            QFile::remove(Platform::sidecarPathFor(video));
+            const QString sidecar = Platform::sidecarPathFor(video);
+            QFile::remove(sidecar);
+            if (QFileInfo(sidecar).fileName() == QStringLiteral("pointer.json"))
+                QDir(QFileInfo(sidecar).absolutePath()).removeRecursively();
         }
     } cleanup{request.outputPath};
     request.webcamEnabled = true;

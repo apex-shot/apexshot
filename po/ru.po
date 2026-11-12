@@ -820,6 +820,21 @@ msgstr "Открыть интерфейс записи:"
 msgid "Record Screen:"
 msgstr "Записать экран:"
 
+msgid "HEVC (smaller files)"
+msgstr "HEVC (файлы меньше)"
+
+msgid "H.264"
+msgstr "H.264"
+
+msgid "Pause or Resume Recording:"
+msgstr "Приостановить или продолжить запись:"
+
+msgid "Restart Recording:"
+msgstr "Начать запись заново:"
+
+msgid "Add Recording Marker:"
+msgstr "Добавить метку записи:"
+
 msgid "Stop and Save Recording:"
 msgstr "Остановить и сохранить запись:"
 
@@ -1413,8 +1428,20 @@ msgstr "Скрыть трек"
 msgid "Hide video"
 msgstr "Скрыть видео"
 
+msgid "Remove cursor shake"
+msgstr "Убирать дрожание курсора"
+
 msgid "Hide when idle"
 msgstr "Скрывать при бездействии"
+
+msgid "Loop cursor position"
+msgstr "Повторять позицию курсора"
+
+msgid "Loop before end"
+msgstr "Повтор перед концом"
+
+msgid "Stop at the end"
+msgstr "Остановка в конце"
 
 msgid "Hide zoom"
 msgstr "Скрыть масштаб"

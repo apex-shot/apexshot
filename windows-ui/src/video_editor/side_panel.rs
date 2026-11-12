@@ -813,6 +813,36 @@ fn build_cursor_follow_page(
     default_row.append(&always_default);
     page.append(&default_row);
 
+    let shake_row = GtkBox::new(Orientation::Horizontal, 8);
+    shake_row.add_css_class("recording-editor-zoom-classic");
+    let shake_label = Label::new(Some(&t("Remove cursor shake")));
+    shake_label.add_css_class("recording-editor-zoom-classic-label");
+    shake_label.set_hexpand(true);
+    shake_label.set_xalign(0.0);
+    let remove_shake = Switch::new();
+    remove_shake.add_css_class("recording-editor-zoom-switch");
+    remove_shake.set_active(settings.remove_shake_threshold > 0.0);
+    remove_shake.set_halign(Align::End);
+    remove_shake.connect_state_set({
+        let cursor = cursor.clone();
+        let repaint = repaint.clone();
+        move |_, active| {
+            // The studied panel turns the filter off by writing zero and back
+            // on at its default threshold.
+            update_cursor_settings(&cursor, &repaint, |settings| {
+                settings.remove_shake_threshold = if active {
+                    crate::recording::editor::cursor_shake::DEFAULT_REMOVE_SHAKE_THRESHOLD
+                } else {
+                    0.0
+                }
+            });
+            gtk4::glib::Propagation::Proceed
+        }
+    });
+    shake_row.append(&shake_label);
+    shake_row.append(&remove_shake);
+    page.append(&shake_row);
+
     let idle_row = GtkBox::new(Orientation::Horizontal, 8);
     idle_row.add_css_class("recording-editor-zoom-classic");
     let idle_label = Label::new(Some(&t("Hide when idle")));
@@ -838,14 +868,73 @@ fn build_cursor_follow_page(
         &cursor_slider(
             &t("Idle delay"),
             120.0,
-            4000.0,
+            5000.0,
             settings.idle_ms,
             40.0,
             0,
             scale,
+            cursor.clone(),
+            repaint.clone(),
+            |settings, value| settings.idle_ms = value,
+        )
+        .widget(),
+    );
+
+    let loop_row = GtkBox::new(Orientation::Horizontal, 8);
+    loop_row.add_css_class("recording-editor-zoom-classic");
+    let loop_label = Label::new(Some(&t("Loop cursor position")));
+    loop_label.add_css_class("recording-editor-zoom-classic-label");
+    loop_label.set_hexpand(true);
+    loop_label.set_xalign(0.0);
+    let loop_switch = Switch::new();
+    loop_switch.add_css_class("recording-editor-zoom-switch");
+    loop_switch.set_active(settings.loop_position_before_end_ms.is_some());
+    loop_switch.set_halign(Align::End);
+    loop_switch.connect_state_set({
+        let cursor = cursor.clone();
+        let repaint = repaint.clone();
+        move |_, active| {
+            // The studied panel turns the loop on one second before the end.
+            update_cursor_settings(&cursor, &repaint, |settings| {
+                settings.loop_position_before_end_ms = if active { Some(1000.0) } else { None };
+            });
+            gtk4::glib::Propagation::Proceed
+        }
+    });
+    loop_row.append(&loop_label);
+    loop_row.append(&loop_switch);
+    page.append(&loop_row);
+    page.append(
+        &cursor_slider(
+            &t("Loop before end"),
+            1000.0,
+            4000.0,
+            settings.loop_position_before_end_ms.unwrap_or(1000.0),
+            50.0,
+            0,
+            scale,
+            cursor.clone(),
+            repaint.clone(),
+            |settings, value| {
+                if settings.loop_position_before_end_ms.is_some() {
+                    settings.loop_position_before_end_ms = Some(value);
+                }
+            },
+        )
+        .widget(),
+    );
+    page.append(
+        &cursor_slider(
+            &t("Stop at the end"),
+            0.0,
+            5000.0,
+            settings.stop_movement_in_last_part_ms,
+            50.0,
+            0,
+            scale,
             cursor,
             repaint,
-            |settings, value| settings.idle_ms = value,
+            |settings, value| settings.stop_movement_in_last_part_ms = value,
         )
         .widget(),
     );

@@ -670,6 +670,7 @@ fn build_settings_window(app: &Application) {
         rec_video_max_res: recordings.rec_video_max_res.clone(),
         rec_video_fps: recordings.rec_video_fps.clone(),
         rec_video_quality: recordings.rec_video_quality.clone(),
+        rec_video_codec: recordings.rec_video_codec.clone(),
         rec_video_mono: recordings.rec_video_mono.clone(),
         webcam: webcam.1,
         screenshot_quick_access: after_capture.screenshot_after_capture_checks[0].clone(),
@@ -710,6 +711,9 @@ fn build_settings_window(app: &Application) {
         shortcut_save_last_capture: shortcuts.save_last_capture_btn.clone(),
         shortcut_record_screen: shortcuts.record_screen_btn.clone(),
         shortcut_recording_stop_save: shortcuts.recording_stop_save_btn.clone(),
+        shortcut_recording_pause: shortcuts.recording_pause_btn.clone(),
+        shortcut_recording_restart: shortcuts.recording_restart_btn.clone(),
+        shortcut_recording_marker: shortcuts.recording_marker_btn.clone(),
         adv_retina_suffix: advanced.retina_suffix_check.clone(),
         adv_clipboard_mode: screenshots.clipboard_mode_input.clone(),
         adv_ocr_language: advanced.ocr_lang_input.clone(),
@@ -922,6 +926,7 @@ fn install_save_dirty_tracking(inputs: &Rc<SaveInputs>, mark_dirty: Rc<dyn Fn()>
     wire_combo(&inputs.rec_video_max_res);
     wire_combo(&inputs.rec_video_fps);
     wire_combo(&inputs.rec_video_quality);
+    wire_combo(&inputs.rec_video_codec);
     wire_check(&inputs.rec_video_mono);
     inputs.webcam.install_dirty_tracking(Rc::clone(&mark_dirty));
     wire_check(&inputs.screenshot_quick_access);
@@ -962,6 +967,9 @@ fn install_save_dirty_tracking(inputs: &Rc<SaveInputs>, mark_dirty: Rc<dyn Fn()>
     wire_shortcut_btn(&inputs.shortcut_save_last_capture);
     wire_shortcut_btn(&inputs.shortcut_record_screen);
     wire_shortcut_btn(&inputs.shortcut_recording_stop_save);
+    wire_shortcut_btn(&inputs.shortcut_recording_pause);
+    wire_shortcut_btn(&inputs.shortcut_recording_restart);
+    wire_shortcut_btn(&inputs.shortcut_recording_marker);
     wire_check(&inputs.adv_retina_suffix);
     wire_combo(&inputs.adv_clipboard_mode);
     wire_combo(&inputs.adv_ocr_language);

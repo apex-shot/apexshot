@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QRect>
 #include <QString>
+#include <QVector>
 
 class QElapsedTimer;
 
@@ -79,6 +80,9 @@ struct RecordingRequest {
     double displayScale = 1.0;
     /// x264 CRF. 0 falls back to 20.
     int crf = 20;
+    /// Encode the screen in HEVC instead of H.264. The camera track stays
+    /// H.264.
+    bool hevc = false;
     /// Record a camera track beside the video. A camera that cannot be opened
     /// is reported through `warning` and leaves the recording without a track
     /// rather than failing it.
@@ -94,6 +98,17 @@ struct RecordingRequest {
 /// The ffmpeg this build records with, resolved from APEXSHOT_FFMPEG, the
 /// application folder, or PATH. Empty when none is available.
 QString ffmpegPath();
+
+/// A recording whose recorder stopped without finishing, found in the temp
+/// folder by `RecordingSession::unfinishedRecordings`.
+struct UnfinishedRecording {
+    QString workDir;
+    /// Where the recording was going to be saved.
+    QString outputPath;
+    qint64 startedAtUnixMs = 0;
+    /// Recorded length when the state was last written, in milliseconds.
+    qint64 durationMs = 0;
+};
 
 class RecordingSession : public QObject
 {
@@ -119,6 +134,10 @@ public:
     /// Stop and remove every segment and the output file.
     void discard();
 
+    /// Mark the current moment of the recording, for the editor's timeline.
+    /// While paused the mark lands where the recording will resume.
+    void addMarker();
+
     bool isActive() const;
     bool isPaused() const;
     QString outputPath() const;
@@ -131,8 +150,30 @@ public:
     /// Whether the current recording successfully opened a webcam.
     bool webcamActive() const;
 
+    /// Recordings whose recorder stopped without finishing. A work directory
+    /// whose recorder process is still running is skipped, and so is this
+    /// process's own unless `includeOwnProcess` is set (for tests). Work
+    /// directories that hold no captured video are deleted.
+    static QVector<UnfinishedRecording> unfinishedRecordings(bool includeOwnProcess = false);
+
+    /// Join what an unfinished recording captured and save it the way a
+    /// stopped recording is saved; `finished` reports the result. The video
+    /// goes to the recorded output path, or beside it with " (recovered)"
+    /// when that name is taken. Returns false with `error` when it cannot
+    /// start.
+    bool recover(const QString& workDir, QString& error);
+
+    /// Delete an unfinished recording's captured data.
+    static void discardUnfinished(const QString& workDir);
+
+    /// Test seam: stop every capture process and timer the way a crash would,
+    /// leaving the work directory and its state file behind.
+    void abandonForTesting();
+
 signals:
     void elapsedChanged(qint64 elapsedMs);
+    /// A marker was added at `mediaMs` of the recording.
+    void markerAdded(qint64 mediaMs);
     void stateChanged();
     /// The capture process has stopped for finalization or discard.
     void captureStopped();

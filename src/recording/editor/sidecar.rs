@@ -1,6 +1,10 @@
 use super::cursor_path::SpringConfig;
 use super::cursor_planner::{self, PlannedPath, PlannerPoint, SyncPoint};
+use super::cursor_shake::{self, ShakeEvent, ShakeEventKind, DEFAULT_REMOVE_SHAKE_THRESHOLD};
 use super::model::CursorRotationMode;
+use super::recording_id::{
+    recording_directory, recording_id_of, recordings_directory, RECORDING_SIDECAR_NAME,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -719,6 +723,14 @@ struct CachedPlan {
     path: Option<Arc<PlannedPath>>,
 }
 
+/// The output of [`PointerSidecar::shake_survivors`]: one flag per pointer
+/// sample and per press end.
+struct ShakeSurvivors {
+    pointer: Vec<bool>,
+    press_down: Vec<bool>,
+    press_up: Vec<bool>,
+}
+
 /// Runtime-only cache. Two sidecars compare equal regardless of what each
 /// planned, and a clone starts cold so a copied sidecar never shows another's
 /// recording.
@@ -732,6 +744,23 @@ impl Clone for PlanCache {
 }
 
 impl PartialEq for PlanCache {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
+/// The pointer samples that survive the shake filter, for the unsmoothed
+/// cursor. Runtime-only and cold on clone, like [`PlanCache`].
+#[derive(Debug, Default)]
+struct ShakeCache(Mutex<Option<(u64, Arc<Vec<PointerSample>>)>>);
+
+impl Clone for ShakeCache {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl PartialEq for ShakeCache {
     fn eq(&self, _other: &Self) -> bool {
         true
     }
@@ -784,9 +813,79 @@ pub struct PointerSidecar {
     /// before it draws or exports; runtime-only, like the plan built from it.
     #[serde(skip)]
     cuts_seconds: Vec<f64>,
+    /// The studied shake filter's threshold in pixels; zero turns it off.
+    /// Pushed in by the editor from the cursor settings; runtime-only.
+    #[serde(skip, default = "default_shake_threshold")]
+    shake_threshold: f64,
+    /// The studied stop tail in milliseconds; zero turns it off.
+    #[serde(skip)]
+    stop_tail_ms: f64,
+    /// The studied loop-before-the-end in milliseconds; `None` turns it off.
+    #[serde(skip)]
+    loop_before_end_ms: Option<f64>,
+    /// The source instant the edit ends at; `None` uses the last sample.
+    #[serde(skip)]
+    playback_end_seconds: Option<f64>,
+    /// The samples the shake filter keeps, for the unsmoothed cursor.
+    #[serde(skip)]
+    shake_cache: ShakeCache,
     /// The planned cursor path for the current spring and speed.
     #[serde(skip)]
     plan_cache: PlanCache,
+}
+
+/// Moments the recorder marked, and where each pause ended, in source
+/// seconds, from the recording manifest beside the pointer sidecar.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RecordingMarks {
+    /// Moments the person marked with the recording-marker shortcut.
+    pub markers: Vec<f64>,
+    /// Where each session after the first begins: the recording resumed there.
+    pub pauses: Vec<f64>,
+}
+
+impl RecordingMarks {
+    /// Read the marks from a manifest's JSON text. Anything missing or
+    /// malformed reads as no marks.
+    pub fn parse(text: &str) -> Self {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
+            return Self::default();
+        };
+        let seconds = |value: &serde_json::Value| {
+            value
+                .as_f64()
+                .filter(|ms| ms.is_finite() && *ms >= 0.0)
+                .map(|ms| ms / 1000.0)
+        };
+        let mut markers: Vec<f64> = value
+            .get("markers")
+            .and_then(|markers| markers.as_array())
+            .map(|markers| markers.iter().filter_map(seconds).collect())
+            .unwrap_or_default();
+        markers.sort_by(f64::total_cmp);
+        let mut pauses: Vec<f64> = value
+            .get("sessions")
+            .and_then(|sessions| sessions.as_array())
+            .map(|sessions| {
+                sessions
+                    .iter()
+                    .skip(1)
+                    .filter_map(|session| session.get("startMs").and_then(seconds))
+                    .collect()
+            })
+            .unwrap_or_default();
+        pauses.sort_by(f64::total_cmp);
+        Self { markers, pauses }
+    }
+
+    /// The marks recorded beside `video_path`, or none.
+    pub fn for_video(video_path: &Path) -> Self {
+        let mut path = PointerSidecar::resolved_sidecar_path(video_path).into_os_string();
+        path.push(".recording.json");
+        std::fs::read_to_string(path)
+            .map(|text| Self::parse(&text))
+            .unwrap_or_default()
+    }
 }
 
 impl PointerSidecar {
@@ -808,6 +907,11 @@ impl PointerSidecar {
             screen_file: None,
             sidecar_directory: None,
             cuts_seconds: Vec::new(),
+            shake_threshold: DEFAULT_REMOVE_SHAKE_THRESHOLD,
+            stop_tail_ms: 0.0,
+            loop_before_end_ms: None,
+            playback_end_seconds: None,
+            shake_cache: ShakeCache::default(),
             plan_cache: PlanCache::default(),
         }
     }
@@ -840,6 +944,20 @@ impl PointerSidecar {
         pointer_sidecars_directory().join(sidecar_file_name(video_path))
     }
 
+    /// The sidecar inside the folder named by the video's recording ID, when
+    /// the MP4 carries one. It may not exist yet.
+    pub fn recording_sidecar_path(video_path: &Path) -> Option<PathBuf> {
+        recording_id_of(video_path).map(|id| recording_directory(&id).join(RECORDING_SIDECAR_NAME))
+    }
+
+    /// Where this video's sidecar is read from: the recording-ID folder, then
+    /// the path hash used before recordings carried an ID.
+    pub fn resolved_sidecar_path(video_path: &Path) -> PathBuf {
+        Self::recording_sidecar_path(video_path)
+            .filter(|path| path.is_file())
+            .unwrap_or_else(|| Self::sidecar_path(video_path))
+    }
+
     pub fn legacy_sidecar_path(video_path: &Path) -> PathBuf {
         let parent = video_path.parent().unwrap_or_else(|| Path::new(""));
         let stem = video_path
@@ -850,7 +968,8 @@ impl PointerSidecar {
     }
 
     pub fn exists_next_to_video(video_path: &Path) -> bool {
-        Self::sidecar_path(video_path).is_file() || Self::legacy_sidecar_path(video_path).is_file()
+        Self::resolved_sidecar_path(video_path).is_file()
+            || Self::legacy_sidecar_path(video_path).is_file()
     }
 
     pub fn load(path: &Path) -> anyhow::Result<Self> {
@@ -863,7 +982,7 @@ impl PointerSidecar {
     /// The directory that owns this sidecar's relative assets.
     fn asset_directory(&self, video_path: &Path) -> Option<PathBuf> {
         self.sidecar_directory.clone().or_else(|| {
-            Self::sidecar_path(video_path)
+            Self::resolved_sidecar_path(video_path)
                 .parent()
                 .map(Path::to_path_buf)
         })
@@ -928,7 +1047,7 @@ impl PointerSidecar {
     /// keeps the two together, so the pair is found from the video path alone.
     pub fn webcam_path(&self, video_path: &Path) -> Option<PathBuf> {
         let track = self.webcam.as_ref().filter(|track| track.is_valid())?;
-        let directory = Self::sidecar_path(video_path).parent()?.to_path_buf();
+        let directory = self.asset_directory(video_path)?;
         let path = directory.join(&track.file);
         path.is_file().then_some(path)
     }
@@ -950,7 +1069,7 @@ impl PointerSidecar {
     }
 
     pub fn load_next_to_video(video_path: &Path) -> Option<Self> {
-        let path = Self::sidecar_path(video_path);
+        let path = Self::resolved_sidecar_path(video_path);
         if !path.is_file() {
             return Self::load_migrate_legacy_sidecar(video_path);
         }
@@ -967,39 +1086,67 @@ impl PointerSidecar {
     }
 
     pub fn write_next_to_video(&self, video_path: &Path) -> anyhow::Result<PathBuf> {
-        let path = Self::sidecar_path(video_path);
+        let path = Self::recording_sidecar_path(video_path)
+            .unwrap_or_else(|| Self::sidecar_path(video_path));
         self.write(&path)?;
         Ok(path)
     }
 
     pub fn delete_next_to_video(video_path: &Path) {
+        if let Some(tagged) = Self::recording_sidecar_path(video_path) {
+            if let Some(folder) = tagged.parent() {
+                if tagged.is_file() {
+                    if let Ok(sidecar) = Self::load(&tagged) {
+                        Self::remove_screen_file(&sidecar, video_path);
+                    }
+                }
+                // Only ever a folder directly under the recordings root.
+                if folder.parent() == Some(recordings_directory().as_path()) && folder.is_dir() {
+                    if let Err(err) = std::fs::remove_dir_all(folder) {
+                        eprintln!(
+                            "[recording] failed to delete recording folder {}: {err}",
+                            folder.display()
+                        );
+                    }
+                }
+            }
+        }
+
         let current_path = Self::sidecar_path(video_path);
         if current_path.is_file() {
             if let Ok(sidecar) = Self::load(&current_path) {
-                if let Some(file) = sidecar.screen_file.as_deref() {
-                    let name = Path::new(file);
-                    if file.starts_with(".apexshot-screen-")
-                        && matches!(
-                            name.components().next(),
-                            Some(std::path::Component::Normal(_))
-                        )
-                        && name.components().count() == 1
-                    {
-                        if let Some(parent) = video_path.parent() {
-                            let _ = std::fs::remove_file(parent.join(name));
-                        }
-                    }
-                }
+                Self::remove_screen_file(&sidecar, video_path);
                 let mut webcam_path = current_path.as_os_str().to_os_string();
                 webcam_path.push(".webcam.mp4");
                 let _ = std::fs::remove_file(webcam_path);
             }
+            let mut manifest_path = current_path.as_os_str().to_os_string();
+            manifest_path.push(".recording.json");
+            let _ = std::fs::remove_file(manifest_path);
             remove_sidecar(&current_path);
         }
 
         let legacy_path = Self::legacy_sidecar_path(video_path);
         if legacy_path.is_file() {
             remove_sidecar(&legacy_path);
+        }
+    }
+
+    /// Remove the clean-screen file a sidecar names beside the video.
+    fn remove_screen_file(sidecar: &Self, video_path: &Path) {
+        if let Some(file) = sidecar.screen_file.as_deref() {
+            let name = Path::new(file);
+            if file.starts_with(".apexshot-screen-")
+                && matches!(
+                    name.components().next(),
+                    Some(std::path::Component::Normal(_))
+                )
+                && name.components().count() == 1
+            {
+                if let Some(parent) = video_path.parent() {
+                    let _ = std::fs::remove_file(parent.join(name));
+                }
+            }
         }
     }
 
@@ -1071,8 +1218,9 @@ impl PointerSidecar {
         if self.source != PointerDataSource::WindowMetadata && !self.recorded_cursor_visible_at(t) {
             return None;
         }
-        let (_, _, kind, cursor_id) = self.interpolated_at_sample(t)?;
-        let (x, y) = self.motion_position_at(t, motion.smooth, motion.speed)?;
+        let motion_t = self.held_motion_time(t);
+        let (_, _, kind, cursor_id) = self.interpolated_at_sample(motion_t)?;
+        let (x, y) = self.motion_position_at(motion_t, motion.smooth, motion.speed)?;
         let alpha = if motion.hide_idle {
             self.idle_alpha(t, motion.idle_ms)
         } else {
@@ -1084,7 +1232,7 @@ impl PointerSidecar {
             kind,
             alpha,
             rotation: self.cursor_rotation_at(
-                t,
+                motion_t,
                 motion.rotation_mode,
                 motion.rotation_ratio,
                 motion.base_rotation_deg,
@@ -1162,19 +1310,36 @@ impl PointerSidecar {
     /// uses this same path so the viewport and rendered cursor never react to
     /// different pointer data.
     pub fn motion_position_at(&self, t: f64, smooth: f64, speed: f64) -> Option<(f64, f64)> {
-        let samples = if self.source == PointerDataSource::WindowMetadata {
-            self.window_pointer_segment_at(t)?
-        } else {
-            &self.pointer
-        };
-        if smooth <= 0.01 {
-            let position = if self.source == PointerDataSource::WindowMetadata {
-                Self::interpolated_window_in(samples, t)
+        if self.source == PointerDataSource::WindowMetadata {
+            let samples = self.window_pointer_segment_at(t)?;
+            return if smooth <= 0.01 {
+                Self::interpolated_window_in(samples, t).map(|(x, y, _, _)| (x, y))
+            } else if samples.is_empty() {
+                None
             } else {
-                Self::interpolated_in(samples, t)
+                Some(self.smoothed_at(t, smooth, speed))
             };
-            position.map(|(x, y, _, _)| (x, y))
-        } else if samples.is_empty() {
+        }
+        let t = self.held_motion_time(t);
+        if smooth <= 0.01 {
+            // The planned path filters shake on its own; the raw cursor
+            // reads the same filtered samples so both agree.
+            let filtered = if self.shake_threshold > 0.0 {
+                Some(self.shake_filtered_pointer())
+            } else {
+                None
+            };
+            let base: &[PointerSample] = match &filtered {
+                Some(samples) => samples.as_slice(),
+                None => &self.pointer,
+            };
+            let refs: Vec<&PointerSample> = base.iter().collect();
+            if let Some((looped, _)) = self.looped_samples(&refs) {
+                return Self::interpolated_in(&looped, t).map(|(x, y, _, _)| (x, y));
+            }
+            return Self::interpolated_in(base, t).map(|(x, y, _, _)| (x, y));
+        }
+        if self.pointer.is_empty() {
             None
         } else {
             Some(self.smoothed_at(t, smooth, speed))
@@ -1217,6 +1382,203 @@ impl PointerSidecar {
         self.cuts_seconds.dedup();
     }
 
+    /// The studied shake filter's threshold, in pixels. Zero or a negative
+    /// value turns it off. The plan is rebuilt for the new value.
+    pub fn set_shake_threshold(&mut self, threshold: f64) {
+        self.shake_threshold = if threshold.is_finite() {
+            threshold.max(0.0)
+        } else {
+            0.0
+        };
+    }
+
+    /// The studied tail behaviours. `stop_movement_in_last_part_ms` holds the
+    /// cursor for that long before the end; `loop_position_before_end_ms`
+    /// sends it back to its first position that long before the end and, as
+    /// in the studied panel, replaces the hold. `playback_end_seconds` is the
+    /// source instant the edit ends at; `None` uses the last pointer sample.
+    pub fn set_cursor_tail(
+        &mut self,
+        stop_movement_in_last_part_ms: f64,
+        loop_position_before_end_ms: Option<f64>,
+        playback_end_seconds: Option<f64>,
+    ) {
+        self.stop_tail_ms = if stop_movement_in_last_part_ms.is_finite() {
+            stop_movement_in_last_part_ms.max(0.0)
+        } else {
+            0.0
+        };
+        self.loop_before_end_ms = loop_position_before_end_ms
+            .filter(|value| value.is_finite())
+            .map(|value| value.max(0.0));
+        self.playback_end_seconds =
+            playback_end_seconds.filter(|end| end.is_finite() && *end > 0.0);
+    }
+
+    /// The source instant the tail behaviours measure back from.
+    fn tail_end_seconds(&self) -> Option<f64> {
+        self.playback_end_seconds
+            .or_else(|| self.pointer.last().map(|sample| sample.t))
+    }
+
+    /// The instant whose cursor is drawn at `t`: `t` itself, or the start of
+    /// the held tail once the studied stop applies.
+    fn held_motion_time(&self, t: f64) -> f64 {
+        if self.source == PointerDataSource::WindowMetadata
+            || self.loop_before_end_ms.is_some()
+            || self.stop_tail_ms <= 0.0
+        {
+            return t;
+        }
+        let Some(end) = self.tail_end_seconds() else {
+            return t;
+        };
+        t.min((end - self.stop_tail_ms / 1000.0).max(0.0))
+    }
+
+    /// The studied loop: the samples up to `end - loop`, then one copy of the
+    /// first of them 1 ms after the last, so the cursor travels home before
+    /// the end. Returns the samples and the cutoff in seconds, or `None` when
+    /// the loop is off or there is nothing to loop.
+    fn looped_samples(&self, samples: &[&PointerSample]) -> Option<(Vec<PointerSample>, f64)> {
+        if self.source == PointerDataSource::WindowMetadata {
+            return None;
+        }
+        let loop_ms = self.loop_before_end_ms?;
+        let end = self.tail_end_seconds()?;
+        let cutoff = (end - loop_ms / 1000.0).max(0.0);
+        let mut kept: Vec<PointerSample> = samples
+            .iter()
+            .filter(|sample| sample.t <= cutoff)
+            .map(|sample| (*sample).clone())
+            .collect();
+        if kept.is_empty() {
+            kept.push((*samples.first()?).clone());
+        }
+        let first = kept[0].clone();
+        let last_t = kept.last()?.t;
+        kept.push(PointerSample {
+            t: last_t + 0.001,
+            ..first
+        });
+        Some((kept, cutoff))
+    }
+
+    /// Which pointer samples and press ends survive the studied shake filter.
+    /// Press ends are placed at the pointer's interpolated position at their
+    /// instant, since the sidecar stores presses as times only.
+    fn shake_survivors(&self) -> ShakeSurvivors {
+        let mut survivors = ShakeSurvivors {
+            pointer: vec![true; self.pointer.len()],
+            press_down: vec![true; self.presses.len()],
+            press_up: vec![true; self.presses.len()],
+        };
+        if self.shake_threshold <= 0.0 {
+            return survivors;
+        }
+        enum Origin {
+            Pointer(usize),
+            Down(usize),
+            Up(usize),
+        }
+        let mut events: Vec<(ShakeEvent, Origin)> = self
+            .pointer
+            .iter()
+            .enumerate()
+            .map(|(index, sample)| {
+                (
+                    ShakeEvent {
+                        time_ms: sample.t * 1000.0,
+                        x: sample.x,
+                        y: sample.y,
+                        kind: ShakeEventKind::Move,
+                    },
+                    Origin::Pointer(index),
+                )
+            })
+            .collect();
+        for (index, press) in self.presses.iter().enumerate() {
+            for (time, kind) in [
+                (press.down, ShakeEventKind::Down),
+                (press.up, ShakeEventKind::Up),
+            ] {
+                let Some((x, y, _, _)) = Self::interpolated_in(&self.pointer, time) else {
+                    continue;
+                };
+                let origin = if kind == ShakeEventKind::Down {
+                    Origin::Down(index)
+                } else {
+                    Origin::Up(index)
+                };
+                events.push((
+                    ShakeEvent {
+                        time_ms: time * 1000.0,
+                        x,
+                        y,
+                        kind,
+                    },
+                    origin,
+                ));
+            }
+        }
+        // A stable sort keeps a move ahead of a press end at the same instant.
+        events.sort_by(|left, right| left.0.time_ms.total_cmp(&right.0.time_ms));
+        let stream: Vec<ShakeEvent> = events.iter().map(|(event, _)| *event).collect();
+        let keep = cursor_shake::shake_keep_mask(&stream, self.shake_threshold);
+        for ((_, origin), kept) in events.iter().zip(keep) {
+            if kept {
+                continue;
+            }
+            match origin {
+                Origin::Pointer(index) => survivors.pointer[*index] = false,
+                Origin::Down(index) => survivors.press_down[*index] = false,
+                Origin::Up(index) => survivors.press_up[*index] = false,
+            }
+        }
+        survivors
+    }
+
+    /// The pointer samples the shake filter keeps, built once per threshold
+    /// and recording.
+    fn shake_filtered_pointer(&self) -> Arc<Vec<PointerSample>> {
+        let key = [
+            self.shake_threshold.to_bits(),
+            self.pointer.len() as u64,
+            self.pointer
+                .first()
+                .map(|sample| sample.t.to_bits())
+                .unwrap_or(0),
+            self.pointer
+                .last()
+                .map(|sample| sample.t.to_bits())
+                .unwrap_or(0),
+        ]
+        .iter()
+        .fold(1469598103934665603_u64, |hash, value| {
+            (hash ^ value).wrapping_mul(1099511628211)
+        });
+        if let Ok(cache) = self.shake_cache.0.lock() {
+            if let Some((cached_key, samples)) = cache.as_ref() {
+                if *cached_key == key {
+                    return Arc::clone(samples);
+                }
+            }
+        }
+        let survivors = self.shake_survivors();
+        let samples: Arc<Vec<PointerSample>> = Arc::new(
+            self.pointer
+                .iter()
+                .zip(&survivors.pointer)
+                .filter(|(_, kept)| **kept)
+                .map(|(sample, _)| sample.clone())
+                .collect(),
+        );
+        if let Ok(mut cache) = self.shake_cache.0.lock() {
+            *cache = Some((key, Arc::clone(&samples)));
+        }
+        samples
+    }
+
     /// Plan the cursor path once per spring and speed, then answer frames from
     /// it. The moments the plan must be exact are the recorded clicks and the
     /// cursor-image changes, matching the reference's sync points.
@@ -1231,8 +1593,19 @@ impl PointerSidecar {
                 }
             }
         }
-        let points: Vec<PlannerPoint> = self
+        let survivors = self.shake_survivors();
+        let kept_pointer: Vec<&PointerSample> = self
             .pointer
+            .iter()
+            .zip(&survivors.pointer)
+            .filter_map(|(sample, kept)| kept.then_some(sample))
+            .collect();
+        let looped = self.looped_samples(&kept_pointer);
+        let kept_pointer: Vec<&PointerSample> = match &looped {
+            Some((samples, _)) => samples.iter().collect(),
+            None => kept_pointer,
+        };
+        let points: Vec<PlannerPoint> = kept_pointer
             .iter()
             .map(|sample| PlannerPoint {
                 time_ms: sample.t * 1000.0,
@@ -1240,15 +1613,28 @@ impl PointerSidecar {
                 y: sample.y,
             })
             .collect();
+        // A click whose press the filter dropped is no longer a moment the
+        // plan must meet.
+        let dropped_downs: Vec<f64> = self
+            .presses
+            .iter()
+            .zip(&survivors.press_down)
+            .filter_map(|(press, kept)| (!kept).then_some(press.down))
+            .collect();
         let mut sync: Vec<SyncPoint> = self
             .clicks
             .iter()
+            .filter(|click| {
+                !dropped_downs
+                    .iter()
+                    .any(|down| (down - click.t).abs() < 0.0015)
+            })
             .map(|click| SyncPoint {
                 time_ms: click.t * 1000.0,
                 tolerance: 2.0,
             })
             .collect();
-        for pair in self.pointer.windows(2) {
+        for pair in kept_pointer.windows(2) {
             if pair[0].cursor_id != pair[1].cursor_id {
                 sync.push(SyncPoint {
                     time_ms: pair[1].t * 1000.0,
@@ -1259,17 +1645,22 @@ impl PointerSidecar {
         // A held button is a sync point twice over: at the press and release
         // the studied planner must meet the pointer exactly, and while the
         // pointer is dragged every recorded move carries the same demand.
-        for press in &self.presses {
-            sync.push(SyncPoint {
-                time_ms: press.down * 1000.0,
-                tolerance: 2.0,
-            });
-            sync.push(SyncPoint {
-                time_ms: press.up * 1000.0,
-                tolerance: 2.0,
-            });
-            if press.dragged {
-                for sample in &self.pointer {
+        for (index, press) in self.presses.iter().enumerate() {
+            let down_kept = survivors.press_down[index];
+            if down_kept {
+                sync.push(SyncPoint {
+                    time_ms: press.down * 1000.0,
+                    tolerance: 2.0,
+                });
+            }
+            if survivors.press_up[index] {
+                sync.push(SyncPoint {
+                    time_ms: press.up * 1000.0,
+                    tolerance: 2.0,
+                });
+            }
+            if press.dragged && down_kept {
+                for sample in &kept_pointer {
                     if press.contains(sample.t) {
                         sync.push(SyncPoint {
                             time_ms: sample.t * 1000.0,
@@ -1279,11 +1670,22 @@ impl PointerSidecar {
                 }
             }
         }
-        let duration_ms = self
+        // The studied loop plans only up to its cutoff; the synthetic return
+        // point is travel, not a moment to meet.
+        if let Some((_, cutoff)) = &looped {
+            let cutoff_ms = cutoff * 1000.0 + 1e-6;
+            sync.retain(|point| point.time_ms <= cutoff_ms);
+        }
+        let mut duration_ms = self
             .pointer
             .last()
             .map(|sample| sample.t * 1000.0 + 1000.0)
             .unwrap_or(0.0);
+        if looped.is_some() {
+            if let Some(end) = self.tail_end_seconds() {
+                duration_ms = duration_ms.max(end * 1000.0 + 1000.0);
+            }
+        }
         let cuts_ms: Vec<f64> = self.cuts_seconds.iter().map(|cut| cut * 1000.0).collect();
         let planned = Arc::new(cursor_planner::plan(
             &points,
@@ -1329,6 +1731,13 @@ impl PointerSidecar {
             spring.damping.to_bits(),
             spring.mass.to_bits(),
             speed.to_bits(),
+            self.shake_threshold.to_bits(),
+            self.loop_before_end_ms
+                .map(f64::to_bits)
+                .unwrap_or(u64::MAX),
+            self.playback_end_seconds
+                .map(f64::to_bits)
+                .unwrap_or(u64::MAX),
         ];
         values.push(self.cuts_seconds.len() as u64);
         values.extend(self.cuts_seconds.iter().map(|cut| cut.to_bits()));
@@ -1339,21 +1748,40 @@ impl PointerSidecar {
         hash
     }
 
+    /// The studied `hideNotMovingAfterMs`: the cursor is drawn while the last
+    /// pointer event is at most `idle_ms` old, and fades out after that. Any
+    /// move or click restores it on the next sample. This is separate from
+    /// the recorded visibility (typing) intervals, which `presented_at`
+    /// checks first.
     fn idle_alpha(&self, t: f64, idle_ms: f64) -> f64 {
-        let window = (idle_ms / 1000.0).clamp(0.12, 4.0);
-        let Some((cx, cy, _)) = self.interpolated_at(t) else {
-            return 1.0;
-        };
-        let mut last_move = self.pointer.first().map(|sample| sample.t).unwrap_or(0.0);
+        let window = (idle_ms / 1000.0).max(0.0);
+        let mut last_event: Option<f64> = None;
+        let mut previous: Option<&PointerSample> = None;
         for sample in &self.pointer {
             if sample.t > t {
                 break;
             }
-            if (sample.x - cx).hypot(sample.y - cy) > 8.0 {
-                last_move = sample.t;
+            let moved = previous
+                .is_none_or(|previous| (sample.x - previous.x).hypot(sample.y - previous.y) > 0.5);
+            if moved {
+                last_event = Some(sample.t);
+            }
+            previous = Some(sample);
+        }
+        for time in self
+            .clicks
+            .iter()
+            .map(|click| click.t)
+            .chain(self.presses.iter().flat_map(|press| [press.down, press.up]))
+        {
+            if time <= t && last_event.is_none_or(|last| time > last) {
+                last_event = Some(time);
             }
         }
-        let still = t - last_move;
+        let Some(last_event) = last_event else {
+            return 1.0;
+        };
+        let still = t - last_event;
         if still <= window {
             return 1.0;
         }
@@ -1540,6 +1968,10 @@ fn compact_to_limit<T: Clone>(samples: &mut Vec<T>, limit: usize) {
     }
 }
 
+fn default_shake_threshold() -> f64 {
+    DEFAULT_REMOVE_SHAKE_THRESHOLD
+}
+
 fn pointer_sidecars_directory() -> PathBuf {
     dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
@@ -1570,6 +2002,180 @@ pub fn delete_recording_outputs(video_path: &Path) {
     PointerSidecar::delete_next_to_video(video_path);
     if video_path.exists() {
         let _ = std::fs::remove_file(video_path);
+    }
+}
+
+#[cfg(test)]
+mod recording_location_tests {
+    use super::super::recording_id::{recording_directory, tagged_mp4_bytes, RECORDING_ID_PREFIX};
+    use super::*;
+
+    /// A unique, valid ID per test, so parallel tests never share a folder.
+    fn unique_id(offset: u64) -> String {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64;
+        format!(
+            "{:08x}-0000-4000-8000-{:012x}",
+            std::process::id(),
+            nanos.wrapping_add(offset) & 0xffff_ffff_ffff
+        )
+    }
+
+    fn video_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-recording-location-{}-{name}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write_tagged_video(path: &Path, id: &str) {
+        let tagged = tagged_mp4_bytes(&format!("{RECORDING_ID_PREFIX}{id}"));
+        std::fs::write(path, tagged).unwrap();
+    }
+
+    fn sidecar_with_pointer(x: f64, y: f64) -> PointerSidecar {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x,
+            y,
+            kind: CursorKind::Default,
+            cursor_id: None,
+        });
+        sidecar
+    }
+
+    #[test]
+    fn a_tagged_video_reads_its_sidecar_from_the_recording_folder() {
+        let id = unique_id(0x1000);
+        let dir = video_dir("reads-from-folder");
+        let video = dir.join("a.mp4");
+        write_tagged_video(&video, &id);
+
+        let sidecar = sidecar_with_pointer(1.0, 2.0);
+        let written = sidecar.write_next_to_video(&video).unwrap();
+        assert_eq!(written, recording_directory(&id).join("pointer.json"));
+
+        let loaded = PointerSidecar::load_next_to_video(&video).unwrap();
+        assert_eq!(loaded.pointer, sidecar.pointer);
+        assert_eq!(loaded.sidecar_directory, Some(recording_directory(&id)));
+        assert!(PointerSidecar::exists_next_to_video(&video));
+
+        let _ = std::fs::remove_dir_all(recording_directory(&id));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn renaming_the_video_keeps_its_sidecar() {
+        let id = unique_id(0x2000);
+        let dir = video_dir("rename");
+        let a = dir.join("a.mp4");
+        let b = dir.join("b.mp4");
+        write_tagged_video(&a, &id);
+        let sidecar = sidecar_with_pointer(3.0, 4.0);
+        sidecar.write_next_to_video(&a).unwrap();
+
+        std::fs::rename(&a, &b).unwrap();
+
+        let loaded = PointerSidecar::load_next_to_video(&b).unwrap();
+        assert_eq!(loaded.pointer, sidecar.pointer);
+
+        std::fs::write(
+            recording_directory(&id).join("pointer.json.recording.json"),
+            r#"{"markers":[1500]}"#,
+        )
+        .unwrap();
+        assert_eq!(RecordingMarks::for_video(&b).markers, vec![1.5]);
+
+        let camera = recording_directory(&id).join("pointer.json.webcam.mp4");
+        std::fs::write(&camera, b"camera").unwrap();
+        let mut with_webcam = sidecar.clone();
+        with_webcam.webcam = Some(WebcamTrack {
+            file: "pointer.json.webcam.mp4".to_string(),
+            width: 640,
+            height: 480,
+            duration: 4.0,
+            start: 0.0,
+            x: 0.1,
+            y: 0.1,
+            w: 0.2,
+            h: 0.2,
+            shape: 0,
+            flip: false,
+        });
+        with_webcam.write_next_to_video(&b).unwrap();
+        let loaded = PointerSidecar::load_next_to_video(&b).unwrap();
+        assert_eq!(loaded.webcam_path(&b), Some(camera));
+
+        let _ = std::fs::remove_dir_all(recording_directory(&id));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_recording_folder_wins_over_the_path_hash() {
+        let id = unique_id(0x3000);
+        let dir = video_dir("folder-wins");
+        let video = dir.join("a.mp4");
+        write_tagged_video(&video, &id);
+
+        let hashed = sidecar_with_pointer(1.0, 0.0);
+        hashed.write(&PointerSidecar::sidecar_path(&video)).unwrap();
+        let tagged = sidecar_with_pointer(2.0, 0.0);
+        tagged.write_next_to_video(&video).unwrap();
+
+        let loaded = PointerSidecar::load_next_to_video(&video).unwrap();
+        assert_eq!(loaded.pointer[0].x, 2.0);
+
+        std::fs::remove_dir_all(recording_directory(&id)).unwrap();
+        let loaded = PointerSidecar::load_next_to_video(&video).unwrap();
+        assert_eq!(loaded.pointer[0].x, 1.0);
+
+        PointerSidecar::delete_next_to_video(&video);
+        assert!(!PointerSidecar::sidecar_path(&video).is_file());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_untagged_video_keeps_the_path_hash() {
+        let dir = video_dir("untagged");
+        let video = dir.join("a.mp4");
+        std::fs::write(&video, b"not an mp4").unwrap();
+
+        let sidecar = sidecar_with_pointer(5.0, 6.0);
+        let written = sidecar.write_next_to_video(&video).unwrap();
+        assert_eq!(written, PointerSidecar::sidecar_path(&video));
+        let loaded = PointerSidecar::load_next_to_video(&video).unwrap();
+        assert_eq!(loaded.pointer, sidecar.pointer);
+
+        PointerSidecar::delete_next_to_video(&video);
+        assert!(!PointerSidecar::sidecar_path(&video).is_file());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn deleting_a_tagged_recording_removes_its_folder() {
+        let id = unique_id(0x5000);
+        let dir = video_dir("delete-folder");
+        let video = dir.join("a.mp4");
+        write_tagged_video(&video, &id);
+        sidecar_with_pointer(0.0, 0.0)
+            .write_next_to_video(&video)
+            .unwrap();
+        let cursors = recording_directory(&id).join("pointer.json.cursors");
+        std::fs::create_dir_all(&cursors).unwrap();
+        std::fs::write(cursors.join("x.png"), b"png").unwrap();
+
+        delete_recording_outputs(&video);
+
+        assert!(!recording_directory(&id).exists());
+        assert!(!video.exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 
@@ -1686,6 +2292,21 @@ mod tests {
     fn new_sidecars_are_version_two() {
         let sidecar = PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
         assert_eq!(sidecar.version, 2);
+    }
+
+    #[test]
+    fn recording_marks_read_markers_and_resumes_from_the_manifest() {
+        let marks = RecordingMarks::parse(
+            r#"{"sessions":[{"startMs":0,"endMs":800},{"startMs":800,"endMs":1800},
+                {"startMs":1800,"endMs":2500}],"markers":[1500,400]}"#,
+        );
+        assert_eq!(marks.markers, vec![0.4, 1.5]);
+        assert_eq!(marks.pauses, vec![0.8, 1.8]);
+        assert_eq!(RecordingMarks::parse("not json"), RecordingMarks::default());
+        assert_eq!(
+            RecordingMarks::parse(r#"{"sessions":[{"startMs":0}]}"#),
+            RecordingMarks::default()
+        );
     }
 
     #[test]
@@ -2359,6 +2980,251 @@ mod tests {
         assert!((long_delay.alpha - 1.0).abs() < 1e-9);
     }
 
+    fn moving_sidecar() -> PointerSidecar {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        for index in 0..=100 {
+            let t = index as f64 / 10.0;
+            sidecar.pointer.push(PointerSample {
+                t,
+                x: 100.0 + 50.0 * t,
+                y: 200.0,
+                kind: CursorKind::Default,
+                cursor_id: None,
+            });
+        }
+        sidecar
+    }
+
+    fn approx(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-6
+    }
+
+    fn raw_x(sidecar: &PointerSidecar, t: f64) -> f64 {
+        sidecar
+            .motion_position_at(t, 0.0, 1.0)
+            .expect("raw position")
+            .0
+    }
+
+    fn planned_position(sidecar: &PointerSidecar, t: f64) -> (f64, f64) {
+        sidecar
+            .motion_position_at(t, 0.75, 1.0)
+            .expect("planned position")
+    }
+
+    #[test]
+    fn stop_tail_zero_changes_nothing() {
+        let mut sidecar = moving_sidecar();
+        let expected = raw_x(&sidecar, 9.5);
+        sidecar.set_cursor_tail(0.0, None, Some(10.0));
+        assert!(approx(raw_x(&sidecar, 9.5), expected));
+        assert!(approx(raw_x(&sidecar, 9.5), 575.0));
+    }
+
+    #[test]
+    fn stop_tail_holds_the_cursor_for_the_last_part() {
+        let mut sidecar = moving_sidecar();
+        sidecar.set_cursor_tail(2000.0, None, Some(10.0));
+        let held = raw_x(&sidecar, 8.0);
+        assert!(approx(held, 500.0));
+        for t in [8.5, 9.0, 9.99, 10.0] {
+            assert!(approx(raw_x(&sidecar, t), held), "raw cursor at {t}");
+        }
+        assert!(approx(raw_x(&sidecar, 7.0), 450.0));
+
+        let first = planned_position(&sidecar, 8.5);
+        for t in [9.0, 9.99] {
+            let position = planned_position(&sidecar, t);
+            assert!((position.0 - first.0).abs() < 1e-9, "planned x at {t}");
+            assert!((position.1 - first.1).abs() < 1e-9, "planned y at {t}");
+        }
+    }
+
+    #[test]
+    fn stop_tail_equal_to_the_duration_holds_the_first_position() {
+        let mut sidecar = moving_sidecar();
+        sidecar.set_cursor_tail(10_000.0, None, Some(10.0));
+        for t in [5.0, 10.0] {
+            assert!(approx(raw_x(&sidecar, t), 100.0), "raw cursor at {t}");
+        }
+    }
+
+    #[test]
+    fn stop_tail_uses_the_last_sample_without_an_end() {
+        let mut sidecar = moving_sidecar();
+        sidecar.set_cursor_tail(2000.0, None, None);
+        assert!(approx(raw_x(&sidecar, 9.5), 500.0));
+    }
+
+    #[test]
+    fn loop_none_changes_nothing() {
+        let mut sidecar = moving_sidecar();
+        sidecar.set_cursor_tail(0.0, None, Some(10.0));
+        assert!(approx(raw_x(&sidecar, 9.0), 550.0));
+    }
+
+    #[test]
+    fn loop_appends_the_first_position_one_ms_after_the_cutoff() {
+        let mut sidecar = moving_sidecar();
+        sidecar.set_cursor_tail(0.0, Some(2000.0), Some(10.0));
+        assert!(approx(raw_x(&sidecar, 8.0), 500.0));
+        for t in [8.0011, 9.5] {
+            assert!(approx(raw_x(&sidecar, t), 100.0), "raw cursor at {t}");
+        }
+
+        let end = planned_position(&sidecar, 9.99);
+        assert!((end.0 - 100.0).abs() < 5.0, "planned x came home");
+        assert!((end.1 - 200.0).abs() < 5.0, "planned y came home");
+        assert!(planned_position(&sidecar, 7.0).0 > 300.0);
+    }
+
+    #[test]
+    fn loop_zero_returns_after_the_last_sample() {
+        let mut sidecar = moving_sidecar();
+        sidecar.set_cursor_tail(0.0, Some(0.0), Some(10.0));
+        assert!(approx(raw_x(&sidecar, 10.0), 600.0));
+        assert!(approx(raw_x(&sidecar, 10.002), 100.0));
+    }
+
+    #[test]
+    fn loop_equal_to_the_duration_keeps_the_first_position() {
+        let mut sidecar = moving_sidecar();
+        sidecar.set_cursor_tail(0.0, Some(10_000.0), Some(10.0));
+        for t in [0.0, 5.0, 10.0] {
+            assert!(approx(raw_x(&sidecar, t), 100.0), "raw cursor at {t}");
+        }
+    }
+
+    #[test]
+    fn loop_replaces_the_stop() {
+        let mut sidecar = moving_sidecar();
+        sidecar.set_cursor_tail(2000.0, Some(2000.0), Some(10.0));
+        assert!(approx(raw_x(&sidecar, 9.5), 100.0));
+    }
+
+    #[test]
+    fn hide_not_moving_off_keeps_the_cursor() {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x: 10.0,
+            y: 10.0,
+            kind: CursorKind::Default,
+            cursor_id: None,
+        });
+        sidecar.pointer.push(PointerSample {
+            t: 0.05,
+            x: 12.0,
+            y: 10.0,
+            kind: CursorKind::Default,
+            cursor_id: None,
+        });
+        let frame = sidecar
+            .presented_at(
+                5.0,
+                CursorMotion {
+                    hide_idle: false,
+                    ..CursorMotion::default()
+                },
+            )
+            .unwrap();
+        assert!((frame.alpha - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn hide_not_moving_restores_on_the_next_sample() {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        for (t, x) in [(0.0, 10.0), (0.05, 12.0), (3.0, 13.0)] {
+            sidecar.pointer.push(PointerSample {
+                t,
+                x,
+                y: 10.0,
+                kind: CursorKind::Default,
+                cursor_id: None,
+            });
+        }
+        let motion = CursorMotion {
+            hide_idle: true,
+            idle_ms: 500.0,
+            ..CursorMotion::default()
+        };
+        let faded = sidecar.presented_at(2.0, motion).unwrap();
+        let restored = sidecar.presented_at(3.0, motion).unwrap();
+        assert!(faded.alpha < 0.05);
+        assert!((restored.alpha - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn hide_not_moving_counts_clicks() {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x: 10.0,
+            y: 10.0,
+            kind: CursorKind::Default,
+            cursor_id: None,
+        });
+        sidecar.pointer.push(PointerSample {
+            t: 0.05,
+            x: 12.0,
+            y: 10.0,
+            kind: CursorKind::Default,
+            cursor_id: None,
+        });
+        sidecar.clicks.push(ClickSample {
+            t: 2.0,
+            x: 12.0,
+            y: 10.0,
+            button: 1,
+            cursor_id: None,
+        });
+        let motion = CursorMotion {
+            hide_idle: true,
+            idle_ms: 500.0,
+            ..CursorMotion::default()
+        };
+        let faded = sidecar.presented_at(1.5, motion).unwrap();
+        let restored = sidecar.presented_at(2.2, motion).unwrap();
+        assert!(faded.alpha < 0.05);
+        assert!((restored.alpha - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn hide_not_moving_after_the_duration_never_hides() {
+        let mut sidecar = moving_sidecar();
+        for sample in sidecar.pointer.iter_mut() {
+            if sample.t > 1.0 {
+                sample.x = 100.0 + 50.0;
+            }
+        }
+        let patient = sidecar
+            .presented_at(
+                10.0,
+                CursorMotion {
+                    hide_idle: true,
+                    idle_ms: 9000.0,
+                    ..CursorMotion::default()
+                },
+            )
+            .unwrap();
+        assert!((patient.alpha - 1.0).abs() < 1e-9);
+        let eager = sidecar
+            .presented_at(
+                1.5,
+                CursorMotion {
+                    hide_idle: true,
+                    idle_ms: 0.0,
+                    ..CursorMotion::default()
+                },
+            )
+            .unwrap();
+        assert!(eager.alpha < 0.05);
+    }
+
     #[test]
     fn presented_at_speed_keeps_cursor_on_the_recorded_timeline() {
         let mut sidecar =
@@ -2528,6 +3394,67 @@ mod tests {
             (again - cut).abs() < 1e-9,
             "the cached plan must stay cut-aware: {again} vs {cut}"
         );
+    }
+
+    #[test]
+    fn the_shake_filter_removes_a_lone_spike_from_the_planned_cursor() {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        for index in 0_u32..=20 {
+            let t = index as f64 * 0.05;
+            let x = if index == 10 { 1500.0 } else { 100.0 };
+            sidecar.pointer.push(PointerSample {
+                t,
+                x,
+                y: 100.0,
+                kind: CursorKind::Default,
+                cursor_id: None,
+            });
+        }
+        let motion = CursorMotion {
+            smooth: 0.8,
+            speed: 1.0,
+            ..CursorMotion::default()
+        };
+        let peak = |sidecar: &PointerSidecar| {
+            (40..=80)
+                .map(|step| sidecar.presented_at(step as f64 * 0.01, motion).unwrap().x)
+                .fold(f64::MIN, f64::max)
+        };
+        let filtered = peak(&sidecar);
+        sidecar.set_shake_threshold(0.0);
+        let unfiltered = peak(&sidecar);
+        assert!(
+            filtered < 150.0,
+            "the spike should be filtered out, peaked at {filtered}"
+        );
+        assert!(
+            unfiltered > filtered + 50.0,
+            "without the filter the spike should pull the cursor: {unfiltered} vs {filtered}"
+        );
+    }
+
+    #[test]
+    fn the_shake_filter_also_removes_the_spike_without_smoothing() {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        for index in 0_u32..=20 {
+            sidecar.pointer.push(PointerSample {
+                t: index as f64 * 0.05,
+                x: if index == 10 { 1500.0 } else { 100.0 },
+                y: 100.0,
+                kind: CursorKind::Default,
+                cursor_id: None,
+            });
+        }
+        let filtered = sidecar.motion_position_at(0.5, 0.0, 1.0).unwrap().0;
+        sidecar.set_shake_threshold(0.0);
+        let raw = sidecar.motion_position_at(0.5, 0.0, 1.0).unwrap().0;
+        assert!(
+            (filtered - 100.0).abs() < 1e-9,
+            "filtered cursor at {filtered}"
+        );
+        assert!((raw - 1500.0).abs() < 1e-9, "unfiltered cursor at {raw}");
     }
 
     #[test]

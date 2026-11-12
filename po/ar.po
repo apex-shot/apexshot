@@ -812,6 +812,21 @@ msgstr "فتح واجهة التسجيل:"
 msgid "Record Screen:"
 msgstr "تسجيل الشاشة:"
 
+msgid "HEVC (smaller files)"
+msgstr "HEVC (ملفات أصغر)"
+
+msgid "H.264"
+msgstr "H.264"
+
+msgid "Pause or Resume Recording:"
+msgstr "إيقاف التسجيل مؤقتًا أو استئنافه:"
+
+msgid "Restart Recording:"
+msgstr "إعادة بدء التسجيل:"
+
+msgid "Add Recording Marker:"
+msgstr "إضافة علامة إلى التسجيل:"
+
 msgid "Stop and Save Recording:"
 msgstr "إيقاف التسجيل وحفظه:"
 
@@ -1396,8 +1411,20 @@ msgstr "إخفاء المسار"
 msgid "Hide video"
 msgstr "إخفاء الفيديو"
 
+msgid "Remove cursor shake"
+msgstr "إزالة اهتزاز المؤشر"
+
 msgid "Hide when idle"
 msgstr "إخفاء الشاشة عند عدم الاستخدام"
+
+msgid "Loop cursor position"
+msgstr "تكرار موضع المؤشر"
+
+msgid "Loop before end"
+msgstr "التكرار قبل النهاية"
+
+msgid "Stop at the end"
+msgstr "التوقف عند النهاية"
 
 msgid "Hide zoom"
 msgstr "إخفاء التكبير/التصغير"

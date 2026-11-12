@@ -229,8 +229,17 @@ pub(super) fn start_export_with_settings(
     settings: ExportSettings,
 ) -> ExportHandle {
     let cuts = model.cuts.clone();
+    let shake_threshold = model.cursor.remove_shake_threshold;
+    let stop_movement_in_last_part_ms = model.cursor.stop_movement_in_last_part_ms;
+    let loop_position_before_end_ms = model.cursor.loop_position_before_end_ms;
     if let Some(sidecar) = model.sidecar.as_mut() {
         sidecar.set_cut_times(&cuts);
+        sidecar.set_shake_threshold(shake_threshold);
+        sidecar.set_cursor_tail(
+            stop_movement_in_last_part_ms,
+            loop_position_before_end_ms,
+            Some(model.trim_end),
+        );
     }
     let (sender, receiver) = mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));
@@ -3251,6 +3260,10 @@ mod tests {
             .and_then(|value| value.parse().ok())
             .unwrap_or(0.0);
         let always_use_default = std::env::var("APEXSHOT_COMPARISON_ALWAYS_DEFAULT").is_ok();
+        let shake_threshold = std::env::var("APEXSHOT_COMPARISON_SHAKE")
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(crate::recording::editor::cursor_shake::DEFAULT_REMOVE_SHAKE_THRESHOLD);
         let cuts: Vec<f64> = std::env::var("APEXSHOT_COMPARISON_CUTS")
             .ok()
             .map(|text| {
@@ -3267,8 +3280,15 @@ mod tests {
             .ok()
             .and_then(|value| value.parse().ok())
             .unwrap_or(duration);
+        let stop_tail_ms = std::env::var("APEXSHOT_COMPARISON_STOP_TAIL_MS")
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(0.0);
+        let loop_ms = std::env::var("APEXSHOT_COMPARISON_LOOP_MS")
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok());
         eprintln!(
-            "export: theme {theme:?} rotation {rotation_mode:?} ratio {rotation_ratio} base {base_rotation_deg} default {always_use_default} trim {trim_start}..{trim_end} cuts {cuts:?}"
+            "export: theme {theme:?} rotation {rotation_mode:?} ratio {rotation_ratio} base {base_rotation_deg} default {always_use_default} trim {trim_start}..{trim_end} cuts {cuts:?} stop {stop_tail_ms} loop {loop_ms:?}"
         );
         if std::env::var("APEXSHOT_COMPARISON_DUMP").is_ok() {
             for t in [0.4, 0.8, 1.2, 2.2, 2.6, 2.9, 3.4, 3.9, 4.4] {
@@ -3304,7 +3324,20 @@ mod tests {
             {
                 let free_x = free.presented_at(t, motion).map(|frame| frame.x);
                 let cut_x = with_cuts.presented_at(t, motion).map(|frame| frame.x);
-                eprintln!("plan {t}: free {free_x:?} cut {cut_x:?}");
+                let mut unfiltered = free.clone();
+                unfiltered.set_shake_threshold(0.0);
+                let mut filtered = free.clone();
+                filtered.set_shake_threshold(shake_threshold);
+                let raw = |sidecar: &crate::recording::editor::sidecar::PointerSidecar| {
+                    sidecar
+                        .presented_at(t, motion)
+                        .map(|frame| (frame.x.round(), frame.y.round()))
+                };
+                eprintln!(
+                    "plan {t}: free {free_x:?} cut {cut_x:?} shake-off {:?} shake-on {:?}",
+                    raw(&unfiltered),
+                    raw(&filtered)
+                );
             }
         }
         let model = ExportModel {
@@ -3321,6 +3354,9 @@ mod tests {
                 rotate_on_x_movement_ratio: rotation_ratio,
                 base_rotation_deg,
                 always_use_default,
+                remove_shake_threshold: shake_threshold,
+                stop_movement_in_last_part_ms: stop_tail_ms,
+                loop_position_before_end_ms: loop_ms,
                 ..CursorSettings::default()
             },
             sidecar: Some(sidecar),

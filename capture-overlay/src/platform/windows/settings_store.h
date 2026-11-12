@@ -37,6 +37,9 @@ struct ShellSettings {
         {QStringLiteral("save_last_capture"), QString()},
         {QStringLiteral("record_screen"), QString()},
         {QStringLiteral("recording_stop_save"), QStringLiteral("Ctrl+Alt+Shift+S")},
+        {QStringLiteral("recording_pause"), QStringLiteral("Ctrl+Alt+Shift+P")},
+        {QStringLiteral("recording_restart"), QStringLiteral("Ctrl+Alt+Shift+R")},
+        {QStringLiteral("recording_marker"), QStringLiteral("Ctrl+Alt+Shift+K")},
     };
 
     struct Screenshots {
@@ -78,7 +81,6 @@ struct ShellSettings {
         RecordingSettings values;
         bool includeMicrophone = false;
         bool includeSpeaker = false;
-        bool showCursor = true;
         bool afterShowResult = true;
         bool afterCopyToClipboard = false;
         bool afterSave = true;

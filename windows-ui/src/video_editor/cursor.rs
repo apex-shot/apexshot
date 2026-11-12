@@ -16,6 +16,7 @@ struct State {
     sidecar: Option<PointerSidecar>,
     video_path: Option<std::path::PathBuf>,
     settings: CursorSettings,
+    end_seconds: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -33,6 +34,7 @@ impl CursorModel {
                 sidecar: None,
                 video_path: None,
                 settings: CursorSettings::default(),
+                end_seconds: None,
             })),
         }
     }
@@ -41,6 +43,17 @@ impl CursorModel {
         let mut state = self.state.borrow_mut();
         state.sidecar = path.and_then(PointerSidecar::load_next_to_video);
         state.video_path = path.map(Path::to_path_buf);
+        let threshold = state.settings.remove_shake_threshold;
+        let settings = state.settings;
+        let end = state.end_seconds;
+        if let Some(sidecar) = state.sidecar.as_mut() {
+            sidecar.set_shake_threshold(threshold);
+            sidecar.set_cursor_tail(
+                settings.stop_movement_in_last_part_ms,
+                settings.loop_position_before_end_ms,
+                end,
+            );
+        }
     }
 
     pub fn settings(&self) -> CursorSettings {
@@ -52,7 +65,35 @@ impl CursorModel {
     }
 
     pub fn set_settings(&self, settings: CursorSettings) {
-        self.state.borrow_mut().settings = settings.clamped();
+        let mut state = self.state.borrow_mut();
+        state.settings = settings.clamped();
+        let threshold = state.settings.remove_shake_threshold;
+        let settings = state.settings;
+        let end = state.end_seconds;
+        if let Some(sidecar) = state.sidecar.as_mut() {
+            sidecar.set_shake_threshold(threshold);
+            sidecar.set_cursor_tail(
+                settings.stop_movement_in_last_part_ms,
+                settings.loop_position_before_end_ms,
+                end,
+            );
+        }
+    }
+
+    /// Where the edit ends, in source seconds. The cursor's tail behaviours
+    /// measure back from it.
+    pub fn set_end(&self, end_seconds: f64) {
+        let mut state = self.state.borrow_mut();
+        state.end_seconds = (end_seconds.is_finite() && end_seconds > 0.0).then_some(end_seconds);
+        let settings = state.settings;
+        let end = state.end_seconds;
+        if let Some(sidecar) = state.sidecar.as_mut() {
+            sidecar.set_cursor_tail(
+                settings.stop_movement_in_last_part_ms,
+                settings.loop_position_before_end_ms,
+                end,
+            );
+        }
     }
 
     /// Where the timeline cuts the footage. The cursor plan leads the cursor

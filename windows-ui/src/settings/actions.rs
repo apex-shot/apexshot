@@ -32,6 +32,7 @@ pub struct SaveInputs {
     pub rec_video_max_res: SettingsSelect,
     pub rec_video_fps: SettingsSelect,
     pub rec_video_quality: SettingsSelect,
+    pub rec_video_codec: SettingsSelect,
     pub rec_video_mono: CheckButton,
     pub webcam: super::webcam::WebcamInputs,
     pub screenshot_quick_access: CheckButton,
@@ -72,6 +73,9 @@ pub struct SaveInputs {
     pub shortcut_save_last_capture: Button,
     pub shortcut_record_screen: Button,
     pub shortcut_recording_stop_save: Button,
+    pub shortcut_recording_pause: Button,
+    pub shortcut_recording_restart: Button,
+    pub shortcut_recording_marker: Button,
     pub adv_retina_suffix: CheckButton,
     pub adv_clipboard_mode: SettingsSelect,
     pub adv_ocr_language: SettingsSelect,
@@ -213,6 +217,11 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<SaveOutcome> {
         .active_id()
         .and_then(|value| value.parse().ok())
         .unwrap_or(1);
+    config.rec_video_codec = inputs
+        .rec_video_codec
+        .active_id()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0);
     config.rec_video_mono = inputs.rec_video_mono.is_active();
 
     config.rec_webcam_enabled = inputs.webcam.enabled.is_active();
@@ -292,6 +301,9 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<SaveOutcome> {
     config.shortcut_open_recording_ui.clear();
     config.shortcut_record_screen = button_label_value(&inputs.shortcut_record_screen);
     config.shortcut_recording_stop_save = button_label_value(&inputs.shortcut_recording_stop_save);
+    config.shortcut_recording_pause = button_label_value(&inputs.shortcut_recording_pause);
+    config.shortcut_recording_restart = button_label_value(&inputs.shortcut_recording_restart);
+    config.shortcut_recording_marker = button_label_value(&inputs.shortcut_recording_marker);
 
     config.adv_retina_suffix = inputs.adv_retina_suffix.is_active();
     config.adv_clipboard_mode = combo_value(&inputs.adv_clipboard_mode, "File & Image (default)");
@@ -422,6 +434,9 @@ fn write_shell_settings_to(path: &Path, config: &AppConfig) -> anyhow::Result<()
             "save_last_capture": config.shortcut_save_last_capture,
             "record_screen": config.shortcut_record_screen,
             "recording_stop_save": config.shortcut_recording_stop_save,
+            "recording_pause": config.shortcut_recording_pause,
+            "recording_restart": config.shortcut_recording_restart,
+            "recording_marker": config.shortcut_recording_marker,
         },
         "screenshots": {
             "export_location": config.screenshot_export_location,
@@ -444,10 +459,10 @@ fn write_shell_settings_to(path: &Path, config: &AppConfig) -> anyhow::Result<()
             "fps_index": config.rec_video_fps,
             "max_resolution_index": config.rec_video_max_res,
             "quality_index": config.rec_video_quality,
+            "codec_index": config.rec_video_codec,
             "mono_audio": config.rec_video_mono,
             "include_microphone": config.rec_mic,
             "include_speaker": config.rec_speaker,
-            "show_cursor": config.rec_cursor,
             "after_show_result": true,
             "after_copy_to_clipboard": config.rec_after_capture_copy_to_clipboard,
             "after_save": config.rec_after_capture_save,
@@ -607,6 +622,7 @@ mod tests {
             rec_video_fps: 3,
             rec_video_max_res: 6,
             rec_video_quality: 0,
+            rec_video_codec: 1,
             rec_video_mono: true,
             rec_countdown: false,
             rec_controls: false,
@@ -675,10 +691,11 @@ mod tests {
         assert_eq!(value["recording"]["fps_index"], 3);
         assert_eq!(value["recording"]["max_resolution_index"], 6);
         assert_eq!(value["recording"]["quality_index"], 0);
+        assert_eq!(value["recording"]["codec_index"], 1);
         assert_eq!(value["recording"]["mono_audio"], true);
         assert_eq!(value["recording"]["include_microphone"], true);
         assert_eq!(value["recording"]["include_speaker"], true);
-        assert_eq!(value["recording"]["show_cursor"], false);
+        assert!(value["recording"].get("show_cursor").is_none());
         assert_eq!(value["recording"]["after_copy_to_clipboard"], true);
         assert_eq!(value["recording"]["after_save"], false);
         assert_eq!(value["recording"]["after_open_editor"], true);
@@ -717,6 +734,9 @@ mod tests {
             value["shortcuts"]["recording_stop_save"],
             "Ctrl+Alt+Shift+S"
         );
+        assert_eq!(value["shortcuts"]["recording_pause"], "Ctrl+Alt+Shift+P");
+        assert_eq!(value["shortcuts"]["recording_restart"], "Ctrl+Alt+Shift+R");
+        assert_eq!(value["shortcuts"]["recording_marker"], "Ctrl+Alt+Shift+K");
 
         write_shell_settings_to(&path, &AppConfig::default()).unwrap();
         let updated: serde_json::Value =

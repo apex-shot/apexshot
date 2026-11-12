@@ -808,6 +808,21 @@ msgstr "録画 UI を開く:"
 msgid "Record Screen:"
 msgstr "画面を録画:"
 
+msgid "HEVC (smaller files)"
+msgstr "HEVC（小さいファイル）"
+
+msgid "H.264"
+msgstr "H.264"
+
+msgid "Pause or Resume Recording:"
+msgstr "録画を一時停止／再開:"
+
+msgid "Restart Recording:"
+msgstr "録画をやり直す:"
+
+msgid "Add Recording Marker:"
+msgstr "録画マーカーを追加:"
+
 msgid "Stop and Save Recording:"
 msgstr "録画を停止して保存:"
 
@@ -1386,8 +1401,20 @@ msgstr "トラックを非表示にする"
 msgid "Hide video"
 msgstr "動画を非表示にする"
 
+msgid "Remove cursor shake"
+msgstr "カーソルの揺れを除去"
+
 msgid "Hide when idle"
 msgstr "アイドル時に非表示にする"
+
+msgid "Loop cursor position"
+msgstr "カーソル位置をループ"
+
+msgid "Loop before end"
+msgstr "終了前のループ"
+
+msgid "Stop at the end"
+msgstr "終了時に停止"
 
 msgid "Hide zoom"
 msgstr "ズームを非表示にする"

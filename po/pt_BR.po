@@ -822,6 +822,21 @@ msgstr "Abrir interface de gravação:"
 msgid "Record Screen:"
 msgstr "Gravar tela:"
 
+msgid "HEVC (smaller files)"
+msgstr "HEVC (arquivos menores)"
+
+msgid "H.264"
+msgstr "H.264"
+
+msgid "Pause or Resume Recording:"
+msgstr "Pausar ou retomar gravação:"
+
+msgid "Restart Recording:"
+msgstr "Reiniciar gravação:"
+
+msgid "Add Recording Marker:"
+msgstr "Adicionar marcador de gravação:"
+
 msgid "Stop and Save Recording:"
 msgstr "Parar e salvar gravação:"
 
@@ -1412,8 +1427,20 @@ msgstr "Ocultar faixa"
 msgid "Hide video"
 msgstr "Ocultar vídeo"
 
+msgid "Remove cursor shake"
+msgstr "Remover tremor do cursor"
+
 msgid "Hide when idle"
 msgstr "Ocultar quando inativo"
+
+msgid "Loop cursor position"
+msgstr "Repetir a posição do cursor"
+
+msgid "Loop before end"
+msgstr "Repetir antes do fim"
+
+msgid "Stop at the end"
+msgstr "Parar no fim"
 
 msgid "Hide zoom"
 msgstr "Ocultar zoom"

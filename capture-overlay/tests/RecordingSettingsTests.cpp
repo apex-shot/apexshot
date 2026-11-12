@@ -37,6 +37,7 @@ void checkDefaults()
     CHECK(settings.maxResolutionIndex == 0);  // Original
     CHECK(settings.qualityIndex == 1);        // High
     CHECK(!settings.monoAudio);
+    CHECK(settings.codecIndex == 0);       // H.264
 }
 
 void checkFpsTable()
@@ -185,6 +186,7 @@ void checkPersistence(const QString& path)
         saved.maxResolutionIndex = 6;
         saved.qualityIndex = 2;
         saved.monoAudio = true;
+        saved.codecIndex = 1;
         Platform::saveRecordingSettings(store, saved);
     }
 
@@ -194,6 +196,7 @@ void checkPersistence(const QString& path)
     CHECK(loaded.maxResolutionIndex == 6);
     CHECK(loaded.qualityIndex == 2);
     CHECK(loaded.monoAudio);
+    CHECK(loaded.codecIndex == 1);
 }
 
 void checkLoadSanitizes(const QString& path)
@@ -203,6 +206,7 @@ void checkLoadSanitizes(const QString& path)
         store.setValue(QStringLiteral("recording/video_fps"), 9);
         store.setValue(QStringLiteral("recording/video_max_res"), -4);
         store.setValue(QStringLiteral("recording/video_quality"), 42);
+        store.setValue(QStringLiteral("recording/video_codec"), 7);
         store.sync();
     }
 
@@ -211,6 +215,7 @@ void checkLoadSanitizes(const QString& path)
     CHECK(loaded.fpsIndex == 1);
     CHECK(loaded.maxResolutionIndex == 0);
     CHECK(loaded.qualityIndex == 1);
+    CHECK(loaded.codecIndex == 0);
 }
 
 }  // namespace

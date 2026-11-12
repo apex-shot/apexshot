@@ -55,6 +55,17 @@ inline constexpr std::array<const char*, 3> kRecordingQualityOptions = {
     "Ultra",
 };
 
+/// Screen codecs. The index is the stored value. H.264 is the default; HEVC
+/// makes smaller files at the same quality but needs a newer player.
+inline constexpr std::array<const char*, 2> kRecordingCodecOptions = {
+    "H.264",
+    "HEVC",
+};
+
+/// HEVC reaches the same quality as H.264 at a quality number about this much
+/// higher, measured on screen recordings by SSIM against a lossless source.
+inline constexpr int kHevcQualityOffset = 4;
+
 /// The complete recording settings a session needs.
 struct RecordingSettings
 {
@@ -66,6 +77,8 @@ struct RecordingSettings
     int qualityIndex = 1;
     /// Record both audio channels as a single mono track.
     bool monoAudio = false;
+    /// Index into kRecordingCodecOptions. The default is H.264.
+    int codecIndex = 0;
 
     /// Put every index back inside its table. Callers use this on load and
     /// before persisting, so a hand-edited or stale config cannot reach a

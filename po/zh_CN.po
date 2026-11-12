@@ -806,6 +806,21 @@ msgstr "打开录制界面："
 msgid "Record Screen:"
 msgstr "录制屏幕："
 
+msgid "HEVC (smaller files)"
+msgstr "HEVC（文件更小）"
+
+msgid "H.264"
+msgstr "H.264"
+
+msgid "Pause or Resume Recording:"
+msgstr "暂停或继续录制："
+
+msgid "Restart Recording:"
+msgstr "重新开始录制："
+
+msgid "Add Recording Marker:"
+msgstr "添加录制标记："
+
 msgid "Stop and Save Recording:"
 msgstr "停止并保存录制："
 
@@ -1384,8 +1399,20 @@ msgstr "隐藏音轨"
 msgid "Hide video"
 msgstr "隐藏视频"
 
+msgid "Remove cursor shake"
+msgstr "移除光标抖动"
+
 msgid "Hide when idle"
 msgstr "空闲时隐藏"
+
+msgid "Loop cursor position"
+msgstr "循环光标位置"
+
+msgid "Loop before end"
+msgstr "结束前循环"
+
+msgid "Stop at the end"
+msgstr "结束时停止"
 
 msgid "Hide zoom"
 msgstr "隐藏缩放"

@@ -504,6 +504,9 @@ pub fn install_shortcut_editors(widgets: &ShortcutSettingsWidgets, parent: &Appl
         &widgets.save_last_capture_btn,
         &widgets.record_screen_btn,
         &widgets.recording_stop_save_btn,
+        &widgets.recording_pause_btn,
+        &widgets.recording_restart_btn,
+        &widgets.recording_marker_btn,
     ] {
         install_shortcut_editor(button, parent, &editing);
     }
@@ -526,6 +529,13 @@ pub struct ShortcutSettingsWidgets {
     pub save_last_capture_btn: Button,
     pub record_screen_btn: Button,
     pub recording_stop_save_btn: Button,
+    /// Windows only, like the three rows that hold them.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub recording_pause_btn: Button,
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub recording_restart_btn: Button,
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub recording_marker_btn: Button,
 }
 
 pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
@@ -763,6 +773,38 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         true,
         Some("recording_stop_save"),
     );
+    // The pause, restart and marker shortcuts are handled by the Windows
+    // shell only. Elsewhere their rows go into a frame that is never shown,
+    // so the widgets keep one shape on every platform.
+    let windows_rows = if cfg!(windows) {
+        recording_frame.clone()
+    } else {
+        build_frame()
+    };
+    let recording_pause_btn = create_row(
+        &windows_rows,
+        "Pause or Resume Recording:",
+        Some("Only during recording"),
+        &config.shortcut_recording_pause,
+        true,
+        Some("recording_pause"),
+    );
+    let recording_restart_btn = create_row(
+        &windows_rows,
+        "Restart Recording:",
+        Some("Only during recording"),
+        &config.shortcut_recording_restart,
+        true,
+        Some("recording_restart"),
+    );
+    let recording_marker_btn = create_row(
+        &windows_rows,
+        "Add Recording Marker:",
+        Some("Only during recording"),
+        &config.shortcut_recording_marker,
+        true,
+        Some("recording_marker"),
+    );
     section.append(&recording_frame);
 
     ShortcutSettingsWidgets {
@@ -782,6 +824,9 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         save_last_capture_btn,
         record_screen_btn,
         recording_stop_save_btn,
+        recording_pause_btn,
+        recording_restart_btn,
+        recording_marker_btn,
     }
 }
 

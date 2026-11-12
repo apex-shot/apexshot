@@ -78,6 +78,10 @@ fn build_capture_overlay() {
     #[rustfmt::skip]
     println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/recording.cpp");
     #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/disk_space.cpp");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/disk_space.h");
+    #[rustfmt::skip]
     println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/window_capture.cpp");
     #[rustfmt::skip]
     println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/window_capture.h");
@@ -141,6 +145,10 @@ fn build_capture_overlay() {
     println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/third_party/quirc/version_db.c");
     #[rustfmt::skip]
     println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/pointer_tracker.cpp");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/recording_manifest.cpp");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/recording_manifest.h");
     #[rustfmt::skip]
     println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/pointer_tracker.h");
     #[rustfmt::skip]
