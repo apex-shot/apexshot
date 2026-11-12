@@ -1,5 +1,8 @@
 //! Windows process preparation: DPI awareness and the bundled UI font.
 
+#[cfg(target_os = "windows")]
+pub mod file_drag;
+
 use std::sync::atomic::{AtomicU32, Ordering};
 
 /// GDI's system DPI as a scale, in thousandths. GDK reports 1 on this Windows

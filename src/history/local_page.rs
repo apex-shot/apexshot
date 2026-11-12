@@ -465,6 +465,7 @@ fn build_card(state: &Rc<PageState>, id: u64, entry: &CaptureEntry, now: SystemT
     // Drag the file out of the window to any app that accepts file drops
     // (file manager, browser, chat app…). GDK converts the GdkFileList to
     // text/uri-list for foreign drop targets automatically.
+    #[cfg(not(target_os = "windows"))]
     {
         let entry = entry.clone();
         let drag = gtk4::DragSource::new();
@@ -473,6 +474,43 @@ fn build_card(state: &Rc<PageState>, id: u64, entry: &CaptureEntry, now: SystemT
         drag.set_content(Some(&gtk4::gdk::ContentProvider::for_value(
             &list.to_value(),
         )));
+        clickable.add_controller(drag);
+    }
+    // On Windows, GDK hands other apps only a Shell IDList Array, which
+    // browsers and chat apps ignore, so the tile starts the shell's own drag
+    // once the pointer has moved past the drag threshold. Claiming the press
+    // keeps the button from treating the drag as a click.
+    #[cfg(target_os = "windows")]
+    {
+        let path = entry.path.clone();
+        let drag = gtk4::GestureDrag::new();
+        drag.set_button(gtk4::gdk::BUTTON_PRIMARY);
+        let started = Rc::new(Cell::new(false));
+        {
+            let started = Rc::clone(&started);
+            drag.connect_drag_begin(move |_, _, _| started.set(false));
+        }
+        drag.connect_drag_update(move |gesture, dx, dy| {
+            if started.get() {
+                return;
+            }
+            let threshold = gtk4::Settings::default()
+                .map(|settings| settings.gtk_dnd_drag_threshold())
+                .unwrap_or(8);
+            if dx.hypot(dy) < f64::from(threshold) {
+                return;
+            }
+            started.set(true);
+            gesture.set_state(gtk4::EventSequenceState::Claimed);
+            let path = path.clone();
+            let gesture = gesture.clone();
+            glib::idle_add_local_once(move || {
+                if let Err(error) = crate::platform::file_drag::drag_file_out(&path) {
+                    eprintln!("[history] drag failed for {}: {error}", path.display());
+                }
+                gesture.reset();
+            });
+        });
         clickable.add_controller(drag);
     }
 
