@@ -192,7 +192,13 @@ impl CursorModel {
         else {
             return;
         };
-        if super::typing::is_typing_at(&sidecar.keys, &sidecar.pointer, source_seconds) {
+        let typing_alpha = super::typing::typing_alpha(
+            &sidecar.keys,
+            &sidecar.pointer,
+            &sidecar.presses,
+            source_seconds,
+        );
+        if typing_alpha <= 0.001 {
             return;
         }
         let settings = state.settings;
@@ -221,11 +227,12 @@ impl CursorModel {
             rotation_ratio: settings.rotate_on_x_movement_ratio,
             base_rotation_deg: settings.base_rotation_deg,
         };
-        let Some(frame) =
+        let Some(mut frame) =
             sidecar.presented_in_video_at(source_seconds, motion, video_width, video_height)
         else {
             return;
         };
+        frame.alpha *= typing_alpha;
         let map_point = |point| {
             let (x, y) = super::zoom::source_to_stage(point, view, rect.width, rect.height);
             (rect.x + x, rect.y + y)
@@ -407,7 +414,7 @@ mod tests {
 
     #[test]
     fn caption_settings_rebuild_the_captions_only_when_they_change() {
-        let cursor = cursor_with_keys(vec![key_down(1.0, 65, &[]), key_down(3.0, 13, &[])]);
+        let cursor = cursor_with_keys(vec![key_down(1.0, 65, &[]), key_down(3.0, 46, &[])]);
         cursor.set_caption_settings(crate::video_editor::keystrokes::Settings {
             shortcuts: true,
             show_single_letters: false,

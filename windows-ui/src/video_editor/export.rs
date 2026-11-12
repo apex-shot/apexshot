@@ -2371,7 +2371,13 @@ fn draw_cursor(
     if !sidecar.can_render_cursor_overlay() {
         return;
     }
-    if super::typing::is_typing_at(&sidecar.keys, &sidecar.pointer, source_time) {
+    let typing_alpha = super::typing::typing_alpha(
+        &sidecar.keys,
+        &sidecar.pointer,
+        &sidecar.presses,
+        source_time,
+    );
+    if typing_alpha <= 0.001 {
         return;
     }
     let motion = CursorMotion {
@@ -2383,7 +2389,7 @@ fn draw_cursor(
         rotation_ratio: settings.rotate_on_x_movement_ratio,
         base_rotation_deg: settings.base_rotation_deg,
     };
-    let Some(frame) = sidecar.presented_in_video_at(
+    let Some(mut frame) = sidecar.presented_in_video_at(
         source_time,
         motion,
         f64::from(source_size.0),
@@ -2391,6 +2397,7 @@ fn draw_cursor(
     ) else {
         return;
     };
+    frame.alpha *= typing_alpha;
     let settings = settings.clamped();
     let map = |point| zoom::source_to_stage(point, view, f64::from(size.0), f64::from(size.1));
     let cursor_point = map((frame.x, frame.y));

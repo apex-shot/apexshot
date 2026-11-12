@@ -71,7 +71,7 @@ pub(super) fn events(sidecar: &PointerSidecar, spans: &[Span]) -> Vec<Event> {
             let span = spans.iter().find(|span| span_covers(span, source_time))?;
             let composition_time =
                 span.composition_start + (source_time - span.source_start) / span.speed;
-            is_time(composition_time).then_some(Event {
+            (composition_time.is_finite() && composition_time > 0.0).then_some(Event {
                 kind,
                 source_time,
                 composition_time,
@@ -209,6 +209,13 @@ mod tests {
             source_time,
             composition_time,
         }
+    }
+
+    #[test]
+    fn a_click_at_the_very_start_plays_no_sound() {
+        let mut sidecar = sidecar();
+        sidecar.presses.push(press(0.0, 0.05, 1));
+        assert_eq!(events(&sidecar, &identity()), Vec::new());
     }
 
     #[test]

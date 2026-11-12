@@ -10,6 +10,10 @@ const TAIL: f64 = 1.5;
 const MIN_DISPLAY: f64 = 0.8;
 const MOD_LOOKBACK: f64 = 3.0;
 const SAME_SHORTCUT_GAP: f64 = 2.0;
+/// A shifted key followed this soon by a plain key is typing, not a shortcut.
+const SHIFT_TYPING_GAP: f64 = 1.0;
+/// Two plain letters or digits this close are typing while single letters are shown.
+const LETTER_RUN_GAP: f64 = 1.0;
 
 const KEY_HEIGHT: f64 = 0.05;
 const BOTTOM_INSET: f64 = 0.033;
@@ -37,8 +41,13 @@ pub(super) struct Caption {
 }
 
 struct Group {
-    caption: Caption,
+    keys: Vec<String>,
+    mask: u8,
+    name: &'static str,
+    first_t: f64,
     last_down: f64,
+    count: usize,
+    first_index: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,18 +103,36 @@ pub(super) fn captions(keys: &[KeySample], show_single_letters: bool) -> Vec<Cap
         .collect();
     events.sort_by(|a, b| a.t.total_cmp(&b.t));
 
+    let entries: Vec<(usize, f64, u8, &'static str)> = events
+        .iter()
+        .enumerate()
+        .filter(|(_, event)| event.kind == "key_down" && Modifier::from_vk(event.key).is_none())
+        .filter_map(|(index, event)| {
+            let name = vk_name(event.key);
+            (!name.is_empty()).then(|| (index, event.t, modifier_mask(&event.modifiers), name))
+        })
+        .collect();
+
+    let kept: Vec<(usize, f64, u8, &'static str)> = entries
+        .iter()
+        .enumerate()
+        .filter_map(|(i, &(index, t, mask, name))| {
+            if mask & Modifier::Shift.bit() != 0 {
+                if let Some(&(_, next_t, next_mask, _)) = entries.get(i + 1) {
+                    if next_mask == 0 && next_t - t < SHIFT_TYPING_GAP {
+                        return None;
+                    }
+                }
+            }
+            if !show_single_letters && mask == 0 && !shown_alone(name) {
+                return None;
+            }
+            Some((index, t, mask, name))
+        })
+        .collect();
+
     let mut groups: Vec<Group> = Vec::new();
-    for (index, event) in events.iter().enumerate() {
-        if event.kind != "key_down" || Modifier::from_vk(event.key).is_some() {
-            continue;
-        }
-        let name = vk_name(event.key);
-        let mask = modifier_mask(&event.modifiers);
-        let typing = (mask & !Modifier::Shift.bit()) == 0;
-        if name.is_empty() || (typing && name.len() == 1 && !show_single_letters) {
-            continue;
-        }
-        let t = event.t;
+    for (index, t, mask, name) in kept {
         let shortcut: Vec<String> = Modifier::ALL
             .iter()
             .filter(|modifier| mask & modifier.bit() != 0)
@@ -113,40 +140,87 @@ pub(super) fn captions(keys: &[KeySample], show_single_letters: bool) -> Vec<Cap
             .chain(std::iter::once(name.to_owned()))
             .collect();
 
+        if show_single_letters {
+            let letter = |n: &str| n.len() == 1 && n.chars().all(|c| c.is_ascii_alphanumeric());
+            if let Some(last) = groups.last() {
+                if last.mask == 0
+                    && letter(last.name)
+                    && mask == 0
+                    && letter(name)
+                    && t - last.first_t < LETTER_RUN_GAP
+                {
+                    groups.pop();
+                    continue;
+                }
+            }
+        }
+
         if let Some(last) = groups.last_mut() {
-            if last.caption.keys == shortcut && t - last.last_down <= SAME_SHORTCUT_GAP {
-                last.caption.count += 1;
-                last.caption.end = t + TAIL;
+            if last.keys == shortcut && t - last.last_down <= SAME_SHORTCUT_GAP {
+                last.count += 1;
                 last.last_down = t;
                 continue;
             }
         }
 
-        let floor = groups
-            .last()
-            .map_or(f64::NEG_INFINITY, |group| group.last_down);
-        let candidate = caption_start(&events[..index], t, mask, floor);
-        let start = match groups.last_mut() {
+        groups.push(Group {
+            keys: shortcut,
+            mask,
+            name,
+            first_t: t,
+            last_down: t,
+            count: 1,
+            first_index: index,
+        });
+    }
+
+    let mut captions: Vec<Caption> = Vec::with_capacity(groups.len());
+    let mut floor = f64::NEG_INFINITY;
+    for group in groups {
+        let candidate = caption_start(
+            &events[..group.first_index],
+            group.first_t,
+            group.mask,
+            floor,
+        );
+        let start = match captions.last_mut() {
             Some(previous) => {
-                let start = (t - LEAD)
-                    .min(candidate.max(previous.caption.start + MIN_DISPLAY))
+                let start = (group.first_t - LEAD)
+                    .min(candidate.max(previous.start + MIN_DISPLAY))
                     .max(0.0);
-                previous.caption.end = previous.caption.end.min(start).max(previous.caption.start);
+                previous.end = previous.end.min(start).max(previous.start);
                 start
             }
             None => candidate,
         };
-        groups.push(Group {
-            caption: Caption {
-                start,
-                end: t + TAIL,
-                keys: shortcut,
-                count: 1,
-            },
-            last_down: t,
+        floor = group.last_down;
+        captions.push(Caption {
+            start,
+            end: group.last_down + TAIL,
+            keys: group.keys,
+            count: group.count,
         });
     }
-    groups.into_iter().map(|group| group.caption).collect()
+    captions
+}
+
+/// Keys that still earn a caption when pressed alone: editing and navigation
+/// keys and the function keys. Letters, digits, Enter, Space, Tab and Escape
+/// pressed alone are typing.
+fn shown_alone(name: &str) -> bool {
+    matches!(
+        name,
+        "Backspace"
+            | "Delete"
+            | "Left"
+            | "Up"
+            | "Right"
+            | "Down"
+            | "Home"
+            | "End"
+            | "PageUp"
+            | "PageDown"
+    ) || (name.len() >= 2 && name.starts_with('F') && name[1..].chars().all(|c| c.is_ascii_digit()))
 }
 
 fn modifier_mask(names: &[String]) -> u8 {
@@ -477,26 +551,53 @@ mod tests {
     }
 
     #[test]
-    fn plain_letters_and_digits_stay_hidden_by_default() {
-        let plain = [down(1.0, VK_A, &[]), down(2.0, VK_FIVE, &[])];
-        assert!(captions(&plain, false).is_empty());
-        assert_eq!(captions(&plain, true).len(), 2);
+    fn lone_keys_follow_the_shown_alone_list() {
+        for key in [VK_A, VK_FIVE, VK_ENTER, 32, 9, 27] {
+            assert!(
+                captions(&[down(1.0, key, &[])], false).is_empty(),
+                "virtual key {key}"
+            );
+        }
+
+        for (key, name) in [(46, "Delete"), (37, "Left"), (116, "F5"), (8, "Backspace")] {
+            let out = captions(&[down(1.0, key, &[])], false);
+            assert_eq!(out.len(), 1, "virtual key {key}");
+            assert_eq!(out[0].keys, [name]);
+        }
 
         let shortcut = [down(1.0, VK_A, &["control"])];
         assert_eq!(captions(&shortcut, false).len(), 1);
 
         let enter = [down(1.0, VK_ENTER, &[])];
-        assert_eq!(captions(&enter, false)[0].keys, ["Enter"]);
+        assert_eq!(captions(&enter, true).len(), 1);
     }
 
     #[test]
-    fn shifted_letters_are_typing_unless_another_modifier_joins_them() {
-        let typed = [down(1.0, VK_A, &["shift"])];
+    fn a_shifted_letter_is_typing_only_when_plain_typing_follows() {
+        let alone = [down(1.0, VK_A, &["shift"])];
+        let out = captions(&alone, false);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].keys, ["Shift", "A"]);
+
+        let typed = [down(1.0, VK_A, &["shift"]), down(1.5, VK_J, &[])];
         assert!(captions(&typed, false).is_empty());
-        assert_eq!(captions(&typed, true).len(), 1);
+
+        let apart = [down(1.0, VK_A, &["shift"]), down(2.5, VK_J, &[])];
+        let out = captions(&apart, false);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].keys, ["Shift", "A"]);
 
         let shortcut = [down(1.0, VK_A, &["control", "shift"])];
         assert_eq!(captions(&shortcut, false)[0].keys, ["Ctrl", "Shift", "A"]);
+    }
+
+    #[test]
+    fn fast_letter_runs_hide_while_single_letters_are_shown() {
+        let fast = [down(1.0, VK_A, &[]), down(1.4, VK_J, &[])];
+        assert!(captions(&fast, true).is_empty());
+
+        let apart = [down(1.0, VK_A, &[]), down(2.5, VK_J, &[])];
+        assert_eq!(captions(&apart, true).len(), 2);
     }
 
     #[test]
