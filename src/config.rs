@@ -78,6 +78,10 @@ pub struct AppConfig {
     pub rec_video_open_editor: bool,
     /// Place the recorded clicks' automatic zooms on a fresh import.
     pub rec_video_auto_zoom_on_import: bool,
+    /// Record key presses beside a Windows recording so the editor can show
+    /// keyboard shortcuts. Off by default: keystrokes are only collected when
+    /// the user asks for them.
+    pub rec_capture_keystrokes: bool,
     /// Video preset the editor applies to a recording it opens. `None` keeps
     /// the built-in defaults.
     pub rec_video_default_preset: Option<String>,
@@ -254,6 +258,7 @@ impl Default for AppConfig {
             rec_video_mono: false,
             rec_video_open_editor: false,
             rec_video_auto_zoom_on_import: true,
+            rec_capture_keystrokes: false,
             rec_video_default_preset: None,
             rec_noise_suppression: false,
             rec_mic: false,
@@ -1589,6 +1594,26 @@ mod tests {
         let loaded: AppConfig = serde_yml::from_str(&yaml).unwrap();
 
         assert!(!loaded.rec_video_auto_zoom_on_import);
+    }
+
+    #[test]
+    fn capture_keystrokes_defaults_off_when_the_key_is_missing() {
+        let yaml = "preview_auto_close_seconds: 12\n";
+        let cfg: AppConfig = serde_yml::from_str(yaml).unwrap();
+        assert!(!cfg.rec_capture_keystrokes);
+    }
+
+    #[test]
+    fn capture_keystrokes_survives_a_yaml_round_trip_when_on() {
+        let original = AppConfig {
+            rec_capture_keystrokes: true,
+            ..AppConfig::default()
+        };
+
+        let yaml = serde_yml::to_string(&original).unwrap();
+        let loaded: AppConfig = serde_yml::from_str(&yaml).unwrap();
+
+        assert!(loaded.rec_capture_keystrokes);
     }
 
     #[test]

@@ -80,6 +80,40 @@ impl CursorModel {
         self.state.borrow().sidecar.clone()
     }
 
+    /// Give a test cursor a recording with one key press and nothing else.
+    #[cfg(test)]
+    pub(super) fn set_keys_for_test(&self) {
+        let mut sidecar = PointerSidecar::new(
+            0,
+            crate::recording::editor::sidecar::CaptureRegion {
+                x: 0,
+                y: 0,
+                w: 0,
+                h: 0,
+            },
+        );
+        sidecar
+            .keys
+            .push(crate::recording::editor::sidecar::KeySample {
+                t: 1.0,
+                kind: "key_down".to_owned(),
+                key: 46,
+                scan_code: 0,
+                modifiers: Vec::new(),
+                cursor_id: None,
+            });
+        self.state.borrow_mut().sidecar = Some(sidecar);
+    }
+
+    /// Whether the open recording carries key presses, without cloning it.
+    pub fn has_keys(&self) -> bool {
+        self.state
+            .borrow()
+            .sidecar
+            .as_ref()
+            .is_some_and(|sidecar| !sidecar.keys.is_empty())
+    }
+
     pub fn set_settings(&self, settings: CursorSettings) {
         let mut state = self.state.borrow_mut();
         state.settings = settings.clamped();

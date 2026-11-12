@@ -1077,8 +1077,12 @@ fn build_cursor_effects_page(
         gtk4::glib::ControlFlow::Continue
     });
 
-    page.append(&build_sound_and_caption_controls(scale, timeline.clone()));
-    page.append(&build_typing_suggestions(scale, timeline));
+    page.append(&build_sound_and_caption_controls(
+        scale,
+        cursor.clone(),
+        timeline.clone(),
+    ));
+    page.append(&build_typing_suggestions(scale, cursor, timeline));
     page
 }
 
@@ -1101,7 +1105,11 @@ fn switch_row(label: &str) -> (GtkBox, Switch) {
 /// The click sound and keyboard caption controls. Each change is written
 /// through the timeline, so it is an undo step and reaches the preview and the
 /// export, and the controls follow the document on load and undo.
-fn build_sound_and_caption_controls(scale: f64, timeline: super::timeline::Timeline) -> GtkBox {
+fn build_sound_and_caption_controls(
+    scale: f64,
+    cursor: super::cursor::CursorModel,
+    timeline: super::timeline::Timeline,
+) -> GtkBox {
     let section = GtkBox::new(Orientation::Vertical, (8.0 * scale).round() as i32);
     section.set_hexpand(true);
 
@@ -1110,35 +1118,71 @@ fn build_sound_and_caption_controls(scale: f64, timeline: super::timeline::Timel
     sound_label.set_xalign(0.0);
     section.append(&sound_label);
 
-    let sound = SettingsSelect::new([("off", t("Off")), ("soft", t("Soft"))], "off");
-    sound.widget().set_hexpand(true);
-    section.append(sound.widget());
+    let syncing = Rc::new(Cell::new(false));
+
+    let sound_row = GtkBox::new(Orientation::Horizontal, (6.0 * scale).round() as i32);
+    sound_row.add_css_class("recording-editor-click-effect-row");
+    sound_row.set_hexpand(true);
+    sound_row.set_homogeneous(true);
+    let sound_card = |label: &str| {
+        let card = ToggleButton::new();
+        card.add_css_class("recording-editor-click-effect-card");
+        card.set_has_frame(false);
+        card.set_hexpand(true);
+        let name = Label::new(Some(label));
+        name.add_css_class("recording-editor-click-effect-label");
+        name.set_xalign(0.5);
+        card.set_child(Some(&name));
+        card
+    };
+    let sound_off = sound_card(&t("Off"));
+    let sound_soft = sound_card(&t("Soft"));
+    sound_soft.set_group(Some(&sound_off));
+    sound_row.append(&sound_off);
+    sound_row.append(&sound_soft);
+    section.append(&sound_row);
+
+    sound_off.connect_toggled({
+        let timeline = timeline.clone();
+        let syncing = syncing.clone();
+        move |card| {
+            if !card.is_active() || syncing.get() {
+                return;
+            }
+            timeline.update_effects(|effects| effects.click_sound = None);
+        }
+    });
+    sound_soft.connect_toggled({
+        let timeline = timeline.clone();
+        let syncing = syncing.clone();
+        move |card| {
+            if !card.is_active() || syncing.get() {
+                return;
+            }
+            timeline.update_effects(|effects| effects.click_sound = Some("soft".to_owned()));
+        }
+    });
 
     let volume = value_slider_control(&t("Volume"), 0.0, 100.0, 25.0, 1.0, 0, scale, {
         let timeline = timeline.clone();
         move |value| timeline.update_effects(|effects| effects.click_sound_volume = value / 100.0)
     });
-    section.append(&volume.widget());
 
     let preview = Button::with_label(&t("Preview"));
-    preview.set_halign(Align::Start);
     preview.connect_clicked({
         let timeline = timeline.clone();
         move |_| super::click_sound::preview(timeline.effects_settings().click_sound_volume)
     });
-    section.append(&preview);
 
-    let syncing = Rc::new(Cell::new(false));
-    sound.connect_changed({
-        let timeline = timeline.clone();
-        let sound = sound.clone();
-        move || {
-            let on = sound.active_id().as_deref() == Some("soft");
-            timeline.update_effects(|effects| {
-                effects.click_sound = on.then(|| "soft".to_owned());
-            });
-        }
-    });
+    let volume_row = GtkBox::new(Orientation::Horizontal, (8.0 * scale).round() as i32);
+    volume_row.set_hexpand(true);
+    volume.widget().set_hexpand(true);
+    volume_row.append(&volume.widget());
+    preview.add_css_class("recording-editor-secondary-button");
+    preview.set_valign(Align::Center);
+    preview.set_halign(Align::End);
+    volume_row.append(&preview);
+    section.append(&volume_row);
 
     let keyboard_label = Label::new(Some(&t("KEYBOARD")));
     keyboard_label.add_css_class("recording-editor-zoom-kicker");
@@ -1149,13 +1193,13 @@ fn build_sound_and_caption_controls(scale: f64, timeline: super::timeline::Timel
     section.append(&shortcuts_row);
     let (letters_row, letters) = switch_row(&t("Show single letters"));
     section.append(&letters_row);
-    let privacy = Label::new(Some(&t(
-        "Keyboard events appear only when keystroke capture was enabled during recording.",
+    let no_keys = Label::new(Some(&t(
+        "This recording has no keystrokes. Turn on Record keystrokes in Settings, under Recording, then record again.",
     )));
-    privacy.add_css_class("recording-editor-zoom-hint");
-    privacy.set_wrap(true);
-    privacy.set_xalign(0.0);
-    section.append(&privacy);
+    no_keys.add_css_class("recording-editor-zoom-hint");
+    no_keys.set_wrap(true);
+    no_keys.set_xalign(0.0);
+    section.append(&no_keys);
 
     shortcuts.connect_state_set({
         let timeline = timeline.clone();
@@ -1178,28 +1222,41 @@ fn build_sound_and_caption_controls(scale: f64, timeline: super::timeline::Timel
         }
     });
 
-    let last = Rc::new(RefCell::new(None::<super::project::EffectsSettings>));
+    let last = Rc::new(RefCell::new(
+        None::<(super::project::EffectsSettings, bool)>,
+    ));
     let refresh: Rc<dyn Fn()> = {
         let volume = volume.clone();
-        let preview = preview.clone();
-        let sound = sound.clone();
+        let volume_row = volume_row.clone();
+        let sound_off = sound_off.clone();
+        let sound_soft = sound_soft.clone();
+        let shortcuts_row = shortcuts_row.clone();
+        let shortcuts = shortcuts.clone();
+        let letters_row = letters_row.clone();
+        let letters = letters.clone();
+        let no_keys = no_keys.clone();
+        let cursor = cursor.clone();
         let syncing = syncing.clone();
         let timeline = timeline.clone();
         Rc::new(move || {
             let effects = timeline.effects_settings();
-            if last.borrow().as_ref() == Some(&effects) {
+            let has_keys = cursor.has_keys();
+            let current = (effects.clone(), has_keys);
+            if last.borrow().as_ref() == Some(&current) {
                 return;
             }
-            *last.borrow_mut() = Some(effects.clone());
+            *last.borrow_mut() = Some(current);
             syncing.set(true);
             let sound_on = effects.click_sound.is_some();
-            sound.set_active_id(effects.click_sound.as_deref().unwrap_or("off"));
+            sound_off.set_active(!sound_on);
+            sound_soft.set_active(sound_on);
             volume.set_value(effects.click_sound_volume * 100.0);
-            volume.widget().set_sensitive(sound_on);
-            preview.set_sensitive(sound_on);
+            volume_row.set_visible(sound_on);
+            shortcuts_row.set_sensitive(has_keys);
             shortcuts.set_active(effects.captions.shortcuts);
+            letters_row.set_sensitive(has_keys && effects.captions.shortcuts);
             letters.set_active(effects.captions.show_single_letters);
-            letters.set_sensitive(effects.captions.shortcuts);
+            no_keys.set_visible(!has_keys);
             syncing.set(false);
         })
     };
@@ -1211,7 +1268,11 @@ fn build_sound_and_caption_controls(scale: f64, timeline: super::timeline::Timel
 /// pause, a speed the apply buttons use, and a control that takes them all.
 /// The cards follow the document on load, undo and removal; the speed is the
 /// panel's own and is not written to the file.
-fn build_typing_suggestions(scale: f64, timeline: super::timeline::Timeline) -> GtkBox {
+fn build_typing_suggestions(
+    scale: f64,
+    cursor: super::cursor::CursorModel,
+    timeline: super::timeline::Timeline,
+) -> GtkBox {
     let section = GtkBox::new(Orientation::Vertical, (8.0 * scale).round() as i32);
     section.set_hexpand(true);
 
@@ -1235,18 +1296,20 @@ fn build_typing_suggestions(scale: f64, timeline: super::timeline::Timeline) -> 
         },
     );
     section.append(&slider.widget());
+    let speed_widget = slider.widget();
 
     let cards = GtkBox::new(Orientation::Vertical, (6.0 * scale).round() as i32);
     cards.set_hexpand(true);
     section.append(&cards);
 
-    let empty = Label::new(Some(&t("No typing pauses detected.")));
+    let empty = Label::new(Some(&t("No typing to speed up in this recording.")));
     empty.add_css_class("recording-editor-zoom-hint");
     empty.set_wrap(true);
     empty.set_xalign(0.0);
     section.append(&empty);
 
     let apply_all = Button::with_label(&t("Apply all suggestions"));
+    apply_all.add_css_class("recording-editor-secondary-button");
     apply_all.set_halign(Align::Start);
     section.append(&apply_all);
     apply_all.connect_clicked({
@@ -1258,7 +1321,10 @@ fn build_typing_suggestions(scale: f64, timeline: super::timeline::Timeline) -> 
     let last = Rc::new(RefCell::new(None::<(u64, u64, u64, u64, Vec<f64>)>));
     let refresh: Rc<dyn Fn()> = {
         let timeline = timeline.clone();
+        let cursor = cursor.clone();
+        let section_box = section.clone();
         let cards = cards.clone();
+        let speed_widget = speed_widget.clone();
         let empty = empty.clone();
         let apply_all = apply_all.clone();
         let speed = speed.clone();
@@ -1274,16 +1340,25 @@ fn build_typing_suggestions(scale: f64, timeline: super::timeline::Timeline) -> 
                 cards.remove(&child);
             }
             for &(start, end) in &suggestions {
-                let card = GtkBox::new(Orientation::Vertical, (4.0 * scale).round() as i32);
+                let card = GtkBox::new(Orientation::Vertical, (6.0 * scale).round() as i32);
                 card.add_css_class("recording-editor-zoom-classic");
-                let range = Label::new(Some(&format!("{start:.1}s – {end:.1}s")));
+                let range = Label::new(Some(&format!("{} · {start:.1}s – {end:.1}s", t("Typing"))));
                 range.add_css_class("recording-editor-zoom-classic-label");
                 range.set_xalign(0.0);
                 card.append(&range);
+                let note = Label::new(Some(&t(
+                    "Speed this part up so viewers do not wait through the typing.",
+                )));
+                note.add_css_class("recording-editor-zoom-hint");
+                note.set_wrap(true);
+                note.set_xalign(0.0);
+                card.append(&note);
                 let buttons = GtkBox::new(Orientation::Horizontal, (6.0 * scale).round() as i32);
                 buttons.set_homogeneous(true);
                 let apply = Button::with_label(&t("Apply suggestion"));
+                apply.add_css_class("recording-editor-primary-button");
                 let dismiss = Button::with_label(&t("Remove suggestion"));
+                dismiss.add_css_class("recording-editor-secondary-button");
                 apply.connect_clicked({
                     let timeline = timeline.clone();
                     let speed = speed.clone();
@@ -1299,9 +1374,18 @@ fn build_typing_suggestions(scale: f64, timeline: super::timeline::Timeline) -> 
                 cards.append(&card);
             }
             let has_suggestions = !suggestions.is_empty();
+            let has_keys = cursor.has_keys();
+            section_box.set_visible(has_keys);
             cards.set_visible(has_suggestions);
+            speed_widget.set_visible(has_suggestions);
             empty.set_visible(!has_suggestions);
-            apply_all.set_visible(has_suggestions);
+            let resolved_any = !timeline.typing_signature().4.is_empty();
+            empty.set_text(&if resolved_any {
+                t("All typing suggestions are handled. Undo brings them back.")
+            } else {
+                t("No typing to speed up in this recording.")
+            });
+            apply_all.set_visible(suggestions.len() >= 2);
         })
     };
     timeline.set_typing_listener(refresh);
@@ -5890,12 +5974,11 @@ mod tests {
                 super::Background::default(),
                 Rc::new(Cell::new(None)),
             );
-            let page = super::build_cursor_effects_page(
-                1.0,
-                super::super::cursor::CursorModel::new(),
-                Rc::new(|| {}),
-                timeline.clone(),
-            );
+            // The switches only enable for a recording that carries keys.
+            let cursor = super::super::cursor::CursorModel::new();
+            cursor.set_keys_for_test();
+            let page =
+                super::build_cursor_effects_page(1.0, cursor, Rc::new(|| {}), timeline.clone());
             let mut switches = Vec::new();
             collect_switches(page.upcast_ref(), &mut switches);
             let (shortcuts, letters) = (&switches[0], &switches[1]);

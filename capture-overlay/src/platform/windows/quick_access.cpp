@@ -2783,6 +2783,7 @@ private:
         // pointer that would double up with the one the editor paints.
         request.includeCursor = false;
         request.includeMicrophone = options.microphone;
+        request.captureKeystrokes = settings.recording.captureKeystrokes;
         request.microphoneDevice = options.microphoneDevice;
         request.systemAudio = options.systemAudio;
         request.systemAudioProcessId = options.systemAudioProcessId;

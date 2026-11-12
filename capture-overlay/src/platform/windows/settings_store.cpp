@@ -289,6 +289,9 @@ ShellSettings loadShellSettings()
         recording.value(QStringLiteral("quality_index")).toInt(out.recording.values.qualityIndex);
     out.recording.values.monoAudio =
         recording.value(QStringLiteral("mono_audio")).toBool(out.recording.values.monoAudio);
+    out.recording.captureKeystrokes =
+        recording.value(QStringLiteral("capture_keystrokes"))
+            .toBool(out.recording.captureKeystrokes);
     out.recording.values.codecIndex =
         recording.value(QStringLiteral("codec_index")).toInt(out.recording.values.codecIndex);
     out.recording.includeMicrophone =

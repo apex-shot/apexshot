@@ -1,8 +1,9 @@
 use crate::config::load_config;
 use crate::i18n::{self, t};
 use gtk4::{
-    prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button, FileChooserAction,
-    FileChooserNative, Label, Orientation, Overlay as GtkOverlay, ResponseType, ScrolledWindow,
+    prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button, CheckButton,
+    FileChooserAction, FileChooserNative, Label, Orientation, Overlay as GtkOverlay, ResponseType,
+    ScrolledWindow,
 };
 use std::cell::Cell;
 use std::rc::Rc;
@@ -380,7 +381,8 @@ fn build_settings_window(app: &Application) {
     let recordings = recording::build_recording_section(&config);
     let webcam = webcam::build_webcam_group(&config);
     recordings.section.append(&webcam.0);
-    let (editor_group, rec_default_video_preset) = build_editor_group(&config);
+    let (editor_group, rec_default_video_preset, rec_capture_keystrokes) =
+        build_editor_group(&config);
     recordings.section.append(&editor_group);
     let screenshots = build_screenshots_section(&config);
     let advanced = advanced::build_advanced_section(&config);
@@ -683,6 +685,7 @@ fn build_settings_window(app: &Application) {
         rec_save: after_capture.rec_save.clone(),
         rec_open_video_editor: after_capture.rec_open_video_editor.clone(),
         rec_auto_zoom_on_import: after_capture.rec_auto_zoom_on_import.clone(),
+        rec_capture_keystrokes,
         rec_default_video_preset,
         quick_access_position: quick_access.position_input.clone(),
         quick_access_overlay_size: quick_access.overlay_size_input.clone(),
@@ -888,7 +891,9 @@ pub(crate) fn install_window_css() {
 
 /// The Editor group of the Recording page: the preset a new recording opens
 /// in the video editor with.
-fn build_editor_group(config: &crate::config::AppConfig) -> (GtkBox, select::SettingsSelect) {
+fn build_editor_group(
+    config: &crate::config::AppConfig,
+) -> (GtkBox, select::SettingsSelect, CheckButton) {
     let group = GtkBox::new(Orientation::Vertical, 14);
     group.set_halign(Align::Fill);
     group.set_valign(Align::Start);
@@ -912,11 +917,18 @@ fn build_editor_group(config: &crate::config::AppConfig) -> (GtkBox, select::Set
     if !choices.iter().any(|(id, _)| id == &configured_id) {
         choices.push((configured_id.clone(), t("Unavailable preset")));
     }
+    let capture_keys = CheckButton::new();
+    capture_keys.set_active(config.rec_capture_keystrokes);
+    frame.append(&webcam::row(
+        "Record keystrokes",
+        Some("Key presses are saved beside the recording so the editor can show keyboard shortcuts. Off by default."),
+        &capture_keys,
+    ));
     let preset = select::SettingsSelect::new(choices, &configured_id);
     frame.append(&webcam::row("Default video preset", None, preset.widget()));
 
     group.append(&frame);
-    (group, preset)
+    (group, preset, capture_keys)
 }
 
 /// Wire every settings control so any edit reaches the auto-saver.
@@ -974,6 +986,7 @@ fn install_save_dirty_tracking(inputs: &Rc<SaveInputs>, mark_dirty: Rc<dyn Fn()>
     wire_check(&inputs.rec_save);
     wire_check(&inputs.rec_open_video_editor);
     wire_check(&inputs.rec_auto_zoom_on_import);
+    wire_check(&inputs.rec_capture_keystrokes);
     wire_combo(&inputs.rec_default_video_preset);
     wire_combo(&inputs.quick_access_position);
     wire_scale(&inputs.quick_access_overlay_size);

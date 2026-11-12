@@ -387,8 +387,10 @@ fn build_title_bar(
     right_balance.append(&actions);
     bar.append(&right_balance);
 
-    windowing::install_window_drag(&left_spacer, window);
-    windowing::install_window_drag(&right_spacer, window);
+    // The whole bar moves the window: the title is click-through and the
+    // spacers have no handlers of their own, while every button claims its
+    // own press before the bar sees it.
+    windowing::install_window_drag(&bar, window);
     (bar, export_button, presets_button)
 }
 
