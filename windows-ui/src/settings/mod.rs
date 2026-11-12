@@ -19,7 +19,7 @@ mod after_capture;
 mod annotate;
 mod autosave;
 #[path = "../../../src/settings/cloud.rs"]
-mod cloud;
+pub(crate) mod cloud;
 mod cloud_login;
 #[path = "../../../src/settings/general.rs"]
 mod general;

@@ -545,8 +545,8 @@ fn initial(email: &str) -> String {
 /// Start the device-code login in a terminal so the user never has to sign in
 /// again through a browser session of their own. Shared with the History
 /// window's Cloud page, which watches the config for the session to land.
-/// Windows has no terminal: that build signs in through the inline connect
-/// view in `crate::settings::cloud_login` instead.
+/// Windows has no terminal: that build opens Settings, which signs in through
+/// the inline connect view in `crate::settings::cloud_login`.
 #[cfg(not(target_os = "windows"))]
 pub(crate) fn spawn_apexshot_login() {
     let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
@@ -569,6 +569,31 @@ pub(crate) fn spawn_apexshot_login() {
     crate::utils::notify::desktop_notification(
         "Could not open a terminal",
         "Run `apexshot login` manually in a terminal to connect your ApexShot Cloud account.",
+    );
+}
+
+/// Windows signs in through the inline connect view in the Settings window's
+/// Cloud page, so the History window opens Settings and watches the config for
+/// the session to land. The executable resolves like the History window's
+/// editor launchers: an explicit override, then a sibling of this binary, then
+/// the bare name for anything that put it on `PATH`.
+#[cfg(target_os = "windows")]
+pub(crate) fn spawn_apexshot_login() {
+    let sibling = std::env::current_exe()
+        .ok()
+        .and_then(|current| current.parent().map(std::path::Path::to_path_buf))
+        .map(|directory| directory.join("apexshot-settings.exe"))
+        .filter(|sibling| sibling.is_file());
+    let executable = std::env::var_os("APEXSHOT_SETTINGS")
+        .map(std::path::PathBuf::from)
+        .or(sibling)
+        .unwrap_or_else(|| std::path::PathBuf::from("apexshot-settings.exe"));
+    if crate::utils::hidden_command(&executable).spawn().is_ok() {
+        return;
+    }
+    crate::utils::notify::desktop_notification(
+        "Could not open Settings",
+        "Open ApexShot Settings → Cloud to connect your ApexShot Cloud account.",
     );
 }
 

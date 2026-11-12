@@ -1,10 +1,12 @@
 //! Windows History window.
 //!
-//! The gallery and window shell are shared with the Linux build. Cloud and
-//! saved-edit pages stay out of the Windows stack until their editors and cloud
-//! transport are available there.
+//! The gallery, the Cloud page, and the window shell are shared with the
+//! Linux build. Motion edits stay a placeholder until that editor is
+//! available on Windows.
 
 pub mod actions;
+#[path = "../../../src/history/cloud_page.rs"]
+pub mod cloud_page;
 #[path = "../../../src/history/local_page.rs"]
 pub mod local_page;
 #[cfg(target_os = "windows")]
@@ -46,8 +48,9 @@ pub struct HistoryPage {
     pub searchable: bool,
 }
 
-/// The Windows page set: placeholders for the surfaces this build does not
-/// have yet, around the page the video editor's saved lists feed.
+/// The Windows page set: a placeholder for the Motion editor this build
+/// does not have yet, the page the video editor's saved lists feed, and the
+/// shared Cloud page.
 ///
 /// It lives here rather than in the shared window so the copy a Windows-only
 /// branch shows stays in the crate that shows it — the Linux catalog check
@@ -65,11 +68,8 @@ pub fn windows_history_pages(
             custom::SPLINE_SYMBOLIC,
             &t("Motion editing is not available in the Windows build yet."),
         ),
-        video_edits_page::build_video_edits_page(toast, search),
-        placeholder_page::build_placeholder_page(
-            custom::CLOUD_OUTLINE_THIN_SYMBOLIC,
-            &t("Cloud browsing is not available in the Windows build yet. Connect your account in Settings → Cloud."),
-        ),
+        video_edits_page::build_video_edits_page(toast.clone(), search),
+        cloud_page::build_cloud_page(toast),
     ]
 }
 

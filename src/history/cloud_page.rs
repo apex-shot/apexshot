@@ -70,17 +70,20 @@ pub fn build_cloud_page(toast: HistoryToast) -> super::HistoryPage {
     column.set_margin_start(28);
     column.set_margin_end(28);
 
-    let title = Label::new(Some(&t("Cloud")));
-    title.add_css_class("recent-captures-title");
-    title.set_halign(Align::Start);
+    #[cfg(not(target_os = "windows"))]
+    {
+        let title = Label::new(Some(&t("Cloud")));
+        title.add_css_class("recent-captures-title");
+        title.set_halign(Align::Start);
 
-    let subtitle = Label::new(Some(&t("Everything you have uploaded to ApexShot Cloud")));
-    subtitle.add_css_class("history-page-subtitle");
-    subtitle.set_halign(Align::Start);
-    subtitle.set_margin_bottom(18);
+        let subtitle = Label::new(Some(&t("Everything you have uploaded to ApexShot Cloud")));
+        subtitle.add_css_class("history-page-subtitle");
+        subtitle.set_halign(Align::Start);
+        subtitle.set_margin_bottom(18);
 
-    column.append(&title);
-    column.append(&subtitle);
+        column.append(&title);
+        column.append(&subtitle);
+    }
 
     // Body holds whichever state is currently rendered; a rebuild only ever
     // clears and refills this box, leaving the title header untouched.
