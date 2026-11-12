@@ -283,89 +283,76 @@
 
             /* ── Inline cloud connect view ── */
 
-            .cloud-connect-panel {
-                background-color: alpha(white, 0.025);
-                border: 1px solid alpha(white, 0.07);
-                border-radius: 18px;
-                padding: 30px 36px 22px 36px;
-                box-shadow: inset 0 1px alpha(white, 0.03), 0 18px 40px -24px alpha(black, 0.7);
-            }
-
-            .cloud-connect-mark {
-                -gtk-icon-shadow: 0 6px 18px alpha(#ff670d, 0.35);
-            }
-
-            .cloud-connect-eyebrow {
-                color: #ff7c2f;
-                font-size: 11px;
-                font-weight: 700;
-                letter-spacing: 0.14em;
-            }
-
             .cloud-connect-title {
-                font-size: 26px;
-                font-weight: 700;
-                letter-spacing: -0.02em;
+                font-size: 20px;
+                font-weight: 600;
+            }
+
+            .cloud-connect-hint {
+                color: alpha(white, 0.6);
+                font-size: 13px;
             }
 
             .cloud-connect-cell {
-                background: alpha(black, 0.30);
-                border: 1px solid alpha(white, 0.09);
-                border-radius: 12px;
-                box-shadow: inset 0 1px alpha(white, 0.04);
-                min-width: 46px;
-                min-height: 56px;
-                font-size: 22px;
+                background-color: alpha(white, 0.04);
+                border: 1px solid alpha(white, 0.10);
+                border-radius: 8px;
+                min-width: 40px;
+                min-height: 48px;
+                font-size: 20px;
                 font-weight: 600;
                 font-feature-settings: "tnum";
-                transition: border-color 150ms ease, background-color 150ms ease;
+                transition: border-color 120ms ease;
             }
 
             .cloud-connect-code:hover .cloud-connect-cell {
-                border-color: alpha(#ff7c2f, 0.45);
-                background: alpha(black, 0.36);
+                border-color: alpha(white, 0.22);
             }
 
             .cloud-connect-dash {
                 color: alpha(white, 0.30);
-                font-size: 20px;
-                font-weight: 400;
+                font-size: 18px;
+                margin: 0 2px;
             }
 
             .editor-root button.cloud-connect-link {
                 background: transparent;
                 border: none;
                 box-shadow: none;
-                padding: 3px 9px;
-                border-radius: 6px;
+                padding: 2px 4px;
+                margin-left: -4px;
+                border-radius: 4px;
                 color: alpha(white, 0.60);
             }
 
             .editor-root button.cloud-connect-link:hover {
-                background: alpha(#ff670d, 0.08);
-                color: #ff9250;
+                background: transparent;
+                color: white;
+            }
+
+            .editor-root button.cloud-connect-link:hover label {
+                text-decoration-line: underline;
             }
 
             .editor-root button.cloud-connect-action {
-                background-image: linear-gradient(180deg, #ff7a26, #ff620a);
+                background-image: none;
                 background-color: #ff670d;
                 color: white;
                 border: none;
-                border-radius: 10px;
-                min-height: 40px;
+                border-radius: 8px;
+                min-height: 34px;
+                padding: 0 16px;
                 font-weight: 600;
-                box-shadow: inset 0 1px alpha(white, 0.22), 0 8px 20px -10px alpha(#ff670d, 0.8);
+                box-shadow: none;
             }
 
             .editor-root button.cloud-connect-action:hover {
-                background-image: linear-gradient(180deg, #ff8a3d, #ff6f1f);
+                background-color: #f25f08;
             }
 
             .editor-root button.cloud-connect-action:disabled {
-                background-image: none;
                 background-color: alpha(#ff670d, 0.35);
                 color: alpha(white, 0.55);
-                box-shadow: none;
             }
 
             .editor-root button.cloud-connect-secondary {
@@ -373,9 +360,10 @@
                 background-color: alpha(white, 0.06);
                 color: alpha(white, 0.88);
                 border: 1px solid alpha(white, 0.08);
-                border-radius: 10px;
-                min-height: 38px;
-                font-weight: 600;
+                border-radius: 8px;
+                min-height: 34px;
+                padding: 0 14px;
+                font-weight: 500;
                 box-shadow: none;
             }
 
@@ -392,7 +380,7 @@
             .editor-root button.cloud-connect-secondary:focus-visible,
             .editor-root button.cloud-connect-link:focus-visible,
             .editor-root button.cloud-connect-back:focus-visible {
-                outline: 2px solid #ff7c2f;
+                outline: 2px solid alpha(#ff7c2f, 0.8);
                 outline-offset: 2px;
             }
 
@@ -410,11 +398,6 @@
                 color: white;
             }
 
-            .cloud-connect-divider {
-                min-height: 1px;
-                background-color: alpha(white, 0.06);
-            }
-
             .cloud-connect-meta {
                 color: alpha(white, 0.55);
                 font-size: 13px;
@@ -428,37 +411,25 @@
                 color: alpha(white, 0.25);
             }
 
-            .cloud-connect-meta-icon {
-                color: alpha(white, 0.45);
-            }
-
             .cloud-connect-expiry {
                 font-feature-settings: "tnum";
             }
 
             .cloud-connect-expiry.cloud-connect-expiry-urgent {
-                color: #ffb547;
+                color: #e9a23b;
             }
 
-            .editor-root.editor-theme-light .cloud-connect-panel {
-                background-color: #ffffff;
-                border-color: alpha(#111827, 0.08);
-                box-shadow: 0 18px 40px -26px alpha(#111827, 0.35);
-            }
-
-            .editor-root.editor-theme-light .cloud-connect-eyebrow {
-                color: #cf530b;
+            .editor-root.editor-theme-light .cloud-connect-hint {
+                color: alpha(#1d2129, 0.62);
             }
 
             .editor-root.editor-theme-light .cloud-connect-cell {
-                background: alpha(#111827, 0.04);
-                border-color: alpha(#111827, 0.12);
-                box-shadow: none;
+                background-color: alpha(#111827, 0.03);
+                border-color: alpha(#111827, 0.14);
             }
 
             .editor-root.editor-theme-light .cloud-connect-code:hover .cloud-connect-cell {
-                border-color: alpha(#ff670d, 0.55);
-                background: alpha(#111827, 0.06);
+                border-color: alpha(#111827, 0.30);
             }
 
             .editor-root.editor-theme-light .cloud-connect-dash {
@@ -470,8 +441,7 @@
             }
 
             .editor-root.editor-theme-light button.cloud-connect-link:hover {
-                background: alpha(#ff670d, 0.08);
-                color: #c2500a;
+                color: #1d2129;
             }
 
             .editor-root.editor-theme-light button.cloud-connect-secondary {
@@ -498,10 +468,6 @@
                 color: #1d2129;
             }
 
-            .editor-root.editor-theme-light .cloud-connect-divider {
-                background-color: alpha(#111827, 0.07);
-            }
-
             .editor-root.editor-theme-light .cloud-connect-meta {
                 color: alpha(#1d2129, 0.6);
             }
@@ -512,10 +478,6 @@
 
             .editor-root.editor-theme-light .cloud-connect-meta-dot {
                 color: alpha(#1d2129, 0.3);
-            }
-
-            .editor-root.editor-theme-light .cloud-connect-meta-icon {
-                color: alpha(#1d2129, 0.5);
             }
 
             .editor-root.editor-theme-light .cloud-connect-expiry.cloud-connect-expiry-urgent {

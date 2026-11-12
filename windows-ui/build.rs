@@ -37,11 +37,9 @@ fn main() {
             "folder-open-regular",
             // The Motion notch borrows the watermark tab's photo glyph.
             "image-regular",
-            // Cloud sign-in: the back pill, the link's open glyph, and the
-            // countdown's clock.
+            // Cloud sign-in: the back pill and the link's open glyph.
             "chevron-left-regular",
             "open-regular",
-            "clock-regular",
         ],
     );
 }

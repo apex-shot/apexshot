@@ -62,54 +62,40 @@ pub(crate) fn wrap_cloud_page(
     cancel_btn.set_child(Some(&back_row));
     view.append(&cancel_btn);
 
-    // The whole flow sits in one raised panel, so the code, its actions, and
-    // the live status read as a single object in the middle of the page.
+    // The flow reads like the rest of Settings: left-aligned under the page
+    // heading, with plain controls and nothing competing with the code.
     let content = GtkBox::new(Orientation::Vertical, 0);
     content.add_css_class("cloud-connect-content");
-    content.add_css_class("cloud-connect-panel");
-    content.set_halign(Align::Center);
-    content.set_valign(Align::Center);
-    content.set_vexpand(true);
-    content.set_margin_top(16);
+    content.set_halign(Align::Start);
+    content.set_valign(Align::Start);
+    content.set_margin_start(12);
+    content.set_margin_top(20);
     content.set_margin_bottom(32);
     view.append(&content);
 
-    let mark = Image::from_icon_name(icon_names::custom::APEXSHOT_CLOUD);
-    mark.add_css_class("cloud-connect-mark");
-    mark.set_pixel_size(44);
-    mark.set_halign(Align::Center);
-    content.append(&mark);
-
-    let eyebrow = Label::new(Some(&t("APEXSHOT CLOUD")));
-    eyebrow.add_css_class("cloud-connect-eyebrow");
-    eyebrow.set_halign(Align::Center);
-    eyebrow.set_margin_top(16);
-    content.append(&eyebrow);
-
     let title = Label::new(Some(&t("Authorize this device")));
     title.add_css_class("cloud-connect-title");
-    title.set_halign(Align::Center);
-    title.set_margin_top(6);
+    title.set_xalign(0.0);
+    title.set_halign(Align::Start);
     content.append(&title);
 
     let subtitle = Label::new(Some(&t(
         "Enter this code in your browser to link this device.",
     )));
-    subtitle.add_css_class("onboarding-copy");
+    subtitle.add_css_class("cloud-connect-hint");
     subtitle.set_wrap(true);
-    subtitle.set_max_width_chars(44);
-    subtitle.set_xalign(0.5);
-    subtitle.set_halign(Align::Center);
-    subtitle.set_justify(gtk4::Justification::Center);
-    subtitle.set_margin_top(8);
+    subtitle.set_max_width_chars(56);
+    subtitle.set_xalign(0.0);
+    subtitle.set_halign(Align::Start);
+    subtitle.set_margin_top(4);
     content.append(&subtitle);
 
-    // The code mirrors the browser page's segmented input: one rounded cell
-    // per character, empty until the backend answers. Clicking it copies it.
-    let code_row = GtkBox::new(Orientation::Horizontal, 8);
+    // The code mirrors the browser page's segmented input: one cell per
+    // character, empty until the backend answers. Clicking it copies it.
+    let code_row = GtkBox::new(Orientation::Horizontal, 6);
     code_row.add_css_class("cloud-connect-code");
-    code_row.set_halign(Align::Center);
-    code_row.set_margin_top(26);
+    code_row.set_halign(Align::Start);
+    code_row.set_margin_top(20);
     code_row.set_tooltip_text(Some(&t("Copy code")));
     code_row.set_cursor_from_name(Some("pointer"));
     set_code_cells(&code_row, "    -    ");
@@ -118,8 +104,8 @@ pub(crate) fn wrap_cloud_page(
     // The address people type, without its scheme; clicking it opens it.
     let link_btn = Button::new();
     link_btn.add_css_class("cloud-connect-link");
-    link_btn.set_halign(Align::Center);
-    link_btn.set_margin_top(14);
+    link_btn.set_halign(Align::Start);
+    link_btn.set_margin_top(12);
     link_btn.set_visible(false);
     let link_row = GtkBox::new(Orientation::Horizontal, 6);
     let link_label = Label::new(None);
@@ -130,17 +116,14 @@ pub(crate) fn wrap_cloud_page(
     link_btn.set_child(Some(&link_row));
     content.append(&link_btn);
 
+    let actions = GtkBox::new(Orientation::Horizontal, 8);
+    actions.set_halign(Align::Start);
+    actions.set_margin_top(20);
     let open_btn = Button::with_label(&t("Open browser"));
     open_btn.add_css_class("settings-primary-btn");
     open_btn.add_css_class("cloud-connect-action");
-    open_btn.set_halign(Align::Fill);
-    open_btn.set_margin_top(22);
     open_btn.set_sensitive(false);
-    content.append(&open_btn);
-
-    let actions = GtkBox::new(Orientation::Horizontal, 10);
-    actions.set_homogeneous(true);
-    actions.set_margin_top(10);
+    actions.append(&open_btn);
     let copy_btn = Button::with_label(&t("Copy code"));
     copy_btn.add_css_class("cloud-connect-secondary");
     copy_btn.set_sensitive(false);
@@ -164,25 +147,19 @@ pub(crate) fn wrap_cloud_page(
 
     let browser_status = Label::new(None);
     browser_status.add_css_class("settings-sub-option");
-    browser_status.set_halign(Align::Center);
-    browser_status.set_xalign(0.5);
+    browser_status.set_halign(Align::Start);
+    browser_status.set_xalign(0.0);
     browser_status.set_wrap(true);
     browser_status.set_margin_top(12);
     browser_status.set_visible(false);
     content.append(&browser_status);
 
-    let divider = GtkBox::new(Orientation::Horizontal, 0);
-    divider.add_css_class("cloud-connect-divider");
-    divider.set_halign(Align::Fill);
-    divider.set_margin_top(22);
-    content.append(&divider);
-
-    // One quiet line: what the app is waiting on, and how long the code
+    // One plain line: what the app is waiting on, and how long the code
     // stays good.
     let footer = GtkBox::new(Orientation::Horizontal, 8);
     footer.add_css_class("cloud-connect-footer");
-    footer.set_halign(Align::Center);
-    footer.set_margin_top(14);
+    footer.set_halign(Align::Start);
+    footer.set_margin_top(18);
     let spinner = Spinner::new();
     spinner.set_valign(Align::Center);
     spinner.start();
@@ -191,19 +168,15 @@ pub(crate) fn wrap_cloud_page(
     status.add_css_class("cloud-connect-meta");
     status.set_valign(Align::Center);
     status.set_wrap(true);
-    status.set_max_width_chars(46);
-    status.set_justify(gtk4::Justification::Center);
+    status.set_max_width_chars(52);
+    status.set_xalign(0.0);
     footer.append(&status);
-    let expiry_box = GtkBox::new(Orientation::Horizontal, 6);
+    let expiry_box = GtkBox::new(Orientation::Horizontal, 8);
     expiry_box.set_valign(Align::Center);
     expiry_box.set_visible(false);
     let dot = Label::new(Some("·"));
     dot.add_css_class("cloud-connect-meta-dot");
     expiry_box.append(&dot);
-    let clock = Image::from_icon_name(icon_names::CLOCK_REGULAR);
-    clock.add_css_class("cloud-connect-meta-icon");
-    clock.set_pixel_size(13);
-    expiry_box.append(&clock);
     let expiry = Label::new(None);
     expiry.add_css_class("cloud-connect-meta");
     expiry.add_css_class("cloud-connect-expiry");
