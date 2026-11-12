@@ -3855,6 +3855,130 @@ mod tests {
         }
     }
 
+    /// Export a saved editor project through the real export pipeline, so the
+    /// zoom camera can be checked on a real recording. Nothing runs unless asked.
+    ///
+    /// `APEXSHOT_PROJECT_FILE` is a project JSON from `video-projects-windows`,
+    /// `APEXSHOT_PROJECT_OUTPUT` the MP4 to write (it must not exist yet), and
+    /// `APEXSHOT_PROJECT_WIDTH` / `APEXSHOT_PROJECT_HEIGHT` the source size.
+    /// `APEXSHOT_PROJECT_SIDECAR` replaces the recording's pointer sidecar,
+    /// `APEXSHOT_PROJECT_SHAKE` the cursor's shake threshold, and
+    /// `APEXSHOT_PROJECT_TRIM_START` / `APEXSHOT_PROJECT_TRIM_END` export only
+    /// that span of a project without cuts.
+    #[test]
+    #[ignore = "manual project export"]
+    fn export_project_for_manual_comparison() {
+        use crate::recording::editor::sidecar::PointerSidecar;
+        use crate::video_editor::project::{EditorProjectFile, ZoomModeFile};
+        use crate::video_editor::timeline::{ZoomClip, ZoomMode};
+
+        let env = |name: &str| std::env::var(name).ok();
+        let number = |name: &str| env(name).and_then(|value| value.parse::<f64>().ok());
+        let project_path =
+            PathBuf::from(env("APEXSHOT_PROJECT_FILE").expect("APEXSHOT_PROJECT_FILE"));
+        let output =
+            PathBuf::from(env("APEXSHOT_PROJECT_OUTPUT").expect("APEXSHOT_PROJECT_OUTPUT"));
+        assert!(!output.exists(), "refusing to overwrite the project export");
+        let width: u32 = env("APEXSHOT_PROJECT_WIDTH")
+            .expect("APEXSHOT_PROJECT_WIDTH")
+            .parse()
+            .unwrap();
+        let height: u32 = env("APEXSHOT_PROJECT_HEIGHT")
+            .expect("APEXSHOT_PROJECT_HEIGHT")
+            .parse()
+            .unwrap();
+        let text = std::fs::read_to_string(&project_path).expect("the project must be readable");
+        let file: EditorProjectFile = serde_json::from_str(&text).expect("the project must parse");
+        assert!(
+            file.cuts.is_empty(),
+            "the harness exports projects without cuts"
+        );
+        let source = file.source_path.clone();
+        let trim_start = number("APEXSHOT_PROJECT_TRIM_START").unwrap_or(file.trim_start_seconds);
+        let trim_end = number("APEXSHOT_PROJECT_TRIM_END").unwrap_or(file.trim_end_seconds);
+        let sidecar = match env("APEXSHOT_PROJECT_SIDECAR") {
+            Some(path) => {
+                Some(PointerSidecar::load(Path::new(&path)).expect("the sidecar must load"))
+            }
+            None => PointerSidecar::load_next_to_video(&source),
+        };
+        let mut cursor = file.cursor.settings();
+        if let Some(shake) = number("APEXSHOT_PROJECT_SHAKE") {
+            cursor.remove_shake_threshold = shake;
+        }
+        // Zoom clips are saved in composition time; exporting a later span
+        // moves the composition's start to `trim_start`.
+        let shift = trim_start - file.trim_start_seconds;
+        let length = trim_end - trim_start;
+        let zooms: Vec<ZoomClip> = file
+            .zoom_clips
+            .iter()
+            .filter_map(|clip| {
+                let start = clip.start - shift;
+                let end = clip.end - shift;
+                (end > 0.0 && start < length).then(|| ZoomClip {
+                    start: start.max(0.0),
+                    end: end.min(length),
+                    scale: clip.scale,
+                    center: clip.center,
+                    hidden: clip.hidden,
+                    mode: if clip.mode == ZoomModeFile::Auto {
+                        ZoomMode::Auto
+                    } else {
+                        ZoomMode::Manual
+                    },
+                    instant: clip.instant,
+                    anchor: None,
+                })
+            })
+            .collect();
+        let zoom_camera = zoom::ZoomCameraSettings {
+            speed: file.zoom_camera.speed,
+            smoothness: file.zoom_camera.smoothness,
+            start_early: file.zoom_camera.start_early,
+            motion_blur: file.zoom_camera.motion_blur,
+            ..zoom::ZoomCameraSettings::default()
+        }
+        .clamped();
+        eprintln!(
+            "project export: {} zooms, span {trim_start}..{trim_end}, shake {}",
+            zooms.len(),
+            cursor.remove_shake_threshold
+        );
+        let model = ExportModel {
+            source,
+            source_size: (width, height),
+            trim_start,
+            trim_end,
+            cuts: Vec::new(),
+            segment_speeds: Vec::new(),
+            freeze_tail: 0.0,
+            zooms,
+            zoom_camera,
+            cursor,
+            sidecar,
+            webcam: None,
+            stage: None,
+            canvas: None,
+            crf: 20,
+            audio: Vec::new(),
+            effects: Default::default(),
+        };
+        let handle = start_export(model, output.clone());
+        loop {
+            match handle.receiver.recv_timeout(Duration::from_secs(600)) {
+                Ok(ExportUpdate::Progress { .. }) => {}
+                Ok(ExportUpdate::Finished(path, _)) => {
+                    assert_eq!(path, output);
+                    break;
+                }
+                Ok(ExportUpdate::Failed(message)) => panic!("export failed: {message}"),
+                Ok(ExportUpdate::Cancelled) => panic!("export cancelled itself"),
+                Err(error) => panic!("export did not report back: {error}"),
+            }
+        }
+    }
+
     #[test]
     fn a_trimmed_cut_composition_exports_to_an_mp4() {
         if std::env::var("APEXSHOT_EXPORT_TEST").ok().as_deref() != Some("1") {
