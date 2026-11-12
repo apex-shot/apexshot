@@ -517,6 +517,10 @@ pub mod editor {
     }
 }
 
+/// Folder recordings land in: Settings' video export location, else the
+/// capture shell's own default, `ApexShotRec` inside the Videos folder
+/// (`defaultRecordingDirectory` in the shell's settings store). History lists
+/// this folder, so the two defaults have to stay the same.
 pub fn recording_output_dir(config: &crate::config::AppConfig) -> std::path::PathBuf {
     let configured = config.video_export_location.trim();
     if !configured.is_empty() {
@@ -529,6 +533,33 @@ pub fn recording_output_dir(config: &crate::config::AppConfig) -> std::path::Pat
                 .map(|home| home.join("Videos"))
         })
         .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("ApexShotRec")
+}
+
+#[cfg(test)]
+mod output_dir_tests {
+    #[test]
+    fn recordings_default_to_the_capture_shells_folder() {
+        let config = crate::config::AppConfig::default();
+        assert!(config.video_export_location.trim().is_empty());
+        let dir = super::recording_output_dir(&config);
+        assert_eq!(
+            dir.file_name().and_then(|name| name.to_str()),
+            Some("ApexShotRec")
+        );
+    }
+
+    #[test]
+    fn a_configured_folder_is_used_as_is() {
+        let config = crate::config::AppConfig {
+            video_export_location: r"D:\Clips".to_string(),
+            ..crate::config::AppConfig::default()
+        };
+        assert_eq!(
+            super::recording_output_dir(&config),
+            std::path::PathBuf::from(r"D:\Clips")
+        );
+    }
 }
 
 pub fn recording_supported() -> bool {

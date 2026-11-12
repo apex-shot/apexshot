@@ -4710,3 +4710,6 @@ msgstr "{name} теперь содержит текущий вид."
 
 msgid "{name} saved."
 msgstr "Сохранено: {name}."
+
+msgid "Motion videos you export appear in Recordings. Saved Motion projects are not kept on Windows yet."
+msgstr "Экспортированные видео Motion появляются в разделе «Записи». Сохранённые проекты Motion в Windows пока не хранятся."

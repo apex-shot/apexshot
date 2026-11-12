@@ -29,6 +29,13 @@ use crate::i18n::{t, tfmt};
 pub(super) const CARD_THUMB_WIDTH: i32 = 160;
 pub(super) const CARD_THUMB_HEIGHT: i32 = 92;
 
+/// Placeholder cards shown while a page loads: enough to fill the first rows.
+const SKELETON_CARDS: usize = 12;
+
+/// Cards built per main-loop turn, so a large folder paints its first rows at
+/// once instead of freezing on one long build.
+const CARD_BATCH: usize = 36;
+
 type SimpleAction = Rc<dyn Fn(&CaptureEntry) -> Result<String, String>>;
 
 /// One card widget plus the metadata needed to filter and act on it.
@@ -46,6 +53,8 @@ struct Card {
 struct PageState {
     kind: MediaKind,
     grid: FlowBox,
+    /// Pulsing placeholder cards, visible while a scan is in flight.
+    skeleton: FlowBox,
     empty_state: GtkBox,
     scroller: ScrolledWindow,
     subtitle: Label,
@@ -130,6 +139,10 @@ pub fn build_local_page(
     grid.set_valign(Align::Start);
     column.append(&grid);
 
+    let skeleton = build_loading_skeleton();
+    skeleton.set_visible(false);
+    column.append(&skeleton);
+
     // Empty-state, hidden until a scan finishes with nothing to show.
     let empty_state = build_empty_state(kind);
     empty_state.set_visible(false);
@@ -140,6 +153,7 @@ pub fn build_local_page(
     let state = Rc::new(PageState {
         kind,
         grid,
+        skeleton,
         empty_state,
         scroller: scroller.clone(),
         subtitle,
@@ -235,6 +249,40 @@ fn build_empty_state(kind: MediaKind) -> GtkBox {
     empty
 }
 
+/// Placeholder cards in the grid's own geometry, shown while a page loads so
+/// the real cards land where the placeholders promised them.
+pub(super) fn build_loading_skeleton() -> FlowBox {
+    let grid = FlowBox::new();
+    grid.add_css_class("recent-captures-grid");
+    grid.add_css_class("history-skeleton-grid");
+    grid.set_selection_mode(SelectionMode::None);
+    grid.set_homogeneous(true);
+    grid.set_row_spacing(14);
+    grid.set_column_spacing(14);
+    grid.set_max_children_per_line(8);
+    grid.set_min_children_per_line(1);
+    grid.set_valign(Align::Start);
+    grid.set_can_target(false);
+    for _ in 0..SKELETON_CARDS {
+        let card = GtkBox::new(Orientation::Vertical, 0);
+        card.add_css_class("history-skeleton-card");
+        let thumb = GtkBox::new(Orientation::Vertical, 0);
+        thumb.add_css_class("history-skeleton-block");
+        thumb.set_size_request(CARD_THUMB_WIDTH, CARD_THUMB_HEIGHT);
+        thumb.set_halign(Align::Center);
+        let line = GtkBox::new(Orientation::Vertical, 0);
+        line.add_css_class("history-skeleton-block");
+        line.add_css_class("history-skeleton-line");
+        line.set_size_request(CARD_THUMB_WIDTH * 3 / 4, 10);
+        line.set_halign(Align::Center);
+        line.set_margin_top(12);
+        card.append(&thumb);
+        card.append(&line);
+        grid.insert(&card, -1);
+    }
+    grid
+}
+
 /// Clear the grid, bump the generation, rescan on a worker thread, and stream
 /// the results (and their thumbnails) back onto the main loop.
 fn reload(state: &Rc<PageState>) {
@@ -252,7 +300,8 @@ fn reload(state: &Rc<PageState>) {
     }
     state.cards.borrow_mut().clear();
     state.empty_state.set_visible(false);
-    state.grid.set_visible(true);
+    state.grid.set_visible(false);
+    state.skeleton.set_visible(true);
     state.subtitle.set_visible(true);
     state.subtitle.set_text(&t("Loading…"));
 
@@ -273,11 +322,13 @@ fn reload(state: &Rc<PageState>) {
     let thumb_rx = Rc::new(thumb_rx);
 
     // Wait for the scan result, then build cards and submit thumbnail jobs.
+    // Polling at frame rate rather than on every idle keeps the wait from
+    // spinning the main loop.
     {
         let state = Rc::clone(state);
         let thumb_tx = thumb_tx.clone();
         let thumb_rx = Rc::clone(&thumb_rx);
-        glib::source::idle_add_local(move || {
+        glib::timeout_add_local(Duration::from_millis(16), move || {
             match scan_rx.try_recv() {
                 Ok(entries) => {
                     // Stale result from a superseded reload.
@@ -296,12 +347,16 @@ fn reload(state: &Rc<PageState>) {
 }
 
 /// Build the cards for `entries` and submit a thumbnail job per card.
+///
+/// Cards go in a batch per main-loop turn, so a large folder paints its first
+/// rows at once instead of freezing on one long build.
 fn populate(
     state: &Rc<PageState>,
     generation: u64,
     entries: Vec<CaptureEntry>,
     thumb_tx: &mpsc::Sender<ThumbnailReady>,
 ) {
+    state.skeleton.set_visible(false);
     if entries.is_empty() {
         state.grid.set_visible(false);
         state.empty_state.set_visible(true);
@@ -317,31 +372,54 @@ fn populate(
         .subtitle
         .set_text(&format!("{} {}", entries.len(), noun));
     state.subtitle.set_visible(true);
+    state.grid.set_visible(true);
 
     let now = SystemTime::now();
-    let mut cards = state.cards.borrow_mut();
-    for entry in entries {
-        let id = state.next_card_id.get();
-        state.next_card_id.set(id + 1);
+    let pending = RefCell::new(entries.into_iter());
+    let thumb_tx = thumb_tx.clone();
+    let state = Rc::clone(state);
+    let add_batch = move || -> bool {
+        // A newer reload owns the grid now.
+        if state.generation.get() != generation {
+            return false;
+        }
+        let mut cards = state.cards.borrow_mut();
+        for _ in 0..CARD_BATCH {
+            let Some(entry) = pending.borrow_mut().next() else {
+                drop(cards);
+                // The shared search entry may already hold a query typed before
+                // this page finished loading (or while another page was
+                // visible) — honor it now.
+                apply_filter(&state, &state.search.text());
+                return false;
+            };
+            let id = state.next_card_id.get();
+            state.next_card_id.set(id + 1);
 
-        let card = build_card(state, id, &entry, now);
-        state.grid.insert(&card.root, -1);
+            let card = build_card(&state, id, &entry, now);
+            state.grid.insert(&card.root, -1);
 
-        // Kick off the thumbnail for this card.
-        thumbnails::submit(ThumbnailRequest {
-            id,
-            generation,
-            source: ThumbnailSource::Local(entry),
-            reply: thumb_tx.clone(),
+            // Kick off the thumbnail for this card.
+            thumbnails::submit(ThumbnailRequest {
+                id,
+                generation,
+                source: ThumbnailSource::Local(entry),
+                reply: thumb_tx.clone(),
+            });
+
+            cards.push(Rc::new(card));
+        }
+        true
+    };
+    if add_batch() {
+        glib::idle_add_local(move || {
+            if add_batch() {
+                glib::ControlFlow::Continue
+            } else {
+                glib::ControlFlow::Break
+            }
         });
-
-        cards.push(Rc::new(card));
     }
-    drop(cards);
-
-    // The shared search entry may already hold a query typed before this page
-    // finished loading (or while another page was visible) — honor it now.
-    apply_filter(state, &state.search.text());
 }
 
 /// Build a single card. `id` is the thumbnail-request id echoed back on
@@ -564,6 +642,7 @@ fn apply_thumbnail(state: &Rc<PageState>, ready: ThumbnailReady) {
 
 fn set_card_image(card: &Card, path: &PathBuf) {
     card.picture.set_filename(Some(path));
+    card.picture.add_css_class("history-card-image-in");
     card.picture.set_visible(true);
     card.placeholder.set_visible(false);
 }

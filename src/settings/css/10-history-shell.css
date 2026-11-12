@@ -111,6 +111,46 @@
                 color: alpha(white, 0.28);
             }
 
+            /* Loading: placeholder cards in the grid's own geometry, pulsing
+               softly until the real cards replace them. */
+            .history-skeleton-card {
+                padding: 8px;
+            }
+
+            .history-skeleton-block {
+                background-color: alpha(white, 0.06);
+                border-radius: 10px;
+                animation: history-skeleton-pulse 1.4s ease-in-out infinite;
+            }
+
+            .history-skeleton-line {
+                border-radius: 999px;
+            }
+
+            @keyframes history-skeleton-pulse {
+                0% { opacity: 0.45; }
+                50% { opacity: 1; }
+                100% { opacity: 0.45; }
+            }
+
+            /* Cards and their thumbnails fade in rather than popping in. */
+            .history-root button.recent-captures-card {
+                animation: history-fade-in 200ms ease-out;
+            }
+
+            .history-card-image-in {
+                animation: history-fade-in 240ms ease-out;
+            }
+
+            @keyframes history-fade-in {
+                from { opacity: 0; }
+                to { opacity: 1; }
+            }
+
+            .editor-root.editor-theme-light .history-skeleton-block {
+                background-color: alpha(#111827, 0.07);
+            }
+
             .history-media-badge {
                 color: white;
                 background: alpha(black, 0.55);

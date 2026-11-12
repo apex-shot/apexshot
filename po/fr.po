@@ -4740,3 +4740,6 @@ msgstr "{name} contient désormais l’apparence actuelle."
 
 msgid "{name} saved."
 msgstr "{name} enregistré."
+
+msgid "Motion videos you export appear in Recordings. Saved Motion projects are not kept on Windows yet."
+msgstr "Les vidéos Motion que vous exportez apparaissent dans Enregistrements. Les projets Motion enregistrés ne sont pas encore conservés sous Windows."

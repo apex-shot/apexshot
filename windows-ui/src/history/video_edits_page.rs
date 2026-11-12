@@ -83,6 +83,7 @@ fn capture_entry(path: &Path) -> Option<scan::CaptureEntry> {
 
 struct PageState {
     grid: FlowBox,
+    skeleton: FlowBox,
     empty_state: GtkBox,
     search: Entry,
     toast: HistoryToast,
@@ -117,6 +118,10 @@ pub fn build_video_edits_page(toast: HistoryToast, search: &Entry) -> HistoryPag
     grid.set_valign(Align::Start);
     column.append(&grid);
 
+    let skeleton = super::local_page::build_loading_skeleton();
+    skeleton.set_visible(false);
+    column.append(&skeleton);
+
     let empty_state = build_empty_state();
     empty_state.set_visible(false);
     column.append(&empty_state);
@@ -125,6 +130,7 @@ pub fn build_video_edits_page(toast: HistoryToast, search: &Entry) -> HistoryPag
 
     let state = Rc::new(PageState {
         grid,
+        skeleton,
         empty_state,
         search: search.clone(),
         toast,
@@ -200,7 +206,8 @@ fn reload(state: &Rc<PageState>) {
     }
     state.cards.borrow_mut().clear();
     state.empty_state.set_visible(false);
-    state.grid.set_visible(true);
+    state.grid.set_visible(false);
+    state.skeleton.set_visible(true);
 
     let (sender, receiver) = mpsc::channel::<Vec<CardData>>();
     std::thread::spawn(move || {
@@ -229,11 +236,13 @@ fn reload(state: &Rc<PageState>) {
 }
 
 fn populate(state: &Rc<PageState>, cards: Vec<CardData>) {
+    state.skeleton.set_visible(false);
     if cards.is_empty() {
         state.grid.set_visible(false);
         state.empty_state.set_visible(true);
         return;
     }
+    state.grid.set_visible(true);
 
     let mut built = state.cards.borrow_mut();
     for card in cards {

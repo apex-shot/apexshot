@@ -256,6 +256,10 @@ impl CloudPage {
         status.set_halign(Align::Center);
         status.set_margin_top(16);
         status.set_margin_bottom(8);
+        // Placeholder cards carry the wait; the line returns only to say the
+        // account has nothing uploaded.
+        status.set_visible(false);
+        let skeleton = super::local_page::build_loading_skeleton();
 
         let load_more = Button::with_label(&t("Load more"));
         load_more.add_css_class("recent-captures-secondary-button");
@@ -267,6 +271,7 @@ impl CloudPage {
         // The grid, status line, and load-more button sit directly in the page
         // body — the page already lives inside the window's outer scroller, so
         // nesting a second scroller here would trap the wheel and split paging.
+        self.body.append(&skeleton);
         self.body.append(&grid);
         self.body.append(&status);
         self.body.append(&load_more);
@@ -287,6 +292,7 @@ impl CloudPage {
             next_card_id: Cell::new(0),
             generation,
             grid,
+            skeleton,
             status,
             load_more: load_more.clone(),
         });
@@ -327,6 +333,7 @@ struct GridContext {
     next_card_id: Cell<u64>,
     generation: u64,
     grid: FlowBox,
+    skeleton: FlowBox,
     status: Label,
     load_more: Button,
 }
@@ -365,6 +372,7 @@ impl GridContext {
             // The worker vanished without sending: release the gate so a later
             // scroll or click can retry rather than wedging forever.
             Err(mpsc::TryRecvError::Disconnected) => {
+                ctx.skeleton.set_visible(false);
                 ctx.loading_in_flight.set(false);
                 ctx.load_more.set_sensitive(true);
                 glib::ControlFlow::Break
@@ -373,6 +381,7 @@ impl GridContext {
     }
 
     fn on_page_result(self: &Rc<Self>, outcome: PageOutcome) {
+        self.skeleton.set_visible(false);
         self.loading_in_flight.set(false);
         self.load_more.set_sensitive(true);
         // Adopt the worker's advanced cursor so the next request continues.

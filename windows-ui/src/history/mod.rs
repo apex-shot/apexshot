@@ -1,8 +1,9 @@
 //! Windows History window.
 //!
 //! The gallery, the Cloud page, and the window shell are shared with the
-//! Linux build. Motion edits stay a placeholder until that editor is
-//! available on Windows.
+//! Linux build. Motion edits stay a placeholder until the Windows Motion
+//! editor keeps its projects; its exported videos already list under
+//! Recordings.
 
 pub mod actions;
 #[path = "../../../src/history/cloud_page.rs"]
@@ -48,9 +49,9 @@ pub struct HistoryPage {
     pub searchable: bool,
 }
 
-/// The Windows page set: a placeholder for the Motion editor this build
-/// does not have yet, the page the video editor's saved lists feed, and the
-/// shared Cloud page.
+/// The Windows page set: a placeholder for Motion projects, which the
+/// Windows Motion editor does not keep yet, the page the video editor's saved
+/// lists feed, and the shared Cloud page.
 ///
 /// It lives here rather than in the shared window so the copy a Windows-only
 /// branch shows stays in the crate that shows it — the Linux catalog check
@@ -66,7 +67,7 @@ pub fn windows_history_pages(
     [
         placeholder_page::build_placeholder_page(
             custom::SPLINE_SYMBOLIC,
-            &t("Motion editing is not available in the Windows build yet."),
+            &t("Motion videos you export appear in Recordings. Saved Motion projects are not kept on Windows yet."),
         ),
         video_edits_page::build_video_edits_page(toast.clone(), search),
         cloud_page::build_cloud_page(toast),
@@ -91,4 +92,49 @@ pub fn show_history_window() -> anyhow::Result<()> {
 
     let _ = app.run_with_args::<String>(&[]);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use gtk4::prelude::*;
+
+    #[test]
+    fn history_styles_parse() {
+        let Some(errors) = crate::test_support::with_gtk(|| {
+            let provider = gtk4::CssProvider::new();
+            let errors = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+            let captured = std::rc::Rc::clone(&errors);
+            provider.connect_parsing_error(move |_, _, error| {
+                captured.borrow_mut().push(error.message().to_string());
+            });
+            provider.load_from_data(include_str!(
+                "../../../src/settings/css/10-history-shell.css"
+            ));
+            let result = errors.borrow().clone();
+            result
+        }) else {
+            eprintln!("skipping: no display available");
+            return;
+        };
+        assert!(errors.is_empty(), "CSS parsing errors: {errors:?}");
+    }
+
+    #[test]
+    fn the_loading_skeleton_fills_the_grid_with_placeholder_cards() {
+        let Some((cards, targetable)) = crate::test_support::with_gtk(|| {
+            let skeleton = super::local_page::build_loading_skeleton();
+            let mut cards = 0;
+            let mut child = skeleton.first_child();
+            while let Some(widget) = child {
+                cards += 1;
+                child = widget.next_sibling();
+            }
+            (cards, skeleton.can_target())
+        }) else {
+            eprintln!("skipping: no display available");
+            return;
+        };
+        assert_eq!(cards, 12);
+        assert!(!targetable);
+    }
 }
