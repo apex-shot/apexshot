@@ -58,6 +58,7 @@ QJsonObject recordingManifestJson(const RecordingManifest& manifest)
         {QStringLiteral("fps"), manifest.fps},
         {QStringLiteral("displayScale"), manifest.displayScale},
         {QStringLiteral("displayRefreshRate"), manifest.displayRefreshRate},
+        {QStringLiteral("devicePixelRatio"), manifest.devicePixelRatio},
         {QStringLiteral("output"),
          QJsonObject{{QStringLiteral("width"), manifest.outputSize.width()},
                      {QStringLiteral("height"), manifest.outputSize.height()}}},

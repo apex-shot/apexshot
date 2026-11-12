@@ -35,6 +35,8 @@ struct RecordingManifest {
     double displayScale = 1.0;
     /// Hz of the display the region sits on; 0 when unknown.
     int displayRefreshRate = 0;
+    /// Device pixel ratio of the display the region sits on, e.g. 1.5 at 150%.
+    double devicePixelRatio = 1.0;
     QSize outputSize;
     /// "h264_qsv", "h264_nvenc" or "libx264".
     QString encoder;

@@ -817,6 +817,10 @@ pub struct PointerSidecar {
     /// Pushed in by the editor from the cursor settings; runtime-only.
     #[serde(skip, default = "default_shake_threshold")]
     shake_threshold: f64,
+    /// The display's device pixel ratio when the recording was made, read from
+    /// the recording manifest beside the sidecar; runtime-only.
+    #[serde(skip, default = "default_device_pixel_ratio")]
+    device_pixel_ratio: f64,
     /// The studied stop tail in milliseconds; zero turns it off.
     #[serde(skip)]
     stop_tail_ms: f64,
@@ -908,6 +912,7 @@ impl PointerSidecar {
             sidecar_directory: None,
             cuts_seconds: Vec::new(),
             shake_threshold: DEFAULT_REMOVE_SHAKE_THRESHOLD,
+            device_pixel_ratio: 1.0,
             stop_tail_ms: 0.0,
             loop_before_end_ms: None,
             playback_end_seconds: None,
@@ -976,7 +981,18 @@ impl PointerSidecar {
         let bytes = std::fs::read(path)?;
         let mut sidecar: Self = serde_json::from_slice(&bytes)?;
         sidecar.sidecar_directory = path.parent().map(Path::to_path_buf);
+        let mut manifest = path.as_os_str().to_os_string();
+        manifest.push(".recording.json");
+        sidecar.device_pixel_ratio = std::fs::read_to_string(manifest)
+            .map(|text| manifest_device_pixel_ratio(&text))
+            .unwrap_or(1.0);
         Ok(sidecar)
+    }
+
+    /// The display's device pixel ratio the recording was made at; 1 when the
+    /// manifest does not say.
+    pub fn device_pixel_ratio(&self) -> f64 {
+        self.device_pixel_ratio
     }
 
     /// The directory that owns this sidecar's relative assets.
@@ -1970,6 +1986,32 @@ fn compact_to_limit<T: Clone>(samples: &mut Vec<T>, limit: usize) {
 
 fn default_shake_threshold() -> f64 {
     DEFAULT_REMOVE_SHAKE_THRESHOLD
+}
+
+fn default_device_pixel_ratio() -> f64 {
+    1.0
+}
+
+/// The display's device pixel ratio a recording manifest records. A manifest
+/// written before the recorder stored it still tells when the video was scaled
+/// down to logical pixels (`displayScale` below 1); anything else reads as 1.
+pub fn manifest_device_pixel_ratio(text: &str) -> f64 {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
+        return 1.0;
+    };
+    if let Some(ratio) = value
+        .get("devicePixelRatio")
+        .and_then(|ratio| ratio.as_f64())
+        .filter(|ratio| ratio.is_finite() && *ratio > 0.0)
+    {
+        return ratio;
+    }
+    value
+        .get("displayScale")
+        .and_then(|scale| scale.as_f64())
+        .filter(|scale| scale.is_finite() && *scale > 0.0 && *scale < 1.0)
+        .map(|scale| 1.0 / scale)
+        .unwrap_or(1.0)
 }
 
 fn pointer_sidecars_directory() -> PathBuf {
@@ -4154,5 +4196,64 @@ mod cursor_tests {
             ..frame
         };
         assert!(sidecar.cursor_capture(&video, &no_id).is_none());
+    }
+
+    #[test]
+    fn the_manifest_gives_the_device_pixel_ratio() {
+        use super::manifest_device_pixel_ratio;
+        assert_eq!(
+            manifest_device_pixel_ratio(r#"{"devicePixelRatio":1.5}"#),
+            1.5
+        );
+        assert_eq!(
+            manifest_device_pixel_ratio(r#"{"devicePixelRatio":1.25,"displayScale":0.5}"#),
+            1.25
+        );
+        assert_eq!(manifest_device_pixel_ratio(r#"{"displayScale":0.5}"#), 2.0);
+        assert_eq!(manifest_device_pixel_ratio(r#"{"displayScale":1}"#), 1.0);
+        assert_eq!(
+            manifest_device_pixel_ratio(r#"{"devicePixelRatio":0}"#),
+            1.0
+        );
+        assert_eq!(manifest_device_pixel_ratio("not json"), 1.0);
+    }
+
+    #[test]
+    fn a_loaded_sidecar_reads_the_ratio_beside_it() {
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-dpr-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|elapsed| elapsed.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("pointer.json");
+        PointerSidecar::new(
+            0,
+            CaptureRegion {
+                x: 0,
+                y: 0,
+                w: 2880,
+                h: 1800,
+            },
+        )
+        .write(&path)
+        .unwrap();
+        assert_eq!(
+            PointerSidecar::load(&path).unwrap().device_pixel_ratio(),
+            1.0
+        );
+        std::fs::write(
+            dir.join("pointer.json.recording.json"),
+            r#"{"devicePixelRatio":2}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            PointerSidecar::load(&path).unwrap().device_pixel_ratio(),
+            2.0
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

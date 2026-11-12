@@ -1,3 +1,4 @@
+#include "platform/platform.h"
 #include "platform/recording.h"
 
 #include "platform/recording_settings.h"
@@ -2094,6 +2095,7 @@ void RecordingSession::Private::writeManifest(const QString& videoPath)
     manifest.fps = request.fps;
     manifest.displayScale = request.displayScale;
     manifest.displayRefreshRate = displayRefreshRateAt(request.region.center());
+    manifest.devicePixelRatio = monitorAt(request.region.center()).dpr;
     manifest.outputSize = manifestOutputSize;
     manifest.encoder = manifestEncoder;
     manifest.crf = manifestCrf;

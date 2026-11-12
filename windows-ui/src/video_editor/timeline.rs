@@ -196,6 +196,9 @@ struct Data {
     duration: f64,
     frame_size: Option<(u32, u32)>,
     fps: f64,
+    /// Width over height of the stage the preview shows, which the zoom
+    /// camera's movement groups take their shape from. Zero until laid out.
+    stage_aspect: f64,
     trim_start: f64,
     trim_end: f64,
     playhead: f64,
@@ -294,6 +297,7 @@ impl Default for Data {
             duration: 0.0,
             frame_size: None,
             fps: 0.0,
+            stage_aspect: 0.0,
             trim_start: 0.0,
             trim_end: 0.0,
             playhead: 0.0,
@@ -1168,6 +1172,7 @@ impl Data {
             start_early: file.zoom_camera.start_early,
             motion_blur: file.zoom_camera.motion_blur,
             frame_rate: super::zoom::ZoomCameraSettings::default().frame_rate,
+            stage_aspect: super::zoom::ZoomCameraSettings::default().stage_aspect,
         }
         .clamped();
         if let (Some(webcam), Some(layer)) = (self.webcam.as_ref(), file.webcam.as_ref()) {
@@ -2057,6 +2062,7 @@ impl Data {
             self.total_duration(),
             super::zoom::ZoomCameraSettings {
                 frame_rate: fps,
+                stage_aspect: self.stage_aspect,
                 ..self.zoom_camera
             },
             self.frame_size,
@@ -3107,6 +3113,7 @@ impl Timeline {
         let fps = if data.fps > 0.0 { data.fps } else { 30.0 };
         let camera_settings = super::zoom::ZoomCameraSettings {
             frame_rate: fps,
+            stage_aspect: data.stage_aspect,
             ..data.zoom_camera
         };
         let shake_threshold = self.cursor.settings().remove_shake_threshold;
@@ -3795,6 +3802,7 @@ impl Timeline {
             &data.camera_mapping(),
             super::zoom::ZoomCameraSettings {
                 frame_rate: fps,
+                stage_aspect: data.stage_aspect,
                 ..data.zoom_camera
             },
             self.cursor.settings().remove_shake_threshold,
@@ -5017,10 +5025,12 @@ pub(super) fn build(
         let last_playing = Rc::new(Cell::new(false));
         let zoom_button = zoom.clone();
         let last_armed = Rc::new(Cell::new(false));
+        let stage = canvas.clone();
         move || {
             let (playing, changed, preview) = {
                 let mut data = data.borrow_mut();
                 data.set_frame_size(source_size.get());
+                data.stage_aspect = f64::from(stage.ratio());
                 let was_playing = data.playing;
                 if was_playing {
                     data.playhead += 0.05;
@@ -5044,6 +5054,7 @@ pub(super) fn build(
                 let fps = if data.fps > 0.0 { data.fps } else { 30.0 };
                 let camera_settings = super::zoom::ZoomCameraSettings {
                     frame_rate: fps,
+                    stage_aspect: data.stage_aspect,
                     ..data.zoom_camera
                 };
                 let shake_threshold = cursor.settings().remove_shake_threshold;

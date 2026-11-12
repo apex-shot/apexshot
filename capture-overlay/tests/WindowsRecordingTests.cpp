@@ -166,6 +166,7 @@ bool checkRecordingManifestJson()
     manifest.cameraWidth = 1280;
     manifest.cameraHeight = 720;
     manifest.cameraStartMs = 120;
+    manifest.devicePixelRatio = 1.5;
     Platform::RecordingManifest::Session first;
     first.startMs = 0;
     first.endMs = 800;
@@ -181,6 +182,7 @@ bool checkRecordingManifestJson()
     const bool ok = json.value(QStringLiteral("version")).toInt() == 1
         && json.value(QStringLiteral("target")).toString() == QStringLiteral("area")
         && region.value(QStringLiteral("w")).toInt() == 300
+        && json.value(QStringLiteral("devicePixelRatio")).toDouble() == 1.5
         && sessions.size() == 2
         && sessions.at(1).toObject().value(QStringLiteral("startMs")).toInt() == 800
         && !sessions.at(0).toObject().contains(QStringLiteral("windowBounds"))

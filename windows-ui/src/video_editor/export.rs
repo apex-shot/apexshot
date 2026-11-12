@@ -866,8 +866,17 @@ fn render_range(
     let mut sink = canvas::FramedSink::new(sink, framer);
     sink.set_captions(canvas::CaptionOverlay::new(model, plan, space));
     let mut camera = ZoomCameraCache::default();
+    // The studied stage takes the output's shape: the canvas when there is
+    // one, else the widened camera stage or the screen itself.
+    let stage_size = model
+        .canvas
+        .as_ref()
+        .map(|canvas| canvas.size)
+        .or(model.stage)
+        .unwrap_or(model.source_size);
     let camera_settings = zoom::ZoomCameraSettings {
         frame_rate: fps,
+        stage_aspect: f64::from(stage_size.0.max(1)) / f64::from(stage_size.1.max(1)),
         ..model.zoom_camera
     };
     let shake_threshold = model.cursor.remove_shake_threshold;

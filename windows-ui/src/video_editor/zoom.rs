@@ -32,6 +32,9 @@ pub(super) struct ZoomCameraSettings {
     pub motion_blur: f64,
     /// Composition frame rate. The studied spring advances once per rendered frame.
     pub frame_rate: f64,
+    /// Width over height of the composition's output, which the studied stage
+    /// takes its shape from. Zero uses the recording frame's own shape.
+    pub stage_aspect: f64,
 }
 
 impl Default for ZoomCameraSettings {
@@ -42,6 +45,7 @@ impl Default for ZoomCameraSettings {
             start_early: false,
             motion_blur: 1.0,
             frame_rate: 60.0,
+            stage_aspect: 0.0,
         }
     }
 }
@@ -72,6 +76,11 @@ impl ZoomCameraSettings {
                 self.frame_rate.clamp(1.0, 240.0)
             } else {
                 defaults.frame_rate
+            },
+            stage_aspect: if self.stage_aspect.is_finite() && self.stage_aspect > 0.0 {
+                self.stage_aspect.clamp(0.1, 10.0)
+            } else {
+                0.0
             },
         }
     }
@@ -373,6 +382,25 @@ impl ZoomCameraPlan {
                 pointer_path::decimate(&filtered, pointer_path::DECIMATE_DISTANCE)
             })
             .unwrap_or_default();
+        // The source's logical size: the recorded region over the display's
+        // device pixel ratio, in the units the studied stage is measured in.
+        let logical_source = sidecar
+            .map(|sidecar| {
+                let ratio = sidecar.device_pixel_ratio();
+                let ratio = if ratio.is_finite() && ratio > 0.0 {
+                    ratio
+                } else {
+                    1.0
+                };
+                let region = (f64::from(sidecar.region.w), f64::from(sidecar.region.h));
+                let size = if region.0 > 0.0 && region.1 > 0.0 {
+                    region
+                } else {
+                    frame
+                };
+                (size.0 / ratio, size.1 / ratio)
+            })
+            .unwrap_or(frame);
         let zooms = clips
             .iter()
             .copied()
@@ -388,7 +416,12 @@ impl ZoomCameraPlan {
                     let points = follow_points(&events, mapping, clip);
                     group_centers(&movement_groups(
                         &points,
-                        movement_group_budget(frame, clip.scale),
+                        movement_group_budget(
+                            frame,
+                            clip.scale,
+                            settings.stage_aspect,
+                            logical_source,
+                        ),
                     ))
                 } else {
                     Vec::new()
@@ -969,14 +1002,38 @@ fn follow_points(
     points.into_iter().map(|e| (e.t, e.x, e.y)).collect()
 }
 
-/// Half the zoomed view: the movement-group budget at this scale. A tighter
-/// zoom groups more finely, a wider one lets the pointer roam further before
-/// splitting.
-fn movement_group_budget(frame: (f64, f64), scale: f64) -> (f64, f64) {
+/// The studied stage is 1080 units tall at the output's aspect
+/// (`DgH:5831`, `DgH:5886-5890`).
+const STUDIED_STAGE_HEIGHT: f64 = 1080.0;
+
+/// The movement-group budget: half the source the studied stage shows at this
+/// zoom (`B39:7921-7924`, `DgH:5897-5912`). That part is the stage over the
+/// source's logical size times the zoom, never more than the whole source, so
+/// a group covers the same stretch of interface on any display. A tighter zoom
+/// groups more finely. `stage_aspect` of zero uses the frame's own shape.
+fn movement_group_budget(
+    frame: (f64, f64),
+    scale: f64,
+    stage_aspect: f64,
+    logical_source: (f64, f64),
+) -> (f64, f64) {
     let scale = scale.max(1.0);
+    let frame = (frame.0.max(1.0), frame.1.max(1.0));
+    let stage_aspect = if stage_aspect.is_finite() && stage_aspect > 0.0 {
+        stage_aspect
+    } else {
+        frame.0 / frame.1
+    };
+    let shown = |stage: f64, source: f64| {
+        if source.is_finite() && source > 0.0 {
+            (stage / (source * scale)).min(1.0)
+        } else {
+            1.0 / scale
+        }
+    };
     (
-        (frame.0.max(1.0) / scale * 0.5).max(1.0),
-        (frame.1.max(1.0) / scale * 0.5).max(1.0),
+        (frame.0 * shown(STUDIED_STAGE_HEIGHT * stage_aspect, logical_source.0) * 0.5).max(1.0),
+        (frame.1 * shown(STUDIED_STAGE_HEIGHT, logical_source.1) * 0.5).max(1.0),
     )
 }
 
@@ -1178,9 +1235,10 @@ fn valid_frame(frame: (f64, f64)) -> bool {
 mod tests {
     use super::{
         background_zoom, camera_transform, card_rect, card_view, focal_point,
-        nearest_follow_sample, placement_rect, source_to_stage, spring_step, stage_point_to_source,
-        studied_advance, studied_precision, view_rect, Camera, CameraMotion, TimeMapping,
-        ZoomCameraCache, ZoomCameraSettings, CAMERA_FOLLOW_SPRING, SCREEN_SPRING_PRECISION,
+        movement_group_budget, nearest_follow_sample, placement_rect, source_to_stage, spring_step,
+        stage_point_to_source, studied_advance, studied_precision, view_rect, Camera, CameraMotion,
+        TimeMapping, ZoomCameraCache, ZoomCameraSettings, CAMERA_FOLLOW_SPRING,
+        SCREEN_SPRING_PRECISION,
     };
     use crate::recording::editor::cursor_shake::DEFAULT_REMOVE_SHAKE_THRESHOLD;
     use crate::recording::editor::sidecar::{
@@ -2060,6 +2118,43 @@ mod tests {
         assert!(
             (center.0 - 405.0).abs() > 1.5,
             "the thinned-out sample must not open the path: {center:?}"
+        );
+    }
+
+    #[test]
+    fn the_group_budget_is_half_what_the_studied_stage_shows() {
+        let aspect = 2304.0 / 1584.0;
+        let (x, y) = movement_group_budget((1920.0, 1200.0), 2.0, aspect, (1920.0, 1200.0));
+        assert!(
+            (x - 1920.0 * (1080.0 * aspect / 3840.0) * 0.5).abs() < 1e-9,
+            "x={x}"
+        );
+        assert!((y - 1200.0 * (1080.0 / 2400.0) * 0.5).abs() < 1e-9, "y={y}");
+    }
+
+    #[test]
+    fn a_small_logical_source_is_shown_whole() {
+        let (x, y) = movement_group_budget((1280.0, 800.0), 1.2, 1.6, (1280.0, 800.0));
+        assert!((x - 640.0).abs() < 1e-9, "x={x}");
+        assert!((y - 400.0).abs() < 1e-9, "y={y}");
+    }
+
+    #[test]
+    fn a_high_dpi_recording_groups_by_its_logical_size() {
+        let frame = (3840.0, 2160.0);
+        let scaled = movement_group_budget(frame, 2.0, 16.0 / 9.0, (1920.0, 1080.0));
+        assert!((scaled.0 - 960.0).abs() < 1e-9, "{scaled:?}");
+        assert!((scaled.1 - 540.0).abs() < 1e-9, "{scaled:?}");
+        let unscaled = movement_group_budget(frame, 2.0, 16.0 / 9.0, frame);
+        assert!((unscaled.0 - 480.0).abs() < 1e-9, "{unscaled:?}");
+        assert!((unscaled.1 - 270.0).abs() < 1e-9, "{unscaled:?}");
+    }
+
+    #[test]
+    fn a_missing_stage_aspect_uses_the_frame_shape() {
+        assert_eq!(
+            movement_group_budget((1920.0, 1080.0), 2.0, 0.0, (1920.0, 1080.0)),
+            movement_group_budget((1920.0, 1080.0), 2.0, 16.0 / 9.0, (1920.0, 1080.0))
         );
     }
 }
