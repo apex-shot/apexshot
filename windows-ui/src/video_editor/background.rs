@@ -129,6 +129,8 @@ pub(crate) struct Background {
     custom_fill: Rc<RefCell<Option<FillPainter>>>,
     padding: Rc<Cell<f64>>,
     radius: Rc<Cell<f64>>,
+    /// The frame the project file names, or `None` for the recording's own shape.
+    aspect: Rc<RefCell<Option<String>>>,
     listeners: ChangeListeners,
 }
 
@@ -141,6 +143,7 @@ impl Default for Background {
             custom_fill: Rc::new(RefCell::new(None)),
             padding: Rc::new(Cell::new(DEFAULT_PADDING)),
             radius: Rc::new(Cell::new(DEFAULT_RADIUS)),
+            aspect: Rc::new(RefCell::new(None)),
             listeners: Rc::new(RefCell::new(Vec::new())),
         }
     }
@@ -243,6 +246,19 @@ impl Background {
             return;
         }
         self.radius.set(value);
+        self.notify();
+    }
+
+    pub fn aspect(&self) -> Option<String> {
+        self.aspect.borrow().clone()
+    }
+
+    /// Change the frame; listeners hear about it like any other stage change.
+    pub fn set_aspect(&self, aspect: Option<String>) {
+        if *self.aspect.borrow() == aspect {
+            return;
+        }
+        *self.aspect.borrow_mut() = aspect;
         self.notify();
     }
 

@@ -50,6 +50,9 @@ pub(super) const PROJECT_VERSION: u32 = 3;
 pub(super) struct StageFile {
     #[serde(default)]
     pub selection: Option<String>,
+    /// The frame the project was saved with; absent means the recording's own shape.
+    #[serde(default)]
+    pub aspect: Option<String>,
 }
 
 /// The camera layer as the project file stores it: fractions of the frame, a
@@ -696,6 +699,7 @@ mod tests {
         let mut file = project(&video);
         file.background = StageFile {
             selection: Some("wallpaper-004.jpg".to_owned()),
+            aspect: None,
         };
         file.background_padding = 48.0;
         file.background_radius = 6.0;
@@ -710,6 +714,31 @@ mod tests {
         assert!((loaded.background_padding - 48.0).abs() < 1e-9);
         assert!((loaded.background_radius - 6.0).abs() < 1e-9);
         assert_eq!(loaded, file);
+    }
+
+    #[test]
+    fn the_stage_frame_round_trips_through_the_project_file() {
+        let directory = scratch("stage-aspect");
+        let video = recording(&directory);
+        let path = directory.join("stage-aspect.json");
+        let mut file = project(&video);
+        file.background = StageFile {
+            selection: None,
+            aspect: Some("9:16".to_owned()),
+        };
+
+        write_at(&path, &file).unwrap();
+        let loaded = read_at(&path, &video).expect("project loads");
+
+        assert_eq!(loaded.background.aspect.as_deref(), Some("9:16"));
+        assert_eq!(loaded, file);
+    }
+
+    #[test]
+    fn a_stage_without_a_frame_keeps_the_recording_shape() {
+        let stage: StageFile =
+            serde_json::from_str(r#"{"selection":null}"#).expect("a stage without a frame reads");
+        assert_eq!(stage.aspect, None);
     }
 
     #[test]
@@ -742,6 +771,7 @@ mod tests {
         let saved = EditorProjectFile {
             background: StageFile {
                 selection: Some("wallpaper-004.jpg".to_owned()),
+                aspect: None,
             },
             background_padding: 48.0,
             background_radius: 6.0,

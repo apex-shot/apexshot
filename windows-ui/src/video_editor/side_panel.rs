@@ -70,7 +70,6 @@ pub(super) fn build_tools_column(
         &build_cursor_panel(scale, cursor, cursor_repaint, timeline.clone()),
         Some("cursor"),
     );
-    pages.add_named(&build_frames_panel(scale), Some("frames"));
     let (webcam_page, refresh_webcam) = build_webcam_panel(scale, timeline.clone());
     pages.add_named(&webcam_page, Some("webcam"));
 
@@ -102,11 +101,6 @@ pub(super) fn build_tools_column(
             t("Background"),
         ),
         ("cursor", icon_names::POINTER_PRIMARY_CLICK, t("Cursor")),
-        (
-            "frames",
-            icon_names::custom::OVERLAPPING_WINDOWS_SYMBOLIC,
-            t("Frames"),
-        ),
         ("webcam", icon_names::custom::WEBCAM_SYMBOLIC, t("Webcam")),
     ];
 
@@ -4180,95 +4174,6 @@ fn setting_switch_row(label: &str, tooltip: &str) -> (GtkBox, Switch) {
     (row, switch)
 }
 
-fn build_frames_panel(scale: f64) -> GtkBox {
-    let body = panel_body();
-
-    let kicker = Label::new(Some(&t("FRAME")));
-    kicker.add_css_class("recording-editor-zoom-kicker");
-    kicker.set_xalign(0.0);
-    body.append(&kicker);
-
-    let aspect = GtkBox::new(Orientation::Horizontal, 0);
-    aspect.add_css_class("recording-editor-zoom-mode");
-    aspect.set_homogeneous(true);
-    let original = tab_button(&t("Original"), "recording-editor-zoom-mode-btn");
-    let wide = tab_button(&t("16:9"), "recording-editor-zoom-mode-btn");
-    let portrait = tab_button(&t("9:16"), "recording-editor-zoom-mode-btn");
-    wide.set_group(Some(&original));
-    portrait.set_group(Some(&original));
-    original.set_active(true);
-    aspect.append(&original);
-    aspect.append(&wide);
-    aspect.append(&portrait);
-    body.append(&aspect);
-
-    let hint = Label::new(Some(&t(
-        "Frame changes keep the source footage centred in the preview.",
-    )));
-    hint.add_css_class("recording-editor-zoom-hint");
-    hint.set_wrap(true);
-    hint.set_xalign(0.0);
-    body.append(&hint);
-
-    let zoom_label = Label::new(Some(&t("ZOOM")));
-    zoom_label.add_css_class("recording-editor-zoom-kicker");
-    zoom_label.add_css_class("recording-editor-zoom-easing-kicker");
-    zoom_label.set_xalign(0.0);
-    body.append(&zoom_label);
-
-    let zoom = GtkBox::new(Orientation::Horizontal, 6);
-    zoom.add_css_class("recording-editor-zoom-chips");
-    zoom.set_homogeneous(true);
-    let zoom_1 = tab_button("1×", "recording-editor-zoom-chip");
-    let zoom_15 = tab_button("1.5×", "recording-editor-zoom-chip");
-    let zoom_2 = tab_button("2×", "recording-editor-zoom-chip");
-    zoom_15.set_group(Some(&zoom_1));
-    zoom_2.set_group(Some(&zoom_1));
-    zoom_1.set_active(true);
-    zoom.append(&zoom_1);
-    zoom.append(&zoom_15);
-    zoom.append(&zoom_2);
-    body.append(&zoom);
-    body.append(&value_slider_row(
-        &t("Strength"),
-        1.0,
-        3.0,
-        1.5,
-        0.1,
-        1,
-        scale,
-    ));
-
-    let easing_label = Label::new(Some(&t("TRANSITION")));
-    easing_label.add_css_class("recording-editor-zoom-kicker");
-    easing_label.add_css_class("recording-editor-zoom-easing-kicker");
-    easing_label.set_xalign(0.0);
-    body.append(&easing_label);
-
-    let easing = GtkBox::new(Orientation::Horizontal, 6);
-    easing.set_homogeneous(true);
-    let smooth = tab_button(&t("Smooth"), "recording-editor-zoom-easing-btn");
-    let snappy = tab_button(&t("Snappy"), "recording-editor-zoom-easing-btn");
-    let instant = tab_button(&t("Instant"), "recording-editor-zoom-easing-btn");
-    snappy.set_group(Some(&smooth));
-    instant.set_group(Some(&smooth));
-    smooth.set_active(true);
-    easing.append(&smooth);
-    easing.append(&snappy);
-    easing.append(&instant);
-    body.append(&easing);
-    body.append(&value_slider_row(
-        &t("Transition"),
-        0.0,
-        1.2,
-        0.45,
-        0.05,
-        2,
-        scale,
-    ));
-    panel_frame(&t("Frames"), body)
-}
-
 fn panel_header(title: &str) -> GtkBox {
     let header = GtkBox::new(Orientation::Horizontal, 8);
     header.add_css_class("recording-editor-zoom-header");
@@ -4304,26 +4209,6 @@ fn panel_body() -> GtkBox {
     body.add_css_class("recording-editor-zoom-body");
     body.set_hexpand(true);
     body
-}
-
-fn tab_button(label: &str, class: &str) -> ToggleButton {
-    let button = ToggleButton::with_label(label);
-    button.add_css_class(class);
-    button.set_has_frame(false);
-    button.set_hexpand(true);
-    button
-}
-
-fn value_slider_row(
-    label: &str,
-    min: f64,
-    max: f64,
-    initial: f64,
-    step: f64,
-    decimals: usize,
-    scale: f64,
-) -> DrawingArea {
-    FilledSlider::new(label, min, max, initial, step, decimals, scale).widget()
 }
 
 #[allow(clippy::too_many_arguments)]

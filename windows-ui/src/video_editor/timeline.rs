@@ -387,6 +387,7 @@ struct EditSnapshot {
 #[derive(Clone, PartialEq)]
 struct Look {
     stage: (Option<String>, f64, f64),
+    stage_aspect: Option<String>,
     cursor: super::presets::CursorFile,
 }
 
@@ -937,6 +938,7 @@ impl Data {
         let cursor = self.cursor.as_ref()?;
         Some(Look {
             stage: background.snapshot(),
+            stage_aspect: background.aspect(),
             cursor: super::presets::CursorFile::from_settings(cursor.settings()),
         })
     }
@@ -1004,7 +1006,9 @@ impl Data {
     ) -> Option<super::project::EditorProjectFile> {
         let path = self.path.as_ref()?;
         let (stage_selection, background_padding, background_radius) = background.snapshot();
+        let stage_aspect = background.aspect();
         let stage_edited = stage_selection.is_some()
+            || stage_aspect.is_some()
             || (background_padding - super::background::DEFAULT_PADDING).abs() > f64::EPSILON
             || background_radius.abs() > f64::EPSILON;
         let layouts = self.webcam_layouts();
@@ -1070,6 +1074,7 @@ impl Data {
             webcam,
             background: super::project::StageFile {
                 selection: stage_selection,
+                aspect: stage_aspect,
             },
             background_padding,
             background_radius,
@@ -3892,6 +3897,7 @@ impl Timeline {
                     file.background_padding,
                     file.background_radius,
                 ),
+                stage_aspect: file.background.aspect.clone(),
                 cursor: file.cursor,
             }
         };
@@ -3907,6 +3913,7 @@ impl Timeline {
         let (selection, padding, radius) = &look.stage;
         self.background
             .apply(selection.as_deref(), *padding, *radius);
+        self.background.set_aspect(look.stage_aspect.clone());
         self.cursor.set_settings(look.cursor.settings());
         if let Some(listener) = self.cursor_listener.borrow().as_ref() {
             listener();
@@ -4052,16 +4059,22 @@ impl Timeline {
             listener();
         }
         match &incoming {
-            Some(file) => self.background.apply(
-                file.background.selection.as_deref(),
-                file.background_padding,
-                file.background_radius,
-            ),
-            None => self.background.apply(
-                None,
-                super::background::DEFAULT_PADDING,
-                super::background::DEFAULT_RADIUS,
-            ),
+            Some(file) => {
+                self.background.apply(
+                    file.background.selection.as_deref(),
+                    file.background_padding,
+                    file.background_radius,
+                );
+                self.background.set_aspect(file.background.aspect.clone());
+            }
+            None => {
+                self.background.apply(
+                    None,
+                    super::background::DEFAULT_PADDING,
+                    super::background::DEFAULT_RADIUS,
+                );
+                self.background.set_aspect(None);
+            }
         }
         if let Some(file) = imported {
             self.project.sync(Some(file), true);

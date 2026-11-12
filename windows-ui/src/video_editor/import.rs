@@ -292,6 +292,7 @@ mod tests {
         let mut source = project();
         source.background = super::super::project::StageFile {
             selection: Some("wallpaper-019.jpg".to_owned()),
+            aspect: None,
         };
         source.background_padding = padding;
         source.background_radius = 9.0;

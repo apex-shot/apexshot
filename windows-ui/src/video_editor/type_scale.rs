@@ -16,6 +16,8 @@ const VIDEO_EDITOR_TYPE_CSS: &str = r#"
         /* Base */
         .video-editor-root {
             font-family: 'DM Sans', 'Noto Sans', system-ui, sans-serif;
+            /* Medium reads closer to the reference body text than Regular. */
+            font-weight: 500;
             font-size: 14px;
         }
         .video-editor-root entry,
@@ -150,6 +152,8 @@ const VIDEO_EDITOR_TYPE_CSS: &str = r#"
         popover.settings-select-popover,
         popover.gradient-type-menu {
             font-family: 'DM Sans', 'Noto Sans', system-ui, sans-serif;
+            /* Medium reads closer to the reference body text than Regular. */
+            font-weight: 500;
             font-size: 14px;
         }
         "#;
