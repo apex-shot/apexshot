@@ -4723,3 +4723,6 @@ msgstr "{name} salvo."
 
 msgid "Motion videos you export appear in Recordings. Saved Motion projects are not kept on Windows yet."
 msgstr "Os vídeos de movimento que você exporta aparecem em Gravações. Projetos de movimento salvos ainda não são mantidos no Windows."
+
+msgid "Expires in {time}"
+msgstr "Expira em {time}"

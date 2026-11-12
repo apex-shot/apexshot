@@ -4620,3 +4620,6 @@ msgstr "已保存 {name}。"
 
 msgid "Motion videos you export appear in Recordings. Saved Motion projects are not kept on Windows yet."
 msgstr "导出的动态视频会显示在“录音”中。Windows 版暂不保留已保存的动态项目。"
+
+msgid "Expires in {time}"
+msgstr "{time} 后过期"

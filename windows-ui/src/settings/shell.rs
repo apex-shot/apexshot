@@ -888,8 +888,9 @@ pub(crate) fn install_type_css() {
             font-weight: 600;
         }
         .cloud-connect-title {
-            font-size: 28px;
+            font-size: 26px;
             font-weight: 600;
+            letter-spacing: -0.3px;
         }
         .cloud-connect-eyebrow {
             font-size: 11px;
@@ -897,21 +898,29 @@ pub(crate) fn install_type_css() {
             letter-spacing: 0.9px;
         }
         .cloud-connect-cell {
-            font-size: 19px;
+            font-size: 22px;
             font-weight: 600;
         }
         .cloud-connect-dash {
-            font-size: 19px;
-            font-weight: 500;
+            font-size: 20px;
+            font-weight: 400;
         }
         .cloud-connect-link {
-            font-size: 15px;
-            font-weight: 400;
+            font-size: 13px;
+            font-weight: 500;
         }
         .cloud-connect-action,
         .cloud-connect-secondary {
             font-size: 14px;
             font-weight: 600;
+        }
+        .cloud-connect-back {
+            font-size: 14px;
+            font-weight: 500;
+        }
+        .cloud-connect-meta {
+            font-size: 13px;
+            font-weight: 400;
         }
 
         /* Usage */

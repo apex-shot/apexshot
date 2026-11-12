@@ -4631,3 +4631,6 @@ msgstr "{name} を保存しました。"
 
 msgid "Motion videos you export appear in Recordings. Saved Motion projects are not kept on Windows yet."
 msgstr "書き出したモーション動画は「録音」に表示されます。保存したモーションプロジェクトは、Windows ではまだ保持されません。"
+
+msgid "Expires in {time}"
+msgstr "有効期限まで {time}"

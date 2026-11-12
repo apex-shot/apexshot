@@ -6,11 +6,14 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use gtk4::{
-    glib, prelude::*, Align, Box as GtkBox, Button, Label, Orientation, Spinner, Stack, Widget,
+    glib, prelude::*, Align, Box as GtkBox, Button, Image, Label, Orientation, Spinner, Stack,
+    Widget,
 };
 
+use crate::capture::editor::window::icon_names;
 use crate::cloud::auth::{begin_device_login, poll_device_login, DeviceLogin, LoginError};
 use crate::cloud::listing::CloudAccount;
 use crate::i18n::{t, tfmt};
@@ -47,29 +50,46 @@ pub(crate) fn wrap_cloud_page(
     view.set_hexpand(true);
     view.set_size_request(-1, 540);
 
-    let cancel_btn = Button::with_label(&t("Back to Cloud"));
+    // Navigation, not a stray line of text: a quiet pill with a chevron.
+    let cancel_btn = Button::new();
     cancel_btn.add_css_class("cloud-connect-back");
     cancel_btn.set_halign(Align::Start);
+    let back_row = GtkBox::new(Orientation::Horizontal, 6);
+    let back_icon = Image::from_icon_name(icon_names::CHEVRON_LEFT_REGULAR);
+    back_icon.set_pixel_size(14);
+    back_row.append(&back_icon);
+    back_row.append(&Label::new(Some(&t("Back to Cloud"))));
+    cancel_btn.set_child(Some(&back_row));
     view.append(&cancel_btn);
 
+    // The whole flow sits in one raised panel, so the code, its actions, and
+    // the live status read as a single object in the middle of the page.
     let content = GtkBox::new(Orientation::Vertical, 0);
     content.add_css_class("cloud-connect-content");
+    content.add_css_class("cloud-connect-panel");
     content.set_halign(Align::Center);
     content.set_valign(Align::Center);
     content.set_vexpand(true);
-    content.set_margin_top(24);
-    content.set_margin_bottom(40);
+    content.set_margin_top(16);
+    content.set_margin_bottom(32);
     view.append(&content);
+
+    let mark = Image::from_icon_name(icon_names::custom::APEXSHOT_CLOUD);
+    mark.add_css_class("cloud-connect-mark");
+    mark.set_pixel_size(44);
+    mark.set_halign(Align::Center);
+    content.append(&mark);
 
     let eyebrow = Label::new(Some(&t("APEXSHOT CLOUD")));
     eyebrow.add_css_class("cloud-connect-eyebrow");
     eyebrow.set_halign(Align::Center);
+    eyebrow.set_margin_top(16);
     content.append(&eyebrow);
 
     let title = Label::new(Some(&t("Authorize this device")));
     title.add_css_class("cloud-connect-title");
     title.set_halign(Align::Center);
-    title.set_margin_top(8);
+    title.set_margin_top(6);
     content.append(&title);
 
     let subtitle = Label::new(Some(&t(
@@ -77,6 +97,7 @@ pub(crate) fn wrap_cloud_page(
     )));
     subtitle.add_css_class("onboarding-copy");
     subtitle.set_wrap(true);
+    subtitle.set_max_width_chars(44);
     subtitle.set_xalign(0.5);
     subtitle.set_halign(Align::Center);
     subtitle.set_justify(gtk4::Justification::Center);
@@ -84,22 +105,30 @@ pub(crate) fn wrap_cloud_page(
     content.append(&subtitle);
 
     // The code mirrors the browser page's segmented input: one rounded cell
-    // per character, empty until the backend answers.
+    // per character, empty until the backend answers. Clicking it copies it.
     let code_row = GtkBox::new(Orientation::Horizontal, 8);
+    code_row.add_css_class("cloud-connect-code");
     code_row.set_halign(Align::Center);
-    code_row.set_margin_top(24);
+    code_row.set_margin_top(26);
+    code_row.set_tooltip_text(Some(&t("Copy code")));
+    code_row.set_cursor_from_name(Some("pointer"));
     set_code_cells(&code_row, "    -    ");
     content.append(&code_row);
 
+    // The address people type, without its scheme; clicking it opens it.
+    let link_btn = Button::new();
+    link_btn.add_css_class("cloud-connect-link");
+    link_btn.set_halign(Align::Center);
+    link_btn.set_margin_top(14);
+    link_btn.set_visible(false);
+    let link_row = GtkBox::new(Orientation::Horizontal, 6);
     let link_label = Label::new(None);
-    link_label.add_css_class("settings-sub-option");
-    link_label.set_selectable(true);
-    link_label.set_wrap(true);
-    link_label.set_xalign(0.5);
-    link_label.set_halign(Align::Center);
-    link_label.set_margin_top(14);
-    link_label.set_visible(false);
-    content.append(&link_label);
+    link_row.append(&link_label);
+    let link_icon = Image::from_icon_name(icon_names::OPEN_REGULAR);
+    link_icon.set_pixel_size(12);
+    link_row.append(&link_icon);
+    link_btn.set_child(Some(&link_row));
+    content.append(&link_btn);
 
     let open_btn = Button::with_label(&t("Open browser"));
     open_btn.add_css_class("settings-primary-btn");
@@ -122,6 +151,17 @@ pub(crate) fn wrap_cloud_page(
     actions.append(&copy_link_btn);
     content.append(&actions);
 
+    {
+        let copy_btn = copy_btn.clone();
+        let click = gtk4::GestureClick::new();
+        click.connect_released(move |_, _, _, _| {
+            if copy_btn.is_sensitive() {
+                copy_btn.emit_clicked();
+            }
+        });
+        code_row.add_controller(click);
+    }
+
     let browser_status = Label::new(None);
     browser_status.add_css_class("settings-sub-option");
     browser_status.set_halign(Align::Center);
@@ -131,27 +171,45 @@ pub(crate) fn wrap_cloud_page(
     browser_status.set_visible(false);
     content.append(&browser_status);
 
-    let status_row = GtkBox::new(Orientation::Horizontal, 8);
-    status_row.set_halign(Align::Center);
-    status_row.set_margin_top(14);
+    let divider = GtkBox::new(Orientation::Horizontal, 0);
+    divider.add_css_class("cloud-connect-divider");
+    divider.set_halign(Align::Fill);
+    divider.set_margin_top(22);
+    content.append(&divider);
+
+    // One quiet line: what the app is waiting on, and how long the code
+    // stays good.
+    let footer = GtkBox::new(Orientation::Horizontal, 8);
+    footer.add_css_class("cloud-connect-footer");
+    footer.set_halign(Align::Center);
+    footer.set_margin_top(14);
     let spinner = Spinner::new();
     spinner.set_valign(Align::Center);
     spinner.start();
-    status_row.append(&spinner);
+    footer.append(&spinner);
     let status = Label::new(Some(&t("Starting…")));
-    status.add_css_class("settings-sub-option");
+    status.add_css_class("cloud-connect-meta");
     status.set_valign(Align::Center);
     status.set_wrap(true);
-    status_row.append(&status);
-    content.append(&status_row);
-
+    status.set_max_width_chars(46);
+    status.set_justify(gtk4::Justification::Center);
+    footer.append(&status);
+    let expiry_box = GtkBox::new(Orientation::Horizontal, 6);
+    expiry_box.set_valign(Align::Center);
+    expiry_box.set_visible(false);
+    let dot = Label::new(Some("·"));
+    dot.add_css_class("cloud-connect-meta-dot");
+    expiry_box.append(&dot);
+    let clock = Image::from_icon_name(icon_names::CLOCK_REGULAR);
+    clock.add_css_class("cloud-connect-meta-icon");
+    clock.set_pixel_size(13);
+    expiry_box.append(&clock);
     let expiry = Label::new(None);
-    expiry.add_css_class("settings-sub-option");
-    expiry.set_halign(Align::Center);
-    expiry.set_xalign(0.5);
-    expiry.set_margin_top(4);
-    expiry.set_visible(false);
-    content.append(&expiry);
+    expiry.add_css_class("cloud-connect-meta");
+    expiry.add_css_class("cloud-connect-expiry");
+    expiry_box.append(&expiry);
+    footer.append(&expiry_box);
+    content.append(&footer);
 
     stack.add_named(&view, Some("connect"));
 
@@ -163,6 +221,7 @@ pub(crate) fn wrap_cloud_page(
         active: Rc::new(Cell::new(false)),
         primary_action: Rc::new(Cell::new(PrimaryAction::OpenBrowser)),
         copy_btn,
+        link_btn,
         link_label,
         copy_link_btn,
         browser_status,
@@ -170,6 +229,7 @@ pub(crate) fn wrap_cloud_page(
         status,
         spinner,
         expiry,
+        expiry_box,
         polling: Rc::new(Cell::new(false)),
         code: Rc::new(RefCell::new(String::new())),
         uri: Rc::new(RefCell::new(String::new())),
@@ -237,6 +297,7 @@ struct ConnectUi {
     active: Rc<Cell<bool>>,
     primary_action: Rc<Cell<PrimaryAction>>,
     copy_btn: Button,
+    link_btn: Button,
     link_label: Label,
     copy_link_btn: Button,
     browser_status: Label,
@@ -244,6 +305,7 @@ struct ConnectUi {
     status: Label,
     spinner: Spinner,
     expiry: Label,
+    expiry_box: GtkBox,
     polling: Rc<Cell<bool>>,
     code: Rc<RefCell<String>>,
     uri: Rc<RefCell<String>>,
@@ -289,6 +351,16 @@ impl ConnectUi {
 
         {
             let ui = self.clone();
+            self.link_btn.connect_clicked(move |_| {
+                let target = ui.uri.borrow().clone();
+                if !target.is_empty() {
+                    open_browser(&target, &ui.browser_status);
+                }
+            });
+        }
+
+        {
+            let ui = self.clone();
             self.open_btn
                 .connect_clicked(move |_| match ui.primary_action.get() {
                     PrimaryAction::OpenBrowser => {
@@ -315,9 +387,10 @@ impl ConnectUi {
         self.uri.replace(String::new());
         self.copy_btn.set_sensitive(false);
         self.copy_link_btn.set_sensitive(false);
-        self.link_label.set_visible(false);
+        self.link_btn.set_visible(false);
         self.browser_status.set_visible(false);
-        self.expiry.set_visible(false);
+        self.expiry_box.set_visible(false);
+        self.expiry.remove_css_class("cloud-connect-expiry-urgent");
         self.status.remove_css_class("onboarding-status-error");
         self.status.set_text(&t("Starting…"));
         self.spinner.start();
@@ -392,17 +465,16 @@ impl ConnectUi {
         self.copy_btn.set_sensitive(true);
         self.copy_link_btn.set_sensitive(true);
         self.open_btn.set_sensitive(true);
-        self.link_label.set_text(&login.verification_uri);
-        self.link_label.set_visible(true);
+        self.link_label
+            .set_text(&display_link(&login.verification_uri));
+        self.link_btn
+            .set_tooltip_text(Some(&login.verification_uri));
+        self.link_btn.set_visible(true);
         self.browser_status.set_visible(true);
         self.status.set_text(&t("Waiting for you to authorize…"));
 
-        let minutes = login.expires_in_secs.div_ceil(60).max(1);
-        self.expiry.set_text(&tfmt(
-            "Code expires in {minutes} min",
-            &[("minutes", &minutes.to_string())],
-        ));
-        self.expiry.set_visible(true);
+        set_expiry(&self.expiry, login.expires_in_secs);
+        self.expiry_box.set_visible(true);
 
         open_browser(&login.verification_uri, &self.browser_status);
     }
@@ -441,6 +513,23 @@ impl ConnectUi {
                 expiry_ui.failed(&LoginError::Expired);
             }
         });
+
+        // Count down from the deadline itself rather than ticking a counter,
+        // so a busy main loop never lets the shown time drift.
+        let deadline = Instant::now() + Duration::from_secs(login.expires_in_secs);
+        let countdown_ui = self.clone();
+        glib::timeout_add_local(Duration::from_millis(250), move || {
+            if !countdown_ui.is_live(session) {
+                return glib::ControlFlow::Break;
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            set_expiry(&countdown_ui.expiry, left.as_secs_f64().ceil() as u64);
+            if left.is_zero() {
+                glib::ControlFlow::Break
+            } else {
+                glib::ControlFlow::Continue
+            }
+        });
     }
 
     fn failed(&self, error: &LoginError) {
@@ -448,16 +537,44 @@ impl ConnectUi {
         self.session.set(self.session.get() + 1);
         self.active.set(false);
         self.spinner.stop();
-        self.expiry.set_visible(false);
+        self.expiry_box.set_visible(false);
         self.copy_btn.set_sensitive(false);
         self.copy_link_btn.set_sensitive(false);
-        self.link_label.set_visible(false);
+        self.link_btn.set_visible(false);
         self.browser_status.set_visible(false);
         self.status.add_css_class("onboarding-status-error");
         self.status.set_text(&login_error_message(error));
         self.primary_action.set(PrimaryAction::Retry);
         self.open_btn.set_label(&t("Try again"));
         self.open_btn.set_sensitive(true);
+    }
+}
+
+/// The verification address without its scheme or trailing slash, the way
+/// people read and type it.
+fn display_link(uri: &str) -> String {
+    let rest = uri
+        .strip_prefix("https://")
+        .or_else(|| uri.strip_prefix("http://"))
+        .unwrap_or(uri);
+    rest.trim_end_matches('/').to_string()
+}
+
+/// Time left on the code as `m:ss`.
+fn format_countdown(secs: u64) -> String {
+    format!("{}:{:02}", secs / 60, secs % 60)
+}
+
+/// Show the time left on the code, and warn once a minute or less remains.
+fn set_expiry(label: &Label, secs: u64) {
+    label.set_text(&tfmt(
+        "Expires in {time}",
+        &[("time", &format_countdown(secs))],
+    ));
+    if secs <= 60 {
+        label.add_css_class("cloud-connect-expiry-urgent");
+    } else {
+        label.remove_css_class("cloud-connect-expiry-urgent");
     }
 }
 
@@ -482,6 +599,52 @@ fn open_browser(url: &str, status: &Label) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_link_drops_its_scheme_and_trailing_slash() {
+        assert_eq!(
+            display_link("https://apexshot.org/auth/device"),
+            "apexshot.org/auth/device"
+        );
+        assert_eq!(display_link("http://example.com/a/"), "example.com/a");
+        assert_eq!(display_link("apexshot.org/x"), "apexshot.org/x");
+    }
+
+    #[test]
+    fn the_countdown_reads_minutes_and_padded_seconds() {
+        assert_eq!(format_countdown(900), "15:00");
+        assert_eq!(format_countdown(61), "1:01");
+        assert_eq!(format_countdown(5), "0:05");
+        assert_eq!(format_countdown(0), "0:00");
+    }
+
+    #[test]
+    fn the_last_minute_turns_the_countdown_urgent() {
+        let Some(states) = crate::test_support::with_gtk(|| {
+            let label = Label::new(None);
+            set_expiry(&label, 125);
+            let calm = (
+                label.text().to_string(),
+                label.has_css_class("cloud-connect-expiry-urgent"),
+            );
+            set_expiry(&label, 60);
+            let urgent = label.has_css_class("cloud-connect-expiry-urgent");
+            set_expiry(&label, 900);
+            (
+                calm,
+                urgent,
+                label.has_css_class("cloud-connect-expiry-urgent"),
+            )
+        }) else {
+            eprintln!("skipping: no display available");
+            return;
+        };
+        let ((calm_text, calm_urgent), urgent, restarted) = states;
+        assert!(calm_text.contains("2:05"), "{calm_text}");
+        assert!(!calm_urgent);
+        assert!(urgent);
+        assert!(!restarted);
+    }
 
     #[test]
     fn cloud_settings_and_sign_in_use_independent_page_heights() {

@@ -4657,3 +4657,6 @@ msgstr "تم حفظ {name}."
 
 msgid "Motion videos you export appear in Recordings. Saved Motion projects are not kept on Windows yet."
 msgstr "تظهر مقاطع فيديو الحركة التي تصدّرها في التسجيلات. لا يتم الاحتفاظ بمشاريع الحركة المحفوظة على Windows بعد."
+
+msgid "Expires in {time}"
+msgstr "تنتهي الصلاحية خلال {time}"
