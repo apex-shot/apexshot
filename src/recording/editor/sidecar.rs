@@ -1761,9 +1761,8 @@ impl PointerSidecar {
             if sample.t > t {
                 break;
             }
-            let moved = previous.is_none_or(|previous| {
-                (sample.x - previous.x).hypot(sample.y - previous.y) > 0.5
-            });
+            let moved = previous
+                .is_none_or(|previous| (sample.x - previous.x).hypot(sample.y - previous.y) > 0.5);
             if moved {
                 last_event = Some(sample.t);
             }
