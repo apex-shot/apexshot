@@ -5014,6 +5014,13 @@ pub(super) fn build(
                 }
                 let composition_time = data.playhead;
                 data.sync_webcam_to_playhead(|| cursor.sidecar());
+                // The tick builds its own frame, so it keeps the captions in
+                // step the way `current_frame` does: playback crosses cuts and
+                // the freeze tail without any edit to republish the frame.
+                cursor.set_caption_settings(data.effects.captions);
+                cursor.set_captions_active(
+                    data.camera_mapping().source_at(composition_time).is_some(),
+                );
                 let placement = data.placement();
                 let add_zoom = data.add_zoom_tool();
                 let unzoomed = placement.is_some() || add_zoom.is_some();
