@@ -622,6 +622,19 @@ void promptSaveRecording(QWidget* parent, const QString& source)
                              QStringLiteral("Could not save the recording."));
 }
 
+/// Stand-in capture for the Settings preview when nothing has been captured yet.
+QImage sampleCaptureImage()
+{
+    QImage image(1600, 900, QImage::Format_ARGB32_Premultiplied);
+    QPainter painter(&image);
+    QLinearGradient gradient(0, 0, image.width(), image.height());
+    gradient.setColorAt(0.0, QColor(255, 102, 0));
+    gradient.setColorAt(1.0, QColor(124, 58, 237));
+    painter.fillRect(image.rect(), gradient);
+    painter.end();
+    return image;
+}
+
 // ------------------------------------------------------------- top bar ------
 struct TopBarLayout {
     QRectF bar;
@@ -1410,6 +1423,8 @@ constexpr int kCardFrameInset = 5;
 constexpr int kCardCornerMargin = 6;
 constexpr int kCardShadowPad = 10;
 constexpr int kCardButtonSize = 30;
+/// How long the Settings preview card stays up.
+constexpr int kCardSampleMs = 2500;
 constexpr ushort kGlyphCardClose = 0xE1B2;  // x
 constexpr ushort kGlyphCardPin = 0xE259;    // pin
 constexpr ushort kGlyphCardUpload = 0xE19E; // upload
@@ -1503,14 +1518,18 @@ private:
 class ResultCard : public QWidget
 {
 public:
-    ResultCard(const QImage& image, const QString& path, bool video)
-        : m_image(image), m_path(path), m_video(video)
+    ResultCard(const QImage& image, const QString& path, bool video, bool sample = false)
+        : m_image(image), m_path(path), m_video(video), m_sample(sample)
     {
         setWindowFlags(Qt::Tool | Qt::FramelessWindowHint);
         setAttribute(Qt::WA_TranslucentBackground, true);
         setAttribute(Qt::WA_DeleteOnClose, true);
         setAttribute(Qt::WA_ShowWithoutActivating, true);
         setWindowTitle(QStringLiteral("ApexShot Preview"));
+        // The Settings preview only shows placement and size: clicks go
+        // through to the window underneath.
+        if (m_sample)
+            setWindowFlag(Qt::WindowTransparentForInput, true);
 
         const Platform::ShellSettings settings = Platform::loadShellSettings();
         m_scale = uiScale();
@@ -1551,13 +1570,13 @@ public:
         m_upload = new CardButton(CardButton::Kind::Corner, kGlyphCardUpload,
                                   QStringLiteral("Upload to cloud"), m_scale, this);
         m_upload->setGeometry(left, bottom, button, button);
-        m_upload->setEnabled(!m_path.isEmpty());
+        m_upload->setEnabled(m_sample || !m_path.isEmpty());
         connect(m_upload, &QAbstractButton::clicked, this, [this] { upload(); });
 
         auto* edit = new CardButton(CardButton::Kind::Corner, kGlyphCardEdit,
                                     QStringLiteral("Edit"), m_scale, this);
         edit->setGeometry(right, bottom, button, button);
-        edit->setEnabled(!m_path.isEmpty());
+        edit->setEnabled(m_sample || !m_path.isEmpty());
         connect(edit, &QAbstractButton::clicked, this, [this] { openEditor(); });
 
         auto* copy = new CardButton(CardButton::Kind::Pill, 0, QStringLiteral("Copy"), m_scale,
@@ -1592,6 +1611,8 @@ public:
 
         m_tick.setInterval(1000);
         connect(&m_tick, &QTimer::timeout, this, [this] { tick(); });
+        if (m_sample)
+            QTimer::singleShot(kCardSampleMs, this, &QWidget::close);
     }
 
     /// Show the card in its corner, or bring a hidden one back.
@@ -1600,7 +1621,7 @@ public:
         place();
         show();
         raise();
-        Platform::setTopmost(static_cast<quintptr>(winId()), m_pinned);
+        Platform::setTopmost(static_cast<quintptr>(winId()), m_pinned || m_sample);
         m_autoCloseClock.restart();
         m_tick.start();
     }
@@ -1710,6 +1731,8 @@ private:
 
     void tick()
     {
+        if (m_sample)
+            return;
         if (m_editOpened) {
             m_tick.stop();
             return;
@@ -1849,6 +1872,7 @@ private:
     QImage m_image;
     QString m_path;
     bool m_video = false;
+    bool m_sample = false;
     QPixmap m_thumb;
     QRect m_cardRect;
     QRect m_frameRect;
@@ -2102,6 +2126,17 @@ public:
     {
         if (hasHiddenCard())
             m_card->reveal();
+    }
+
+    /// Settings asks for this while Position or Overlay size changes, so the
+    /// person sees where and how big the card will be. A real card is left alone.
+    void previewQuickAccessCard()
+    {
+        if (m_sampleCard)
+            m_sampleCard->close();
+        const QImage image = m_lastScreenshot.isNull() ? sampleCaptureImage() : m_lastScreenshot;
+        m_sampleCard = new ResultCard(image, QString(), false, true);
+        m_sampleCard->reveal();
     }
 
     void shortcutShowLastPreview()
@@ -3693,6 +3728,7 @@ private:
     QImage m_lastScreenshot;
     QString m_lastScreenshotPath;
     QPointer<ResultCard> m_card;
+    QPointer<ResultCard> m_sampleCard;
     Platform::RecordingSession* m_activeSession = nullptr;
     /// Throws the running take away and starts the same recording again; set
     /// while a recording runs, for the restart button and shortcut.
@@ -3858,8 +3894,11 @@ int run(QApplication& app)
         QObject::connect(&sessionServer, &QLocalServer::newConnection, shell, [shell] {
             while (QLocalSocket* socket = sessionServer.nextPendingConnection()) {
                 QObject::connect(socket, &QLocalSocket::readyRead, socket, [socket, shell] {
-                    if (socket->readAll().trimmed() == QByteArray("menu"))
+                    const QByteArray command = socket->readAll().trimmed();
+                    if (command == QByteArray("menu"))
                         shell->openMenu();
+                    else if (command == QByteArray("preview-quick-access"))
+                        shell->previewQuickAccessCard();
                 });
                 QObject::connect(socket, &QLocalSocket::disconnected,
                                  socket, &QLocalSocket::deleteLater);

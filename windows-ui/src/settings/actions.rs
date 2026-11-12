@@ -159,6 +159,14 @@ pub fn install_checkbox_behaviors(
 pub struct SaveOutcome {
     pub language_changed: bool,
     pub theme_changed: bool,
+    /// Position or Overlay size changed, so the shell should show a sample card.
+    pub quick_access_layout_changed: bool,
+}
+
+/// Whether a save moved or resized the Quick Access card.
+fn quick_access_layout_changed(previous: &AppConfig, next: &AppConfig) -> bool {
+    previous.quick_access_position != next.quick_access_position
+        || (previous.quick_access_overlay_size - next.quick_access_overlay_size).abs() > 1e-9
 }
 
 fn shortcut_label_value(label: Option<gtk4::glib::GString>) -> String {
@@ -330,6 +338,7 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<SaveOutcome> {
     let config = config.sanitized();
     let language_changed = previous_config.ui_language != config.ui_language;
     let theme_changed = previous_config.ui_theme != config.ui_theme;
+    let quick_access_layout_changed = quick_access_layout_changed(&previous_config, &config);
     if language_changed {
         crate::i18n::init(&config.ui_language);
     }
@@ -380,6 +389,7 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<SaveOutcome> {
     Ok(SaveOutcome {
         language_changed,
         theme_changed,
+        quick_access_layout_changed,
     })
 }
 
@@ -867,5 +877,21 @@ mod tests {
         .unwrap();
         assert_eq!(std::fs::read(&devices).unwrap(), b"{invalid");
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn quick_access_layout_changes_only_for_position_and_size() {
+        let previous = AppConfig::default();
+        let mut next = previous.clone();
+        next.quick_access_auto_close_enabled = !previous.quick_access_auto_close_enabled;
+        assert!(!quick_access_layout_changed(&previous, &next));
+
+        let mut moved = previous.clone();
+        moved.quick_access_position = "Right".into();
+        assert!(quick_access_layout_changed(&previous, &moved));
+
+        let mut resized = previous.clone();
+        resized.quick_access_overlay_size = 1.3;
+        assert!(quick_access_layout_changed(&previous, &resized));
     }
 }

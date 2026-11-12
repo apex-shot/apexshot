@@ -83,6 +83,9 @@ impl AutoSaver {
             let outcome = save_settings(&saver.inputs);
             match outcome {
                 Ok(outcome) => {
+                    if outcome.quick_access_layout_changed {
+                        super::windowing::preview_quick_access_card();
+                    }
                     if outcome.language_changed {
                         crate::i18n::apply_gtk_direction(&crate::config::load_config().ui_language);
                     }

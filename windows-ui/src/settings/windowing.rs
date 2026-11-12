@@ -41,6 +41,18 @@ pub fn prefers_reduced_transparency() -> bool {
     false
 }
 
+/// Ask the running shell to show a sample Quick Access card, so a Position or
+/// Overlay size change shows where and how big the card will be. Quiet when
+/// the shell is not running.
+pub(crate) fn preview_quick_access_card() {
+    if let Ok(mut pipe) = std::fs::OpenOptions::new()
+        .write(true)
+        .open(r"\\.\pipe\apexshot-shell")
+    {
+        let _ = pipe.write_all(b"preview-quick-access");
+    }
+}
+
 /// Launch target for "Start at login".
 ///
 /// The settings binary is not the tray shell, so prefer the sibling
