@@ -1,10 +1,7 @@
 //! The studied build's pointer-path filters, applied before the camera reads
-//! the path: shake removal (`B39:2846-2862`, default threshold from
-//! `DgH:3254`) and distance decimation that always keeps clicks
-//! (`B39:2804-2826`).
+//! the path: shake removal (`B39:2846-2862`) at the project's threshold, and
+//! distance decimation that always keeps clicks (`B39:2804-2826`).
 
-/// The studied default for removing cursor shakes, in pixels of Manhattan distance.
-pub(super) const SHAKE_THRESHOLD: f64 = 500.0;
 /// The studied minimum distance between kept pointer moves, in pixels.
 pub(super) const DECIMATE_DISTANCE: f64 = 10.0;
 

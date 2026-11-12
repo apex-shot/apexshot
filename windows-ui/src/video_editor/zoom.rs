@@ -255,6 +255,7 @@ pub(super) struct ZoomCameraCache {
     frame: Option<(f64, f64)>,
     mapping: Option<TimeMapping>,
     settings: Option<ZoomCameraSettings>,
+    shake_threshold: Option<f64>,
     plan: Option<ZoomCameraPlan>,
 }
 
@@ -264,23 +265,34 @@ impl ZoomCameraCache {
         self.frame = None;
         self.mapping = None;
         self.settings = None;
+        self.shake_threshold = None;
         self.plan = None;
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn evaluate(
         &mut self,
         clips: &[ZoomClip],
         frame: (f64, f64),
         mapping: &TimeMapping,
         settings: ZoomCameraSettings,
+        shake_threshold: f64,
         time: f64,
         sidecar: impl FnOnce() -> Option<PointerSidecar>,
     ) -> Camera {
         let settings = settings.clamped();
+        // Zero turns the filter off, as the sidecar's own setter does; a value
+        // that is not finite must not make every frame rebuild the plan.
+        let shake_threshold = if shake_threshold.is_finite() {
+            shake_threshold.max(0.0)
+        } else {
+            0.0
+        };
         if self.clips.as_deref() != Some(clips)
             || self.frame != Some(frame)
             || self.mapping.as_ref() != Some(mapping)
             || self.settings != Some(settings)
+            || self.shake_threshold != Some(shake_threshold)
             || self.plan.is_none()
         {
             let sidecar = sidecar();
@@ -290,11 +302,13 @@ impl ZoomCameraCache {
                 frame,
                 mapping,
                 settings,
+                shake_threshold,
             ));
             self.clips = Some(clips.to_vec());
             self.frame = Some(frame);
             self.mapping = Some(mapping.clone());
             self.settings = Some(settings);
+            self.shake_threshold = Some(shake_threshold);
         }
         self.plan
             .as_mut()
@@ -310,6 +324,7 @@ impl ZoomCameraPlan {
         frame: (f64, f64),
         mapping: &TimeMapping,
         settings: ZoomCameraSettings,
+        shake_threshold: f64,
     ) -> Self {
         let mut clips = clips.to_vec();
         clips.sort_by(|left, right| left.start.total_cmp(&right.start));
@@ -351,8 +366,11 @@ impl ZoomCameraPlan {
                 events.retain(|e| e.t.is_finite() && e.x.is_finite() && e.y.is_finite());
                 events.sort_by(|a, b| a.t.total_cmp(&b.t));
                 // The studied camera reads the recording's pointer path after
-                // its default shake filter (`B39:3274-3284`, `DgH:3254`).
-                pointer_path::remove_shakes(&events, pointer_path::SHAKE_THRESHOLD)
+                // the project's shake filter (`B39:3274-3284`), and thins the
+                // whole path once before any zoom takes its range from it
+                // (`B39:3333-3339`).
+                let filtered = pointer_path::remove_shakes(&events, shake_threshold);
+                pointer_path::decimate(&filtered, pointer_path::DECIMATE_DISTANCE)
             })
             .unwrap_or_default();
         let zooms = clips
@@ -897,13 +915,12 @@ fn nearest_follow_sample(samples: &[(f64, f64, f64)], start: f64) -> Option<(f64
 }
 
 /// The pointer samples one clip's follow camera reads, as
-/// `(composition_time, x, y)`. Moves closer than the studied 10 px to the
-/// last kept event are dropped, but presses and releases are always kept,
-/// and the last sample before each footage window is carried in at the
+/// `(composition_time, x, y)`, taken from the already thinned path. The last
+/// thinned sample at or before each footage window is carried in at the
 /// window's first instant so the first movement group starts where the
-/// pointer already was. When the clip has no sample before or inside its
-/// windows, the studied nearest-sample fallback keeps the camera following
-/// instead of freezing on the stored centre.
+/// pointer already was (`B39:3334-3339`). When the clip has no sample before
+/// or inside its windows, the studied nearest-sample fallback keeps the
+/// camera following instead of freezing on the stored centre.
 fn follow_points(
     samples: &[PointerEvent],
     mapping: &TimeMapping,
@@ -913,14 +930,18 @@ fn follow_points(
     let mut first_window = None;
     for (start, _, source_start, source_end) in mapping.windows(clip) {
         first_window.get_or_insert((start, source_start));
-        let index = samples.partition_point(|e| e.t < source_start);
-        if let Some(before) = index.checked_sub(1).and_then(|before| samples.get(before)) {
+        let carried = samples.partition_point(|e| e.t <= source_start);
+        if let Some(before) = carried
+            .checked_sub(1)
+            .and_then(|before| samples.get(before))
+        {
             points.push(PointerEvent {
                 t: start - 0.001,
                 kind: PointerKind::Move,
                 ..*before
             });
         }
+        let index = samples.partition_point(|e| e.t < source_start);
         points.extend(
             samples[index..]
                 .iter()
@@ -945,12 +966,7 @@ fn follow_points(
         }
     }
     points.sort_by(|left, right| left.t.total_cmp(&right.t));
-    // The studied focus path keeps clicks and drops moves closer than 10 px
-    // to the last kept event (`B39:2804-2826`, `B39:3333`).
-    pointer_path::decimate(&points, pointer_path::DECIMATE_DISTANCE)
-        .into_iter()
-        .map(|e| (e.t, e.x, e.y))
-        .collect()
+    points.into_iter().map(|e| (e.t, e.x, e.y)).collect()
 }
 
 /// Half the zoomed view: the movement-group budget at this scale. A tighter
@@ -1166,6 +1182,7 @@ mod tests {
         studied_advance, studied_precision, view_rect, Camera, CameraMotion, TimeMapping,
         ZoomCameraCache, ZoomCameraSettings, CAMERA_FOLLOW_SPRING, SCREEN_SPRING_PRECISION,
     };
+    use crate::recording::editor::cursor_shake::DEFAULT_REMOVE_SHAKE_THRESHOLD;
     use crate::recording::editor::sidecar::{
         CaptureRegion, ClickSample, CursorKind, PointerSample, PointerSidecar,
     };
@@ -1218,6 +1235,7 @@ mod tests {
             frame,
             &TimeMapping::default(),
             ZoomCameraSettings::default(),
+            DEFAULT_REMOVE_SHAKE_THRESHOLD,
             time,
             || Some(sidecar.clone()),
         )
@@ -1513,6 +1531,7 @@ mod tests {
                     (640.0, 480.0),
                     &TimeMapping::default(),
                     ZoomCameraSettings::default(),
+                    DEFAULT_REMOVE_SHAKE_THRESHOLD,
                     time,
                     || Some(sidecar.clone()),
                 )
@@ -1591,6 +1610,7 @@ mod tests {
             (640.0, 480.0),
             &mapping,
             ZoomCameraSettings::default(),
+            DEFAULT_REMOVE_SHAKE_THRESHOLD,
             1.2,
             || Some(sidecar.clone()),
         );
@@ -1610,6 +1630,7 @@ mod tests {
             frame,
             &identity,
             ZoomCameraSettings::default(),
+            DEFAULT_REMOVE_SHAKE_THRESHOLD,
             2.0,
             || Some(first_sidecar.clone()),
         );
@@ -1619,6 +1640,7 @@ mod tests {
             frame,
             &identity,
             ZoomCameraSettings::default(),
+            DEFAULT_REMOVE_SHAKE_THRESHOLD,
             2.0,
             || Some(first_sidecar.clone()),
         );
@@ -1629,6 +1651,7 @@ mod tests {
             frame,
             &identity,
             ZoomCameraSettings::default(),
+            DEFAULT_REMOVE_SHAKE_THRESHOLD,
             2.0,
             || Some(second_sidecar.clone()),
         );
@@ -1818,6 +1841,7 @@ mod tests {
                     frame,
                     &TimeMapping::default(),
                     settings,
+                    DEFAULT_REMOVE_SHAKE_THRESHOLD,
                     1.25,
                     || Some(sidecar.clone()),
                 )
@@ -1850,6 +1874,7 @@ mod tests {
                     frame,
                     &TimeMapping::default(),
                     settings,
+                    DEFAULT_REMOVE_SHAKE_THRESHOLD,
                     1.8,
                     || Some(sidecar.clone()),
                 )
@@ -1941,6 +1966,100 @@ mod tests {
         assert_eq!(
             focal_point((0.0, 0.0, 1000.0, 500.0), camera),
             (500.0, 250.0)
+        );
+    }
+
+    #[test]
+    fn turning_shake_removal_off_lets_the_camera_follow_a_spike() {
+        let mut points: Vec<(f64, f64, f64)> = (0..=30)
+            .map(|i| (1.0 + i as f64 * 0.1, 900.0, 500.0))
+            .collect();
+        points.insert(11, (2.05, 50.0, 50.0));
+        let sidecar = sidecar((1280, 720), &points);
+        let clips = [auto_clip(1.0, 4.0, 2.0, (640.0, 360.0))];
+        let frame = (1280.0, 720.0);
+        let centre_at = |threshold: f64| {
+            let mut cache = ZoomCameraCache::default();
+            cache
+                .evaluate(
+                    &clips,
+                    frame,
+                    &TimeMapping::default(),
+                    ZoomCameraSettings::default(),
+                    threshold,
+                    2.15,
+                    || Some(sidecar.clone()),
+                )
+                .1
+        };
+        let filtered = centre_at(DEFAULT_REMOVE_SHAKE_THRESHOLD);
+        assert!(
+            (filtered.0 - 900.0).abs() < 1.0 && (filtered.1 - 500.0).abs() < 1.0,
+            "the filter must hide the spike: {filtered:?}"
+        );
+        let unfiltered = centre_at(0.0);
+        assert!(
+            (unfiltered.0 - 900.0).abs() > 1.0 || (unfiltered.1 - 500.0).abs() > 1.0,
+            "with the filter off the camera must react to the spike: {unfiltered:?}"
+        );
+    }
+
+    #[test]
+    fn the_cache_rebuilds_when_the_shake_threshold_changes() {
+        let mut points: Vec<(f64, f64, f64)> = (0..=30)
+            .map(|i| (1.0 + i as f64 * 0.1, 900.0, 500.0))
+            .collect();
+        points.insert(11, (2.05, 50.0, 50.0));
+        let sidecar = sidecar((1280, 720), &points);
+        let clips = [auto_clip(1.0, 4.0, 2.0, (640.0, 360.0))];
+        let frame = (1280.0, 720.0);
+        let mut cache = ZoomCameraCache::default();
+        let mut at = |threshold: f64| {
+            cache
+                .evaluate(
+                    &clips,
+                    frame,
+                    &TimeMapping::default(),
+                    ZoomCameraSettings::default(),
+                    threshold,
+                    2.15,
+                    || Some(sidecar.clone()),
+                )
+                .1
+        };
+        let filtered = at(DEFAULT_REMOVE_SHAKE_THRESHOLD);
+        let unfiltered = at(0.0);
+        assert!(
+            (filtered.0 - unfiltered.0).abs() + (filtered.1 - unfiltered.1).abs() > 1.0,
+            "a new threshold must rebuild the plan: {filtered:?} vs {unfiltered:?}"
+        );
+    }
+
+    #[test]
+    fn the_follow_path_is_thinned_before_a_zoom_takes_its_range() {
+        // The whole path is thinned first, so the sample at 0.5 s (5 px from
+        // the kept one) is gone and the zoom carries in the sample at 0 s.
+        // The sample at 1.0 s is 12 px from that one, so it stays.
+        let clips = [auto_clip(0.6, 4.0, 2.0, (320.0, 240.0))];
+        let sidecar = sidecar(
+            (640, 480),
+            &[
+                (0.0, 400.0, 240.0),
+                (0.5, 405.0, 240.0),
+                (1.0, 412.0, 240.0),
+            ],
+        );
+        let (scale, center) = evaluate(&clips, &sidecar, (640.0, 480.0), 3.5);
+        assert!((scale - 2.0).abs() < 0.03, "scale={scale}");
+        // 400 holds from 0.599 s to 1.0 s, then 412 for the trailing 100 ms.
+        let expected = (400.0 * 0.401 + 412.0 * 0.1) / 0.501;
+        assert!(
+            (center.0 - expected).abs() < 1.0,
+            "center={center:?} expected x={expected}"
+        );
+        assert!(
+            (center.0 - 405.0).abs() > 1.5,
+            "the thinned-out sample must not open the path: {center:?}"
         );
     }
 }

@@ -3109,6 +3109,7 @@ impl Timeline {
             frame_rate: fps,
             ..data.zoom_camera
         };
+        let shake_threshold = self.cursor.settings().remove_shake_threshold;
         let camera = if unzoomed {
             (1.0, data.frame_center())
         } else {
@@ -3121,6 +3122,7 @@ impl Timeline {
                 frame,
                 &data.camera_mapping(),
                 camera_settings,
+                shake_threshold,
                 data.playhead,
                 || self.cursor.sidecar(),
             )
@@ -3138,6 +3140,7 @@ impl Timeline {
                     frame,
                     &data.camera_mapping(),
                     camera_settings,
+                    shake_threshold,
                     (data.playhead - 1.0 / fps).max(0.0),
                     || self.cursor.sidecar(),
                 )
@@ -3794,6 +3797,7 @@ impl Timeline {
                 frame_rate: fps,
                 ..data.zoom_camera
             },
+            self.cursor.settings().remove_shake_threshold,
             data.playhead,
             || self.cursor.sidecar(),
         ))
@@ -5042,6 +5046,7 @@ pub(super) fn build(
                     frame_rate: fps,
                     ..data.zoom_camera
                 };
+                let shake_threshold = cursor.settings().remove_shake_threshold;
                 let camera = if unzoomed {
                     (1.0, data.frame_center())
                 } else {
@@ -5054,6 +5059,7 @@ pub(super) fn build(
                         frame,
                         &data.camera_mapping(),
                         camera_settings,
+                        shake_threshold,
                         composition_time,
                         || cursor.sidecar(),
                     )
@@ -5072,6 +5078,7 @@ pub(super) fn build(
                         frame,
                         &data.camera_mapping(),
                         camera_settings,
+                        shake_threshold,
                         (composition_time - 1.0 / fps).max(0.0),
                         || cursor.sidecar(),
                     )

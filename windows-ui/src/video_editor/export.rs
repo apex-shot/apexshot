@@ -870,6 +870,7 @@ fn render_range(
         frame_rate: fps,
         ..model.zoom_camera
     };
+    let shake_threshold = model.cursor.remove_shake_threshold;
     let mut decoded = if plan.passthrough {
         Vec::new()
     } else {
@@ -1190,6 +1191,7 @@ fn render_range(
                 source,
                 &plan.mapping,
                 camera_settings,
+                shake_threshold,
                 composition_time,
                 || model.sidecar.clone(),
             );
@@ -1248,6 +1250,7 @@ fn render_range(
                         source,
                         &plan.mapping,
                         camera_settings,
+                        shake_threshold,
                         (composition_time - 1.0 / fps).max(0.0),
                         || model.sidecar.clone(),
                     )
