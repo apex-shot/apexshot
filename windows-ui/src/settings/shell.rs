@@ -314,7 +314,9 @@ impl UserChipLabels {
         };
         self.initials.set_text(&chip.initials);
         self.name.set_text(&chip.name);
+        self.name.set_tooltip_text(Some(&chip.name));
         self.subtitle.set_text(&chip.subtitle);
+        self.subtitle.set_tooltip_text(Some(&chip.subtitle));
         self.badge.set_text(&chip.badge);
         self.badge.set_visible(!chip.badge.is_empty());
         bar.set_visible(true);
@@ -354,7 +356,12 @@ pub fn build_user_chip(config: &AppConfig, scale: f64, on_click: impl Fn() + 'st
     let name = Label::new(None);
     name.add_css_class("settings-user-name");
     name.set_xalign(0.0);
+    name.set_single_line_mode(true);
     name.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    // An ellipsizing label still asks for its whole text as its natural
+    // width, so a long account name would widen the sidebar instead of
+    // shortening to "…". The cap leaves room for the plan badge beside it.
+    name.set_max_width_chars(18);
     top.append(&name);
     let badge = Label::new(None);
     badge.add_css_class("settings-user-badge");
@@ -364,7 +371,9 @@ pub fn build_user_chip(config: &AppConfig, scale: f64, on_click: impl Fn() + 'st
     let subtitle = Label::new(None);
     subtitle.add_css_class("settings-user-sub");
     subtitle.set_xalign(0.0);
+    subtitle.set_single_line_mode(true);
     subtitle.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    subtitle.set_max_width_chars(28);
 
     text.append(&top);
     text.append(&subtitle);
@@ -1062,6 +1071,30 @@ mod tests {
             return;
         };
         assert_eq!((initial, signed_in, signed_out), (false, true, false));
+    }
+
+    #[test]
+    fn account_chip_keeps_a_long_account_inside_the_sidebar() {
+        let Some(natural) = crate::test_support::with_gtk(|| {
+            let config = AppConfig {
+                cloud_api_token: "token".to_string(),
+                cloud_user_name: "Someone With A Remarkably Long Display Name".to_string(),
+                cloud_user_email: "someone.with.a.remarkably.long.address@example-company.com"
+                    .to_string(),
+                cloud_plan_tier: "free".to_string(),
+                ..AppConfig::default()
+            };
+            let bar = build_user_chip(&config, 1.0, || {});
+            let (_, natural, _, _) = bar.measure(Orientation::Horizontal, -1);
+            natural
+        }) else {
+            eprintln!("skipping: no display available");
+            return;
+        };
+        assert!(
+            natural <= SIDEBAR_WIDTH as i32,
+            "the account chip asks for {natural}px, wider than the {SIDEBAR_WIDTH}px sidebar"
+        );
     }
 
     #[test]
