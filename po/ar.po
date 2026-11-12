@@ -4516,3 +4516,141 @@ msgstr "يملأ السبليت الإطار من حافة إلى حافة."
 
 msgid "Transitions"
 msgstr "الانتقالات"
+
+msgid "1:1"
+msgstr "1:1"
+
+msgid "4:3"
+msgstr "4:3"
+
+msgid "All typing suggestions are handled. Undo brings them back."
+msgstr "تمت معالجة كل اقتراحات الكتابة. يعيدها التراجع."
+
+msgid "Apply all suggestions"
+msgstr "تطبيق كل الاقتراحات"
+
+msgid "Apply suggestion"
+msgstr "تطبيق الاقتراح"
+
+msgid "Apply to this project"
+msgstr "تطبيق على هذا المشروع"
+
+msgid "Built-in defaults"
+msgstr "الإعدادات الافتراضية المدمجة"
+
+msgid "Could not open the preset's folder."
+msgstr "تعذر فتح مجلد الإعداد المسبق."
+
+msgid "Create"
+msgstr "إنشاء"
+
+msgid "Default for new recordings"
+msgstr "الافتراضي للتسجيلات الجديدة"
+
+msgid "Default video preset"
+msgstr "إعداد الفيديو المسبق الافتراضي"
+
+msgid "Editor"
+msgstr "المحرر"
+
+msgid "Keyboard"
+msgstr "لوحة المفاتيح"
+
+msgid "Movement"
+msgstr "الحركة"
+
+msgid "Name the preset before saving it."
+msgstr "سمِّ الإعداد المسبق قبل حفظه."
+
+msgid "New preset from this project"
+msgstr "إعداد مسبق جديد من هذا المشروع"
+
+msgid "No presets yet"
+msgstr "لا توجد إعدادات مسبقة بعد"
+
+msgid "No typing to speed up in this recording."
+msgstr "لا توجد كتابة لتسريعها في هذا التسجيل."
+
+msgid "Preset name"
+msgstr "اسم الإعداد المسبق"
+
+msgid "Preset options"
+msgstr "خيارات الإعداد المسبق"
+
+msgid "Presets"
+msgstr "الإعدادات المسبقة"
+
+msgid "Press + to save this project's background, cursor, camera and captions as a preset."
+msgstr "اضغط + لحفظ خلفية هذا المشروع والمؤشر والكاميرا والتسميات التوضيحية كإعداد مسبق."
+
+msgid "Preview"
+msgstr "معاينة"
+
+msgid "Put every zoom animation setting back to its default."
+msgstr "إعادة كل إعدادات حركة التكبير إلى قيمها الافتراضية."
+
+msgid "Record keystrokes"
+msgstr "تسجيل ضغطات المفاتيح"
+
+msgid "Remove as default"
+msgstr "إزالة كافتراضي"
+
+msgid "Remove suggestion"
+msgstr "إزالة الاقتراح"
+
+msgid "Rename"
+msgstr "إعادة تسمية"
+
+msgid "Renamed to {name}."
+msgstr "تمت إعادة التسمية إلى {name}."
+
+msgid "Set as default"
+msgstr "تعيين كافتراضي"
+
+msgid "Show in folder"
+msgstr "إظهار في المجلد"
+
+msgid "Show keyboard shortcuts"
+msgstr "إظهار اختصارات لوحة المفاتيح"
+
+msgid "Show single letters"
+msgstr "إظهار الأحرف المفردة"
+
+msgid "Soft"
+msgstr "ناعم"
+
+msgid "Sound"
+msgstr "الصوت"
+
+msgid "That preset is no longer on disk."
+msgstr "لم يعد هذا الإعداد المسبق موجودًا على القرص."
+
+msgid "This recording has no keystrokes. Turn on Record keystrokes in Settings, under Recording, then record again."
+msgstr "لا يحتوي هذا التسجيل على ضغطات مفاتيح. فعّل «تسجيل ضغطات المفاتيح» في الإعدادات، ضمن التسجيل، ثم سجّل مرة أخرى."
+
+msgid "This zoom"
+msgstr "هذا التكبير"
+
+msgid "Typing"
+msgstr "الكتابة"
+
+msgid "Unavailable preset"
+msgstr "إعداد مسبق غير متاح"
+
+msgid "Update with current look"
+msgstr "التحديث بالمظهر الحالي"
+
+msgid "Visibility"
+msgstr "الظهور"
+
+msgid "Volume"
+msgstr "مستوى الصوت"
+
+msgid "{name} deleted."
+msgstr "تم حذف {name}."
+
+msgid "{name} now holds the current look."
+msgstr "يحتوي {name} الآن على المظهر الحالي."
+
+msgid "{name} saved."
+msgstr "تم حفظ {name}."

@@ -4479,3 +4479,141 @@ msgstr "Split 占满画面，边到边。"
 
 msgid "Transitions"
 msgstr "过渡"
+
+msgid "1:1"
+msgstr "1:1"
+
+msgid "4:3"
+msgstr "4:3"
+
+msgid "All typing suggestions are handled. Undo brings them back."
+msgstr "所有输入建议都已处理。撤销可将其恢复。"
+
+msgid "Apply all suggestions"
+msgstr "应用全部建议"
+
+msgid "Apply suggestion"
+msgstr "应用建议"
+
+msgid "Apply to this project"
+msgstr "应用到此项目"
+
+msgid "Built-in defaults"
+msgstr "内置默认值"
+
+msgid "Could not open the preset's folder."
+msgstr "无法打开预设所在的文件夹。"
+
+msgid "Create"
+msgstr "创建"
+
+msgid "Default for new recordings"
+msgstr "新录制的默认值"
+
+msgid "Default video preset"
+msgstr "默认视频预设"
+
+msgid "Editor"
+msgstr "编辑器"
+
+msgid "Keyboard"
+msgstr "键盘"
+
+msgid "Movement"
+msgstr "移动"
+
+msgid "Name the preset before saving it."
+msgstr "请先为预设命名再保存。"
+
+msgid "New preset from this project"
+msgstr "从此项目新建预设"
+
+msgid "No presets yet"
+msgstr "暂无预设"
+
+msgid "No typing to speed up in this recording."
+msgstr "此录制中没有可加速的输入。"
+
+msgid "Preset name"
+msgstr "预设名称"
+
+msgid "Preset options"
+msgstr "预设选项"
+
+msgid "Presets"
+msgstr "预设"
+
+msgid "Press + to save this project's background, cursor, camera and captions as a preset."
+msgstr "按 + 可将此项目的背景、光标、摄像头和字幕保存为预设。"
+
+msgid "Preview"
+msgstr "预览"
+
+msgid "Put every zoom animation setting back to its default."
+msgstr "将所有缩放动画设置恢复为默认值。"
+
+msgid "Record keystrokes"
+msgstr "记录按键"
+
+msgid "Remove as default"
+msgstr "取消默认"
+
+msgid "Remove suggestion"
+msgstr "移除建议"
+
+msgid "Rename"
+msgstr "重命名"
+
+msgid "Renamed to {name}."
+msgstr "已重命名为 {name}。"
+
+msgid "Set as default"
+msgstr "设为默认"
+
+msgid "Show in folder"
+msgstr "在文件夹中显示"
+
+msgid "Show keyboard shortcuts"
+msgstr "显示键盘快捷键"
+
+msgid "Show single letters"
+msgstr "显示单个字母"
+
+msgid "Soft"
+msgstr "柔和"
+
+msgid "Sound"
+msgstr "声音"
+
+msgid "That preset is no longer on disk."
+msgstr "该预设已不在磁盘上。"
+
+msgid "This recording has no keystrokes. Turn on Record keystrokes in Settings, under Recording, then record again."
+msgstr "此录制没有按键记录。请在设置的“录制”中开启“记录按键”，然后重新录制。"
+
+msgid "This zoom"
+msgstr "此缩放"
+
+msgid "Typing"
+msgstr "输入"
+
+msgid "Unavailable preset"
+msgstr "不可用的预设"
+
+msgid "Update with current look"
+msgstr "用当前外观更新"
+
+msgid "Visibility"
+msgstr "可见性"
+
+msgid "Volume"
+msgstr "音量"
+
+msgid "{name} deleted."
+msgstr "已删除 {name}。"
+
+msgid "{name} now holds the current look."
+msgstr "{name} 已更新为当前外观。"
+
+msgid "{name} saved."
+msgstr "已保存 {name}。"

@@ -4590,3 +4590,141 @@ msgstr "El Split llena el encuadre de borde a borde."
 
 msgid "Transitions"
 msgstr "Transiciones"
+
+msgid "1:1"
+msgstr "1:1"
+
+msgid "4:3"
+msgstr "4:3"
+
+msgid "All typing suggestions are handled. Undo brings them back."
+msgstr "Todas las sugerencias de escritura están resueltas. Deshacer las recupera."
+
+msgid "Apply all suggestions"
+msgstr "Aplicar todas las sugerencias"
+
+msgid "Apply suggestion"
+msgstr "Aplicar sugerencia"
+
+msgid "Apply to this project"
+msgstr "Aplicar a este proyecto"
+
+msgid "Built-in defaults"
+msgstr "Valores predeterminados integrados"
+
+msgid "Could not open the preset's folder."
+msgstr "No se ha podido abrir la carpeta del preajuste."
+
+msgid "Create"
+msgstr "Crear"
+
+msgid "Default for new recordings"
+msgstr "Predeterminado para grabaciones nuevas"
+
+msgid "Default video preset"
+msgstr "Preajuste de vídeo predeterminado"
+
+msgid "Editor"
+msgstr "Editor"
+
+msgid "Keyboard"
+msgstr "Teclado"
+
+msgid "Movement"
+msgstr "Movimiento"
+
+msgid "Name the preset before saving it."
+msgstr "Ponle nombre al preajuste antes de guardarlo."
+
+msgid "New preset from this project"
+msgstr "Nuevo preajuste a partir de este proyecto"
+
+msgid "No presets yet"
+msgstr "Aún no hay preajustes"
+
+msgid "No typing to speed up in this recording."
+msgstr "No hay escritura que acelerar en esta grabación."
+
+msgid "Preset name"
+msgstr "Nombre del preajuste"
+
+msgid "Preset options"
+msgstr "Opciones del preajuste"
+
+msgid "Presets"
+msgstr "Preajustes"
+
+msgid "Press + to save this project's background, cursor, camera and captions as a preset."
+msgstr "Pulsa + para guardar el fondo, el cursor, la cámara y los subtítulos de este proyecto como preajuste."
+
+msgid "Preview"
+msgstr "Vista previa"
+
+msgid "Put every zoom animation setting back to its default."
+msgstr "Restablecer todos los ajustes de animación del zoom a sus valores predeterminados."
+
+msgid "Record keystrokes"
+msgstr "Grabar pulsaciones de teclas"
+
+msgid "Remove as default"
+msgstr "Quitar como predeterminado"
+
+msgid "Remove suggestion"
+msgstr "Quitar sugerencia"
+
+msgid "Rename"
+msgstr "Cambiar nombre"
+
+msgid "Renamed to {name}."
+msgstr "Nombre cambiado a {name}."
+
+msgid "Set as default"
+msgstr "Establecer como predeterminado"
+
+msgid "Show in folder"
+msgstr "Mostrar en la carpeta"
+
+msgid "Show keyboard shortcuts"
+msgstr "Mostrar atajos de teclado"
+
+msgid "Show single letters"
+msgstr "Mostrar letras sueltas"
+
+msgid "Soft"
+msgstr "Suave"
+
+msgid "Sound"
+msgstr "Sonido"
+
+msgid "That preset is no longer on disk."
+msgstr "Ese preajuste ya no está en el disco."
+
+msgid "This recording has no keystrokes. Turn on Record keystrokes in Settings, under Recording, then record again."
+msgstr "Esta grabación no tiene pulsaciones de teclas. Activa «Grabar pulsaciones de teclas» en Ajustes, en Grabación, y vuelve a grabar."
+
+msgid "This zoom"
+msgstr "Este zoom"
+
+msgid "Typing"
+msgstr "Escritura"
+
+msgid "Unavailable preset"
+msgstr "Preajuste no disponible"
+
+msgid "Update with current look"
+msgstr "Actualizar con el aspecto actual"
+
+msgid "Visibility"
+msgstr "Visibilidad"
+
+msgid "Volume"
+msgstr "Volumen"
+
+msgid "{name} deleted."
+msgstr "{name} eliminado."
+
+msgid "{name} now holds the current look."
+msgstr "{name} ahora tiene el aspecto actual."
+
+msgid "{name} saved."
+msgstr "{name} guardado."

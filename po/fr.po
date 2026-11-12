@@ -4602,3 +4602,141 @@ msgstr "Le Split remplit le cadre d'un bord à l'autre."
 
 msgid "Transitions"
 msgstr "Transitions"
+
+msgid "1:1"
+msgstr "1:1"
+
+msgid "4:3"
+msgstr "4:3"
+
+msgid "All typing suggestions are handled. Undo brings them back."
+msgstr "Toutes les suggestions de frappe sont traitées. Annuler les rétablit."
+
+msgid "Apply all suggestions"
+msgstr "Appliquer toutes les suggestions"
+
+msgid "Apply suggestion"
+msgstr "Appliquer la suggestion"
+
+msgid "Apply to this project"
+msgstr "Appliquer à ce projet"
+
+msgid "Built-in defaults"
+msgstr "Valeurs par défaut intégrées"
+
+msgid "Could not open the preset's folder."
+msgstr "Impossible d’ouvrir le dossier du préréglage."
+
+msgid "Create"
+msgstr "Créer"
+
+msgid "Default for new recordings"
+msgstr "Par défaut pour les nouveaux enregistrements"
+
+msgid "Default video preset"
+msgstr "Préréglage vidéo par défaut"
+
+msgid "Editor"
+msgstr "Éditeur"
+
+msgid "Keyboard"
+msgstr "Clavier"
+
+msgid "Movement"
+msgstr "Mouvement"
+
+msgid "Name the preset before saving it."
+msgstr "Nommez le préréglage avant de l’enregistrer."
+
+msgid "New preset from this project"
+msgstr "Nouveau préréglage à partir de ce projet"
+
+msgid "No presets yet"
+msgstr "Aucun préréglage pour l’instant"
+
+msgid "No typing to speed up in this recording."
+msgstr "Aucune frappe à accélérer dans cet enregistrement."
+
+msgid "Preset name"
+msgstr "Nom du préréglage"
+
+msgid "Preset options"
+msgstr "Options du préréglage"
+
+msgid "Presets"
+msgstr "Préréglages"
+
+msgid "Press + to save this project's background, cursor, camera and captions as a preset."
+msgstr "Appuyez sur + pour enregistrer l’arrière-plan, le curseur, la caméra et les sous-titres de ce projet comme préréglage."
+
+msgid "Preview"
+msgstr "Aperçu"
+
+msgid "Put every zoom animation setting back to its default."
+msgstr "Rétablir les valeurs par défaut de tous les réglages d’animation du zoom."
+
+msgid "Record keystrokes"
+msgstr "Enregistrer les frappes"
+
+msgid "Remove as default"
+msgstr "Ne plus utiliser par défaut"
+
+msgid "Remove suggestion"
+msgstr "Retirer la suggestion"
+
+msgid "Rename"
+msgstr "Renommer"
+
+msgid "Renamed to {name}."
+msgstr "Renommé en {name}."
+
+msgid "Set as default"
+msgstr "Définir par défaut"
+
+msgid "Show in folder"
+msgstr "Afficher dans le dossier"
+
+msgid "Show keyboard shortcuts"
+msgstr "Afficher les raccourcis clavier"
+
+msgid "Show single letters"
+msgstr "Afficher les lettres seules"
+
+msgid "Soft"
+msgstr "Doux"
+
+msgid "Sound"
+msgstr "Son"
+
+msgid "That preset is no longer on disk."
+msgstr "Ce préréglage n’est plus sur le disque."
+
+msgid "This recording has no keystrokes. Turn on Record keystrokes in Settings, under Recording, then record again."
+msgstr "Cet enregistrement ne contient aucune frappe. Activez « Enregistrer les frappes » dans Paramètres, sous Enregistrement, puis enregistrez à nouveau."
+
+msgid "This zoom"
+msgstr "Ce zoom"
+
+msgid "Typing"
+msgstr "Frappe"
+
+msgid "Unavailable preset"
+msgstr "Préréglage indisponible"
+
+msgid "Update with current look"
+msgstr "Mettre à jour avec l’apparence actuelle"
+
+msgid "Visibility"
+msgstr "Visibilité"
+
+msgid "Volume"
+msgstr "Volume"
+
+msgid "{name} deleted."
+msgstr "{name} supprimé."
+
+msgid "{name} now holds the current look."
+msgstr "{name} contient désormais l’apparence actuelle."
+
+msgid "{name} saved."
+msgstr "{name} enregistré."

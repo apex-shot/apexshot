@@ -4592,3 +4592,141 @@ msgstr "Der Split füllt das Bild von Rand zu Rand."
 
 msgid "Transitions"
 msgstr "Übergänge"
+
+msgid "1:1"
+msgstr "1:1"
+
+msgid "4:3"
+msgstr "4:3"
+
+msgid "All typing suggestions are handled. Undo brings them back."
+msgstr "Alle Tippvorschläge sind erledigt. Mit Rückgängig kommen sie zurück."
+
+msgid "Apply all suggestions"
+msgstr "Alle Vorschläge anwenden"
+
+msgid "Apply suggestion"
+msgstr "Vorschlag anwenden"
+
+msgid "Apply to this project"
+msgstr "Auf dieses Projekt anwenden"
+
+msgid "Built-in defaults"
+msgstr "Integrierte Standardwerte"
+
+msgid "Could not open the preset's folder."
+msgstr "Der Ordner der Voreinstellung konnte nicht geöffnet werden."
+
+msgid "Create"
+msgstr "Erstellen"
+
+msgid "Default for new recordings"
+msgstr "Standard für neue Aufnahmen"
+
+msgid "Default video preset"
+msgstr "Standard-Videovoreinstellung"
+
+msgid "Editor"
+msgstr "Editor"
+
+msgid "Keyboard"
+msgstr "Tastatur"
+
+msgid "Movement"
+msgstr "Bewegung"
+
+msgid "Name the preset before saving it."
+msgstr "Gib der Voreinstellung vor dem Speichern einen Namen."
+
+msgid "New preset from this project"
+msgstr "Neue Voreinstellung aus diesem Projekt"
+
+msgid "No presets yet"
+msgstr "Noch keine Voreinstellungen"
+
+msgid "No typing to speed up in this recording."
+msgstr "In dieser Aufnahme gibt es kein Tippen zum Beschleunigen."
+
+msgid "Preset name"
+msgstr "Name der Voreinstellung"
+
+msgid "Preset options"
+msgstr "Optionen der Voreinstellung"
+
+msgid "Presets"
+msgstr "Voreinstellungen"
+
+msgid "Press + to save this project's background, cursor, camera and captions as a preset."
+msgstr "Drücke +, um Hintergrund, Cursor, Kamera und Untertitel dieses Projekts als Voreinstellung zu speichern."
+
+msgid "Preview"
+msgstr "Vorschau"
+
+msgid "Put every zoom animation setting back to its default."
+msgstr "Alle Zoom-Animationseinstellungen auf den Standard zurücksetzen."
+
+msgid "Record keystrokes"
+msgstr "Tastenanschläge aufnehmen"
+
+msgid "Remove as default"
+msgstr "Nicht mehr als Standard verwenden"
+
+msgid "Remove suggestion"
+msgstr "Vorschlag entfernen"
+
+msgid "Rename"
+msgstr "Umbenennen"
+
+msgid "Renamed to {name}."
+msgstr "In {name} umbenannt."
+
+msgid "Set as default"
+msgstr "Als Standard festlegen"
+
+msgid "Show in folder"
+msgstr "Im Ordner anzeigen"
+
+msgid "Show keyboard shortcuts"
+msgstr "Tastenkürzel anzeigen"
+
+msgid "Show single letters"
+msgstr "Einzelne Buchstaben anzeigen"
+
+msgid "Soft"
+msgstr "Sanft"
+
+msgid "Sound"
+msgstr "Ton"
+
+msgid "That preset is no longer on disk."
+msgstr "Diese Voreinstellung ist nicht mehr auf dem Datenträger."
+
+msgid "This recording has no keystrokes. Turn on Record keystrokes in Settings, under Recording, then record again."
+msgstr "Diese Aufnahme enthält keine Tastenanschläge. Aktiviere „Tastenanschläge aufnehmen“ in den Einstellungen unter „Aufnahme“ und nimm erneut auf."
+
+msgid "This zoom"
+msgstr "Dieser Zoom"
+
+msgid "Typing"
+msgstr "Tippen"
+
+msgid "Unavailable preset"
+msgstr "Nicht verfügbare Voreinstellung"
+
+msgid "Update with current look"
+msgstr "Mit aktuellem Aussehen aktualisieren"
+
+msgid "Visibility"
+msgstr "Sichtbarkeit"
+
+msgid "Volume"
+msgstr "Lautstärke"
+
+msgid "{name} deleted."
+msgstr "{name} gelöscht."
+
+msgid "{name} now holds the current look."
+msgstr "{name} enthält jetzt das aktuelle Aussehen."
+
+msgid "{name} saved."
+msgstr "{name} gespeichert."
