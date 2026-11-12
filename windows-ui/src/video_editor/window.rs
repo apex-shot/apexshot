@@ -73,7 +73,8 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     }
 
     let document_title = Rc::new(RefCell::new(document_title(initial)));
-    let (title_bar, export_button) = build_title_bar(&window, document_title.clone(), scale);
+    let (title_bar, export_button, presets_button) =
+        build_title_bar(&window, document_title.clone(), scale);
 
     let workspace = GtkBox::new(Orientation::Horizontal, 0);
     workspace.add_css_class("recording-editor-workspace");
@@ -81,7 +82,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     workspace.set_vexpand(true);
 
     let background = super::background::Background::default();
-    let stage = build_stage(scale, background.clone(), export_button);
+    let stage = build_stage(scale, background.clone(), export_button, presets_button);
     workspace.append(&stage.root);
 
     let cursor_layer = stage.cursor_layer.clone();
@@ -96,8 +97,10 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
         prefers_dark,
         stage.cursor.clone(),
         stage.webcam.clone(),
+        background.clone(),
         stage.source_size.clone(),
     );
+    super::presets_popover::attach(&stage.presets_button, &timeline, scale);
 
     let tools_column = super::side_panel::build_tools_column(
         scale,
@@ -141,18 +144,20 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
             });
             // With the studied framing, the moving card's whole trail is drawn
             // over the stage so its edges smear across the background.
-            let card = trail.and_then(|_| {
-                let (now, _, stage_size) = stage.card_geometry(frame.camera)?;
-                let (previous, _, _) = stage.card_geometry(frame.camera_before)?;
-                Some(super::preview::CardLayer {
-                    now,
-                    previous,
-                    stage: stage_size,
-                    radius: stage.clip.radius_ratio(),
-                    fps: frame.fps,
-                    amount: frame.motion_blur,
+            let card = (frame.motion_blur.is_finite() && frame.motion_blur > 0.0)
+                .then(|| {
+                    let (now, _, stage_size) = stage.card_geometry(frame.camera)?;
+                    let (previous, _, _) = stage.card_geometry(frame.camera_before)?;
+                    Some(super::preview::CardLayer {
+                        now,
+                        previous,
+                        stage: stage_size,
+                        radius: stage.clip.radius_ratio(),
+                        fps: frame.fps,
+                        amount: frame.motion_blur,
+                    })
                 })
-            });
+                .flatten();
             stage.preview.set_trail(trail, card, frame.playing);
             stage.apply_webcam_layout();
             let ripple = stage
@@ -201,6 +206,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
                 timeline.source_duration(),
                 timeline.composition_duration(),
             );
+            timeline.notify_typing_changed();
         })
     };
     update_document(initial);
@@ -266,7 +272,7 @@ fn build_title_bar(
     window: &ApplicationWindow,
     document_title: Rc<RefCell<String>>,
     scale: f64,
-) -> (GtkBox, Button) {
+) -> (GtkBox, Button, Button) {
     let bar = GtkBox::new(Orientation::Horizontal, 0);
     bar.add_css_class("settings-window-controls");
     bar.add_css_class("video-editor-titlebar");
@@ -358,9 +364,11 @@ fn build_title_bar(
     export_button.set_sensitive(false);
     export_button.set_margin_end((8.0 * scale).round() as i32);
 
+    let presets_button = super::presets_popover::title_button(scale);
     let actions = GtkBox::new(Orientation::Horizontal, 0);
     actions.set_halign(Align::End);
     actions.set_valign(Align::Fill);
+    actions.append(&presets_button);
     actions.append(&export_button);
     actions.append(&minimize);
     actions.append(&maximize);
@@ -381,7 +389,7 @@ fn build_title_bar(
 
     windowing::install_window_drag(&left_spacer, window);
     windowing::install_window_drag(&right_spacer, window);
-    (bar, export_button)
+    (bar, export_button, presets_button)
 }
 
 fn set_title_bar_text(bar: &GtkBox, title: &str) {
@@ -755,6 +763,7 @@ struct Stage {
     estimate: Estimate,
     quality: Rc<Cell<QualityTier>>,
     export_button: Button,
+    presets_button: Button,
     background: super::background::BackgroundState,
     background_layer: DrawingArea,
     cursor_layer: DrawingArea,
@@ -1328,6 +1337,7 @@ impl Stage {
         let preview_source = clean_source.as_deref().or(path);
         let Some((texture, width, height)) = preview_source.and_then(poster_texture) else {
             self.export_button.set_sensitive(false);
+            self.presets_button.set_sensitive(false);
             self.picture.set_visible(false);
             self.hint.set_visible(true);
             self.source_size.set(None);
@@ -1342,6 +1352,7 @@ impl Stage {
         self.hint.set_visible(false);
         self.source_size.set(Some((width, height)));
         self.export_button.set_sensitive(true);
+        self.presets_button.set_sensitive(true);
         self.apply_geometry();
         self.apply_webcam_layout();
         self.set_camera((1.0, (f64::from(width) / 2.0, f64::from(height) / 2.0)));
@@ -1500,6 +1511,7 @@ fn build_stage(
     scale: f64,
     background: super::background::Background,
     export_button: Button,
+    presets_button: Button,
 ) -> Stage {
     let root = GtkBox::new(Orientation::Vertical, 0);
     root.add_css_class("recording-editor-stage");
@@ -1674,6 +1686,7 @@ fn build_stage(
                     height: video.height,
                 }),
             );
+            cursor.draw_captions(context, width, height, source_seconds.get());
             draw_in_video(
                 context,
                 video,
@@ -1808,6 +1821,7 @@ fn build_stage(
         estimate: estimate.clone(),
         quality: quality.clone(),
         export_button: export_button.clone(),
+        presets_button: presets_button.clone(),
         background: background.state(),
         background_layer: background_layer.clone(),
         cursor_layer,
@@ -2087,8 +2101,11 @@ fn export_model(
         trim_start: footage.trim_start,
         trim_end: footage.trim_end,
         cuts: footage.cuts,
+        segment_speeds: footage.segment_speeds,
+        freeze_tail: footage.freeze_tail,
         zooms: footage.zooms,
         zoom_camera: footage.zoom_camera,
+        effects: footage.effects,
         cursor: stage.cursor.settings(),
         sidecar,
         webcam: stage.webcam.export(),

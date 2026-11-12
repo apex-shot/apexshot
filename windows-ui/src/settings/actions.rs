@@ -42,6 +42,8 @@ pub struct SaveInputs {
     pub rec_copy_to_clipboard: CheckButton,
     pub rec_save: CheckButton,
     pub rec_open_video_editor: CheckButton,
+    pub rec_auto_zoom_on_import: CheckButton,
+    pub rec_default_video_preset: SettingsSelect,
     pub quick_access_position: SettingsSelect,
     pub quick_access_overlay_size: Scale,
     pub quick_access_auto_close_enabled: CheckButton,
@@ -250,6 +252,9 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<SaveOutcome> {
     config.rec_after_capture_copy_to_clipboard = inputs.rec_copy_to_clipboard.is_active();
     config.rec_after_capture_save = inputs.rec_save.is_active();
     config.rec_video_open_editor = inputs.rec_open_video_editor.is_active();
+    config.rec_video_auto_zoom_on_import = inputs.rec_auto_zoom_on_import.is_active();
+    config.rec_video_default_preset =
+        default_preset_choice(inputs.rec_default_video_preset.active_id());
 
     config.quick_access_position = combo_value(&inputs.quick_access_position, "Left");
     config.quick_access_overlay_size = inputs.quick_access_overlay_size.value();
@@ -595,6 +600,10 @@ fn combo_value(combo: &SettingsSelect, fallback: &str) -> String {
     combo.active_id().unwrap_or_else(|| fallback.to_string())
 }
 
+fn default_preset_choice(id: Option<String>) -> Option<String> {
+    id.filter(|id| !id.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -750,6 +759,16 @@ mod tests {
         assert_eq!(updated["quick_access"]["close_after_uploading"], true);
 
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn default_video_preset_saves_none_for_the_builtin_choice() {
+        assert_eq!(default_preset_choice(Some(String::new())), None);
+        assert_eq!(default_preset_choice(None), None);
+        assert_eq!(
+            default_preset_choice(Some("Interview".to_string())),
+            Some("Interview".to_string())
+        );
     }
 
     #[test]

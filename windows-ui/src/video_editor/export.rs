@@ -96,6 +96,11 @@ pub(super) struct ExportModel {
     pub trim_start: f64,
     pub trim_end: f64,
     pub cuts: Vec<f64>,
+    /// One speed per kept source interval, in composition order; a missing or
+    /// malformed entry plays at 1x.
+    pub segment_speeds: Vec<f64>,
+    /// Seconds the last frame is held after the footage ends.
+    pub freeze_tail: f64,
     pub zooms: Vec<ZoomClip>,
     /// The camera settings the preview is using, so the export's camera is the
     /// same camera.
@@ -115,22 +120,46 @@ pub(super) struct ExportModel {
     /// Files that may carry the recording's sound, in order of preference;
     /// the first with an audio stream is used. Empty means the source.
     pub audio: Vec<PathBuf>,
+    pub effects: super::project::EffectsSettings,
 }
 
-/// One contiguous kept span of footage, rendered back to back.
+/// One contiguous kept span of footage, rendered back to back. `speed` is how
+/// fast its source runs against composition time; 0 holds the last frame of
+/// the footage for the span's whole length.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct SourceSpan {
     pub composition_start: f64,
     pub source_start: f64,
+    /// The snapped source time the span ends at, so a sped span keeps its whole
+    /// source range however many output frames it rounds to.
+    pub source_end: f64,
+    pub speed: f64,
     pub frames: u64,
 }
 
+/// The slowest and fastest playback a span may carry.
+const MIN_SPEED: f64 = 0.125;
+const MAX_SPEED: f64 = 8.0;
+
+/// The speed an interval plays at: its entry when it is a usable number,
+/// otherwise 1x.
+fn interval_speed(speeds: &[f64], index: usize) -> f64 {
+    speeds
+        .get(index)
+        .copied()
+        .filter(|speed| speed.is_finite() && *speed > 0.0)
+        .map_or(1.0, |speed| speed.clamp(MIN_SPEED, MAX_SPEED))
+}
+
 /// Split the trimmed footage at the cuts, rounding frame counts on the shared
-/// grid so the spans join without a gap, a repeat, or frame drift.
+/// grid so the spans join without a gap, a repeat, or frame drift. Each kept
+/// interval plays at its own speed, and its output length is rounded against
+/// the running total so a long sped export does not drift.
 pub(super) fn frame_plan(
     trim_start: f64,
     trim_end: f64,
     cuts: &[f64],
+    speeds: &[f64],
     fps: f64,
 ) -> Vec<SourceSpan> {
     let start = trim_start.max(0.0);
@@ -159,17 +188,31 @@ pub(super) fn frame_plan(
         .chain(cut_frames)
         .chain(std::iter::once(total))
         .collect();
-    boundaries
-        .windows(2)
-        .filter_map(|pair| {
-            let frames = pair[1] - pair[0];
-            (frames > 0).then_some(SourceSpan {
-                composition_start: pair[0] as f64 / fps,
-                source_start: origin + pair[0] as f64 / fps,
-                frames,
-            })
-        })
-        .collect()
+    let mut spans = Vec::with_capacity(boundaries.len());
+    let mut elapsed = 0.0f64;
+    let mut composition_frames = 0u64;
+    for (index, pair) in boundaries.windows(2).enumerate() {
+        let frames = pair[1] - pair[0];
+        if frames == 0 {
+            continue;
+        }
+        let speed = interval_speed(speeds, index);
+        elapsed += frames as f64 / speed;
+        let boundary = elapsed.round() as u64;
+        let output_frames = boundary.saturating_sub(composition_frames);
+        if output_frames == 0 {
+            continue;
+        }
+        spans.push(SourceSpan {
+            composition_start: composition_frames as f64 / fps,
+            source_start: origin + pair[0] as f64 / fps,
+            source_end: origin + pair[1] as f64 / fps,
+            speed,
+            frames: output_frames,
+        });
+        composition_frames = boundary;
+    }
+    spans
 }
 
 pub(super) fn total_frames(spans: &[SourceSpan]) -> u64 {
@@ -177,6 +220,7 @@ pub(super) fn total_frames(spans: &[SourceSpan]) -> u64 {
 }
 
 /// Source time of a global composition frame, through the span that owns it.
+/// A held span answers its first source frame for every frame it covers.
 pub(super) fn frame_source_time(spans: &[SourceSpan], frame: u64, fps: f64) -> Option<f64> {
     if !fps.is_finite() || fps <= 0.0 {
         return None;
@@ -184,7 +228,11 @@ pub(super) fn frame_source_time(spans: &[SourceSpan], frame: u64, fps: f64) -> O
     let mut remaining = frame;
     for span in spans {
         if remaining < span.frames {
-            return Some(span.source_start + remaining as f64 / fps);
+            if span.speed <= 0.0 || !span.speed.is_finite() {
+                return Some(span.source_start);
+            }
+            let time = span.source_start + remaining as f64 * span.speed / fps;
+            return Some(time.min(span.source_end));
         }
         remaining -= span.frames;
     }
@@ -575,7 +623,29 @@ fn plan_render(model: &ExportModel, settings: ExportSettings) -> Result<RenderPl
         .or_else(|| ffmpeg::probe_frame_rate(&model.source))
         .filter(|fps| fps.is_finite() && *fps > 0.0)
         .unwrap_or(DEFAULT_FPS);
-    let spans = frame_plan(model.trim_start, model.trim_end, &model.cuts, fps);
+    let mut spans = frame_plan(
+        model.trim_start,
+        model.trim_end,
+        &model.cuts,
+        &model.segment_speeds,
+        fps,
+    );
+    if model.freeze_tail.is_finite() && model.freeze_tail > 0.0 {
+        let frames = (model.freeze_tail * fps).round() as u64;
+        let hold = spans
+            .last()
+            .map(|last| (last.source_end - 1.0 / fps).max(last.source_start));
+        if let (Some(hold), true) = (hold, frames > 0) {
+            let composition_start = total_frames(&spans) as f64 / fps;
+            spans.push(SourceSpan {
+                composition_start,
+                source_start: hold,
+                source_end: hold,
+                speed: 0.0,
+                frames,
+            });
+        }
+    }
     let total = total_frames(&spans);
     if total == 0 {
         return Err(End::Failed("there is no footage to export".to_string()));
@@ -587,12 +657,11 @@ fn plan_render(model: &ExportModel, settings: ExportSettings) -> Result<RenderPl
         spans
             .iter()
             .map(|span| {
-                let duration = span.frames as f64 / fps;
                 (
                     span.composition_start,
-                    span.composition_start + duration,
+                    span.composition_start + span.frames as f64 / fps,
                     span.source_start,
-                    span.source_start + duration,
+                    span.source_end,
                 )
             })
             .collect(),
@@ -795,6 +864,7 @@ fn render_range(
         None => None,
     };
     let mut sink = canvas::FramedSink::new(sink, framer);
+    sink.set_captions(canvas::CaptionOverlay::new(model, plan, space));
     let mut camera = ZoomCameraCache::default();
     let camera_settings = zoom::ZoomCameraSettings {
         frame_rate: fps,
@@ -985,6 +1055,8 @@ fn render_range(
         }
     };
     let mut span_base = 0u64;
+    let mut camera_hold: Vec<u8> = Vec::new();
+    let mut camera_hold_size = (0u32, 0u32);
 
     // The rest rect and zoom area when the export has a canvas: a zoom then
     // grows the card over the padding, as the preview does.
@@ -1030,10 +1102,24 @@ fn render_range(
         };
         let mut track_reader = match webcam.as_ref() {
             Some(webcam) => {
-                let at = span.source_start + local_first as f64 / fps;
+                let hold = span.speed <= 0.0 || !span.speed.is_finite();
+                let at = if hold {
+                    span.source_start
+                } else {
+                    span.source_start + local_first as f64 * span.speed / fps
+                };
                 let start = webcam.start_at(at);
-                let lead = webcam.lead_at(at);
-                let duration = count as f64 / fps;
+                let lead = if hold {
+                    webcam.lead_at(at)
+                } else {
+                    webcam.lead_at(at) / span.speed
+                };
+                let duration = if hold { 1.0 / fps } else { count as f64 / fps };
+                let time_scale = if hold {
+                    webcam.time_scale()
+                } else {
+                    webcam.time_scale() / span.speed
+                };
                 let decode = webcam::camera_decode_size(webcam.source_size, size);
                 match webcam::TrackReader::open(
                     &webcam.path,
@@ -1041,7 +1127,7 @@ fn render_range(
                     duration,
                     fps,
                     decode,
-                    webcam.time_scale(),
+                    time_scale,
                     lead,
                 ) {
                     Some(reader) => Some(reader),
@@ -1057,6 +1143,7 @@ fn render_range(
             }
             None => None,
         };
+        camera_hold.clear();
         let mut span_frame = 0u64;
         while span_frame < count {
             if cancel.load(Ordering::Relaxed) {
@@ -1447,7 +1534,19 @@ fn render_range(
             }
             // The camera layer sits over the cursor, the way the bubble window
             // sat over the desktop while the recording ran.
-            let camera_frame = track_reader.as_mut().and_then(|reader| reader.next_frame());
+            let camera_frame = match track_reader.as_mut() {
+                Some(reader) if span.speed > 0.0 => reader.next_frame(),
+                Some(reader) => {
+                    if camera_hold.is_empty() {
+                        if let Some((pixels, hold_size)) = reader.next_frame() {
+                            camera_hold.extend_from_slice(pixels);
+                            camera_hold_size = hold_size;
+                        }
+                    }
+                    (!camera_hold.is_empty()).then_some((camera_hold.as_slice(), camera_hold_size))
+                }
+                None => None,
+            };
             if let Some(webcam) = webcam.as_ref() {
                 let hidden = webcam::silence_hide_at(
                     &webcam.silence,
@@ -1875,8 +1974,25 @@ fn decoder_command(
     size: (u32, u32),
     hardware: bool,
 ) -> std::process::Command {
-    let source_start = span.source_start + first as f64 / fps;
+    let hold = span.speed <= 0.0 || !span.speed.is_finite();
+    let source_start = if hold {
+        span.source_start
+    } else {
+        (span.source_start + first as f64 * span.speed / fps).min(span.source_end)
+    };
     let duration = count as f64 / fps;
+    let filter = if hold {
+        format!(
+            "trim=end_frame=1,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration={duration:.6},\
+             fps={fps}:start_time=0,scale={}:{}",
+            size.0, size.1
+        )
+    } else {
+        format!(
+            "setpts=(PTS-STARTPTS)/{:.9},fps={fps}:start_time=0,scale={}:{}",
+            span.speed, size.0, size.1
+        )
+    };
     let mut command = crate::utils::hidden_command(ffmpeg::ffmpeg_executable());
     command.args(["-hide_banner", "-loglevel", "error", "-nostdin"]);
     if hardware {
@@ -1890,7 +2006,7 @@ fn decoder_command(
         .arg("-an")
         // A seek between source frames leaves a positive first timestamp.
         // Fill that leading gap on the output grid instead of losing a frame.
-        .args(["-vf", &format!("scale={}:{},fps={fps}:start_time=0", size.0, size.1)])
+        .args(["-vf", &filter])
         .args(["-frames:v", &count.to_string()])
         .args(["-f", "rawvideo", "-pix_fmt", "nv12", "pipe:1"]);
     command
@@ -2255,6 +2371,9 @@ fn draw_cursor(
     if !sidecar.can_render_cursor_overlay() {
         return;
     }
+    if super::typing::is_typing_at(&sidecar.keys, &sidecar.pointer, source_time) {
+        return;
+    }
     let motion = CursorMotion {
         smooth: settings.smooth,
         hide_idle: settings.hide_idle,
@@ -2511,9 +2630,10 @@ struct CursorScratch {
 #[cfg(test)]
 mod tests {
     use super::{
-        decoder_command, frame_plan, frame_source_time, h264_level, output_size, rate, render,
-        render_with_workers, split_ranges, start_export, start_export_with_settings, total_frames,
-        zoom, Codec, Encoder, End, ExportModel, ExportSettings, ExportUpdate, SourceSpan,
+        decoder_command, frame_plan, frame_source_time, h264_level, output_size, plan_render, rate,
+        render, render_with_workers, split_ranges, start_export, start_export_with_settings,
+        total_frames, zoom, Codec, Encoder, End, ExportModel, ExportSettings, ExportUpdate,
+        SourceSpan,
     };
     use crate::recording::editor::ffmpeg;
     use crate::recording::editor::model::{CursorRotationMode, CursorSettings};
@@ -2526,6 +2646,8 @@ mod tests {
         let span = SourceSpan {
             composition_start: 0.0,
             source_start: 1.0,
+            source_end: 2.0,
+            speed: 1.0,
             frames: 30,
         };
         let args = |hardware| -> Vec<String> {
@@ -2589,7 +2711,7 @@ mod tests {
     #[test]
     fn kept_spans_skip_cuts_without_gaps_or_repeats() {
         let fps = 30.0;
-        let spans = frame_plan(1.0, 9.0, &[3.0, 5.0], fps);
+        let spans = frame_plan(1.0, 9.0, &[3.0, 5.0], &[], fps);
         assert_eq!(spans.len(), 3);
         assert_eq!(total_frames(&spans), 240);
         assert_eq!(spans[0].frames, 60);
@@ -2611,7 +2733,7 @@ mod tests {
     #[test]
     fn a_cut_between_frames_lands_on_the_nearest_frame_boundary() {
         let fps = 30.0;
-        let spans = frame_plan(0.0, 2.0, &[1.05], fps);
+        let spans = frame_plan(0.0, 2.0, &[1.05], &[], fps);
         assert_eq!(total_frames(&spans), 60);
         assert_eq!(spans[0].frames, 32);
         assert_eq!(spans[1].frames, 28);
@@ -2624,7 +2746,7 @@ mod tests {
     #[test]
     fn a_trim_inside_a_frame_snaps_to_the_frame_grid() {
         let fps = 30.0;
-        let spans = frame_plan(1.017, 3.017, &[], fps);
+        let spans = frame_plan(1.017, 3.017, &[], &[], fps);
         assert_eq!(spans.len(), 1);
         assert_eq!(total_frames(&spans), 60);
         assert!((spans[0].source_start - 1.0 / 30.0 * 31.0).abs() < 1e-6);
@@ -2633,12 +2755,327 @@ mod tests {
 
     #[test]
     fn ignored_cuts_and_empty_ranges_produce_no_plan() {
-        assert!(frame_plan(2.0, 2.0, &[], 30.0).is_empty());
-        assert!(frame_plan(0.0, 5.0, &[], 0.0).is_empty());
-        assert!(frame_plan(0.0, f64::NAN, &[], 30.0).is_empty());
-        let spans = frame_plan(1.0, 9.0, &[0.5, 9.5, f64::NAN], 30.0);
+        assert!(frame_plan(2.0, 2.0, &[], &[], 30.0).is_empty());
+        assert!(frame_plan(0.0, 5.0, &[], &[], 0.0).is_empty());
+        assert!(frame_plan(0.0, f64::NAN, &[], &[], 30.0).is_empty());
+        let spans = frame_plan(1.0, 9.0, &[0.5, 9.5, f64::NAN], &[], 30.0);
         assert_eq!(spans.len(), 1);
         assert_eq!(total_frames(&spans), 240);
+    }
+
+    #[test]
+    fn a_speed_changes_the_output_length_and_keeps_the_source_range() {
+        let fps = 30.0;
+        let spans = frame_plan(0.0, 6.0, &[2.0], &[1.0, 3.0], fps);
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0].frames, 60);
+        assert_eq!(spans[1].frames, 40);
+        assert_eq!(total_frames(&spans), 100);
+        assert!((spans[0].composition_start - 0.0).abs() < 1e-9);
+        assert!((spans[0].source_start - 0.0).abs() < 1e-9);
+        assert!((spans[0].source_end - 2.0).abs() < 1e-9);
+        assert!((spans[0].speed - 1.0).abs() < 1e-9);
+        assert!((spans[1].composition_start - 2.0).abs() < 1e-9);
+        assert!((spans[1].source_start - 2.0).abs() < 1e-9);
+        assert!((spans[1].source_end - 6.0).abs() < 1e-9);
+        assert!((spans[1].speed - 3.0).abs() < 1e-9);
+        assert!((frame_source_time(&spans, 59, fps).unwrap() - 59.0 / 30.0).abs() < 1e-9);
+        assert!((frame_source_time(&spans, 60, fps).unwrap() - 2.0).abs() < 1e-9);
+        assert!((frame_source_time(&spans, 99, fps).unwrap() - 5.9).abs() < 1e-9);
+        assert_eq!(frame_source_time(&spans, 100, fps), None);
+    }
+
+    #[test]
+    fn a_sped_span_never_maps_past_its_source_end() {
+        let fps = 30.0;
+        let spans = frame_plan(0.0, 4.0, &[], &[8.0], fps);
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].frames, 15);
+        let last = frame_source_time(&spans, 14, fps).unwrap();
+        assert!(last <= spans[0].source_end + 1e-9, "{last}");
+        assert!((last - (4.0 - 8.0 / fps)).abs() < 1e-9, "{last}");
+    }
+
+    #[test]
+    fn sped_intervals_round_against_the_running_total() {
+        let fps = 30.0;
+        let cuts = [1.0 / fps, 2.0 / fps];
+        let spans = frame_plan(0.0, 3.0 / fps, &cuts, &[3.0, 3.0, 3.0], fps);
+        assert_eq!(total_frames(&spans), 1);
+        assert_eq!(spans.len(), 1);
+        assert!((spans[0].source_start - 1.0 / fps).abs() < 1e-9);
+        assert!((spans[0].source_end - 2.0 / fps).abs() < 1e-9);
+    }
+
+    #[test]
+    fn malformed_speeds_fall_back_to_one_and_out_of_range_speeds_clamp() {
+        let fps = 30.0;
+        let odd = frame_plan(
+            0.0,
+            4.0,
+            &[1.0, 2.0, 3.0],
+            &[f64::NAN, 0.0, f64::INFINITY],
+            fps,
+        );
+        assert_eq!(odd.len(), 4);
+        assert!(odd.iter().all(|span| (span.speed - 1.0).abs() < 1e-9));
+        assert_eq!(total_frames(&odd), 120);
+        assert_eq!(total_frames(&frame_plan(0.0, 4.0, &[], &[], fps)), 120);
+        assert_eq!(total_frames(&frame_plan(0.0, 1.0, &[], &[0.01], fps)), 240);
+        assert_eq!(total_frames(&frame_plan(0.0, 1.0, &[], &[-1.0], fps)), 30);
+        assert_eq!(total_frames(&frame_plan(0.0, 1.0, &[], &[100.0], fps)), 4);
+        let missing = frame_plan(0.0, 2.0, &[1.0], &[2.0], fps);
+        assert_eq!(missing.len(), 2);
+        assert!((missing[0].speed - 2.0).abs() < 1e-9);
+        assert!((missing[1].speed - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_freeze_tail_holds_the_last_source_frame_for_its_length() {
+        let model = ExportModel {
+            source: PathBuf::from("in.mp4"),
+            source_size: (320, 240),
+            trim_start: 0.0,
+            trim_end: 2.0,
+            cuts: Vec::new(),
+            segment_speeds: vec![2.0],
+            freeze_tail: 1.0,
+            zooms: Vec::new(),
+            zoom_camera: zoom::ZoomCameraSettings::default(),
+            cursor: CursorSettings::default(),
+            sidecar: None,
+            webcam: None,
+            stage: None,
+            canvas: None,
+            crf: 20,
+            audio: Vec::new(),
+            effects: Default::default(),
+        };
+        let plan = plan_render(
+            &model,
+            ExportSettings {
+                fps: Some(30),
+                ..ExportSettings::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(plan.total, 60);
+        let hold = plan.spans.last().unwrap();
+        assert_eq!(hold.speed, 0.0);
+        assert_eq!(hold.frames, 30);
+        assert_eq!(hold.source_start, hold.source_end);
+        assert!((hold.source_start - (2.0 - 1.0 / 30.0)).abs() < 1e-9);
+        assert!((hold.composition_start - 1.0).abs() < 1e-9);
+        assert_eq!(
+            frame_source_time(&plan.spans, 45, 30.0),
+            Some(hold.source_start)
+        );
+        assert!((plan.mapping.source_at(1.5).unwrap() - hold.source_start).abs() < 1e-9);
+        assert!((plan.mapping.source_at(0.5).unwrap() - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_missing_or_malformed_freeze_tail_adds_nothing() {
+        let model = ExportModel {
+            source: PathBuf::from("in.mp4"),
+            source_size: (320, 240),
+            trim_start: 0.0,
+            trim_end: 2.0,
+            cuts: Vec::new(),
+            segment_speeds: Vec::new(),
+            freeze_tail: f64::NAN,
+            zooms: Vec::new(),
+            zoom_camera: zoom::ZoomCameraSettings::default(),
+            cursor: CursorSettings::default(),
+            sidecar: None,
+            webcam: None,
+            stage: None,
+            canvas: None,
+            crf: 20,
+            audio: Vec::new(),
+            effects: Default::default(),
+        };
+        let plan = plan_render(
+            &model,
+            ExportSettings {
+                fps: Some(30),
+                ..ExportSettings::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(plan.total, 60);
+        assert!(plan.spans.iter().all(|span| span.speed > 0.0));
+        assert_eq!(plan.mapping.source_at(1.5), Some(1.5));
+    }
+
+    #[test]
+    fn a_sped_span_seeks_on_the_source_clock_and_retimes_the_decoder() {
+        let span = SourceSpan {
+            composition_start: 0.0,
+            source_start: 2.0,
+            source_end: 4.0,
+            speed: 3.0,
+            frames: 20,
+        };
+        let args = |first, count| -> Vec<String> {
+            decoder_command(
+                Path::new("in.mp4"),
+                span,
+                first,
+                count,
+                30.0,
+                (640, 360),
+                false,
+            )
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+        };
+        let followed = |args: &[String], flag: &str| {
+            args.iter()
+                .position(|arg| arg == flag)
+                .map(|index| args[index + 1].clone())
+        };
+        let first = args(5, 15);
+        assert_eq!(followed(&first, "-ss").as_deref(), Some("2.500000"));
+        assert_eq!(followed(&first, "-t").as_deref(), Some("0.500000"));
+        assert_eq!(followed(&first, "-frames:v").as_deref(), Some("15"));
+        assert_eq!(
+            followed(&first, "-vf").as_deref(),
+            Some("setpts=(PTS-STARTPTS)/3.000000000,fps=30:start_time=0,scale=640:360")
+        );
+        let last = args(19, 1);
+        assert_eq!(followed(&last, "-ss").as_deref(), Some("3.900000"));
+    }
+
+    #[test]
+    fn a_held_span_decodes_one_frame_and_clones_it() {
+        let span = SourceSpan {
+            composition_start: 2.0,
+            source_start: 1.966_667,
+            source_end: 1.966_667,
+            speed: 0.0,
+            frames: 30,
+        };
+        let args: Vec<String> =
+            decoder_command(Path::new("in.mp4"), span, 0, 30, 30.0, (640, 360), false)
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect();
+        let followed = |flag: &str| {
+            args.iter()
+                .position(|arg| arg == flag)
+                .map(|index| args[index + 1].clone())
+        };
+        assert_eq!(followed("-ss").as_deref(), Some("1.966667"));
+        assert_eq!(followed("-t").as_deref(), Some("1.000000"));
+        assert_eq!(followed("-frames:v").as_deref(), Some("30"));
+        assert_eq!(
+            followed("-vf").as_deref(),
+            Some(
+                "trim=end_frame=1,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=1.000000,fps=30:start_time=0,scale=640:360"
+            )
+        );
+    }
+
+    #[test]
+    fn a_slow_motion_span_reaches_the_end_of_its_footage() {
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-export-slow-motion-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("one-second.mp4");
+        let generated = crate::utils::hidden_command(ffmpeg::ffmpeg_executable())
+            .args(["-y", "-hide_banner", "-loglevel", "error"])
+            .args([
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=320x240:rate=30:duration=1",
+            ])
+            .args(["-pix_fmt", "yuv420p", "-c:v", "libx264"])
+            .arg(&source)
+            .output();
+        if !generated.is_ok_and(|output| output.status.success()) {
+            eprintln!("skipping the slow motion export test: ffmpeg is unavailable");
+            return;
+        }
+        let settings = ExportSettings {
+            fps: Some(30),
+            hardware: false,
+            ..ExportSettings::default()
+        };
+        for (speed, frames, seconds) in [(0.5, 60u64, 2.0), (0.125, 240, 8.0)] {
+            let model = ExportModel {
+                source: source.clone(),
+                source_size: (320, 240),
+                trim_start: 0.0,
+                trim_end: 1.0,
+                cuts: Vec::new(),
+                segment_speeds: vec![speed],
+                freeze_tail: 0.0,
+                zooms: Vec::new(),
+                zoom_camera: zoom::ZoomCameraSettings::default(),
+                cursor: CursorSettings::default(),
+                sidecar: None,
+                webcam: None,
+                stage: None,
+                canvas: None,
+                crf: 28,
+                audio: Vec::new(),
+                effects: Default::default(),
+            };
+            let output = dir.join(format!("out-{speed}.mp4"));
+            let (sender, _receiver) = mpsc::channel();
+            let cancel = Arc::new(AtomicBool::new(false));
+            render_with_workers(
+                &model,
+                &output,
+                &sender,
+                &cancel,
+                Encoder::X264,
+                settings,
+                Some(1),
+            )
+            .unwrap_or_else(|error| panic!("{speed}x failed: {error:?}"));
+            let probe = crate::utils::hidden_command(ffmpeg::ffprobe_executable())
+                .args([
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "v:0",
+                    "-count_frames",
+                    "-show_entries",
+                    "stream=nb_read_frames,duration",
+                    "-of",
+                    "json",
+                ])
+                .arg(&output)
+                .output()
+                .unwrap();
+            let report: serde_json::Value = serde_json::from_slice(&probe.stdout).unwrap();
+            let stream = &report["streams"][0];
+            let field = |key: &str| -> f64 {
+                let value = &stream[key];
+                value
+                    .as_f64()
+                    .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
+                    .unwrap_or_else(|| panic!("the {speed}x export has no {key}: {report}"))
+            };
+            assert_eq!(
+                field("nb_read_frames") as u64,
+                frames,
+                "the {speed}x export has {report}"
+            );
+            let duration = field("duration");
+            assert!(
+                (duration - seconds).abs() <= 2.0 / 30.0,
+                "the {speed}x export runs {duration} s: {report}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -2814,6 +3251,8 @@ mod tests {
             trim_start: 0.0,
             trim_end: 3.0,
             cuts: Vec::new(),
+            segment_speeds: Vec::new(),
+            freeze_tail: 0.0,
             zooms: Vec::new(),
             zoom_camera: zoom::ZoomCameraSettings::default(),
             cursor: CursorSettings::default(),
@@ -2823,6 +3262,7 @@ mod tests {
             canvas: None,
             crf: 24,
             audio: Vec::new(),
+            effects: Default::default(),
         };
         let output = dir.join("out.mp4");
         let handle = start_export_with_settings(
@@ -2863,6 +3303,8 @@ mod tests {
             trim_start: 0.0,
             trim_end: 3.0,
             cuts: Vec::new(),
+            segment_speeds: Vec::new(),
+            freeze_tail: 0.0,
             zooms: Vec::new(),
             zoom_camera: zoom::ZoomCameraSettings::default(),
             cursor: CursorSettings::default(),
@@ -2872,6 +3314,7 @@ mod tests {
             canvas: None,
             crf: 24,
             audio: Vec::new(),
+            effects: Default::default(),
         };
         let joined = dir.join("joined.mp4");
         let (sender, _receiver) = mpsc::channel();
@@ -2952,6 +3395,8 @@ mod tests {
             trim_start: 0.0,
             trim_end: 6.0,
             cuts: vec![2.0],
+            segment_speeds: Vec::new(),
+            freeze_tail: 0.0,
             zooms: vec![crate::video_editor::timeline::ZoomClip {
                 start: 1.0,
                 end: 4.0,
@@ -2970,6 +3415,7 @@ mod tests {
             canvas: None,
             crf: 0,
             audio: Vec::new(),
+            effects: Default::default(),
         };
         let settings = ExportSettings {
             fps: Some(30),
@@ -3054,6 +3500,8 @@ mod tests {
             trim_start: 0.0,
             trim_end: 2.0,
             cuts: vec![],
+            segment_speeds: Vec::new(),
+            freeze_tail: 0.0,
             zooms: vec![ZoomClip {
                 start: 0.2,
                 end: 1.4,
@@ -3072,6 +3520,7 @@ mod tests {
             canvas: None,
             crf: 18,
             audio: Vec::new(),
+            effects: Default::default(),
         };
         for fps in [24, 60] {
             let mut videos = Vec::new();
@@ -3165,6 +3614,8 @@ mod tests {
             trim_start: 0.0,
             trim_end: 0.5,
             cuts: vec![0.25],
+            segment_speeds: Vec::new(),
+            freeze_tail: 0.0,
             zooms: Vec::new(),
             zoom_camera: zoom::ZoomCameraSettings::default(),
             cursor: CursorSettings::default(),
@@ -3174,6 +3625,7 @@ mod tests {
             canvas: None,
             crf: 20,
             audio: Vec::new(),
+            effects: Default::default(),
         };
         for fps in [24, 60] {
             let settings = ExportSettings {
@@ -3346,6 +3798,8 @@ mod tests {
             trim_start,
             trim_end,
             cuts,
+            segment_speeds: Vec::new(),
+            freeze_tail: 0.0,
             zooms: Vec::new(),
             zoom_camera: crate::video_editor::zoom::ZoomCameraSettings::default(),
             cursor: CursorSettings {
@@ -3365,6 +3819,7 @@ mod tests {
             canvas: None,
             crf: 20,
             audio: Vec::new(),
+            effects: Default::default(),
         };
         let handle = start_export(model, output.clone());
         loop {
@@ -3422,6 +3877,8 @@ mod tests {
             trim_start,
             trim_end,
             cuts,
+            segment_speeds: Vec::new(),
+            freeze_tail: 0.0,
             zooms: vec![crate::video_editor::timeline::ZoomClip {
                 start: 0.0,
                 end: expected,
@@ -3443,6 +3900,7 @@ mod tests {
             canvas: None,
             crf: 23,
             audio: Vec::new(),
+            effects: Default::default(),
         };
         let handle = start_export(model, output.clone());
         loop {
@@ -3487,6 +3945,8 @@ mod tests {
             trim_start: 0.0,
             trim_end: 60.0,
             cuts: Vec::new(),
+            segment_speeds: Vec::new(),
+            freeze_tail: 0.0,
             zooms: Vec::new(),
             zoom_camera: crate::video_editor::zoom::ZoomCameraSettings::default(),
             cursor: CursorSettings::default(),
@@ -3496,6 +3956,7 @@ mod tests {
             canvas: None,
             crf: 23,
             audio: Vec::new(),
+            effects: Default::default(),
         };
         let handle = start_export(model, output.clone());
         let progress = handle
@@ -4057,6 +4518,8 @@ mod tests {
                 trim_start: 0.0,
                 trim_end: 10.0,
                 cuts: Vec::new(),
+                segment_speeds: Vec::new(),
+                freeze_tail: 0.0,
                 zooms,
                 zoom_camera: crate::video_editor::zoom::ZoomCameraSettings::default(),
                 cursor: CursorSettings::default(),
@@ -4066,6 +4529,7 @@ mod tests {
                 canvas: None,
                 crf: 20,
                 audio: Vec::new(),
+                effects: Default::default(),
             };
             let started = std::time::Instant::now();
             let handle = start_export(model, output.clone());
@@ -4352,6 +4816,8 @@ mod webcam_export_tests {
             trim_start: 0.0,
             trim_end: 1.5,
             cuts: Vec::new(),
+            segment_speeds: Vec::new(),
+            freeze_tail: 0.0,
             zooms,
             zoom_camera: crate::video_editor::zoom::ZoomCameraSettings::default(),
             cursor: CursorSettings::default(),
@@ -4373,6 +4839,7 @@ mod webcam_export_tests {
             canvas: None,
             crf: 30,
             audio: Vec::new(),
+            effects: Default::default(),
         };
         let handle = start_export(model, output.clone());
         loop {
@@ -5233,6 +5700,8 @@ mod webcam_export_tests {
             trim_start: 2.0,
             trim_end: 4.5,
             cuts: Vec::new(),
+            segment_speeds: Vec::new(),
+            freeze_tail: 0.0,
             zooms: Vec::new(),
             zoom_camera: crate::video_editor::zoom::ZoomCameraSettings::default(),
             cursor: CursorSettings::default(),
@@ -5254,6 +5723,7 @@ mod webcam_export_tests {
             canvas: None,
             crf: 30,
             audio: Vec::new(),
+            effects: Default::default(),
         };
         let handle = start_export(model, output.clone());
         loop {
@@ -5390,6 +5860,8 @@ mod webcam_export_tests {
             trim_start: 0.0,
             trim_end: 1.5,
             cuts: Vec::new(),
+            segment_speeds: Vec::new(),
+            freeze_tail: 0.0,
             zooms: Vec::new(),
             zoom_camera: crate::video_editor::zoom::ZoomCameraSettings::default(),
             cursor: CursorSettings::default(),
@@ -5414,6 +5886,7 @@ mod webcam_export_tests {
             canvas: None,
             crf: 30,
             audio: Vec::new(),
+            effects: Default::default(),
         };
         let handle = start_export(model, output.clone());
         loop {
@@ -5542,6 +6015,8 @@ mod webcam_export_tests {
                 trim_start: 0.0,
                 trim_end: 2.8,
                 cuts: Vec::new(),
+                segment_speeds: Vec::new(),
+                freeze_tail: 0.0,
                 zooms: Vec::new(),
                 zoom_camera: crate::video_editor::zoom::ZoomCameraSettings {
                     motion_blur: 0.0,
@@ -5573,6 +6048,7 @@ mod webcam_export_tests {
                 canvas: None,
                 crf: 30,
                 audio: Vec::new(),
+                effects: Default::default(),
             };
             let handle = start_export(model, output.clone());
             loop {
@@ -5903,6 +6379,8 @@ mod webcam_export_tests {
                 trim_start: 0.0,
                 trim_end: 1.5,
                 cuts: Vec::new(),
+                segment_speeds: Vec::new(),
+                freeze_tail: 0.0,
                 zooms: Vec::new(),
                 zoom_camera: crate::video_editor::zoom::ZoomCameraSettings {
                     motion_blur,
@@ -5927,6 +6405,7 @@ mod webcam_export_tests {
                 canvas: None,
                 crf: 30,
                 audio: Vec::new(),
+                effects: Default::default(),
             };
             let handle = start_export(model, output.clone());
             loop {
@@ -6073,6 +6552,8 @@ mod webcam_export_tests {
                 trim_start: 0.0,
                 trim_end: 2.5,
                 cuts: Vec::new(),
+                segment_speeds: Vec::new(),
+                freeze_tail: 0.0,
                 zooms: Vec::new(),
                 zoom_camera: crate::video_editor::zoom::ZoomCameraSettings {
                     motion_blur: 0.0,
@@ -6097,6 +6578,7 @@ mod webcam_export_tests {
                 canvas: None,
                 crf: 30,
                 audio: Vec::new(),
+                effects: Default::default(),
             };
             let handle = start_export(model, output.clone());
             loop {
@@ -6180,6 +6662,8 @@ mod webcam_export_tests {
             trim_start: 0.0,
             trim_end: 1.0,
             cuts: Vec::new(),
+            segment_speeds: Vec::new(),
+            freeze_tail: 0.0,
             zooms: Vec::new(),
             zoom_camera: crate::video_editor::zoom::ZoomCameraSettings::default(),
             cursor: CursorSettings::default(),
@@ -6189,6 +6673,7 @@ mod webcam_export_tests {
             canvas: None,
             crf: 18,
             audio: Vec::new(),
+            effects: Default::default(),
         };
         let settings = ExportSettings {
             fps: Some(30),
@@ -6247,6 +6732,8 @@ mod webcam_export_tests {
             trim_start: 0.0,
             trim_end: 1.0,
             cuts: Vec::new(),
+            segment_speeds: Vec::new(),
+            freeze_tail: 0.0,
             zooms: Vec::new(),
             zoom_camera: crate::video_editor::zoom::ZoomCameraSettings::default(),
             cursor: CursorSettings::default(),
@@ -6262,6 +6749,7 @@ mod webcam_export_tests {
             }),
             crf: 18,
             audio: Vec::new(),
+            effects: Default::default(),
         };
         let settings = ExportSettings {
             fps: Some(30),
@@ -6336,6 +6824,8 @@ mod webcam_export_tests {
             trim_start: 0.0,
             trim_end: 2.0,
             cuts: Vec::new(),
+            segment_speeds: Vec::new(),
+            freeze_tail: 0.0,
             zooms: vec![crate::video_editor::timeline::ZoomClip {
                 start: 0.0,
                 end: 2.0,
@@ -6360,6 +6850,7 @@ mod webcam_export_tests {
             }),
             crf: 18,
             audio: Vec::new(),
+            effects: Default::default(),
         };
         let settings = ExportSettings {
             fps: Some(30),
@@ -6476,6 +6967,8 @@ mod webcam_export_tests {
                 trim_start: 0.0,
                 trim_end: 1.5,
                 cuts: Vec::new(),
+                segment_speeds: Vec::new(),
+                freeze_tail: 0.0,
                 zooms: Vec::new(),
                 zoom_camera: crate::video_editor::zoom::ZoomCameraSettings {
                     motion_blur: 0.0,
@@ -6500,6 +6993,7 @@ mod webcam_export_tests {
                 canvas,
                 crf: 30,
                 audio: Vec::new(),
+                effects: Default::default(),
             };
             let handle = start_export(model, output.clone());
             loop {
@@ -6679,6 +7173,8 @@ mod webcam_export_tests {
                 trim_start: 0.0,
                 trim_end: 1.5,
                 cuts: Vec::new(),
+                segment_speeds: Vec::new(),
+                freeze_tail: 0.0,
                 zooms: Vec::new(),
                 zoom_camera: crate::video_editor::zoom::ZoomCameraSettings {
                     motion_blur: 0.0,
@@ -6703,6 +7199,7 @@ mod webcam_export_tests {
                 canvas,
                 crf: 30,
                 audio: Vec::new(),
+                effects: Default::default(),
             };
             let handle = start_export(model, output.clone());
             loop {

@@ -250,6 +250,46 @@ impl CardTrail {
         })
     }
 
+    /// The card standing still, mapped into the same output pixels `new`
+    /// produces, so the preview can keep drawing one whole-stage card layer
+    /// while motion blur is on and the camera rests or moves less than a
+    /// pixel. The coverage is crisp, one sample per pixel and no smear; this
+    /// changes which layer presents the card, not how the card looks.
+    pub(super) fn stationary(
+        now: (f64, f64, f64, f64),
+        stage: (f64, f64),
+        output: (u32, u32),
+        radius: f64,
+    ) -> Option<Self> {
+        if !(stage.0.is_finite() && stage.1.is_finite() && stage.0 > 0.0 && stage.1 > 0.0)
+            || output.0 == 0
+            || output.1 == 0
+            || !now.0.is_finite()
+            || !now.1.is_finite()
+            || !now.2.is_finite()
+            || !now.3.is_finite()
+            || !(now.2 > 0.0 && now.3 > 0.0)
+        {
+            return None;
+        }
+        let sx = f64::from(output.0) / stage.0;
+        let sy = f64::from(output.1) / stage.1;
+        let rect = [now.0 * sx, now.1 * sy, now.2 * sx, now.3 * sy];
+        if rect.iter().any(|value| !value.is_finite()) || rect[2] <= 0.0 || rect[3] <= 0.0 {
+            return None;
+        }
+        let radius = if radius.is_finite() {
+            radius.max(0.0)
+        } else {
+            0.0
+        };
+        Some(Self {
+            before: rect,
+            now: rect,
+            radius,
+        })
+    }
+
     /// Draw the trail into `output`, premultiplied RGBA at `output_size`.
     /// Pixels the card never covered stay transparent.
     #[allow(clippy::too_many_arguments)]
@@ -705,6 +745,64 @@ mod tests {
             (150..=220).contains(&alpha(2, 2)),
             "corner edge alpha {}",
             alpha(2, 2)
+        );
+    }
+
+    #[test]
+    fn stationary_card_maps_the_rest_rect_into_output_pixels() {
+        let trail =
+            CardTrail::stationary((100.0, 0.0, 100.0, 100.0), (200.0, 100.0), (400, 200), 0.25)
+                .unwrap();
+        assert_eq!(trail.before, trail.now);
+        assert_eq!(trail.now, [200.0, 0.0, 200.0, 200.0]);
+        assert_eq!(trail.radius, 0.25);
+        let nudged = (100.4, 0.0, 100.0, 100.0);
+        let still = (100.0, 0.0, 100.0, 100.0);
+        assert!(
+            CardTrail::new(nudged, still, (200.0, 100.0), (400, 200), 60.0, 1.0, 0.0).is_none()
+        );
+        assert!(CardTrail::stationary(nudged, (200.0, 100.0), (400, 200), 0.0).is_some());
+    }
+
+    #[test]
+    fn stationary_card_is_crisp_inside_and_keeps_its_corners() {
+        let pixels = uniform((32, 32), 200);
+        let trail =
+            CardTrail::stationary((8.0, 8.0, 16.0, 16.0), (32.0, 32.0), (32, 32), 0.5).unwrap();
+        let mut output = vec![7; 32 * 32 * 4];
+        trail.render(&pixels, (32, 32), (32, 32), &mut output, 16, 1.0, 4);
+        let alpha = |x: usize, y: usize| output[(y * 32 + x) * 4 + 3];
+        assert_eq!(alpha(16, 16), 255);
+        assert_eq!(output[(16 * 32 + 16) * 4], 200);
+        assert_eq!(alpha(6, 16), 0, "left of the card");
+        assert_eq!(alpha(9, 9), 0, "rounded corner");
+    }
+
+    #[test]
+    fn stationary_card_rejects_degenerate_geometry() {
+        let rest = (0.0, 0.0, 16.0, 16.0);
+        assert!(CardTrail::stationary(rest, (0.0, 16.0), (32, 32), 0.0).is_none());
+        assert!(CardTrail::stationary(rest, (f64::NAN, 16.0), (32, 32), 0.0).is_none());
+        assert!(CardTrail::stationary(rest, (16.0, 16.0), (0, 32), 0.0).is_none());
+        assert!(
+            CardTrail::stationary((0.0, 0.0, 0.0, 16.0), (16.0, 16.0), (32, 32), 0.0).is_none()
+        );
+        assert!(
+            CardTrail::stationary((f64::NAN, 0.0, 16.0, 16.0), (16.0, 16.0), (32, 32), 0.0)
+                .is_none()
+        );
+        assert!(CardTrail::stationary(
+            (0.0, 0.0, f64::INFINITY, 16.0),
+            (16.0, 16.0),
+            (32, 32),
+            0.0
+        )
+        .is_none());
+        assert_eq!(
+            CardTrail::stationary(rest, (16.0, 16.0), (32, 32), f64::NAN)
+                .unwrap()
+                .radius,
+            0.0
         );
     }
 }

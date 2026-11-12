@@ -102,7 +102,11 @@ fn position_id(config: &AppConfig) -> &'static str {
         .unwrap_or("bottom_right")
 }
 
-fn row(title: &str, description: Option<&str>, control: &impl IsA<gtk4::Widget>) -> GtkBox {
+pub(super) fn row(
+    title: &str,
+    description: Option<&str>,
+    control: &impl IsA<gtk4::Widget>,
+) -> GtkBox {
     let row = GtkBox::new(Orientation::Horizontal, 12);
     row.add_css_class("settings-table-row");
     row.set_hexpand(true);

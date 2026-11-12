@@ -30,12 +30,23 @@ use crate::capture::editor::window::icon_names;
 use crate::i18n::t;
 use crate::recording::editor::auto_zoom;
 use crate::recording::editor::ffmpeg;
+use crate::recording::editor::model::CursorSettings;
 
 use super::history::EditHistory;
 
 const PLACEHOLDER_SECONDS: f64 = 30.0;
 const FIT_SCALE_RANGE: f64 = 7.0;
 const MIN_CLIP_SECONDS: f64 = 0.1;
+/// Slowest and fastest segment speed a saved project may carry. The panel
+/// offers a narrower range, but a file written by a build that allowed more
+/// still opens at a speed this one can play.
+const MIN_SEGMENT_SPEED: f64 = 0.125;
+const MAX_SEGMENT_SPEED: f64 = 8.0;
+/// The speed a typing suggestion applies at until the user changes it.
+pub(super) const DEFAULT_TYPING_SPEED: f64 = 3.0;
+/// The speed range the Cursor panel offers for typing suggestions.
+pub(super) const MIN_TYPING_SPEED: f64 = 1.5;
+pub(super) const MAX_TYPING_SPEED: f64 = 8.0;
 const DEFAULT_ZOOM_SCALE: f64 = 2.0;
 const DEFAULT_ZOOM_SECONDS: f64 = 3.0;
 const DEFAULT_EFFECT_SECONDS: f64 = 1.8;
@@ -178,6 +189,10 @@ struct ClipTemplate {
 
 struct Data {
     path: Option<PathBuf>,
+    /// Whether this recording has a project of its own yet. A fresh import does,
+    /// so an unedited stage is written and kept; a recording opened without one
+    /// has nothing worth saving until its first edit.
+    has_project: bool,
     duration: f64,
     frame_size: Option<(u32, u32)>,
     fps: f64,
@@ -193,6 +208,8 @@ struct Data {
     zoom_clips: Vec<ZoomClip>,
     /// Camera-wide zoom settings: the follow spring and the early lead-in.
     zoom_camera: super::zoom::ZoomCameraSettings,
+    /// The click sound and the keyboard captions the edit list carries.
+    effects: super::project::EffectsSettings,
     hide_clips: Vec<HideClip>,
     selected_zoom: Option<usize>,
     /// Bumped every time a zoom clip is selected. The panel reveals itself on
@@ -226,6 +243,13 @@ struct Data {
     /// gives the new piece its own start; dragging a segment changes only that
     /// start, so pieces can be pulled apart and leave a gap.
     segment_starts: Vec<f64>,
+    /// Playback speed of each cut piece, one entry per segment. The footage a
+    /// piece covers stays what it is; its composition length is that footage
+    /// divided by this. A missing or unusable entry plays at 1×.
+    segment_speeds: Vec<f64>,
+    /// Source starts of typing suggestions the user applied or removed. A
+    /// suggestion whose start is listed here is not offered again.
+    typing_suggestions_resolved: Vec<f64>,
     /// The segment under an in-flight drag. It paints last so it rides over
     /// the pieces it crosses.
     moving_segment: Option<usize>,
@@ -240,6 +264,13 @@ struct Data {
     /// The camera layer, set once the editor has built one. Absent on a
     /// recording with no camera track.
     webcam: Option<super::webcam::WebcamModel>,
+    /// The stage and the cursor, which a preset step reads and writes beside
+    /// the edit list. Absent on a document built without the panels.
+    background: Option<super::background::Background>,
+    cursor: Option<super::cursor::CursorModel>,
+    /// The look the last undo or redo put back, for the timeline to apply to
+    /// the stage and the cursor it does not own.
+    restored_look: Option<Look>,
     /// The layout change the Webcam panel is editing, when one is selected.
     selected_layout: Option<usize>,
     /// Bumped every time a layout change is selected, including a repeated
@@ -259,6 +290,7 @@ impl Default for Data {
     fn default() -> Self {
         Self {
             path: None,
+            has_project: false,
             duration: 0.0,
             frame_size: None,
             fps: 0.0,
@@ -273,6 +305,7 @@ impl Default for Data {
             frames: Vec::new(),
             zoom_clips: Vec::new(),
             zoom_camera: super::zoom::ZoomCameraSettings::default(),
+            effects: super::project::EffectsSettings::default(),
             hide_clips: Vec::new(),
             selected_zoom: None,
             zoom_selection_epoch: 0,
@@ -287,10 +320,15 @@ impl Default for Data {
             dragging_effect: false,
             cuts: Vec::new(),
             segment_starts: Vec::new(),
+            segment_speeds: Vec::new(),
+            typing_suggestions_resolved: Vec::new(),
             moving_segment: None,
             freeze_tail: 0.0,
             history: EditHistory::default(),
             webcam: None,
+            background: None,
+            cursor: None,
+            restored_look: None,
             selected_layout: None,
             layout_selection_epoch: 0,
             layout_burst: None,
@@ -310,6 +348,9 @@ impl Default for Data {
 #[derive(Clone, PartialEq)]
 struct EditSnapshot {
     path: Option<PathBuf>,
+    /// Whether the recording had a project when the step was taken, so undoing
+    /// an edit never takes the project's existence away with it.
+    has_project: bool,
     duration: f64,
     frame_size: Option<(u32, u32)>,
     fps: f64,
@@ -318,10 +359,13 @@ struct EditSnapshot {
     trim_end: f64,
     cuts: Vec<f64>,
     segment_starts: Vec<f64>,
+    segment_speeds: Vec<f64>,
+    typing_suggestions_resolved: Vec<f64>,
     freeze_tail: f64,
     zoom_clips: Vec<ZoomClip>,
     hide_clips: Vec<HideClip>,
     zoom_camera: super::zoom::ZoomCameraSettings,
+    effects: super::project::EffectsSettings,
     /// The camera layer, which lives in the webcam model rather than here;
     /// the snapshot keeps the value so undo can put the bubble back.
     webcam: Option<super::webcam::LayerSettings>,
@@ -333,6 +377,17 @@ struct EditSnapshot {
     selected_hide: Option<usize>,
     selected_layout: Option<usize>,
     clipboard: Option<ClipTemplate>,
+    /// The stage and cursor look, carried only by a step that applied a preset.
+    look: Option<Look>,
+}
+
+/// The stage and the cursor look a preset writes. They live beside the edit
+/// list, so a step that applies a preset carries them to take back or replay
+/// with the document.
+#[derive(Clone, PartialEq)]
+struct Look {
+    stage: (Option<String>, f64, f64),
+    cursor: super::presets::CursorFile,
 }
 
 impl ZoomClip {
@@ -401,9 +456,11 @@ impl Data {
         super::zoom::TimeMapping::new(
             (0..self.segment_count())
                 .filter_map(|index| {
-                    let (start, end) = self.segment_span(index)?;
+                    let (start, _) = self.segment_span(index)?;
                     let &(source_start, source_end) = boundaries.get(index)?;
-                    Some((start, end, source_start, source_end))
+                    let footage_end =
+                        start + (source_end - source_start).max(0.0) / self.segment_speed(index);
+                    Some((start, footage_end, source_start, source_end))
                 })
                 .collect(),
         )
@@ -455,12 +512,25 @@ impl Data {
             .max(0.0)
     }
 
+    /// Playback speed of one cut piece. A speed the file cannot mean — a
+    /// non-number, zero or a negative — plays at 1×, and the runtime bounds
+    /// are wider than the panel offers so a file from another build still
+    /// opens at something this one can play.
+    fn segment_speed(&self, index: usize) -> f64 {
+        self.segment_speeds
+            .get(index)
+            .copied()
+            .filter(|speed| speed.is_finite() && *speed > 0.0)
+            .map(|speed| speed.clamp(MIN_SEGMENT_SPEED, MAX_SEGMENT_SPEED))
+            .unwrap_or(1.0)
+    }
+
     /// Composition span of one segment, hold included on the last piece.
     fn segment_span(&self, index: usize) -> Option<(f64, f64)> {
         let boundaries = self.segment_boundaries();
         let &(source_start, source_end) = boundaries.get(index)?;
         let start = self.segment_start(index);
-        let mut end = start + (source_end - source_start).max(0.0);
+        let mut end = start + (source_end - source_start).max(0.0) / self.segment_speed(index);
         if index + 1 == boundaries.len() {
             end += self.freeze_tail;
         }
@@ -472,11 +542,13 @@ impl Data {
     fn source_time_at(&self, composition_time: f64) -> Option<f64> {
         let boundaries = self.segment_boundaries();
         for (index, &(source_start, source_end)) in boundaries.iter().enumerate() {
+            let speed = self.segment_speed(index);
             let start = self.segment_start(index);
-            let end = start + (source_end - source_start).max(0.0);
+            let end = start + (source_end - source_start).max(0.0) / speed;
             if composition_time + 1e-9 >= start && composition_time <= end + 1e-9 {
                 return Some(
-                    (source_start + (composition_time - start)).clamp(source_start, source_end),
+                    (source_start + (composition_time - start) * speed)
+                        .clamp(source_start, source_end),
                 );
             }
         }
@@ -488,7 +560,10 @@ impl Data {
     fn composition_time_for_source(&self, source_time: f64) -> Option<f64> {
         for (index, &(source_start, source_end)) in self.segment_boundaries().iter().enumerate() {
             if source_time + 1e-9 >= source_start && source_time <= source_end + 1e-9 {
-                return Some(self.segment_start(index) + (source_time - source_start).max(0.0));
+                return Some(
+                    self.segment_start(index)
+                        + (source_time - source_start).max(0.0) / self.segment_speed(index),
+                );
             }
         }
         None
@@ -505,7 +580,7 @@ impl Data {
         let mut nearest = self.trim_start;
         for (index, &(source_start, source_end)) in self.segment_boundaries().iter().enumerate() {
             let start = self.segment_start(index);
-            let end = start + (source_end - source_start).max(0.0);
+            let end = start + (source_end - source_start).max(0.0) / self.segment_speed(index);
             if end <= self.playhead + 1e-9 {
                 nearest = source_end;
             } else if start > self.playhead {
@@ -545,7 +620,7 @@ impl Data {
         let Some(&(source_start, source_end)) = boundaries.get(index) else {
             return;
         };
-        let duration = (source_end - source_start).max(0.0);
+        let duration = (source_end - source_start).max(0.0) / self.segment_speed(index);
         let mut start = self.segment_start(index);
         for _ in 0..boundaries.len() {
             let end = start + duration;
@@ -557,7 +632,7 @@ impl Data {
                         return None;
                     }
                     let other_start = self.segment_start(other);
-                    let other_end = other_start + (s1 - s0).max(0.0);
+                    let other_end = other_start + (s1 - s0).max(0.0) / self.segment_speed(other);
                     ranges_overlap(start, end, other_start, other_end)
                         .then_some((other_start, other_end))
                 });
@@ -600,7 +675,7 @@ impl Data {
             let previous_start = self.segment_starts[index - 1];
             let previous_length = boundaries
                 .get(index - 1)
-                .map(|(start, end)| (end - start).max(0.0))
+                .map(|(start, end)| (end - start).max(0.0) / self.segment_speed(index - 1))
                 .unwrap_or(0.0);
             self.segment_starts.push(previous_start + previous_length);
         }
@@ -609,6 +684,14 @@ impl Data {
                 *first = 0.0;
             }
         }
+    }
+
+    /// Keep one speed per cut piece. A list shorter than the segment count is
+    /// filled with 1×, so a piece the file never named plays at normal speed.
+    fn normalize_segment_speeds(&mut self) {
+        let count = self.segment_count();
+        self.segment_speeds.truncate(count);
+        self.segment_speeds.resize(count, 1.0);
     }
 
     fn visible_span(&self) -> f64 {
@@ -684,9 +767,11 @@ impl Data {
             .copied()
             .unwrap_or((self.trim_start, self.trim_end));
         let last_start = self.segment_start(last);
-        let value = last_source_start + (desired.max(0.0) - last_start).max(0.0);
+        let speed = self.segment_speed(last);
+        let value = last_source_start + (desired.max(0.0) - last_start).max(0.0) * speed;
         self.trim_end = value.clamp(floor, duration);
-        self.freeze_tail = (value - duration).max(0.0);
+        let footage_end = last_start + (self.trim_end - last_source_start).max(0.0) / speed;
+        self.freeze_tail = (desired.max(0.0) - footage_end).max(0.0);
         self.clamp_playhead();
         self.clamp_cuts();
         self.reproject_anchored_zooms();
@@ -696,6 +781,7 @@ impl Data {
 
     fn reset_media(&mut self) {
         self.path = None;
+        self.has_project = false;
         self.duration = 0.0;
         self.frame_size = None;
         self.fps = 0.0;
@@ -722,8 +808,11 @@ impl Data {
         self.hover_hide = None;
         self.dragging_effect = false;
         self.zoom_camera = super::zoom::ZoomCameraSettings::default();
+        self.effects = super::project::EffectsSettings::default();
         self.cuts.clear();
         self.segment_starts.clear();
+        self.segment_speeds.clear();
+        self.typing_suggestions_resolved.clear();
         self.moving_segment = None;
         self.freeze_tail = 0.0;
         self.selected_layout = None;
@@ -737,6 +826,7 @@ impl Data {
     fn snapshot(&self) -> EditSnapshot {
         EditSnapshot {
             path: self.path.clone(),
+            has_project: self.has_project,
             duration: self.duration,
             frame_size: self.frame_size,
             fps: self.fps,
@@ -745,10 +835,13 @@ impl Data {
             trim_end: self.trim_end,
             cuts: self.cuts.clone(),
             segment_starts: self.segment_starts.clone(),
+            segment_speeds: self.segment_speeds.clone(),
+            typing_suggestions_resolved: self.typing_suggestions_resolved.clone(),
             freeze_tail: self.freeze_tail,
             zoom_clips: self.zoom_clips.clone(),
             hide_clips: self.hide_clips.clone(),
             zoom_camera: self.zoom_camera,
+            effects: self.effects.clone(),
             webcam: self.webcam.as_ref().and_then(|model| model.settings()),
             webcam_layouts: self.webcam_layouts(),
             selected: self.selected,
@@ -756,6 +849,7 @@ impl Data {
             selected_hide: self.selected_hide,
             selected_layout: self.selected_layout,
             clipboard: self.clipboard,
+            look: None,
         }
     }
 
@@ -807,7 +901,7 @@ impl Data {
     /// Returns `false` when there is nothing left to take back, which leaves
     /// the document untouched.
     fn undo_edit(&mut self) -> bool {
-        let current = self.snapshot();
+        let current = self.current_state(self.history.peek_undo());
         let Some(previous) = self.history.undo(current) else {
             return false;
         };
@@ -817,12 +911,34 @@ impl Data {
 
     /// Replay the edit the last undo took back.
     fn redo_edit(&mut self) -> bool {
-        let current = self.snapshot();
+        let current = self.current_state(self.history.peek_redo());
         let Some(next) = self.history.redo(current) else {
             return false;
         };
         self.restore(next);
         true
+    }
+
+    /// The state an undo or redo leaves on the opposite stack. The live look
+    /// goes with it only when the step being taken carries one, so an ordinary
+    /// step never moves the stage when it is replayed.
+    fn current_state(&self, step: Option<&EditSnapshot>) -> EditSnapshot {
+        let mut current = self.snapshot();
+        if step.is_some_and(|step| step.look.is_some()) {
+            current.look = self.live_look();
+        }
+        current
+    }
+
+    /// The stage and the cursor as they stand now, or `None` before the panels
+    /// exist.
+    fn live_look(&self) -> Option<Look> {
+        let background = self.background.as_ref()?;
+        let cursor = self.cursor.as_ref()?;
+        Some(Look {
+            stage: background.snapshot(),
+            cursor: super::presets::CursorFile::from_settings(cursor.settings()),
+        })
     }
 
     /// Put a step back on the document. The values were clamped when the step
@@ -835,6 +951,7 @@ impl Data {
             self.frames = snapshot.frames;
         }
         self.path = snapshot.path;
+        self.has_project = snapshot.has_project;
         self.duration = snapshot.duration;
         self.frame_size = snapshot.frame_size;
         self.fps = snapshot.fps;
@@ -842,10 +959,13 @@ impl Data {
         self.trim_end = snapshot.trim_end;
         self.cuts = snapshot.cuts;
         self.segment_starts = snapshot.segment_starts;
+        self.segment_speeds = snapshot.segment_speeds;
+        self.typing_suggestions_resolved = snapshot.typing_suggestions_resolved;
         self.freeze_tail = snapshot.freeze_tail;
         self.zoom_clips = snapshot.zoom_clips;
         self.hide_clips = snapshot.hide_clips;
         self.zoom_camera = snapshot.zoom_camera;
+        self.effects = snapshot.effects;
         if let (Some(webcam), Some(layer)) = (self.webcam.as_ref(), snapshot.webcam) {
             webcam.set_settings(layer);
         }
@@ -857,6 +977,7 @@ impl Data {
         self.selected_hide = snapshot.selected_hide;
         self.selected_layout = snapshot.selected_layout;
         self.clipboard = snapshot.clipboard;
+        self.restored_look = snapshot.look;
         self.layout_burst = None;
         self.playing = false;
         // A restored selection is a new one for the panel, which reveals
@@ -870,9 +991,22 @@ impl Data {
 
     /// The edits as they should be written for this recording, or `None` when
     /// the session still matches a freshly opened video — a file that records
-    /// "nothing changed" would only put an empty card in History.
-    fn project_file(&self) -> Option<super::project::EditorProjectFile> {
+    /// "nothing changed" would only put an empty card in History. A session that
+    /// already has a project keeps it even with nothing edited, so a stage reset
+    /// to flat is not lost and the next open does not seed it again.
+    ///
+    /// The stage is part of the document, so `background` contributes its
+    /// wallpaper, padding and radius: a recording opened on a polished stage
+    /// has something worth saving even before an edit is made.
+    fn project_file(
+        &self,
+        background: &super::background::Background,
+    ) -> Option<super::project::EditorProjectFile> {
         let path = self.path.as_ref()?;
+        let (stage_selection, background_padding, background_radius) = background.snapshot();
+        let stage_edited = stage_selection.is_some()
+            || (background_padding - super::background::DEFAULT_PADDING).abs() > f64::EPSILON
+            || background_radius.abs() > f64::EPSILON;
         let layouts = self.webcam_layouts();
         let layouts_edited = layouts
             .as_ref()
@@ -886,15 +1020,22 @@ impl Data {
                 let layouts = layouts.clone().unwrap_or_default();
                 super::project::WebcamLayerFile::from_layer(layer, &layouts)
             });
-        let pristine = webcam.is_none()
+        let pristine = !stage_edited
+            && webcam.is_none()
             && self.cuts.is_empty()
+            && self
+                .segment_speeds
+                .iter()
+                .all(|speed| (speed - 1.0).abs() <= 1e-9)
+            && self.typing_suggestions_resolved.is_empty()
             && self.zoom_clips.is_empty()
             && self.hide_clips.is_empty()
             && self.freeze_tail <= f64::EPSILON
             && self.trim_start.abs() <= 0.001
             && (self.duration - self.trim_end).abs() <= 0.001
-            && self.zoom_camera == super::zoom::ZoomCameraSettings::default();
-        if pristine {
+            && self.zoom_camera == super::zoom::ZoomCameraSettings::default()
+            && self.effects == super::project::EffectsSettings::default();
+        if pristine && !self.has_project {
             return None;
         }
         let (source_size, source_mtime_secs) = super::project::fingerprint(path)?;
@@ -907,6 +1048,8 @@ impl Data {
             trim_end_seconds: self.trim_end,
             cuts: self.cuts.clone(),
             segment_starts: self.segment_starts.clone(),
+            segment_speeds: self.segment_speeds.clone(),
+            typing_suggestions_resolved: self.typing_suggestions_resolved.clone(),
             freeze_tail: self.freeze_tail,
             zoom_clips: self.zoom_clips.iter().map(|clip| clip.to_file()).collect(),
             zoom_camera: super::project::ZoomCameraFile {
@@ -925,9 +1068,19 @@ impl Data {
                 })
                 .collect(),
             webcam,
+            background: super::project::StageFile {
+                selection: stage_selection,
+            },
+            background_padding,
+            background_radius,
             playhead_seconds: self.playhead,
             timeline_scale: self.scale,
             timeline_scroll_seconds: self.scroll,
+            cursor_click_sound: self.effects.click_sound.clone(),
+            cursor_click_sound_volume: self.effects.click_sound_volume,
+            captions_shortcuts: self.effects.captions.shortcuts,
+            captions_show_single_letters: self.effects.captions.show_single_letters,
+            cursor: Default::default(),
         })
     }
 
@@ -940,6 +1093,10 @@ impl Data {
     /// written before layouts existed still opens on the picture its two
     /// switches described. The layer itself stays available even for a
     /// screen-only start, so a later cue can bring the camera back.
+    ///
+    /// Segment starts are completed before the trim clamp runs, so a file
+    /// written before pieces carried their own starts spreads them out
+    /// contiguously instead of stacking every piece at zero.
     fn apply_project(&mut self, file: &super::project::EditorProjectFile) {
         let duration = self.duration.max(0.0);
         self.trim_start = file.trim_start_seconds.clamp(0.0, duration);
@@ -948,15 +1105,30 @@ impl Data {
             .cuts
             .iter()
             .copied()
-            .filter(|cut| {
-                cut.is_finite()
-                    && *cut > self.trim_start + MIN_CLIP_SECONDS
-                    && *cut < self.trim_end - MIN_CLIP_SECONDS
-            })
+            .filter(|cut| cut.is_finite() && *cut > self.trim_start && *cut < self.trim_end)
             .collect();
         self.cuts.sort_by(f64::total_cmp);
+        self.cuts
+            .dedup_by(|left, right| (*left - *right).abs() <= 1e-9);
         self.segment_starts = file
             .segment_starts
+            .iter()
+            .copied()
+            .filter(|start| start.is_finite() && *start >= 0.0)
+            .collect();
+        self.segment_speeds = file
+            .segment_speeds
+            .iter()
+            .map(|speed| {
+                if speed.is_finite() && *speed > 0.0 {
+                    speed.clamp(MIN_SEGMENT_SPEED, MAX_SEGMENT_SPEED)
+                } else {
+                    1.0
+                }
+            })
+            .collect();
+        self.typing_suggestions_resolved = file
+            .typing_suggestions_resolved
             .iter()
             .copied()
             .filter(|start| start.is_finite() && *start >= 0.0)
@@ -1021,6 +1193,7 @@ impl Data {
             webcam.set_layouts(super::webcam::LayoutSettings::default());
         }
         self.selected_layout = None;
+        self.effects = file.effects();
         self.scale = if file.timeline_scale.is_finite() {
             file.timeline_scale.clamp(0.0, 100.0)
         } else {
@@ -1036,10 +1209,12 @@ impl Data {
         } else {
             0.0
         };
+        self.normalize_segment_starts();
         self.clamp_cuts();
         self.clamp_effects();
         self.clamp_scroll();
         self.clamp_playhead();
+        self.has_project = true;
     }
 
     /// Source-time spans of the video lane's segments. With no cuts there is
@@ -1084,37 +1259,236 @@ impl Data {
             .get(split_index)
             .map(|(start, _)| *start)
             .unwrap_or(self.trim_start);
-        let right_start = left_start + (source - left_source_start).max(0.0);
+        let speed = self.segment_speed(split_index);
+        let right_start = left_start + (source - left_source_start).max(0.0) / speed;
         self.cuts.insert(split_index, source);
         if self.segment_starts.len() <= split_index {
             self.segment_starts.resize(split_index + 1, left_start);
         }
         self.segment_starts.insert(split_index + 1, right_start);
+        if self.segment_speeds.len() <= split_index {
+            self.segment_speeds.resize(split_index + 1, 1.0);
+        }
+        self.segment_speeds.insert(split_index + 1, speed);
         self.normalize_segment_starts();
+        self.normalize_segment_speeds();
         self.reproject_anchored_zooms();
         self.record_edit(before);
         true
     }
 
+    /// Apply typing suggestions as one undo step. Ranges that are not a real
+    /// pause, or that are already resolved, change nothing.
+    fn apply_typing_ranges(&mut self, ranges: &[(f64, f64)], speed: f64) -> bool {
+        if ranges.is_empty() {
+            return false;
+        }
+        let before = self.snapshot();
+        let mut changed = false;
+        for &(start, end) in ranges {
+            changed |= self.apply_typing_range(start, end, speed);
+        }
+        if changed {
+            self.record_edit(before);
+        }
+        changed
+    }
+
+    /// Slow one source range to `speed`: cut the range out of the pieces it
+    /// straddles, give every piece inside it that speed, and pull the pieces
+    /// after it back by the footage they no longer spend, keeping their gaps.
+    fn apply_typing_range(&mut self, start: f64, end: f64, speed: f64) -> bool {
+        if !start.is_finite() || !end.is_finite() || !speed.is_finite() || speed <= 0.0 {
+            return false;
+        }
+        if !self.has_media() {
+            return false;
+        }
+        let speed = speed.clamp(MIN_SEGMENT_SPEED, MAX_SEGMENT_SPEED);
+        if start < self.trim_start - 1e-9 || end > self.trim_end + 1e-9 {
+            return false;
+        }
+        let start = start.max(self.trim_start);
+        let end = end.min(self.trim_end);
+        if end - start <= 1e-6 {
+            return false;
+        }
+        if self
+            .typing_suggestions_resolved
+            .iter()
+            .any(|resolved| (resolved - start).abs() <= 1e-6)
+        {
+            return false;
+        }
+        let old_boundaries = self.segment_boundaries();
+        if old_boundaries.is_empty() {
+            return false;
+        }
+        let old_starts: Vec<f64> = (0..old_boundaries.len())
+            .map(|index| self.segment_start(index))
+            .collect();
+        let old_speeds: Vec<f64> = (0..old_boundaries.len())
+            .map(|index| self.segment_speed(index))
+            .collect();
+        let old_ends: Vec<f64> = old_boundaries
+            .iter()
+            .enumerate()
+            .map(|(index, &(source_start, source_end))| {
+                old_starts[index] + (source_end - source_start).max(0.0) / old_speeds[index]
+            })
+            .collect();
+
+        let old_cuts = self.cuts.clone();
+        let mut cuts = self.cuts.clone();
+        for boundary in [start, end] {
+            if boundary > self.trim_start + 1e-9
+                && boundary < self.trim_end - 1e-9
+                && !cuts.iter().any(|cut| (cut - boundary).abs() <= 1e-6)
+            {
+                let index = cuts.partition_point(|cut| *cut < boundary);
+                cuts.insert(index, boundary);
+            }
+        }
+        cuts.sort_by(f64::total_cmp);
+        self.cuts = cuts;
+
+        let boundaries = self.segment_boundaries();
+        let mut owners = Vec::with_capacity(boundaries.len());
+        for &(source_start, _) in &boundaries {
+            let owner = old_boundaries
+                .iter()
+                .enumerate()
+                .filter(|(_, &(old_start, old_end))| {
+                    source_start + 1e-9 >= old_start && source_start <= old_end + 1e-9
+                })
+                .max_by(|(_, left), (_, right)| left.0.total_cmp(&right.0))
+                .map(|(index, _)| index);
+            let Some(owner) = owner else {
+                self.cuts = old_cuts.clone();
+                return false;
+            };
+            owners.push(owner);
+        }
+
+        let mut speeds = Vec::with_capacity(boundaries.len());
+        for (index, &(source_start, source_end)) in boundaries.iter().enumerate() {
+            let inside = source_start >= start - 1e-6 && source_end <= end + 1e-6;
+            speeds.push(if inside {
+                speed
+            } else {
+                old_speeds[owners[index]]
+            });
+        }
+
+        let mut starts = Vec::with_capacity(boundaries.len());
+        starts.push(old_starts[owners[0]]);
+        for index in 1..boundaries.len() {
+            let (source_start, source_end) = boundaries[index - 1];
+            let previous_duration = (source_end - source_start).max(0.0) / speeds[index - 1];
+            let gap = if owners[index] == owners[index - 1] {
+                0.0
+            } else {
+                old_starts[owners[index]] - old_ends[owners[index - 1]]
+            };
+            starts.push(starts[index - 1] + previous_duration + gap);
+        }
+
+        self.segment_starts = starts;
+        self.segment_speeds = speeds;
+        self.normalize_segment_starts();
+        self.normalize_segment_speeds();
+        if !self
+            .typing_suggestions_resolved
+            .iter()
+            .any(|resolved| (resolved - start).abs() <= 1e-6)
+        {
+            self.typing_suggestions_resolved.push(start);
+        }
+        self.reproject_anchored_zooms();
+        self.clamp_effects();
+        self.clamp_playhead();
+        self.clamp_scroll();
+        true
+    }
+
+    /// Stop offering the suggestion that starts at `start`, as one undo step.
+    fn dismiss_typing_suggestion(&mut self, start: f64) -> bool {
+        if !start.is_finite() || start < 0.0 {
+            return false;
+        }
+        if self.typing_range_resolved(start, start) {
+            return false;
+        }
+        let before = self.snapshot();
+        self.typing_suggestions_resolved.push(start);
+        self.record_edit(before);
+        true
+    }
+
+    /// Whether a suggestion has already been applied or removed, by either the
+    /// detected range's start or the start it is shown at after trimming.
+    fn typing_range_resolved(&self, original_start: f64, clipped_start: f64) -> bool {
+        self.typing_suggestions_resolved.iter().any(|resolved| {
+            (resolved - original_start).abs() <= 1e-6 || (resolved - clipped_start).abs() <= 1e-6
+        })
+    }
+
+    /// Move a resolved entry from the start a suggestion was shown at to the
+    /// start the recording detected it at, so the same pause stays resolved
+    /// when trimming changes where it is shown. Applied ranges record their
+    /// resolved start before this runs, so undo keeps the step and redo keeps
+    /// the final identifiers.
+    fn replace_typing_resolved(&mut self, clipped_start: f64, original_start: f64) {
+        for resolved in &mut self.typing_suggestions_resolved {
+            if (*resolved - clipped_start).abs() <= 1e-6 {
+                *resolved = original_start;
+            }
+        }
+        let mut seen: Vec<f64> = Vec::with_capacity(self.typing_suggestions_resolved.len());
+        for resolved in self.typing_suggestions_resolved.drain(..) {
+            if !seen
+                .iter()
+                .any(|existing| (*existing - resolved).abs() <= 1e-6)
+            {
+                seen.push(resolved);
+            }
+        }
+        self.typing_suggestions_resolved = seen;
+    }
+
     /// Trimming can leave cuts outside the kept footage; those segments no
-    /// longer exist, and their starts go with them.
+    /// longer exist, and their starts and speeds go with them. A piece that
+    /// survives keeps the start and speed of the old piece whose source span
+    /// holds its new first frame, so trimming across a cut never resets a
+    /// moved or sped piece. The old topology comes from the cuts as they were
+    /// before the trim, because the new trim can hide the very cut that
+    /// identifies the piece.
     fn clamp_cuts(&mut self) {
-        let before = self.segment_boundaries();
+        let old_cuts = self.cuts.clone();
+        let old_starts = self.segment_starts.clone();
+        let old_speeds = self.segment_speeds.clone();
         let (start, end) = (self.trim_start, self.trim_end);
         self.cuts
-            .retain(|cut| *cut > start + 0.1 && *cut < end - 0.1);
+            .retain(|cut| *cut > start + 1e-9 && *cut < end - 1e-9);
         let after = self.segment_boundaries();
         let mut starts = Vec::with_capacity(after.len());
+        let mut speeds = Vec::with_capacity(after.len());
         for &(source_start, _) in &after {
-            let inherited = before
-                .iter()
-                .position(|&(old_start, _)| (old_start - source_start).abs() < 1e-9)
-                .map(|index| self.segment_start(index))
-                .unwrap_or(0.0);
-            starts.push(inherited);
+            let owner = old_cuts.partition_point(|cut| *cut <= source_start + 1e-9);
+            starts.push(old_starts.get(owner).copied().unwrap_or(0.0));
+            speeds.push(
+                old_speeds
+                    .get(owner)
+                    .copied()
+                    .filter(|speed| speed.is_finite() && *speed > 0.0)
+                    .map(|speed| speed.clamp(MIN_SEGMENT_SPEED, MAX_SEGMENT_SPEED))
+                    .unwrap_or(1.0),
+            );
         }
         self.segment_starts = starts;
+        self.segment_speeds = speeds;
         self.normalize_segment_starts();
+        self.normalize_segment_speeds();
     }
 
     fn effect_count(&self, track: EffectTrack) -> usize {
@@ -1790,6 +2164,17 @@ impl Data {
         self.zoom_camera = settings;
     }
 
+    fn update_effects(&mut self, update: impl FnOnce(&mut super::project::EffectsSettings)) {
+        let mut effects = self.effects.clone();
+        update(&mut effects);
+        let effects = effects.clamped();
+        if effects == self.effects {
+            return;
+        }
+        self.record_continuous_edit();
+        self.effects = effects;
+    }
+
     /// Delete on the video clip empties the composition. The window still has
     /// the document open, so reloading the recording brings the clip back;
     /// undo also brings it back, which is why the media travels in the step.
@@ -1825,9 +2210,10 @@ impl Data {
             return None;
         }
         let composition_start = self.segment_start(index);
+        let speed = self.segment_speed(index);
         Some((
-            composition_start + (start - source_start),
-            composition_start + (end - source_start),
+            composition_start + (start - source_start) / speed,
+            composition_start + (end - source_start) / speed,
         ))
     }
 
@@ -1838,15 +2224,16 @@ impl Data {
         let boundaries = self.segment_boundaries();
         for (index, &(source_start, source_end)) in boundaries.iter().enumerate() {
             let composition_start = self.segment_start(index);
-            let composition_end = composition_start + (source_end - source_start).max(0.0);
+            let speed = self.segment_speed(index);
+            let composition_end = composition_start + (source_end - source_start).max(0.0) / speed;
             let overlap_start = start.max(composition_start);
             let overlap_end = end.min(composition_end);
             if overlap_end - overlap_start <= 1e-9 {
                 continue;
             }
             return Some((
-                source_start + (overlap_start - composition_start),
-                source_start + (overlap_end - composition_start),
+                source_start + (overlap_start - composition_start) * speed,
+                source_start + (overlap_end - composition_start) * speed,
             ));
         }
         None
@@ -1871,6 +2258,9 @@ impl Data {
         let boundaries = self.segment_boundaries();
         let starts: Vec<f64> = (0..boundaries.len())
             .map(|index| self.segment_start(index))
+            .collect();
+        let speeds: Vec<f64> = (0..boundaries.len())
+            .map(|index| self.segment_speed(index))
             .collect();
         let mut reprojected: Vec<ZoomClip> = Vec::with_capacity(self.zoom_clips.len());
         for clip in self.zoom_clips.drain(..) {
@@ -1898,9 +2288,10 @@ impl Data {
                 continue;
             }
             let composition_start = starts.get(index).copied().unwrap_or(0.0);
+            let speed = speeds.get(index).copied().unwrap_or(1.0);
             reprojected.push(ZoomClip {
-                start: composition_start + (start - source_start),
-                end: composition_start + (end - source_start),
+                start: composition_start + (start - source_start) / speed,
+                end: composition_start + (end - source_start) / speed,
                 ..clip
             });
         }
@@ -1936,6 +2327,38 @@ impl Data {
             None => self.selected_zoom,
         }
         .filter(|index| *index < self.zoom_clips.len());
+    }
+
+    /// Put the automatic zooms a fresh import starts with on the lane.
+    ///
+    /// The recorder's clicks seed the windows in encoded-video pixels, and a
+    /// composition that has just opened starts at source time, so each
+    /// placement is already the footage it frames. Seeding is a creation
+    /// default rather than an edit, so nothing goes on the undo stack.
+    fn seed_auto_zooms(
+        &mut self,
+        sidecar: &crate::recording::editor::sidecar::PointerSidecar,
+        frame_size: (u32, u32),
+        enabled: bool,
+    ) {
+        let (width, height) = frame_size;
+        if !enabled || !self.zoom_clips.is_empty() || !self.has_media() || width < 2 || height < 2 {
+            return;
+        }
+        let width = f64::from(width);
+        let height = f64::from(height);
+        let clicks = auto_zoom::clicks_from_sidecar(sidecar, width, height);
+        let pointer = auto_zoom::pointer_from_sidecar(sidecar, width, height);
+        let detections = auto_zoom::automatic_zooms(&clicks, &pointer, self.duration);
+        let placements = place_auto_zooms(&self.zoom_clips, &detections, frame_size);
+        self.set_frame_size(Some(frame_size));
+        self.pointer_available = !sidecar.pointer.is_empty();
+        let mut seeded = Vec::with_capacity(placements.len());
+        for mut placement in placements {
+            placement.anchor = self.source_anchor(placement.start, placement.end);
+            seeded.push(placement);
+        }
+        self.zoom_clips = seeded;
     }
 
     /// Resize one pill, clamped between its neighbours so the lanes stay
@@ -2069,6 +2492,11 @@ impl Data {
     fn webcam_layouts(&self) -> Option<super::webcam::LayoutSettings> {
         let webcam = self.webcam.as_ref()?;
         webcam.has_track().then(|| webcam.layouts())
+    }
+
+    /// Where the recording's camera sits, or `None` when it captured none.
+    fn webcam_settings(&self) -> Option<super::webcam::LayerSettings> {
+        self.webcam.as_ref()?.settings()
     }
 
     /// Whether the camera layer draws at all. A switched-off layer occupies
@@ -2605,8 +3033,11 @@ pub(super) struct ExportFootage {
     pub trim_start: f64,
     pub trim_end: f64,
     pub cuts: Vec<f64>,
+    pub segment_speeds: Vec<f64>,
+    pub freeze_tail: f64,
     pub zooms: Vec<ZoomClip>,
     pub zoom_camera: super::zoom::ZoomCameraSettings,
+    pub effects: super::project::EffectsSettings,
 }
 
 type PreviewFrameSink = Rc<RefCell<Option<Rc<dyn Fn(PreviewFrame)>>>>;
@@ -2624,6 +3055,22 @@ pub(super) struct Timeline {
     frame_sink: PreviewFrameSink,
     zoom_listener: ChangeListener,
     webcam_listener: ChangeListener,
+    effects_listener: ChangeListener,
+    /// Told when the typing suggestions or the ranges already resolved change,
+    /// so the Cursor panel can rebuild its cards without doing so on every
+    /// playback repaint.
+    typing_listener: ChangeListener,
+    /// Told when a document opens with a different cursor look, so the Cursor
+    /// panel shows the look the file carries rather than its starting one.
+    cursor_listener: ChangeListener,
+    /// Bumped when the cursor sidecar is loaded for a document, which is the
+    /// one change the kept range and the resolved list cannot describe.
+    typing_epoch: Rc<Cell<u64>>,
+    /// The stage behind the video: the wallpaper, its padding and the card's
+    /// corner radius. The project file keeps it with the rest of the edit list,
+    /// and its only listener holds the project sync handle, so the panel never
+    /// keeps the timeline or its document alive.
+    background: super::background::Background,
     /// The saved edit list: what was last written, and whether the editor has
     /// repainted since, which is when it may need writing again.
     project: super::project::ProjectSync,
@@ -2645,10 +3092,13 @@ impl Timeline {
         let data = self.data.borrow();
         self.cursor.set_cuts(&data.cuts);
         self.cursor.set_end(data.trim_end);
+        self.cursor.set_caption_settings(data.effects.captions);
         let placement = data.placement();
         let add_zoom = data.add_zoom_tool();
         let unzoomed = placement.is_some() || add_zoom.is_some();
         data.sync_webcam_to_playhead(|| self.cursor.sidecar());
+        self.cursor
+            .set_captions_active(data.camera_mapping().source_at(data.playhead).is_some());
         let fps = if data.fps > 0.0 { data.fps } else { 30.0 };
         let camera_settings = super::zoom::ZoomCameraSettings {
             frame_rate: fps,
@@ -2728,8 +3178,11 @@ impl Timeline {
             trim_start: data.trim_start,
             trim_end: data.trim_end,
             cuts: data.cuts.clone(),
+            segment_speeds: data.segment_speeds.clone(),
+            freeze_tail: data.freeze_tail,
             zooms: data.zoom_clips.clone(),
             zoom_camera: data.zoom_camera,
+            effects: data.effects.clone(),
         })
     }
 
@@ -2759,6 +3212,187 @@ impl Timeline {
     pub fn set_zoom_listener(&self, listener: Rc<dyn Fn()>) {
         *self.zoom_listener.borrow_mut() = Some(listener.clone());
         listener();
+    }
+
+    /// The click sound and keyboard caption settings the document carries.
+    pub fn effects_settings(&self) -> super::project::EffectsSettings {
+        self.data.borrow().effects.clone()
+    }
+
+    /// Ask to be told whenever the effects change, including on load and on
+    /// undo. The first call delivers the state already on screen.
+    pub fn set_effects_listener(&self, listener: Rc<dyn Fn()>) {
+        *self.effects_listener.borrow_mut() = Some(listener.clone());
+        listener();
+    }
+
+    /// Change the click sound or the captions. The change is one undo step,
+    /// unless it leaves the settings as they were.
+    pub fn update_effects(&self, update: impl FnOnce(&mut super::project::EffectsSettings)) {
+        {
+            let mut data = self.data.borrow_mut();
+            data.playing = false;
+            data.update_effects(update);
+        }
+        (self.repaint)();
+        self.publish_frame();
+    }
+
+    /// Every typing pause the key stream detects that still touches the kept
+    /// footage, as `(shown_start, shown_end, detected_start)`. The detected
+    /// start identifies the pause even when trimming moves where it is shown.
+    fn typing_ranges(&self) -> Vec<(f64, f64, f64)> {
+        let Some(sidecar) = self.cursor.sidecar() else {
+            return Vec::new();
+        };
+        let data = self.data.borrow();
+        if !data.has_media() {
+            return Vec::new();
+        }
+        let (kept_start, kept_end) = (data.trim_start, data.trim_end);
+        super::typing::detect(&sidecar.keys)
+            .into_iter()
+            .filter_map(|(start, end)| {
+                if !start.is_finite() || !end.is_finite() {
+                    return None;
+                }
+                let clipped_start = start.max(kept_start);
+                let clipped_end = end.min(kept_end);
+                (clipped_end - clipped_start > 1e-6).then_some((clipped_start, clipped_end, start))
+            })
+            .collect()
+    }
+
+    /// The typing pauses the recording's key stream suggests, in source
+    /// seconds. Ranges the user applied or removed, and ranges that no longer
+    /// touch the kept footage, are left out.
+    pub fn typing_suggestions(&self) -> Vec<(f64, f64)> {
+        let ranges = self.typing_ranges();
+        let data = self.data.borrow();
+        ranges
+            .into_iter()
+            .filter(|&(clipped_start, _, original_start)| {
+                !data.typing_range_resolved(original_start, clipped_start)
+            })
+            .map(|(clipped_start, clipped_end, _)| (clipped_start, clipped_end))
+            .collect()
+    }
+
+    /// Ask to be told whenever the typing suggestions or the resolved ranges
+    /// change, including on load and on undo. The first call delivers the
+    /// state already on screen.
+    pub fn set_typing_listener(&self, listener: Rc<dyn Fn()>) {
+        *self.typing_listener.borrow_mut() = Some(listener.clone());
+        listener();
+    }
+
+    /// Tell the panel the document is open, after the cursor sidecar has been
+    /// loaded, so the typing cards read the new recording's key stream.
+    pub fn notify_typing_changed(&self) {
+        self.typing_epoch
+            .set(self.typing_epoch.get().wrapping_add(1));
+        if let Some(listener) = self.typing_listener.borrow().as_ref() {
+            listener();
+        }
+    }
+
+    /// What decides which typing suggestions are on offer apart from the key
+    /// stream: the document, the kept source range and the ranges already
+    /// resolved. The panel compares it so a playback repaint does not run a
+    /// detection pass on every tick.
+    pub fn typing_signature(&self) -> (u64, u64, u64, u64, Vec<f64>) {
+        let data = self.data.borrow();
+        (
+            self.generation.get(),
+            self.typing_epoch.get(),
+            data.trim_start.to_bits(),
+            data.trim_end.to_bits(),
+            data.typing_suggestions_resolved.clone(),
+        )
+    }
+
+    /// Slow one suggested source range to `speed` as a single undo step.
+    pub fn apply_typing_suggestion(&self, start: f64, end: f64, speed: f64) {
+        let Some(original_start) = self
+            .typing_ranges()
+            .into_iter()
+            .find(|&(clipped_start, _, _)| (clipped_start - start).abs() <= 1e-6)
+            .map(|(_, _, original_start)| original_start)
+        else {
+            return;
+        };
+        let changed = {
+            let mut data = self.data.borrow_mut();
+            if data.typing_range_resolved(original_start, start) {
+                return;
+            }
+            data.playing = false;
+            let changed = data.apply_typing_ranges(&[(start, end)], speed);
+            if changed {
+                data.replace_typing_resolved(start, original_start);
+            }
+            changed
+        };
+        if changed {
+            (self.repaint)();
+            self.publish_frame();
+        }
+    }
+
+    /// Slow every suggestion still on offer to `speed` as a single undo step.
+    pub fn apply_all_typing_suggestions(&self, speed: f64) {
+        let ranges: Vec<(f64, f64, f64)> = {
+            let data = self.data.borrow();
+            self.typing_ranges()
+                .into_iter()
+                .filter(|&(clipped_start, _, original_start)| {
+                    !data.typing_range_resolved(original_start, clipped_start)
+                })
+                .collect()
+        };
+        if ranges.is_empty() {
+            return;
+        }
+        let changed = {
+            let mut data = self.data.borrow_mut();
+            data.playing = false;
+            let spans: Vec<(f64, f64)> = ranges
+                .iter()
+                .map(|&(clipped_start, clipped_end, _)| (clipped_start, clipped_end))
+                .collect();
+            let changed = data.apply_typing_ranges(&spans, speed);
+            if changed {
+                for &(clipped_start, _, original_start) in &ranges {
+                    data.replace_typing_resolved(clipped_start, original_start);
+                }
+            }
+            changed
+        };
+        if changed {
+            (self.repaint)();
+            self.publish_frame();
+        }
+    }
+
+    /// Stop offering the suggestion that starts at `start`, as one undo step.
+    pub fn dismiss_typing_suggestion(&self, start: f64) {
+        let Some(original_start) = self
+            .typing_ranges()
+            .into_iter()
+            .find(|&(clipped_start, _, _)| (clipped_start - start).abs() <= 1e-6)
+            .map(|(_, _, original_start)| original_start)
+        else {
+            return;
+        };
+        let changed = {
+            let mut data = self.data.borrow_mut();
+            data.playing = false;
+            data.dismiss_typing_suggestion(original_start)
+        };
+        if changed {
+            (self.repaint)();
+            self.publish_frame();
+        }
     }
 
     /// The camera layer this document carries, or `None` when the recording
@@ -2810,6 +3444,13 @@ impl Timeline {
     /// document opens onto a saved one.
     pub fn set_webcam_listener(&self, listener: Rc<dyn Fn()>) {
         *self.webcam_listener.borrow_mut() = Some(listener.clone());
+        listener();
+    }
+
+    /// Ask to be told when a document opens with a different cursor look,
+    /// including the look the document already open carries.
+    pub fn set_cursor_listener(&self, listener: Rc<dyn Fn()>) {
+        *self.cursor_listener.borrow_mut() = Some(listener.clone());
         listener();
     }
 
@@ -3160,12 +3801,139 @@ impl Timeline {
         self.publish_frame();
     }
 
+    /// Note that the cursor's look changed, so the autosave writes it with
+    /// the rest of the edit list instead of waiting for another edit.
+    pub fn mark_cursor_changed(&self) {
+        self.project.mark_changed();
+    }
+
+    /// Save this project's look as a preset the preset store keeps.
+    ///
+    /// The look is the stage, the cursor's current settings, the camera's
+    /// styling, the captions and the click sound; the footage and the edit
+    /// list stay out of it. The open document, the settings and the history
+    /// are not touched, and the store is written only because this was asked
+    /// for by a person pressing the button that calls it.
+    pub fn save_preset(&self, name: &str) -> Result<super::presets::Preset, String> {
+        let preset = self.captured_look(name)?;
+        super::presets::save(&preset)?;
+        Ok(preset)
+    }
+
+    /// Write this project's look over an existing preset, keeping its id and
+    /// name, so the list keeps its place and the name stays the one it had.
+    pub fn update_preset(
+        &self,
+        existing: &super::presets::Preset,
+    ) -> Result<super::presets::Preset, String> {
+        let preset = super::presets::replacing(existing, self.captured_look(&existing.name)?);
+        super::presets::save(&preset)?;
+        Ok(preset)
+    }
+
+    /// The open project's look as a preset under `name`, not yet written.
+    fn captured_look(&self, name: &str) -> Result<super::presets::Preset, String> {
+        let mut file = self
+            .data
+            .borrow()
+            .project_file(&self.background)
+            .ok_or_else(|| "Open a readable recording before saving a preset".to_owned())?;
+        let (layer, layouts) = {
+            let data = self.data.borrow();
+            (
+                data.webcam_settings(),
+                data.webcam_layouts().unwrap_or_default(),
+            )
+        };
+        fill_camera_from_recording(&mut file, layer, layouts);
+        let cursor = self.cursor.settings();
+        file.cursor = super::presets::CursorFile::from_settings(cursor);
+        super::presets::from_project(&file, cursor, name)
+    }
+
+    /// Put a saved look on the open project as one undo step.
+    ///
+    /// The camera's styling, the captions and the click sound go through the
+    /// edit list. The stage and the cursor are applied beside it, and the same
+    /// step carries them, so one undo puts every part back.
+    pub fn apply_preset(&self, preset: &super::presets::Preset) {
+        let look = {
+            let mut data = self.data.borrow_mut();
+            if !data.has_media() {
+                return;
+            }
+            let mut before = data.snapshot();
+            before.look = data.live_look();
+            data.playing = false;
+            data.has_project = true;
+            let Some(mut file) = data.project_file(&self.background) else {
+                return;
+            };
+            fill_camera_from_recording(
+                &mut file,
+                data.webcam_settings(),
+                data.webcam_layouts().unwrap_or_default(),
+            );
+            let cues = file
+                .webcam
+                .as_ref()
+                .map(|webcam| webcam.resolved_layouts().cues);
+            super::presets::apply_to(&mut file, preset);
+            if let (Some(webcam), Some(cues)) = (file.webcam.as_mut(), cues) {
+                let mut layouts = webcam.resolved_layouts();
+                layouts.cues = cues;
+                webcam.layouts = Some(layouts);
+            }
+            data.record_edit(before);
+            data.apply_project(&file);
+            Look {
+                stage: (
+                    file.background.selection.clone(),
+                    file.background_padding,
+                    file.background_radius,
+                ),
+                cursor: file.cursor,
+            }
+        };
+        self.apply_look(&look);
+        (self.repaint)();
+        self.publish_frame();
+    }
+
+    /// Put a look's stage and cursor on the open project and tell the panels
+    /// that show them. The background's listeners mark the project changed,
+    /// and the cursor's change is marked here.
+    fn apply_look(&self, look: &Look) {
+        let (selection, padding, radius) = &look.stage;
+        self.background
+            .apply(selection.as_deref(), *padding, *radius);
+        self.cursor.set_settings(look.cursor.settings());
+        if let Some(listener) = self.cursor_listener.borrow().as_ref() {
+            listener();
+        }
+        self.project.mark_changed();
+    }
+
+    /// Put the stage and the cursor back when the step the last undo or redo
+    /// restored carries them.
+    fn apply_restored_look(&self) {
+        let look = self.data.borrow_mut().restored_look.take();
+        if let Some(look) = look {
+            self.apply_look(&look);
+        }
+    }
+
     /// Write this recording's edits now. Called when another recording replaces
     /// this one and when the window closes, both of which land before the
     /// repaint-driven autosave's next tick.
     pub fn flush_project(&self) {
-        let snapshot = self.data.borrow().project_file();
-        self.project.sync(snapshot, true);
+        self.project.sync(
+            snapshot_with_cursor(
+                self.data.borrow().project_file(&self.background),
+                self.cursor.settings(),
+            ),
+            true,
+        );
     }
 
     /// Take the document back to how it stood before the last edit.
@@ -3175,6 +3943,7 @@ impl Timeline {
     pub fn undo(&self) -> bool {
         let changed = self.data.borrow_mut().undo_edit();
         if changed {
+            self.apply_restored_look();
             (self.repaint)();
             self.publish_frame();
         }
@@ -3185,6 +3954,7 @@ impl Timeline {
     pub fn redo(&self) -> bool {
         let changed = self.data.borrow_mut().redo_edit();
         if changed {
+            self.apply_restored_look();
             (self.repaint)();
             self.publish_frame();
         }
@@ -3195,7 +3965,12 @@ impl Timeline {
     /// empty placeholder scale.
     ///
     /// The outgoing recording's edits are written first, then the incoming
-    /// recording's saved edit list is restored on top of its probed lengths.
+    /// recording's saved edit list is restored on top of its probed lengths. A
+    /// recording with no project yet is seeded with the import stage and saved
+    /// at once, a recording that already has one keeps the stage it stored, and
+    /// an empty or unreadable document opens flat. The stage lands after the
+    /// document borrow is gone, so nothing redraws against a half-swapped
+    /// document.
     pub fn set_document(&self, path: Option<&Path>) {
         self.flush_project();
         self.camera_cache.borrow_mut().clear();
@@ -3209,6 +3984,7 @@ impl Timeline {
         data.history.clear();
         let mut duration = 0.0;
         let mut restored = None;
+        let mut imported = None;
         if let Some(source) = &source {
             duration = ffmpeg::probe_duration(source).unwrap_or(0.0);
             data.fps = ffmpeg::probe_frame_rate(source)
@@ -3229,6 +4005,29 @@ impl Timeline {
                 restored = super::project::load_project(source);
                 if let Some(file) = &restored {
                     data.apply_project(file);
+                } else if duration.is_finite() {
+                    data.has_project = true;
+                    if crate::config::load_config().rec_video_auto_zoom_on_import {
+                        if let (Some(sidecar), Some(frame_size)) = (
+                            crate::recording::editor::sidecar::PointerSidecar::load_next_to_video(
+                                source,
+                            ),
+                            ffmpeg::probe_frame_size(source),
+                        ) {
+                            data.seed_auto_zooms(&sidecar, frame_size, true);
+                        }
+                    }
+                    if let Some(mut file) = data.project_file(&self.background) {
+                        fill_camera_from_recording(
+                            &mut file,
+                            data.webcam_settings(),
+                            data.webcam_layouts().unwrap_or_default(),
+                        );
+                        super::import::seed(&mut file);
+                        data.apply_project(&file);
+                        imported = Some(file);
+                    }
+                    data.has_project = imported.is_some();
                 }
             }
         } else if let Some(webcam) = data.webcam.clone() {
@@ -3242,7 +4041,27 @@ impl Timeline {
         let scale = data.scale;
         drop(data);
 
-        self.project.adopt(restored);
+        self.project.adopt(restored.clone());
+        let incoming = restored.or(imported.clone());
+        self.cursor.set_settings(incoming_cursor(incoming.as_ref()));
+        if let Some(listener) = self.cursor_listener.borrow().as_ref() {
+            listener();
+        }
+        match &incoming {
+            Some(file) => self.background.apply(
+                file.background.selection.as_deref(),
+                file.background_padding,
+                file.background_radius,
+            ),
+            None => self.background.apply(
+                None,
+                super::background::DEFAULT_PADDING,
+                super::background::DEFAULT_RADIUS,
+            ),
+        }
+        if let Some(file) = imported {
+            self.project.sync(Some(file), true);
+        }
         self.zoom_scale.set_value(scale);
         (self.repaint)();
         if let Some(source) = source {
@@ -3285,6 +4104,44 @@ impl Timeline {
     }
 }
 
+/// The cursor look a document opens on: the one its file carries, or the
+/// panel's starting look when the document brought none.
+fn incoming_cursor(file: Option<&super::project::EditorProjectFile>) -> CursorSettings {
+    file.map(|file| file.cursor.settings()).unwrap_or_default()
+}
+
+/// A snapshot with this session's cursor look in it.
+///
+/// The cursor model lives beside the edit list rather than inside it, so the
+/// snapshot the data builds carries the starting look, and the owner of the
+/// model puts the real one in before anything is written.
+fn snapshot_with_cursor(
+    snapshot: Option<super::project::EditorProjectFile>,
+    cursor: CursorSettings,
+) -> Option<super::project::EditorProjectFile> {
+    snapshot.map(|file| super::project::EditorProjectFile {
+        cursor: super::presets::CursorFile::from_settings(cursor),
+        ..file
+    })
+}
+
+/// Give a snapshot the camera layer the recording captured when the edit list
+/// has none, so a saved look or a new project keeps the recorded placement
+/// rather than claiming the recording carried no camera.
+fn fill_camera_from_recording(
+    file: &mut super::project::EditorProjectFile,
+    layer: Option<super::webcam::LayerSettings>,
+    layouts: super::webcam::LayoutSettings,
+) {
+    if file.webcam.is_some() {
+        return;
+    }
+    if let Some(layer) = layer {
+        file.webcam = Some(super::project::WebcamLayerFile::from_layer(layer, &layouts));
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(super) fn build(
     window: &ApplicationWindow,
     canvas: &AspectFrame,
@@ -3292,6 +4149,7 @@ pub(super) fn build(
     prefers_dark: bool,
     cursor: super::cursor::CursorModel,
     webcam: super::webcam::WebcamModel,
+    background: super::background::Background,
     source_size: Rc<Cell<Option<(u32, u32)>>>,
 ) -> Timeline {
     let data = Rc::new(RefCell::new(Data::default()));
@@ -3301,9 +4159,18 @@ pub(super) fn build(
     install_timeline_css(scale);
     // The document needs the camera layer even when this recording has no
     // track: opening a different one has to be able to load it.
-    data.borrow_mut().webcam = Some(webcam);
+    {
+        let mut data = data.borrow_mut();
+        data.webcam = Some(webcam);
+        data.background = Some(background.clone());
+        data.cursor = Some(cursor.clone());
+    }
     let camera_cache = Rc::new(RefCell::new(super::zoom::ZoomCameraCache::default()));
     let project = super::project::ProjectSync::default();
+    {
+        let project = project.clone();
+        background.connect(Rc::new(move || project.mark_changed()));
+    }
 
     let dock = GtkBox::new(Orientation::Vertical, 0);
     dock.add_css_class("recording-editor-timeline-dock");
@@ -3725,6 +4592,9 @@ pub(super) fn build(
     // Repainting is the one place every mutation already passes through.
     let zoom_listener: ChangeListener = Rc::new(RefCell::new(None));
     let webcam_listener: ChangeListener = Rc::new(RefCell::new(None));
+    let effects_listener: ChangeListener = Rc::new(RefCell::new(None));
+    let typing_listener: ChangeListener = Rc::new(RefCell::new(None));
+    let cursor_listener: ChangeListener = Rc::new(RefCell::new(None));
     let repaint: Rc<dyn Fn()> = {
         let data = data.clone();
         let ruler = ruler.clone();
@@ -3741,6 +4611,8 @@ pub(super) fn build(
         let lane_state = lane_state.clone();
         let zoom_listener = zoom_listener.clone();
         let webcam_listener = webcam_listener.clone();
+        let effects_listener = effects_listener.clone();
+        let typing_listener = typing_listener.clone();
         let project = project.clone();
         Rc::new(move || {
             let state = {
@@ -3774,6 +4646,12 @@ pub(super) fn build(
             if let Some(listener) = webcam_listener.borrow().as_ref() {
                 listener();
             }
+            if let Some(listener) = effects_listener.borrow().as_ref() {
+                listener();
+            }
+            if let Some(listener) = typing_listener.borrow().as_ref() {
+                listener();
+            }
             // Every mutation repaints, so this is the one place that can tell
             // the autosave a change may be waiting to be written.
             project.mark_changed();
@@ -3792,11 +4670,13 @@ pub(super) fn build(
     // file on disk, so a hover, a scroll or a playhead tick never rewrites it.
     {
         let data = data.clone();
+        let background = background.clone();
         let project = project.clone();
+        let cursor = cursor.clone();
         gtk4::glib::timeout_add_local(Duration::from_secs(2), move || {
             if project.take_changed() {
-                let snapshot = data.borrow().project_file();
-                project.sync(snapshot, false);
+                let snapshot = data.borrow().project_file(&background);
+                project.sync(snapshot_with_cursor(snapshot, cursor.settings()), false);
             }
             gtk4::glib::ControlFlow::Continue
         });
@@ -4226,6 +5106,11 @@ pub(super) fn build(
         frame_sink,
         zoom_listener,
         webcam_listener,
+        effects_listener,
+        typing_listener,
+        cursor_listener,
+        typing_epoch: Rc::new(Cell::new(0)),
+        background,
         project,
     };
     bind_layout_lane(&layout_track, data, timeline.clone(), sync_play_icon, scale);
@@ -4817,7 +5702,8 @@ fn bind_clip(
                     DragKind::Seek => seek_to_x(&mut data, width, start_x + offset_x),
                     DragKind::TrimStart => {
                         let delta = offset_x / data.pixels_per_second(width).max(1e-6);
-                        data.set_trim_start(anchor.get() + delta);
+                        let speed = data.segment_speed(0);
+                        data.set_trim_start(anchor.get() + delta * speed);
                     }
                     DragKind::TrimEnd | DragKind::Extend => {
                         let delta = offset_x / data.pixels_per_second(width).max(1e-6);
@@ -6796,7 +7682,8 @@ fn draw_video_clip(
     for &index in &order {
         let (source_start, source_end) = boundaries[index];
         let segment_start = data.segment_start(index);
-        let footage = (source_end - source_start).max(0.0);
+        let speed = data.segment_speed(index);
+        let footage = (source_end - source_start).max(0.0) / speed;
         let hold = if index == last_index {
             data.freeze_tail.max(0.0)
         } else {
@@ -6835,8 +7722,8 @@ fn draw_video_clip(
                 if to <= from {
                     continue;
                 }
-                let tile_x = data.time_to_x(segment_start + (from - source_start), width);
-                let tile_right = data.time_to_x(segment_start + (to - source_start), width);
+                let tile_x = data.time_to_x(segment_start + (from - source_start) / speed, width);
+                let tile_right = data.time_to_x(segment_start + (to - source_start) / speed, width);
                 let tile_w = (tile_right - tile_x).max(1.0);
                 paint_cover(context, frame, tile_x, y, tile_w, clip_height);
             }
@@ -6879,6 +7766,35 @@ fn draw_video_clip(
             }
         }
 
+        if (speed - 1.0).abs() > 1e-9 {
+            let label = speed_label(speed);
+            context.select_font_face("DM Sans", FontSlant::Normal, FontWeight::Bold);
+            context.set_font_size((10.0 * scale).round());
+            if let Ok(extents) = context.text_extents(&label) {
+                let pad = 5.0 * scale;
+                let badge_w = extents.width() + pad * 2.0;
+                let badge_h = (14.0 * scale).min(clip_height - 4.0 * scale);
+                if badge_h > 0.0 && badge_w + 8.0 * scale <= body_width {
+                    let badge_x = right - badge_w - 4.0 * scale;
+                    let badge_y = y + clip_height - badge_h - 4.0 * scale;
+                    rounded_rect(
+                        context,
+                        badge_x,
+                        badge_y,
+                        badge_w,
+                        badge_h,
+                        (badge_h / 2.0).min(4.0 * scale),
+                    );
+                    context.set_source_rgba(0.05, 0.06, 0.08, 0.72);
+                    let _ = context.fill();
+                    context.set_source_rgba(1.0, 1.0, 1.0, 0.92);
+                    let text_top = badge_y + (badge_h - extents.height()) / 2.0;
+                    context.move_to(badge_x + pad, text_top - extents.y_bearing());
+                    let _ = context.show_text(&label);
+                }
+            }
+        }
+
         if data.selected {
             rounded_rect(
                 context,
@@ -6910,6 +7826,17 @@ fn draw_video_clip(
                 tone,
             );
         }
+    }
+}
+
+/// A speed as the timeline chip labels it: whole numbers stay whole, and a
+/// fractional speed keeps its own digits.
+fn speed_label(speed: f64) -> String {
+    let rounded = (speed * 100.0).round() / 100.0;
+    if (rounded - rounded.round()).abs() < 1e-9 {
+        format!("{}×", rounded.round() as i64)
+    } else {
+        format!("{rounded}×")
     }
 }
 
@@ -7071,10 +7998,13 @@ fn rounded_rect(context: &Context, x: f64, y: f64, width: f64, height: f64, radi
 
 #[cfg(test)]
 mod tests {
+    use super::super::background::{Background, DEFAULT_PADDING, DEFAULT_RADIUS};
     use super::super::project;
     use super::super::webcam::{CameraLayout, LayoutSettings};
     use super::*;
-    use crate::recording::editor::sidecar::{CaptureRegion, PointerSidecar, WebcamTrack};
+    use crate::recording::editor::sidecar::{
+        CaptureRegion, ClickSample, PointerSidecar, WebcamTrack,
+    };
     use gtk4::cairo::{Format, ImageSurface};
 
     fn loaded() -> Data {
@@ -7104,13 +8034,328 @@ mod tests {
         let video = recording("fresh");
         let mut data = loaded();
         data.path = Some(video.clone());
+        let background = Background::default();
 
-        assert!(data.project_file().is_none());
+        assert!(data.project_file(&background).is_none());
 
         assert!(data.add_effect(EffectTrack::Zoom, 2.0).is_some());
-        let file = data.project_file().expect("an edited session is saved");
+        let file = data
+            .project_file(&background)
+            .expect("an edited session is saved");
         assert_eq!(file.zoom_clips.len(), 1);
         assert_eq!(file.source_path, video);
+    }
+
+    #[test]
+    fn a_stage_alone_is_saved_with_the_project() {
+        let video = recording("stage-only");
+        let mut data = loaded();
+        data.path = Some(video.clone());
+        let background = Background::default();
+
+        assert!(
+            data.project_file(&background).is_none(),
+            "an untouched flat stage is still a freshly opened recording"
+        );
+
+        background.apply(Some("wallpaper-004.jpg"), 48.0, 6.0);
+        let file = data
+            .project_file(&background)
+            .expect("a staged session is saved");
+        assert_eq!(
+            file.background.selection.as_deref(),
+            Some("wallpaper-004.jpg")
+        );
+        assert!((file.background_padding - 48.0).abs() < 1e-9);
+        assert!((file.background_radius - 6.0).abs() < 1e-9);
+        assert_eq!(file.source_path, video);
+    }
+
+    #[test]
+    fn a_padding_only_stage_is_saved_and_resets_to_pristine() {
+        let video = recording("stage-padding-only");
+        let mut data = loaded();
+        data.path = Some(video);
+        let background = Background::default();
+
+        background.apply(None, 48.0, DEFAULT_RADIUS);
+        let file = data
+            .project_file(&background)
+            .expect("a padded stage is saved");
+        assert!(file.background.selection.is_none());
+        assert!((file.background_padding - 48.0).abs() < 1e-9);
+        assert!((file.background_radius - DEFAULT_RADIUS).abs() < 1e-9);
+
+        background.apply(None, DEFAULT_PADDING, DEFAULT_RADIUS);
+        assert!(data.project_file(&background).is_none());
+    }
+
+    #[test]
+    fn a_radius_only_stage_is_saved_and_resets_to_pristine() {
+        let video = recording("stage-radius-only");
+        let mut data = loaded();
+        data.path = Some(video);
+        let background = Background::default();
+
+        background.apply(None, DEFAULT_PADDING, 6.0);
+        let file = data
+            .project_file(&background)
+            .expect("a rounded stage is saved");
+        assert!(file.background.selection.is_none());
+        assert!((file.background_padding - DEFAULT_PADDING).abs() < 1e-9);
+        assert!((file.background_radius - 6.0).abs() < 1e-9);
+
+        background.apply(None, DEFAULT_PADDING, DEFAULT_RADIUS);
+        assert!(data.project_file(&background).is_none());
+    }
+
+    #[test]
+    fn an_initialised_project_keeps_a_flat_stage() {
+        let video = recording("seeded-reset");
+        let mut data = loaded();
+        data.path = Some(video);
+        data.has_project = true;
+        let background = Background::default();
+
+        background.apply(Some("wallpaper-004.jpg"), 40.0, 0.0);
+        assert!(data.project_file(&background).is_some());
+
+        background.apply(None, DEFAULT_PADDING, DEFAULT_RADIUS);
+        let file = data
+            .project_file(&background)
+            .expect("a reset stage keeps its project");
+        assert!(file.background.selection.is_none());
+        assert!((file.background_padding - DEFAULT_PADDING).abs() < 1e-9);
+        assert!((file.background_radius - DEFAULT_RADIUS).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_saved_flat_project_is_not_seeded_again() {
+        let video = recording("flat-v2");
+        let mut data = loaded();
+        data.path = Some(video.clone());
+        data.apply_project(&project::EditorProjectFile {
+            version: 2,
+            source_path: video,
+            source_size: 0,
+            source_mtime_secs: 0,
+            trim_start_seconds: 0.0,
+            trim_end_seconds: 10.0,
+            cuts: Vec::new(),
+            segment_starts: Vec::new(),
+            segment_speeds: Vec::new(),
+            typing_suggestions_resolved: Vec::new(),
+            freeze_tail: 0.0,
+            zoom_clips: Vec::new(),
+            zoom_camera: project::ZoomCameraFile::default(),
+            cursor_hide_clips: Vec::new(),
+            webcam: None,
+            background: project::StageFile::default(),
+            background_padding: DEFAULT_PADDING,
+            background_radius: DEFAULT_RADIUS,
+            playhead_seconds: 0.0,
+            timeline_scale: 0.0,
+            timeline_scroll_seconds: 0.0,
+            cursor_click_sound: None,
+            cursor_click_sound_volume: 0.25,
+            captions_shortcuts: false,
+            captions_show_single_letters: false,
+            cursor: Default::default(),
+        });
+
+        let background = Background::default();
+        let file = data
+            .project_file(&background)
+            .expect("a loaded project is kept even when flat");
+        assert!(file.background.selection.is_none());
+        assert!((file.background_padding - DEFAULT_PADDING).abs() < 1e-9);
+        assert!((file.background_radius - DEFAULT_RADIUS).abs() < 1e-9);
+
+        let text = serde_json::to_string(&file).unwrap();
+        assert_eq!(
+            serde_json::from_str::<project::EditorProjectFile>(&text).unwrap(),
+            file
+        );
+    }
+
+    #[test]
+    fn resetting_the_media_clears_the_project_marker() {
+        let mut data = loaded();
+        data.has_project = true;
+
+        data.reset_media();
+
+        assert!(!data.has_project);
+    }
+
+    #[test]
+    fn an_undo_step_keeps_the_project_initialised() {
+        let mut data = loaded();
+        data.has_project = true;
+
+        let before = data.snapshot();
+        data.has_project = false;
+        data.restore(before);
+
+        assert!(data.has_project);
+    }
+
+    fn tuned_cursor() -> CursorSettings {
+        CursorSettings {
+            theme: crate::recording::editor::model::CursorTheme::White,
+            size: 1.6,
+            click_effect: crate::recording::editor::model::ClickEffect::Circle,
+            stop_movement_in_last_part_ms: 800.0,
+            ..CursorSettings::default()
+        }
+    }
+
+    fn editable(name: &str) -> (Data, Background) {
+        let video = recording(name);
+        let mut data = loaded();
+        data.path = Some(video);
+        assert!(data.add_effect(EffectTrack::Zoom, 2.0).is_some());
+        (data, Background::default())
+    }
+
+    #[test]
+    fn a_document_opens_on_the_cursor_look_its_file_stored() {
+        let (data, background) = editable("cursor-open");
+        let file = data
+            .project_file(&background)
+            .expect("an edited session is saved");
+        let stored = snapshot_with_cursor(Some(file), tuned_cursor()).expect("a snapshot");
+
+        assert_eq!(incoming_cursor(Some(&stored)), tuned_cursor());
+        assert_eq!(incoming_cursor(None), CursorSettings::default());
+    }
+
+    #[test]
+    fn a_saved_snapshot_carries_the_cursor_this_session_holds() {
+        let (data, background) = editable("cursor-save");
+        let file = data
+            .project_file(&background)
+            .expect("an edited session is saved");
+        assert_eq!(file.cursor, super::super::presets::CursorFile::default());
+
+        let saved = snapshot_with_cursor(Some(file), tuned_cursor()).expect("a snapshot");
+        assert_eq!(saved.cursor.settings(), tuned_cursor());
+        assert_eq!(
+            saved.cursor,
+            super::super::presets::CursorFile::from_settings(tuned_cursor())
+        );
+        assert_eq!(snapshot_with_cursor(None, tuned_cursor()), None);
+    }
+
+    #[test]
+    fn noting_a_cursor_change_writes_nothing_until_the_sync_runs() {
+        let (data, background) = editable("cursor-tick");
+        let video = data.path.clone().expect("the session has a recording");
+        let directory = video
+            .parent()
+            .expect("a recording sits in a folder")
+            .to_path_buf();
+        let snapshot = snapshot_with_cursor(data.project_file(&background), tuned_cursor());
+        let path = project::project_path_for_video(&video);
+        project::delete_project(&video);
+        let sync = project::ProjectSync::default();
+        sync.adopt(None);
+
+        sync.mark_changed();
+        assert!(
+            sync.take_changed(),
+            "the autosave tick is what sees the note"
+        );
+        assert!(!path.exists(), "noting a change writes nothing on its own");
+
+        assert!(sync.sync(snapshot, false));
+        let saved = project::load_project(&video).expect("the project reloads");
+        assert_eq!(saved.cursor.settings(), tuned_cursor());
+
+        project::delete_project(&video);
+        clean_up(vec![video, directory]);
+    }
+
+    #[test]
+    fn a_document_with_nothing_to_save_carries_no_look_for_a_preset() {
+        let data = Data::default();
+        let background = Background::default();
+        assert!(data.project_file(&background).is_none());
+    }
+
+    #[test]
+    fn a_captured_look_keeps_the_camera_the_recording_shows() {
+        let (data, background) = editable("preset-camera");
+        let mut file = data
+            .project_file(&background)
+            .expect("an edited session is saved");
+        assert!(file.webcam.is_none(), "an unmoved camera saves no block");
+
+        fill_camera_from_recording(
+            &mut file,
+            Some(super::super::webcam::LayerSettings {
+                enabled: true,
+                fullscreen: false,
+                x: 0.62,
+                y: 0.31,
+                w: 0.18,
+                h: 0.24,
+                radius: 0.4,
+                mirror: true,
+                delay_seconds: 0.02,
+                zoomed_scale: 0.7,
+                hide_during_silence: Some(4.0),
+            }),
+            LayoutSettings::default(),
+        );
+        let camera = file.webcam.as_ref().expect("the recorded camera travels");
+        assert_eq!(camera.x, 0.62);
+        assert_eq!(camera.radius, 0.4);
+        assert!(camera.mirror);
+        assert!(camera.layouts.is_some());
+
+        fill_camera_from_recording(&mut file, None, LayoutSettings::default());
+        assert_eq!(
+            file.webcam.as_ref().expect("the block stays").x,
+            0.62,
+            "a saved block is never replaced by the recorded one"
+        );
+    }
+
+    #[test]
+    fn a_legacy_project_without_piece_starts_opens_contiguous_at_normal_speed() {
+        let mut data = loaded();
+        data.apply_project(&project::EditorProjectFile {
+            version: 2,
+            source_path: PathBuf::from("clip.mp4"),
+            source_size: 0,
+            source_mtime_secs: 0,
+            trim_start_seconds: 0.0,
+            trim_end_seconds: 10.0,
+            cuts: vec![3.0, 6.0],
+            segment_starts: Vec::new(),
+            segment_speeds: Vec::new(),
+            typing_suggestions_resolved: Vec::new(),
+            freeze_tail: 0.0,
+            zoom_clips: Vec::new(),
+            zoom_camera: project::ZoomCameraFile::default(),
+            cursor_hide_clips: Vec::new(),
+            webcam: None,
+            background: project::StageFile::default(),
+            background_padding: DEFAULT_PADDING,
+            background_radius: DEFAULT_RADIUS,
+            playhead_seconds: 0.0,
+            timeline_scale: 0.0,
+            timeline_scroll_seconds: 0.0,
+            cursor_click_sound: None,
+            cursor_click_sound_volume: 0.25,
+            captions_shortcuts: false,
+            captions_show_single_letters: false,
+            cursor: Default::default(),
+        });
+
+        assert_eq!(data.segment_starts, vec![0.0, 3.0, 6.0]);
+        assert_eq!(data.segment_speeds, vec![1.0, 1.0, 1.0]);
     }
 
     #[test]
@@ -7125,6 +8370,8 @@ mod tests {
             trim_end_seconds: 40.0,
             cuts: vec![1.0, 5.0, 50.0],
             segment_starts: vec![0.0, 2.5],
+            segment_speeds: vec![1.0, 1.0],
+            typing_suggestions_resolved: Vec::new(),
             freeze_tail: 0.5,
             zoom_clips: vec![
                 project::ZoomClipFile {
@@ -7164,9 +8411,17 @@ mod tests {
                 hidden: false,
             }],
             webcam: None,
+            background: project::StageFile::default(),
+            background_padding: DEFAULT_PADDING,
+            background_radius: DEFAULT_RADIUS,
             playhead_seconds: 99.0,
             timeline_scale: 400.0,
             timeline_scroll_seconds: 12.0,
+            cursor_click_sound: None,
+            cursor_click_sound_volume: 0.25,
+            captions_shortcuts: false,
+            captions_show_single_letters: false,
+            cursor: Default::default(),
         });
 
         // The recording is 10s: the project's tail past it is clamped, and a
@@ -7343,6 +8598,86 @@ mod tests {
         assert_eq!(placed[0].scale, MAX_ZOOM_SCALE);
         assert_eq!(placed[0].center, (64.0, 432.0));
         assert!(place_auto_zooms(&[existing[0], placed[0]], &detections, (640, 480)).is_empty());
+    }
+
+    fn click_sidecar(clicks: &[(f64, f64, f64)]) -> PointerSidecar {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        for &(t, x, y) in clicks {
+            sidecar.clicks.push(ClickSample {
+                t,
+                x,
+                y,
+                button: 0,
+                cursor_id: None,
+            });
+        }
+        sidecar
+    }
+
+    #[test]
+    fn a_fresh_import_seeds_its_clicks_automatic_zooms() {
+        let mut data = loaded();
+        let sidecar = click_sidecar(&[
+            (1.0, 480.0, 270.0),
+            (7.0, 1440.0, 810.0),
+            (9.5, 960.0, 540.0),
+        ]);
+
+        data.seed_auto_zooms(&sidecar, (1920, 1080), true);
+
+        assert_eq!(data.zoom_clips.len(), 2);
+        let first = data.zoom_clips[0];
+        assert!((first.start - 0.7).abs() < 1e-9);
+        assert!((first.end - 3.5).abs() < 1e-9);
+        assert!((first.scale - 2.0).abs() < 1e-9);
+        assert_eq!(first.center, (480.0, 270.0));
+        assert_eq!(first.mode, ZoomMode::Auto);
+        let (anchor_start, anchor_end) = first.anchor.expect("a seeded clip carries its footage");
+        assert!((anchor_start - 0.7).abs() < 1e-9);
+        assert!((anchor_end - 3.5).abs() < 1e-9);
+
+        let second = data.zoom_clips[1];
+        assert!((second.start - 6.7).abs() < 1e-9);
+        assert!((second.end - 9.2).abs() < 1e-9);
+        assert_eq!(second.center, (1440.0, 810.0));
+        assert_eq!(second.mode, ZoomMode::Auto);
+        let (anchor_start, anchor_end) = second.anchor.expect("a seeded clip carries its footage");
+        assert!((anchor_start - 6.7).abs() < 1e-9);
+        assert!((anchor_end - 9.2).abs() < 1e-9);
+        assert_eq!(data.frame_size, Some((1920, 1080)));
+    }
+
+    #[test]
+    fn seeding_stays_off_when_the_setting_is_off() {
+        let mut data = loaded();
+        let sidecar = click_sidecar(&[(1.0, 480.0, 270.0)]);
+
+        data.seed_auto_zooms(&sidecar, (1920, 1080), false);
+
+        assert!(data.zoom_clips.is_empty());
+    }
+
+    #[test]
+    fn seeding_again_keeps_the_clips_the_first_import_placed() {
+        let mut data = loaded();
+        data.seed_auto_zooms(&click_sidecar(&[(1.0, 480.0, 270.0)]), (1920, 1080), true);
+        let seeded = data.zoom_clips.clone();
+
+        data.seed_auto_zooms(&click_sidecar(&[(5.0, 100.0, 100.0)]), (1280, 720), true);
+
+        assert_eq!(data.zoom_clips, seeded);
+        assert_eq!(data.frame_size, Some((1920, 1080)));
+    }
+
+    #[test]
+    fn clicks_in_the_final_second_seed_nothing() {
+        let mut data = loaded();
+        let sidecar = click_sidecar(&[(9.5, 960.0, 540.0)]);
+
+        data.seed_auto_zooms(&sidecar, (1920, 1080), true);
+
+        assert!(data.zoom_clips.is_empty());
     }
 
     #[test]
@@ -7597,6 +8932,278 @@ mod tests {
         assert!((data.segment_start(1) - 6.0).abs() < 1e-9);
         assert!((data.segment_start(2) - 8.0).abs() < 1e-9);
         assert!((data.total_duration() - 12.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_trim_that_crosses_a_cut_keeps_the_piece_it_lands_in() {
+        let mut data = loaded();
+        assert!(data.add_cut(4.0));
+        assert!(data.add_cut(8.0));
+        data.segment_starts = vec![0.0, 4.0, 8.0];
+        data.segment_speeds = vec![2.0, 4.0, 1.0];
+
+        data.set_trim_start(5.0);
+
+        assert_eq!(data.segment_boundaries(), vec![(5.0, 8.0), (8.0, 10.0)]);
+        assert_eq!(data.segment_speeds, vec![4.0, 1.0]);
+        assert!((data.segment_start(0) - 4.0).abs() < 1e-9);
+        assert!((data.segment_start(1) - 8.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_suggestion_next_to_the_clip_edge_survives_save_and_undo() {
+        let video = recording("typing-edge");
+        let mut data = loaded();
+        data.path = Some(video.clone());
+        assert!(data.apply_typing_ranges(&[(0.05, 1.0)], 2.0));
+
+        let background = Background::default();
+        let file = data
+            .project_file(&background)
+            .expect("an edge suggestion is saved");
+        assert_eq!(file.cuts, vec![0.05, 1.0]);
+        assert_eq!(file.segment_speeds, vec![1.0, 2.0, 1.0]);
+
+        let mut reopened = loaded();
+        reopened.path = Some(video);
+        reopened.apply_project(&file);
+        assert_eq!(reopened.cuts, vec![0.05, 1.0]);
+        assert_eq!(reopened.segment_speeds, vec![1.0, 2.0, 1.0]);
+
+        assert!(data.undo_edit());
+        assert!(data.cuts.is_empty());
+        assert!(data.segment_speeds.is_empty() || data.segment_speeds == vec![1.0]);
+        assert!(data.redo_edit());
+        assert_eq!(data.cuts, vec![0.05, 1.0]);
+        assert_eq!(data.segment_speeds, vec![1.0, 2.0, 1.0]);
+    }
+
+    #[test]
+    fn a_resolved_detected_range_stays_hidden_when_the_trim_expands() {
+        let mut data = loaded();
+        assert!(data.apply_typing_ranges(&[(3.0, 5.0)], 2.0));
+        data.replace_typing_resolved(3.0, 2.0);
+        assert_eq!(data.typing_suggestions_resolved, vec![2.0]);
+
+        data.trim_start = 3.0;
+        data.clamp_cuts();
+        assert!(data.typing_range_resolved(2.0, 3.0));
+
+        data.trim_start = 0.0;
+        data.clamp_cuts();
+        assert!(data.typing_range_resolved(2.0, 2.0));
+        assert!(!data.typing_range_resolved(3.0, 3.0));
+    }
+
+    #[test]
+    fn mixed_speeds_change_each_pieces_composition_length() {
+        let mut data = loaded();
+        assert!(data.add_cut(2.0));
+        assert!(data.add_cut(4.0));
+        data.segment_speeds = vec![2.0, 4.0, 1.0];
+        data.segment_starts = vec![0.0, 1.0, 1.5];
+
+        assert!((data.total_duration() - 7.5).abs() < 1e-9);
+        assert!((data.segment_span(0).unwrap().1 - 1.0).abs() < 1e-9);
+        assert!((data.segment_span(1).unwrap().0 - 1.0).abs() < 1e-9);
+        assert!((data.segment_span(1).unwrap().1 - 1.5).abs() < 1e-9);
+        assert!((data.segment_span(2).unwrap().0 - 1.5).abs() < 1e-9);
+
+        assert!((data.source_time_at(0.5).unwrap() - 1.0).abs() < 1e-9);
+        assert!((data.source_time_at(1.25).unwrap() - 3.0).abs() < 1e-9);
+        assert!((data.composition_time_for_source(3.0).unwrap() - 1.25).abs() < 1e-9);
+
+        data.playhead = 2.0;
+        assert!((data.playhead_source_time() - 4.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn splitting_a_sped_piece_inherits_its_speed() {
+        let mut data = loaded();
+        data.segment_speeds = vec![3.0];
+
+        assert!(data.add_cut(2.0));
+
+        assert_eq!(data.cuts, vec![6.0]);
+        assert_eq!(data.segment_speeds, vec![3.0, 3.0]);
+        assert!((data.segment_start(1) - 2.0).abs() < 1e-9);
+        assert!((data.segment_span(1).unwrap().1 - (2.0 + 4.0 / 3.0)).abs() < 1e-9);
+        assert!((data.total_duration() - 10.0 / 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn trimming_keeps_the_speed_of_the_piece_it_keeps() {
+        let mut data = loaded();
+        assert!(data.add_cut(4.0));
+        data.segment_speeds = vec![2.0, 4.0];
+
+        data.trim_start = 1.0;
+        data.clamp_cuts();
+        assert_eq!(data.segment_boundaries(), vec![(1.0, 4.0), (4.0, 10.0)]);
+        assert_eq!(data.segment_speeds, vec![2.0, 4.0]);
+        assert!((data.segment_start(0) - 0.0).abs() < 1e-9);
+
+        data.trim_start = 5.0;
+        data.clamp_cuts();
+        assert_eq!(data.segment_boundaries(), vec![(5.0, 10.0)]);
+        assert_eq!(data.segment_speeds, vec![4.0]);
+        assert!((data.segment_start(0) - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn speeding_a_range_keeps_the_gaps_between_moved_pieces() {
+        let mut data = loaded();
+        assert!(data.add_cut(3.0));
+        assert!(data.add_cut(6.0));
+        data.segment_starts = vec![0.0, 3.0, 8.0];
+
+        assert!(data.apply_typing_ranges(&[(3.0, 6.0)], 3.0));
+
+        assert!((data.segment_start(1) - 3.0).abs() < 1e-9);
+        assert!((data.segment_start(2) - 6.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_suggestion_next_to_the_clip_edge_skips_the_split_guard() {
+        let mut data = loaded();
+
+        assert!(data.apply_typing_ranges(&[(0.05, 1.0)], 2.0));
+
+        assert_eq!(data.cuts, vec![0.05, 1.0]);
+        assert_eq!(data.segment_speeds, vec![1.0, 2.0, 1.0]);
+    }
+
+    #[test]
+    fn applying_a_typing_range_splits_and_reflows_as_one_undo() {
+        let mut data = loaded();
+
+        assert!(data.apply_typing_ranges(&[(3.0, 6.0)], 3.0));
+
+        assert_eq!(
+            data.segment_boundaries(),
+            vec![(0.0, 3.0), (3.0, 6.0), (6.0, 10.0)]
+        );
+        assert_eq!(data.segment_speeds, vec![1.0, 3.0, 1.0]);
+        assert!((data.segment_start(0) - 0.0).abs() < 1e-9);
+        assert!((data.segment_start(1) - 3.0).abs() < 1e-9);
+        assert!((data.segment_start(2) - 4.0).abs() < 1e-9);
+        assert!((data.total_duration() - 8.0).abs() < 1e-9);
+        assert_eq!(data.typing_suggestions_resolved, vec![3.0]);
+
+        assert!(data.undo_edit());
+        assert_eq!(data.segment_boundaries(), vec![(0.0, 10.0)]);
+        assert!(data.segment_speeds.is_empty() || data.segment_speeds == vec![1.0]);
+        assert!(data.typing_suggestions_resolved.is_empty());
+        assert!((data.total_duration() - 10.0).abs() < 1e-9);
+        assert!(!data.undo_edit());
+
+        assert!(data.redo_edit());
+        assert_eq!(data.segment_speeds, vec![1.0, 3.0, 1.0]);
+        assert_eq!(data.typing_suggestions_resolved, vec![3.0]);
+        assert!(!data.apply_typing_ranges(&[(3.0, 6.0)], 3.0));
+    }
+
+    #[test]
+    fn applying_all_suggestions_is_one_undo_and_skips_resolved_ranges() {
+        let mut data = loaded();
+        data.typing_suggestions_resolved.push(7.0);
+
+        assert!(data.apply_typing_ranges(&[(1.0, 2.0), (4.0, 5.0), (7.0, 8.0)], 2.0));
+
+        assert_eq!(
+            data.segment_boundaries(),
+            vec![(0.0, 1.0), (1.0, 2.0), (2.0, 4.0), (4.0, 5.0), (5.0, 10.0)]
+        );
+        assert_eq!(data.segment_speeds, vec![1.0, 2.0, 1.0, 2.0, 1.0]);
+        assert_eq!(data.typing_suggestions_resolved, vec![7.0, 1.0, 4.0]);
+        assert!((data.total_duration() - 9.0).abs() < 1e-9);
+
+        assert!(data.undo_edit());
+        assert!(data.cuts.is_empty());
+        assert_eq!(data.typing_suggestions_resolved, vec![7.0]);
+        assert!(!data.undo_edit());
+    }
+
+    #[test]
+    fn a_dismissed_suggestion_is_not_applied_and_undo_brings_it_back() {
+        let mut data = loaded();
+
+        assert!(data.dismiss_typing_suggestion(3.0));
+        assert!(!data.apply_typing_ranges(&[(3.0, 6.0)], 2.0));
+        assert!(data.cuts.is_empty());
+
+        assert!(data.undo_edit());
+        assert!(data.typing_suggestions_resolved.is_empty());
+        assert!(data.apply_typing_ranges(&[(3.0, 6.0)], 2.0));
+    }
+
+    #[test]
+    fn non_finite_typing_ranges_and_speeds_are_refused() {
+        let mut data = loaded();
+
+        assert!(!data.apply_typing_ranges(&[(f64::NAN, 3.0)], 3.0));
+        assert!(!data.apply_typing_ranges(&[(1.0, f64::INFINITY)], 3.0));
+        assert!(!data.apply_typing_ranges(&[(1.0, 2.0)], f64::NAN));
+        assert!(!data.apply_typing_ranges(&[(1.0, 2.0)], 0.0));
+        assert!(!data.apply_typing_ranges(&[(1.0, 2.0)], -2.0));
+
+        assert!(data.cuts.is_empty());
+        assert!(data.typing_suggestions_resolved.is_empty());
+    }
+
+    #[test]
+    fn resolved_typing_ranges_round_trip_with_the_project() {
+        let video = recording("typing-resolved");
+        let mut data = loaded();
+        data.path = Some(video.clone());
+        assert!(data.apply_typing_ranges(&[(2.0, 4.0)], 2.0));
+
+        let background = Background::default();
+        let file = data
+            .project_file(&background)
+            .expect("an applied suggestion is saved");
+        assert_eq!(file.segment_speeds, vec![1.0, 2.0, 1.0]);
+        assert_eq!(file.typing_suggestions_resolved, vec![2.0]);
+
+        let mut reopened = loaded();
+        reopened.path = Some(video);
+        reopened.apply_project(&file);
+        assert_eq!(reopened.segment_speeds, vec![1.0, 2.0, 1.0]);
+        assert_eq!(reopened.typing_suggestions_resolved, vec![2.0]);
+    }
+
+    #[test]
+    fn anchored_zooms_follow_footage_through_a_sped_piece() {
+        let mut data = loaded();
+        assert!(data.add_cut(4.0));
+        data.segment_speeds = vec![1.0, 3.0];
+        data.zoom_clips = vec![ZoomClip {
+            start: 0.0,
+            end: 1.0,
+            scale: 2.0,
+            center: (960.0, 540.0),
+            hidden: false,
+            mode: ZoomMode::Auto,
+            instant: false,
+            anchor: Some((4.5, 5.5)),
+        }];
+
+        data.reproject_anchored_zooms();
+
+        let clip = data.zoom_clips[0];
+        assert!((clip.start - (4.0 + 0.5 / 3.0)).abs() < 1e-9);
+        assert!((clip.end - (4.0 + 1.5 / 3.0)).abs() < 1e-9);
+        assert!((super::super::zoom::CAMERA_FOLLOW_SPRING.stiffness - 125.0).abs() < 1e-9);
+        assert!((super::super::zoom::CAMERA_FOLLOW_SPRING.damping - 12.0).abs() < 1e-9);
+        assert!((super::super::zoom::CAMERA_FOLLOW_SPRING.mass - 1.5).abs() < 1e-9);
+        assert!((crate::recording::editor::auto_zoom::TAIL_SECONDS - 2.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn speed_labels_read_whole_and_fractional_speeds() {
+        assert_eq!(speed_label(3.0), "3×");
+        assert_eq!(speed_label(1.5), "1.5×");
+        assert_eq!(speed_label(1.0), "1×");
     }
 
     #[test]
@@ -8369,10 +9976,13 @@ mod tests {
     #[test]
     fn a_layout_only_edit_is_saved_with_the_placement_it_did_not_touch() {
         let (mut data, scratch) = webcam_loaded("saved");
-        assert!(data.project_file().is_none());
+        let background = Background::default();
+        assert!(data.project_file(&background).is_none());
 
         assert!(data.update_layouts(|layouts| layouts.transition_seconds = 0.8, false));
-        let file = data.project_file().expect("a layout edit is saved");
+        let file = data
+            .project_file(&background)
+            .expect("a layout edit is saved");
         let webcam = file.webcam.expect("the camera block is written");
         let group = webcam.layouts.expect("the layout timeline is written");
         assert!((group.transition_seconds - 0.8).abs() < 1e-9);
@@ -8411,6 +10021,8 @@ mod tests {
             trim_end_seconds: 10.0,
             cuts: Vec::new(),
             segment_starts: Vec::new(),
+            segment_speeds: Vec::new(),
+            typing_suggestions_resolved: Vec::new(),
             freeze_tail: 0.0,
             zoom_clips: Vec::new(),
             zoom_camera: project::ZoomCameraFile::default(),
@@ -8429,9 +10041,17 @@ mod tests {
                 hide_during_silence: None,
                 layouts: None,
             }),
+            background: project::StageFile::default(),
+            background_padding: DEFAULT_PADDING,
+            background_radius: DEFAULT_RADIUS,
             playhead_seconds: 0.0,
             timeline_scale: 0.0,
             timeline_scroll_seconds: 0.0,
+            cursor_click_sound: None,
+            cursor_click_sound_volume: 0.25,
+            captions_shortcuts: false,
+            captions_show_single_letters: false,
+            cursor: Default::default(),
         });
 
         let layouts = saved_layouts(&data);
@@ -8551,6 +10171,165 @@ mod tests {
         assert!(data.undo_edit());
         assert!(saved_layouts(&data).cues.is_empty());
         clean_up(scratch);
+    }
+
+    /// A timeline over a recording with a camera track whose layout timeline
+    /// has two cues, built on the GTK thread. The stage is the bundled one.
+    fn timeline_with_camera_cues(name: &str) -> (Timeline, Background, Vec<PathBuf>) {
+        let (data, paths) = webcam_loaded(name);
+        let video = data.path.clone().expect("a recording");
+        let webcam = data.webcam.clone().expect("a camera model");
+        webcam.set_layouts(LayoutSettings {
+            cues: vec![
+                super::super::webcam::LayoutCue {
+                    at: 1.5,
+                    layout: CameraLayout::FullscreenCamera,
+                    position: None,
+                    cutout_x: None,
+                },
+                super::super::webcam::LayoutCue {
+                    at: 4.25,
+                    layout: CameraLayout::CameraOverlay,
+                    position: None,
+                    cutout_x: None,
+                },
+            ],
+            ..LayoutSettings::default()
+        });
+
+        let background = Background::default();
+        static NEXT_APP: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let app_number = NEXT_APP.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let app = gtk4::Application::builder()
+            .application_id(format!("com.apexshot.Tests.PresetApply{app_number}"))
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+        let window = gtk4::ApplicationWindow::new(&app);
+        let canvas = gtk4::AspectFrame::new(0.5, 0.5, 1.0, false);
+        let timeline = build(
+            &window,
+            &canvas,
+            1.0,
+            false,
+            super::super::cursor::CursorModel::new(),
+            webcam,
+            background.clone(),
+            Rc::new(Cell::new(None)),
+        );
+        {
+            let mut document = timeline.data.borrow_mut();
+            document.path = Some(video);
+            document.duration = 10.0;
+            document.trim_end = 10.0;
+            document.frame_size = Some((1920, 1080));
+        }
+        (timeline, background, paths)
+    }
+
+    /// The stage of a look captured from the open project: a wallpaper, an
+    /// inset and a radius that differ from the bundled stage.
+    fn captured_stage_look(
+        timeline: &Timeline,
+        background: &Background,
+    ) -> super::super::presets::Preset {
+        background.apply(Some("wallpaper-019.jpg"), 66.0, 9.0);
+        let file = timeline
+            .data
+            .borrow()
+            .project_file(background)
+            .expect("an edited recording has a project");
+        super::super::presets::from_project(&file, CursorSettings::default(), "Look")
+            .expect("the look captures")
+    }
+
+    #[test]
+    fn applying_a_preset_keeps_the_layout_cues_of_the_recording() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let (timeline, background, paths) = timeline_with_camera_cues("preset-cues");
+            let look = captured_stage_look(&timeline, &background);
+            background.apply(Some("wallpaper-004.jpg"), 40.0, 5.0);
+
+            timeline.apply_preset(&look);
+
+            assert_eq!(
+                background.snapshot(),
+                (Some("wallpaper-019.jpg".to_owned()), 66.0, 9.0)
+            );
+            let cues: Vec<f64> = timeline
+                .webcam_layouts()
+                .expect("the camera keeps its layout timeline")
+                .cues
+                .iter()
+                .map(|cue| cue.at)
+                .collect();
+            assert_eq!(cues, [1.5, 4.25]);
+            clean_up(paths);
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
+    }
+
+    #[test]
+    fn undoing_a_preset_puts_the_stage_back_and_redo_applies_it_again() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let (timeline, background, paths) = timeline_with_camera_cues("preset-undo");
+            let look = captured_stage_look(&timeline, &background);
+            background.apply(Some("wallpaper-004.jpg"), 40.0, 5.0);
+            timeline.apply_preset(&look);
+
+            assert!(timeline.undo());
+            assert_eq!(
+                background.snapshot(),
+                (Some("wallpaper-004.jpg".to_owned()), 40.0, 5.0)
+            );
+            assert_eq!(saved_layouts(&timeline.data.borrow()).cues.len(), 2);
+
+            assert!(timeline.redo());
+            assert_eq!(
+                background.snapshot(),
+                (Some("wallpaper-019.jpg".to_owned()), 66.0, 9.0)
+            );
+            clean_up(paths);
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
+    }
+
+    #[test]
+    fn an_edit_made_after_a_preset_undoes_without_moving_the_stage() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let (timeline, background, paths) = timeline_with_camera_cues("preset-edit");
+            let look = captured_stage_look(&timeline, &background);
+            background.apply(Some("wallpaper-004.jpg"), 40.0, 5.0);
+            timeline.apply_preset(&look);
+            timeline
+                .data
+                .borrow_mut()
+                .add_effect(EffectTrack::Zoom, 2.0)
+                .expect("a zoom lands on the recording");
+
+            assert!(timeline.undo());
+            assert!(timeline.data.borrow().zoom_clips.is_empty());
+            assert_eq!(
+                background.snapshot(),
+                (Some("wallpaper-019.jpg".to_owned()), 66.0, 9.0),
+                "undoing the zoom leaves the preset's stage where it is"
+            );
+
+            assert!(timeline.undo());
+            assert_eq!(
+                background.snapshot(),
+                (Some("wallpaper-004.jpg".to_owned()), 40.0, 5.0),
+                "the preset's own step puts the stage back"
+            );
+            clean_up(paths);
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
     }
 
     #[test]
@@ -8737,11 +10516,14 @@ mod tests {
     #[test]
     fn a_cutout_placement_undoes_and_redoes_with_the_project() {
         let (mut data, scratch) = webcam_loaded("cutout-position");
+        let background = Background::default();
         assert!((saved_layouts(&data).cutout_position_x - 0.5).abs() < 1e-9);
 
         assert!(data.update_layouts(|layouts| layouts.cutout_position_x = 0.2, false));
         assert!((saved_layouts(&data).cutout_position_x - 0.2).abs() < 1e-9);
-        let saved = data.project_file().expect("the layout edit is saved");
+        let saved = data
+            .project_file(&background)
+            .expect("the layout edit is saved");
         assert!(
             (saved
                 .webcam
@@ -9179,5 +10961,69 @@ mod tests {
         assert!((data.frame_aspect() - 16.0 / 9.0).abs() < 1e-9);
         data.frame_size = Some((0, 1080));
         assert!((data.frame_aspect() - 16.0 / 9.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn effects_travel_with_the_project_file_and_return_on_load() {
+        let video = recording("effects-file");
+        let background = Background::default();
+        let mut data = loaded();
+        data.path = Some(video);
+        data.update_effects(|effects| {
+            effects.click_sound = Some("soft".to_owned());
+            effects.click_sound_volume = 0.6;
+            effects.captions.shortcuts = true;
+        });
+        let file = data
+            .project_file(&background)
+            .expect("an effect change is an edit");
+        assert_eq!(file.cursor_click_sound.as_deref(), Some("soft"));
+        assert!(file.captions_shortcuts);
+
+        let mut reopened = loaded();
+        reopened.apply_project(&file);
+        assert_eq!(reopened.effects, data.effects);
+    }
+
+    #[test]
+    fn an_effects_change_undoes_and_an_unchanged_one_adds_no_step() {
+        let mut data = loaded();
+        data.update_effects(|effects| effects.captions.shortcuts = true);
+        data.update_effects(|effects| effects.captions.shortcuts = true);
+        assert!(data.undo_edit());
+        assert_eq!(data.effects, project::EffectsSettings::default());
+        assert!(!data.undo_edit());
+        assert!(data.redo_edit());
+        assert!(data.effects.captions.shortcuts);
+    }
+
+    #[test]
+    fn opening_another_recording_replaces_its_effects() {
+        let video = recording("effects-switch");
+        let background = Background::default();
+        let mut with_effects = loaded();
+        with_effects.path = Some(video.clone());
+        with_effects.update_effects(|effects| {
+            effects.click_sound = Some("soft".to_owned());
+            effects.captions.show_single_letters = true;
+        });
+        let first = with_effects
+            .project_file(&background)
+            .expect("the first recording is saved");
+        let mut plain = loaded();
+        plain.path = Some(video);
+        plain.has_project = true;
+        let second = plain
+            .project_file(&background)
+            .expect("the second recording keeps a project");
+
+        let mut data = loaded();
+        data.apply_project(&first);
+        assert_eq!(data.effects, with_effects.effects);
+        data.apply_project(&second);
+        assert_eq!(data.effects, project::EffectsSettings::default());
+        data.apply_project(&first);
+        data.reset_media();
+        assert_eq!(data.effects, project::EffectsSettings::default());
     }
 }

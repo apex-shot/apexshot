@@ -335,6 +335,39 @@ pub mod editor {
             None
         }
 
+        /// The encoded video's frame size, from the container's video stream.
+        /// The pointer sidecar's clicks are mapped into these pixels before an
+        /// automatic zoom is placed, so a fresh import needs them from ffprobe
+        /// rather than from the editor's preview.
+        pub fn probe_frame_size(source: &Path) -> Option<(u32, u32)> {
+            let output = crate::utils::hidden_command(ffprobe_executable())
+                .args([
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "v:0",
+                    "-show_entries",
+                    "stream=width,height",
+                    "-of",
+                    "json",
+                ])
+                .arg(source)
+                .output()
+                .ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            parse_frame_size(&String::from_utf8_lossy(&output.stdout))
+        }
+
+        fn parse_frame_size(text: &str) -> Option<(u32, u32)> {
+            let value: serde_json::Value = serde_json::from_str(text).ok()?;
+            let stream = value.get("streams")?.as_array()?.first()?;
+            let width = u32::try_from(stream.get("width")?.as_u64()?).ok()?;
+            let height = u32::try_from(stream.get("height")?.as_u64()?).ok()?;
+            (width >= 2 && height >= 2).then_some((width, height))
+        }
+
         pub fn ffmpeg_executable() -> PathBuf {
             if let Some(path) = std::env::var_os("APEXSHOT_FFMPEG") {
                 let path = PathBuf::from(path);
@@ -413,7 +446,7 @@ pub mod editor {
 
         #[cfg(test)]
         mod tests {
-            use super::{parse_duration, parse_fps_line, parse_rate};
+            use super::{parse_duration, parse_fps_line, parse_frame_size, parse_rate};
 
             #[test]
             fn ffmpeg_duration_lines_become_seconds() {
@@ -444,6 +477,41 @@ pub mod editor {
                 let other = "  Stream #0:0: Video: h264, yuv420p, 1280x720, 59.94 fps, 59.94 tbr";
                 assert!((parse_fps_line(other).unwrap() - 59.94).abs() < 1e-6);
                 assert!(parse_fps_line("no rate here").is_none());
+            }
+
+            #[test]
+            fn the_frame_size_comes_from_the_video_stream() {
+                let json = r#"{"programs":[],"streams":[{"width":1920,"height":1080,"codec_name":"h264"}]}"#;
+                assert_eq!(parse_frame_size(json), Some((1920, 1080)));
+            }
+
+            #[test]
+            fn a_missing_or_unreadable_frame_size_is_not_guessed() {
+                assert_eq!(parse_frame_size(r#"{"streams":[]}"#), None);
+                assert_eq!(parse_frame_size(r#"{"streams":[{"height":1080}]}"#), None);
+                assert_eq!(
+                    parse_frame_size(r#"{"streams":[{"width":"1920","height":1080}]}"#),
+                    None
+                );
+                assert_eq!(parse_frame_size("not json"), None);
+            }
+
+            #[test]
+            fn a_frame_size_too_small_to_compose_is_refused() {
+                assert_eq!(
+                    parse_frame_size(r#"{"streams":[{"width":0,"height":1080}]}"#),
+                    None
+                );
+                assert_eq!(
+                    parse_frame_size(r#"{"streams":[{"width":1,"height":1}]}"#),
+                    None
+                );
+            }
+
+            #[test]
+            fn a_frame_size_beyond_u32_is_refused() {
+                let json = r#"{"streams":[{"width":4294967296,"height":1080}]}"#;
+                assert_eq!(parse_frame_size(json), None);
             }
         }
     }

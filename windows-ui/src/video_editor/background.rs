@@ -105,6 +105,17 @@ pub(super) fn effective_padding(padding: f64) -> f64 {
     }
 }
 
+/// A saved stage metric: negatives have no meaning on a canvas, so they floor
+/// at zero, and a value that is not a number reads as the default it started
+/// from.
+fn stage_metric(value: f64, default: f64) -> f64 {
+    if value.is_finite() {
+        value.max(0.0)
+    } else {
+        default
+    }
+}
+
 /// A fill the panel paints itself, drawn over the whole canvas. The Custom tab
 /// owns the color and gradient model, so it hands the stage a painter instead of
 /// its state: the stage needs pixels, not a fill type.
@@ -146,6 +157,41 @@ impl Background {
             padding: self.padding.clone(),
             radius: self.radius.clone(),
         }
+    }
+
+    /// The stage as a project file stores it: the wallpaper, the inset and the
+    /// card's corner radius.
+    pub fn snapshot(&self) -> (Option<String>, f64, f64) {
+        (
+            self.selection.borrow().clone(),
+            self.padding.get(),
+            self.radius.get(),
+        )
+    }
+
+    /// Put the stage back to what a project file recorded, or to no fill at all
+    /// when the recording carries no stage.
+    ///
+    /// The panel's own painter has no serialised form, so it is always dropped,
+    /// even when the incoming selection is empty too: the last document's
+    /// gradient must not stay behind the next one's video. Every value lands
+    /// before the single notification, so a listener never reads a stage that is
+    /// only half replaced, and a stage that already matches is left alone.
+    pub fn apply(&self, selection: Option<&str>, padding: f64, radius: f64) {
+        let selection = selection.map(str::to_owned);
+        let padding = stage_metric(padding, DEFAULT_PADDING);
+        let radius = stage_metric(radius, DEFAULT_RADIUS);
+        let had_custom_fill = self.custom_fill.borrow_mut().take().is_some();
+        let unchanged = *self.selection.borrow() == selection
+            && (self.padding.get() - padding).abs() <= f64::EPSILON
+            && (self.radius.get() - radius).abs() <= f64::EPSILON;
+        if unchanged && !had_custom_fill {
+            return;
+        }
+        *self.selection.borrow_mut() = selection;
+        self.padding.set(padding);
+        self.radius.set(radius);
+        self.notify();
     }
 
     pub fn select(&self, file_name: Option<&str>) {
@@ -394,5 +440,104 @@ mod tests {
         // A drag that repeats the same value must not repaint.
         background.set_radius(20.0);
         assert_eq!(calls.get(), 2);
+    }
+
+    #[test]
+    fn applying_a_project_replaces_the_whole_stage() {
+        let background = Background::default();
+        background.select(Some("wallpaper-004.jpg"));
+        background.set_padding(48.0);
+        background.set_radius(6.0);
+
+        background.apply(Some("wallpaper-001.jpg"), 12.0, 3.0);
+        assert_eq!(
+            background.state().selection().as_deref(),
+            Some("wallpaper-001.jpg")
+        );
+        assert_eq!(background.padding(), 12.0);
+        assert_eq!(background.radius(), 3.0);
+    }
+
+    #[test]
+    fn applying_no_fill_clears_a_wallpaper() {
+        let background = Background::default();
+        background.set_padding(48.0);
+        background.select(Some("wallpaper-004.jpg"));
+
+        background.apply(None, DEFAULT_PADDING, DEFAULT_RADIUS);
+
+        assert!(background.state().selection().is_none());
+        assert_eq!(background.padding(), DEFAULT_PADDING);
+        assert_eq!(background.radius(), DEFAULT_RADIUS);
+    }
+
+    #[test]
+    fn a_document_without_a_project_clears_the_previous_one() {
+        let background = Background::default();
+        background.select(Some("wallpaper-001.jpg"));
+        background.set_padding(60.0);
+        background.set_radius(12.0);
+        let painter: super::FillPainter = std::rc::Rc::new(|_: &super::Context, _: i32, _: i32| {});
+        background.set_custom_fill(Some(painter));
+
+        background.apply(None, DEFAULT_PADDING, DEFAULT_RADIUS);
+
+        assert!(background.state().selection().is_none());
+        assert!(
+            background.state().custom_fill().is_none(),
+            "the previous document's painter must not paint the next one"
+        );
+        assert_eq!(background.padding(), DEFAULT_PADDING);
+        assert_eq!(background.radius(), DEFAULT_RADIUS);
+    }
+
+    #[test]
+    fn applying_a_stage_notifies_once_after_every_value_lands() {
+        let background = Background::default();
+        let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        {
+            let state = background.state();
+            let seen = seen.clone();
+            background.connect(std::rc::Rc::new(move || {
+                seen.borrow_mut()
+                    .push((state.selection(), state.padding(), state.radius()));
+            }));
+        }
+        seen.borrow_mut().clear();
+
+        background.apply(Some("wallpaper-004.jpg"), 48.0, 6.0);
+
+        let seen = seen.borrow();
+        assert_eq!(seen.len(), 1, "one redraw per applied stage");
+        assert_eq!(seen[0].0.as_deref(), Some("wallpaper-004.jpg"));
+        assert_eq!(seen[0].1, 48.0);
+        assert_eq!(seen[0].2, 6.0);
+    }
+
+    #[test]
+    fn a_stage_already_in_place_does_not_repaint() {
+        let background = Background::default();
+        background.select(Some("wallpaper-004.jpg"));
+        background.set_padding(48.0);
+        let calls = std::rc::Rc::new(std::cell::Cell::new(0));
+        let counter = calls.clone();
+        background.connect(std::rc::Rc::new(move || counter.set(counter.get() + 1)));
+        assert_eq!(calls.get(), 1, "connect paints once");
+
+        background.apply(Some("wallpaper-004.jpg"), 48.0, DEFAULT_RADIUS);
+        assert_eq!(calls.get(), 1, "an unchanged stage is not a redraw");
+    }
+
+    #[test]
+    fn a_saved_stage_with_nonsense_metrics_reads_as_defaults() {
+        let background = Background::default();
+
+        background.apply(Some("wallpaper-004.jpg"), f64::NAN, -8.0);
+        assert_eq!(background.padding(), DEFAULT_PADDING);
+        assert_eq!(background.radius(), DEFAULT_RADIUS);
+
+        background.apply(None, -12.0, f64::INFINITY);
+        assert_eq!(background.padding(), 0.0);
+        assert_eq!(background.radius(), DEFAULT_RADIUS);
     }
 }
