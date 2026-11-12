@@ -2,85 +2,16 @@ use super::windowing::prefers_dark_glass_theme;
 use crate::i18n::{empty_shortcut_label, t};
 use crate::{config::AppConfig, daemon::set_daemon_hotkey_suppressed};
 use gtk4::{
-    gdk, prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, Dialog, EventControllerKey,
-    Image, Label, Orientation, ResponseType,
+    gdk, prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, EventControllerKey, Image,
+    Label, Orientation,
 };
-use std::{cell::RefCell, collections::HashMap};
-
-#[cfg(target_os = "windows")]
-fn may_focus_dialog(foreground_pid: u32, own_pid: u32) -> bool {
-    foreground_pid == 0 || foreground_pid == own_pid
-}
-
-#[cfg(target_os = "windows")]
-fn raise_shortcut_dialog(dialog: &Dialog) {
-    use windows_sys::core::BOOL;
-    use windows_sys::Win32::Foundation::{HWND, LPARAM};
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId,
-        SetForegroundWindow,
-    };
-
-    if !dialog.is_visible() {
-        return;
-    }
-
-    struct Search {
-        pid: u32,
-        title: String,
-        found: HWND,
-    }
-
-    unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
-        let search = &mut *(lparam as *mut Search);
-        let mut pid = 0u32;
-        GetWindowThreadProcessId(hwnd, &mut pid);
-        if pid != search.pid {
-            return 1;
-        }
-
-        let mut buffer = [0u16; 256];
-        let len = GetWindowTextW(hwnd, buffer.as_mut_ptr(), buffer.len() as i32);
-        if len <= 0 {
-            return 1;
-        }
-        let title = String::from_utf16_lossy(&buffer[..len as usize]);
-        if !search.title.is_empty() && title == search.title {
-            search.found = hwnd;
-            return 0;
-        }
-        1
-    }
-
-    let mut search = Search {
-        pid: std::process::id(),
-        title: dialog
-            .title()
-            .map(|title| title.to_string())
-            .unwrap_or_else(|| "Set Shortcut".to_string()),
-        found: std::ptr::null_mut(),
-    };
-
-    unsafe {
-        let mut foreground_pid = 0;
-        let foreground = GetForegroundWindow();
-        if !foreground.is_null() {
-            GetWindowThreadProcessId(foreground, &mut foreground_pid);
-        }
-        if !may_focus_dialog(foreground_pid, search.pid) {
-            return;
-        }
-        EnumWindows(Some(enum_proc), &mut search as *mut Search as LPARAM);
-        if search.found.is_null() {
-            return;
-        }
-        SetForegroundWindow(search.found);
-    }
-}
-
 #[cfg(not(target_os = "windows"))]
-#[allow(dead_code)]
-fn raise_shortcut_dialog(_dialog: &Dialog) {}
+use gtk4::{Dialog, ResponseType};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    rc::Rc,
+};
 
 fn normalize_shortcut_key_name(key_name: &str) -> Option<String> {
     let trimmed = key_name.trim();
@@ -228,11 +159,211 @@ fn captured_keycaps_row() -> GtkBox {
     row
 }
 
-fn install_shortcut_editor(
-    button: &Button,
-    parent: &ApplicationWindow,
-    editing: &std::rc::Rc<std::cell::Cell<bool>>,
-) {
+/// The Set Shortcut panel: a header with Cancel, the title and Set, and a body
+/// that steps from arming to listening to the captured keys.
+struct CapturePanel {
+    header: GtkBox,
+    body: GtkBox,
+    cancel_btn: Button,
+    set_btn: Button,
+    stack: gtk4::Stack,
+    arming_label: Label,
+    keycaps_row: GtkBox,
+}
+
+fn build_capture_panel(action_name: &str) -> CapturePanel {
+    let header = GtkBox::new(Orientation::Horizontal, 12);
+    header.set_margin_top(10);
+    header.set_margin_bottom(10);
+    header.set_margin_start(14);
+    header.set_margin_end(14);
+
+    let cancel_btn = Button::with_label(&t("Cancel"));
+    cancel_btn.add_css_class("shortcut-capture-secondary-btn");
+    cancel_btn.set_valign(Align::Center);
+    let title = Label::new(Some(&t("Set Shortcut")));
+    title.add_css_class("shortcut-capture-title");
+    title.set_hexpand(true);
+    title.set_halign(Align::Center);
+    title.set_valign(Align::Center);
+    let set_btn = Button::with_label(&t("Set"));
+    set_btn.add_css_class("shortcut-capture-primary-btn");
+    set_btn.set_valign(Align::Center);
+    set_btn.set_sensitive(false);
+
+    header.append(&cancel_btn);
+    header.append(&title);
+    header.append(&set_btn);
+
+    let body = GtkBox::new(Orientation::Vertical, 16);
+    #[cfg(target_os = "windows")]
+    body.set_vexpand(true);
+    body.set_margin_top(12);
+    body.set_margin_bottom(20);
+    body.set_margin_start(28);
+    body.set_margin_end(28);
+
+    let subtitle = Label::new(Some(&format!(
+        "Enter new shortcut to change {}",
+        action_name
+    )));
+    subtitle.set_wrap(true);
+    subtitle.set_xalign(0.0);
+    subtitle.add_css_class("shortcut-capture-subtitle");
+    body.append(&subtitle);
+
+    let stack = gtk4::Stack::new();
+    stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
+    #[cfg(target_os = "windows")]
+    stack.set_vexpand(true);
+
+    let arming_box = GtkBox::new(Orientation::Vertical, 14);
+    arming_box.set_vexpand(true);
+    let arming_label = Label::new(Some(&t("Preparing shortcut capture…")));
+    arming_label.add_css_class("shortcut-capture-hint");
+    arming_label.set_xalign(0.0);
+    arming_box.append(&arming_label);
+    stack.add_named(&arming_box, Some("arming"));
+
+    let listening_box = GtkBox::new(Orientation::Vertical, 14);
+    listening_box.set_vexpand(true);
+    let listening_icon = Label::new(Some(&t("⌄")));
+    listening_icon.add_css_class("shortcut-capture-listening-icon");
+    listening_box.append(&listening_icon);
+    let listening_hint = Label::new(Some(&t(
+        "Press Esc to cancel or Backspace to disable the keyboard shortcut",
+    )));
+    listening_hint.set_wrap(true);
+    listening_hint.set_xalign(0.0);
+    listening_hint.add_css_class("shortcut-capture-hint");
+    listening_box.append(&listening_hint);
+    stack.add_named(&listening_box, Some("listening"));
+
+    let captured_box = GtkBox::new(Orientation::Vertical, 18);
+    captured_box.set_vexpand(true);
+    let keycaps_row = captured_keycaps_row();
+    captured_box.append(&keycaps_row);
+    stack.add_named(&captured_box, Some("captured"));
+    stack.set_visible_child_name("arming");
+    body.append(&stack);
+
+    CapturePanel {
+        header,
+        body,
+        cancel_btn,
+        set_btn,
+        stack,
+        arming_label,
+        keycaps_row,
+    }
+}
+
+/// Keys pressed while the panel listens. Esc runs `cancel`; Backspace alone
+/// marks the shortcut for removal; any other key with its modifiers is shown
+/// as keycaps and enables Set.
+fn capture_key_controller(
+    panel: &CapturePanel,
+    captured: Rc<RefCell<Option<String>>>,
+    suppression_ready: Rc<Cell<bool>>,
+    cancel: impl Fn() + 'static,
+) -> EventControllerKey {
+    let keycaps_for_keys = panel.keycaps_row.clone();
+    let stack_for_keys = panel.stack.clone();
+    let set_btn_for_keys = panel.set_btn.clone();
+
+    let key_controller = EventControllerKey::new();
+    key_controller.set_propagation_phase(gtk4::PropagationPhase::Capture);
+    key_controller.connect_key_pressed(move |controller, key, keycode, state| {
+        if key == gdk::Key::Escape {
+            cancel();
+            return gtk4::glib::Propagation::Stop;
+        }
+        let ctrl = state.contains(gdk::ModifierType::CONTROL_MASK);
+        let alt = state.contains(gdk::ModifierType::ALT_MASK);
+        let shift = state.contains(gdk::ModifierType::SHIFT_MASK);
+        let super_key = state.contains(gdk::ModifierType::SUPER_MASK)
+            || state.contains(gdk::ModifierType::META_MASK);
+
+        #[cfg(target_os = "windows")]
+        let key = controller
+            .current_event()
+            .and_then(|event| event.downcast::<gdk::KeyEvent>().ok())
+            .and_then(|event| {
+                controller.widget().map(|widget| {
+                    unmodified_shortcut_key(&widget.display(), keycode, event.layout() as i32, key)
+                })
+            })
+            .unwrap_or(key);
+        #[cfg(not(target_os = "windows"))]
+        let _ = (controller, keycode);
+
+        if let Some(name) = key.name() {
+            match handle_shortcut_key(suppression_ready.get(), &name, ctrl, alt, shift, super_key) {
+                ShortcutKeyOutcome::Ignore => return gtk4::glib::Propagation::Proceed,
+                ShortcutKeyOutcome::Disable => {
+                    captured.replace(Some(String::new()));
+                    while let Some(child) = keycaps_for_keys.first_child() {
+                        keycaps_for_keys.remove(&child);
+                    }
+                    let cleared = Label::new(Some(&t("Shortcut will be disabled")));
+                    cleared.add_css_class("shortcut-capture-cleared-label");
+                    keycaps_for_keys.append(&cleared);
+                    stack_for_keys.set_visible_child_name("captured");
+                    set_btn_for_keys.set_sensitive(true);
+                    return gtk4::glib::Propagation::Stop;
+                }
+                ShortcutKeyOutcome::Capture { parts, label } => {
+                    captured.replace(Some(label));
+                    while let Some(child) = keycaps_for_keys.first_child() {
+                        keycaps_for_keys.remove(&child);
+                    }
+
+                    for (idx, part) in parts.iter().enumerate() {
+                        let keycap = Label::new(Some(part));
+                        keycap.add_css_class("shortcut-capture-keycap");
+                        keycaps_for_keys.append(&keycap);
+                        if idx + 1 != parts.len() {
+                            let plus = Label::new(Some(&t("+")));
+                            plus.add_css_class("shortcut-capture-plus");
+                            keycaps_for_keys.append(&plus);
+                        }
+                    }
+
+                    stack_for_keys.set_visible_child_name("captured");
+                    set_btn_for_keys.set_sensitive(true);
+                    return gtk4::glib::Propagation::Stop;
+                }
+            }
+        }
+
+        gtk4::glib::Propagation::Proceed
+    });
+    key_controller
+}
+
+/// Pause the global hotkeys so the keys reach the panel, then start listening.
+fn arm_capture(panel: &CapturePanel, suppression_ready: &Cell<bool>) {
+    if request_hotkey_suppressed(true) {
+        panel.stack.set_visible_child_name("listening");
+        suppression_ready.set(true);
+    } else {
+        panel.arming_label.set_text(&t(
+            "Could not pause the shortcut listener. Close this dialog and try again.",
+        ));
+    }
+}
+
+fn apply_captured_shortcut(button: &Button, captured: &RefCell<Option<String>>) {
+    if let Some(text) = captured.borrow().clone() {
+        if text.is_empty() {
+            button.set_label(&empty_shortcut_label());
+        } else {
+            button.set_label(&text);
+        }
+    }
+}
+
+fn install_shortcut_editor(button: &Button, parent: &ApplicationWindow, editing: &Rc<Cell<bool>>) {
     let button = button.clone();
     let parent = parent.clone();
     let editing = editing.clone();
@@ -241,254 +372,214 @@ fn install_shortcut_editor(
             return;
         }
         let action_name = button.label().unwrap_or_else(|| "shortcut".into());
-
-        let dialog = Dialog::builder()
-            .transient_for(&parent)
-            // Non-modal on Windows: if the owned window is ever obscured, the
-            // user can still close Settings instead of being trapped.
-            .modal(!cfg!(target_os = "windows"))
-            .title(t("Set Shortcut"))
-            .deletable(false)
-            .default_width(400)
-            .default_height(290)
-            .build();
-        // Windows: closing Settings must take the dialog with it. On Linux the
-        // modal dialog already blocks that close path, so leave it untouched.
         #[cfg(target_os = "windows")]
-        dialog.set_destroy_with_parent(true);
-        dialog.add_css_class("shortcut-capture-dialog");
-        #[cfg(target_os = "windows")]
-        dialog.add_css_class("shortcut-capture-windows");
-        if !prefers_dark_glass_theme() {
-            dialog.add_css_class("editor-theme-light");
-        }
-
-        let header = GtkBox::new(Orientation::Horizontal, 12);
-        header.set_margin_top(10);
-        header.set_margin_bottom(10);
-        header.set_margin_start(14);
-        header.set_margin_end(14);
-
-        let cancel_btn = Button::with_label(&t("Cancel"));
-        cancel_btn.add_css_class("shortcut-capture-secondary-btn");
-        cancel_btn.set_valign(Align::Center);
-        let title = Label::new(Some(&t("Set Shortcut")));
-        title.add_css_class("shortcut-capture-title");
-        title.set_hexpand(true);
-        title.set_halign(Align::Center);
-        title.set_valign(Align::Center);
-        let set_btn = Button::with_label(&t("Set"));
-        set_btn.add_css_class("shortcut-capture-primary-btn");
-        set_btn.set_valign(Align::Center);
-        set_btn.set_sensitive(false);
-
-        header.append(&cancel_btn);
-        header.append(&title);
-        header.append(&set_btn);
-        dialog.set_titlebar(Some(&header));
-
-        let content = dialog.content_area();
-        content.set_spacing(0);
-
-        let body = GtkBox::new(Orientation::Vertical, 16);
-        #[cfg(target_os = "windows")]
-        body.set_vexpand(true);
-        body.set_margin_top(12);
-        body.set_margin_bottom(20);
-        body.set_margin_start(28);
-        body.set_margin_end(28);
-
-        let subtitle = Label::new(Some(&format!(
-            "Enter new shortcut to change {}",
-            action_name
-        )));
-        subtitle.set_wrap(true);
-        subtitle.set_xalign(0.0);
-        subtitle.add_css_class("shortcut-capture-subtitle");
-        body.append(&subtitle);
-
-        let stack = gtk4::Stack::new();
-        stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
-        #[cfg(target_os = "windows")]
-        stack.set_vexpand(true);
-
-        let arming_box = GtkBox::new(Orientation::Vertical, 14);
-        arming_box.set_vexpand(true);
-        let arming_label = Label::new(Some(&t("Preparing shortcut capture…")));
-        arming_label.add_css_class("shortcut-capture-hint");
-        arming_label.set_xalign(0.0);
-        arming_box.append(&arming_label);
-        stack.add_named(&arming_box, Some("arming"));
-
-        let listening_box = GtkBox::new(Orientation::Vertical, 14);
-        listening_box.set_vexpand(true);
-        let listening_icon = Label::new(Some(&t("⌄")));
-        listening_icon.add_css_class("shortcut-capture-listening-icon");
-        listening_box.append(&listening_icon);
-        let listening_hint = Label::new(Some(&t(
-            "Press Esc to cancel or Backspace to disable the keyboard shortcut",
-        )));
-        listening_hint.set_wrap(true);
-        listening_hint.set_xalign(0.0);
-        listening_hint.add_css_class("shortcut-capture-hint");
-        listening_box.append(&listening_hint);
-        stack.add_named(&listening_box, Some("listening"));
-
-        let captured_box = GtkBox::new(Orientation::Vertical, 18);
-        captured_box.set_vexpand(true);
-        let keycaps_row = captured_keycaps_row();
-        captured_box.append(&keycaps_row);
-        stack.add_named(&captured_box, Some("captured"));
-        stack.set_visible_child_name("arming");
-        body.append(&stack);
-        content.append(&body);
-
-        let captured_shortcut = std::rc::Rc::new(std::cell::RefCell::new(None::<String>));
-        let keycaps_for_keys = keycaps_row.clone();
-        let stack_for_keys = stack.clone();
-        let set_btn_for_keys = set_btn.clone();
-        let captured_for_keys = captured_shortcut.clone();
-        let suppression_ready = std::rc::Rc::new(std::cell::Cell::new(false));
-
-        let key_controller = EventControllerKey::new();
-        key_controller.set_propagation_phase(gtk4::PropagationPhase::Capture);
-        let suppression_ready_for_keys = suppression_ready.clone();
-        let dialog_for_keys = dialog.downgrade();
-        key_controller.connect_key_pressed(move |controller, key, keycode, state| {
-            if key == gdk::Key::Escape {
-                if let Some(dialog) = dialog_for_keys.upgrade() {
-                    dialog.response(ResponseType::Cancel);
-                }
-                return gtk4::glib::Propagation::Stop;
-            }
-            let ctrl = state.contains(gdk::ModifierType::CONTROL_MASK);
-            let alt = state.contains(gdk::ModifierType::ALT_MASK);
-            let shift = state.contains(gdk::ModifierType::SHIFT_MASK);
-            let super_key = state.contains(gdk::ModifierType::SUPER_MASK)
-                || state.contains(gdk::ModifierType::META_MASK);
-
-            #[cfg(target_os = "windows")]
-            let key = controller
-                .current_event()
-                .and_then(|event| event.downcast::<gdk::KeyEvent>().ok())
-                .and_then(|event| {
-                    controller.widget().map(|widget| {
-                        unmodified_shortcut_key(
-                            &widget.display(),
-                            keycode,
-                            event.layout() as i32,
-                            key,
-                        )
-                    })
-                })
-                .unwrap_or(key);
-            #[cfg(not(target_os = "windows"))]
-            let _ = (controller, keycode);
-
-            if let Some(name) = key.name() {
-                match handle_shortcut_key(
-                    suppression_ready_for_keys.get(),
-                    &name,
-                    ctrl,
-                    alt,
-                    shift,
-                    super_key,
-                ) {
-                    ShortcutKeyOutcome::Ignore => return gtk4::glib::Propagation::Proceed,
-                    ShortcutKeyOutcome::Disable => {
-                        captured_for_keys.replace(Some(String::new()));
-                        while let Some(child) = keycaps_for_keys.first_child() {
-                            keycaps_for_keys.remove(&child);
-                        }
-                        let cleared = Label::new(Some(&t("Shortcut will be disabled")));
-                        cleared.add_css_class("shortcut-capture-cleared-label");
-                        keycaps_for_keys.append(&cleared);
-                        stack_for_keys.set_visible_child_name("captured");
-                        set_btn_for_keys.set_sensitive(true);
-                        return gtk4::glib::Propagation::Stop;
-                    }
-                    ShortcutKeyOutcome::Capture { parts, label } => {
-                        captured_for_keys.replace(Some(label));
-                        while let Some(child) = keycaps_for_keys.first_child() {
-                            keycaps_for_keys.remove(&child);
-                        }
-
-                        for (idx, part) in parts.iter().enumerate() {
-                            let keycap = Label::new(Some(part));
-                            keycap.add_css_class("shortcut-capture-keycap");
-                            keycaps_for_keys.append(&keycap);
-                            if idx + 1 != parts.len() {
-                                let plus = Label::new(Some(&t("+")));
-                                plus.add_css_class("shortcut-capture-plus");
-                                keycaps_for_keys.append(&plus);
-                            }
-                        }
-
-                        stack_for_keys.set_visible_child_name("captured");
-                        set_btn_for_keys.set_sensitive(true);
-                        return gtk4::glib::Propagation::Stop;
-                    }
-                }
-            }
-
-            gtk4::glib::Propagation::Proceed
-        });
-        dialog.add_controller(key_controller);
-
-        let dialog_for_cancel = dialog.clone();
-        cancel_btn.connect_clicked(move |_| dialog_for_cancel.response(ResponseType::Cancel));
-        let dialog_for_set = dialog.clone();
-        set_btn.connect_clicked(move |_| dialog_for_set.response(ResponseType::Accept));
-
-        let captured_for_response = captured_shortcut.clone();
-        let button_for_response = button.clone();
-        dialog.connect_response(move |dialog, response| {
-            if response == ResponseType::Accept {
-                if let Some(text) = captured_for_response.borrow().clone() {
-                    if text.is_empty() {
-                        button_for_response.set_label(&empty_shortcut_label());
-                    } else {
-                        button_for_response.set_label(&text);
-                    }
-                }
-            }
-            let _ = request_hotkey_suppressed(false);
-            dialog.close();
-        });
-
-        let editing_for_close = editing.clone();
-        dialog.connect_close_request(move |_| {
-            editing_for_close.set(false);
-            let _ = request_hotkey_suppressed(false);
-            gtk4::glib::Propagation::Proceed
-        });
-
-        let dialog_for_present = dialog.clone();
-        let stack_for_present = stack.clone();
-        let suppression_ready_for_present = suppression_ready.clone();
-        dialog_for_present.present();
-        #[cfg(target_os = "windows")]
-        {
-            // The GTK surface may not have its native window yet on the same
-            // frame; raise it once the dialog has been mapped.
-            let dialog_for_raise = dialog_for_present.clone();
-            gtk4::glib::timeout_add_local_once(std::time::Duration::from_millis(60), move || {
-                raise_shortcut_dialog(&dialog_for_raise);
-            });
-        }
-        if request_hotkey_suppressed(true) {
-            stack_for_present.set_visible_child_name("listening");
-            suppression_ready_for_present.set(true);
-        } else {
-            arming_label.set_text(&t(
-                "Could not pause the shortcut listener. Close this dialog and try again.",
-            ));
-        }
+        present_capture_sheet(&parent, &button, &editing, &action_name);
+        #[cfg(not(target_os = "windows"))]
+        present_capture_dialog(&parent, &button, &editing, &action_name);
     });
 }
 
+#[cfg(not(target_os = "windows"))]
+fn present_capture_dialog(
+    parent: &ApplicationWindow,
+    button: &Button,
+    editing: &Rc<Cell<bool>>,
+    action_name: &str,
+) {
+    let panel = build_capture_panel(action_name);
+    let dialog = Dialog::builder()
+        .transient_for(parent)
+        .modal(true)
+        .title(t("Set Shortcut"))
+        .deletable(false)
+        .default_width(400)
+        .default_height(290)
+        .build();
+    dialog.add_css_class("shortcut-capture-dialog");
+    if !prefers_dark_glass_theme() {
+        dialog.add_css_class("editor-theme-light");
+    }
+    dialog.set_titlebar(Some(&panel.header));
+    let content = dialog.content_area();
+    content.set_spacing(0);
+    content.append(&panel.body);
+
+    let captured = Rc::new(RefCell::new(None::<String>));
+    let suppression_ready = Rc::new(Cell::new(false));
+    let dialog_for_keys = dialog.downgrade();
+    dialog.add_controller(capture_key_controller(
+        &panel,
+        captured.clone(),
+        suppression_ready.clone(),
+        move || {
+            if let Some(dialog) = dialog_for_keys.upgrade() {
+                dialog.response(ResponseType::Cancel);
+            }
+        },
+    ));
+
+    let dialog_for_cancel = dialog.clone();
+    panel
+        .cancel_btn
+        .connect_clicked(move |_| dialog_for_cancel.response(ResponseType::Cancel));
+    let dialog_for_set = dialog.clone();
+    panel
+        .set_btn
+        .connect_clicked(move |_| dialog_for_set.response(ResponseType::Accept));
+
+    let button_for_response = button.clone();
+    dialog.connect_response(move |dialog, response| {
+        if response == ResponseType::Accept {
+            apply_captured_shortcut(&button_for_response, &captured);
+        }
+        let _ = request_hotkey_suppressed(false);
+        dialog.close();
+    });
+
+    let editing_for_close = editing.clone();
+    dialog.connect_close_request(move |_| {
+        editing_for_close.set(false);
+        let _ = request_hotkey_suppressed(false);
+        gtk4::glib::Propagation::Proceed
+    });
+
+    dialog.present();
+    arm_capture(&panel, &suppression_ready);
+}
+
+/// On Windows the panel is a sheet inside Settings rather than a window of its
+/// own. A scrim covers the window, so nothing under it can change while a
+/// shortcut is recorded; a click on the scrim cancels, as does Esc.
+#[cfg(target_os = "windows")]
+fn present_capture_sheet(
+    parent: &ApplicationWindow,
+    button: &Button,
+    editing: &Rc<Cell<bool>>,
+    action_name: &str,
+) {
+    // Settings sets an overlay as the window's child; the save toast rides on
+    // it too.
+    let Some(host) = parent.child().and_downcast::<gtk4::Overlay>() else {
+        editing.set(false);
+        return;
+    };
+    let panel = build_capture_panel(action_name);
+
+    let scrim = GtkBox::new(Orientation::Vertical, 0);
+    scrim.add_css_class("shortcut-capture-scrim");
+    scrim.set_hexpand(true);
+    scrim.set_vexpand(true);
+
+    let card = GtkBox::new(Orientation::Vertical, 0);
+    card.add_css_class("shortcut-capture-dialog");
+    card.add_css_class("shortcut-capture-windows");
+    card.add_css_class("shortcut-capture-sheet");
+    if !prefers_dark_glass_theme() {
+        card.add_css_class("editor-theme-light");
+    }
+    card.set_halign(Align::Center);
+    card.set_valign(Align::Center);
+    card.set_size_request(400, 290);
+    card.append(&panel.header);
+    card.append(&panel.body);
+
+    host.add_overlay(&scrim);
+    host.add_overlay(&card);
+
+    let captured = Rc::new(RefCell::new(None::<String>));
+    let suppression_ready = Rc::new(Cell::new(false));
+    let keys_slot: Rc<RefCell<Option<gtk4::glib::WeakRef<EventControllerKey>>>> =
+        Rc::new(RefCell::new(None));
+    let close_slot: Rc<RefCell<Option<gtk4::glib::SignalHandlerId>>> = Rc::new(RefCell::new(None));
+
+    let finish: Rc<dyn Fn(bool)> = Rc::new({
+        let host = host.downgrade();
+        let scrim = scrim.downgrade();
+        let card = card.downgrade();
+        let parent = parent.downgrade();
+        let button = button.clone();
+        let editing = editing.clone();
+        let captured = captured.clone();
+        let keys_slot = keys_slot.clone();
+        let close_slot = close_slot.clone();
+        move |accept| {
+            // Esc, the scrim, both buttons and closing Settings all end here;
+            // only the first of them tears the sheet down.
+            if !editing.replace(false) {
+                return;
+            }
+            if accept {
+                apply_captured_shortcut(&button, &captured);
+            }
+            let _ = request_hotkey_suppressed(false);
+            if let Some(parent) = parent.upgrade() {
+                if let Some(keys) = keys_slot
+                    .borrow_mut()
+                    .take()
+                    .and_then(|keys| keys.upgrade())
+                {
+                    parent.remove_controller(&keys);
+                }
+                if let Some(id) = close_slot.borrow_mut().take() {
+                    parent.disconnect(id);
+                }
+            }
+            if let (Some(host), Some(scrim), Some(card)) =
+                (host.upgrade(), scrim.upgrade(), card.upgrade())
+            {
+                host.remove_overlay(&card);
+                host.remove_overlay(&scrim);
+            }
+        }
+    });
+
+    // Esc and the scrim click finish from an idle callback, so the controller
+    // and the scrim are not removed while their own handlers still run.
+    let finish_later = {
+        let finish = finish.clone();
+        move || {
+            let finish = finish.clone();
+            gtk4::glib::idle_add_local_once(move || finish(false));
+        }
+    };
+
+    let keys = capture_key_controller(
+        &panel,
+        captured.clone(),
+        suppression_ready.clone(),
+        finish_later.clone(),
+    );
+    parent.add_controller(keys.clone());
+    keys_slot.replace(Some(keys.downgrade()));
+
+    let close_id = parent.connect_close_request({
+        let finish = finish.clone();
+        move |_| {
+            finish(false);
+            gtk4::glib::Propagation::Proceed
+        }
+    });
+    close_slot.replace(Some(close_id));
+
+    let dismiss = gtk4::GestureClick::new();
+    dismiss.connect_released(move |_, _, _, _| finish_later());
+    scrim.add_controller(dismiss);
+
+    panel.cancel_btn.connect_clicked({
+        let finish = finish.clone();
+        move |_| finish(false)
+    });
+    panel.set_btn.connect_clicked({
+        let finish = finish.clone();
+        move |_| finish(true)
+    });
+
+    panel.cancel_btn.grab_focus();
+    arm_capture(&panel, &suppression_ready);
+}
+
 pub fn install_shortcut_editors(widgets: &ShortcutSettingsWidgets, parent: &ApplicationWindow) {
-    let editing = std::rc::Rc::new(std::cell::Cell::new(false));
+    let editing = Rc::new(Cell::new(false));
     for button in [
         &widgets.open_file_btn,
         &widgets.open_clipboard_btn,
@@ -1009,14 +1100,6 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     #[test]
-    fn dialog_focus_does_not_interrupt_another_process() {
-        assert!(super::may_focus_dialog(0, 42));
-        assert!(super::may_focus_dialog(42, 42));
-        assert!(!super::may_focus_dialog(99, 42));
-    }
-
-    #[cfg(target_os = "windows")]
-    #[test]
     fn captured_keycaps_are_centered_in_the_available_space() {
         use gtk4::{Align, Orientation};
 
@@ -1106,5 +1189,88 @@ mod tests {
                 "title centre {label_centre} misses the icon centre {icon_centre}"
             );
         }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn capture_sheet_opens_inside_settings_and_cancels_cleanly() {
+        use gtk4::{
+            prelude::{GtkWindowExt, ObjectExt},
+            ApplicationWindow, Overlay,
+        };
+        use std::{cell::Cell, rc::Rc};
+
+        fn overlay_children(overlay: &Overlay) -> usize {
+            let mut count = 0;
+            let mut child = overlay.first_child();
+            while let Some(widget) = child {
+                count += 1;
+                child = widget.next_sibling();
+            }
+            count
+        }
+
+        let Some(result) = crate::test_support::with_gtk(|| {
+            let window = ApplicationWindow::builder().build();
+            let host = Overlay::new();
+            host.set_child(Some(&GtkBox::new(gtk4::Orientation::Vertical, 0)));
+            window.set_child(Some(&host));
+
+            let editing = Rc::new(Cell::new(false));
+            let first = Button::with_label("Ctrl+Alt+S");
+            let second = Button::with_label("Ctrl+Alt+A");
+            super::install_shortcut_editor(&first, &window, &editing);
+            super::install_shortcut_editor(&second, &window, &editing);
+
+            let before = overlay_children(&host);
+            first.emit_clicked();
+            let open = overlay_children(&host);
+            let editing_while_open = editing.get();
+            // A second editor cannot stack another sheet on the first.
+            second.emit_clicked();
+            let after_second = overlay_children(&host);
+
+            let card = host.last_child().unwrap();
+            let header = card.first_child().unwrap();
+            let cancel = header.first_child().unwrap().downcast::<Button>().unwrap();
+            cancel.emit_clicked();
+            let closed = overlay_children(&host);
+            let editing_after_cancel = editing.get();
+
+            first.emit_clicked();
+            let reopened = overlay_children(&host);
+            // `close()` returns early on a window that was never realized, so
+            // raise the request a real Settings window gets from its close button.
+            let _: bool = window.emit_by_name("close-request", &[]);
+            let editing_after_window_close = editing.get();
+
+            (
+                before,
+                open,
+                editing_while_open,
+                after_second,
+                closed,
+                editing_after_cancel,
+                first.label().unwrap().to_string(),
+                reopened,
+                editing_after_window_close,
+            )
+        }) else {
+            eprintln!("Skipping: GTK not available (no display server)");
+            return;
+        };
+
+        assert_eq!(result.0, 1);
+        assert_eq!(
+            result.1, 3,
+            "the scrim and the card ride on the window's overlay"
+        );
+        assert!(result.2);
+        assert_eq!(result.3, 3);
+        assert_eq!(result.4, 1, "Cancel removes the scrim and the card");
+        assert!(!result.5);
+        assert_eq!(result.6, "Ctrl+Alt+S", "Cancel keeps the existing shortcut");
+        assert_eq!(result.7, 3);
+        assert!(!result.8, "closing Settings ends the capture");
     }
 }

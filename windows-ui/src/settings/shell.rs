@@ -597,6 +597,14 @@ pub fn install_css() {
         gap = px(14.0),
     ));
 
+    // The Set Shortcut sheet: a scrim over the whole window, rounded like the
+    // window's own corners, with the card centred on top.
+    css.push_str(
+        " .shortcut-capture-scrim { background-color:rgba(0,0,0,0.5); border-radius:12px; } \
+         .editor-theme-light .shortcut-capture-scrim { background-color:rgba(17,24,39,0.28); } \
+         .shortcut-capture-sheet { box-shadow:0 18px 48px rgba(0,0,0,0.45); }",
+    );
+
     let provider = CssProvider::new();
     provider.load_from_data(&css);
     gtk4::style_context_add_provider_for_display(
@@ -807,6 +815,14 @@ pub(crate) fn install_type_css() {
             font-weight: 500;
         }
         .shortcut-row-status {
+            font-size: 13px;
+            font-weight: 500;
+        }
+        /* The shortcut buttons keep a monospaced face, in one Windows draws
+           with even, solid strokes at this size. */
+        button.shortcuts-record-btn,
+        button.shortcuts-record-btn label {
+            font-family: 'Cascadia Mono', 'Consolas', monospace;
             font-size: 13px;
             font-weight: 500;
         }
