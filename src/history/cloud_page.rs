@@ -498,20 +498,30 @@ impl GridContext {
         clickable.set_child(Some(&content));
         card_box.append(&clickable);
 
-        // Left-click opens the share link; the actions also live in the
-        // right-click popover, matching the local pages.
+        // Double-click opens the share link, like the local pages, so a stray
+        // click never sends the user to the browser; right-click raises the
+        // action menu.
         let share_url = share_url_of(upload);
         {
             let toast = self.page.toast.clone();
             let url = share_url.clone();
-            clickable.connect_clicked(move |_| match url.as_deref() {
-                Some(url) => report(&toast, actions::open_in_browser(url)),
-                None => toast.show(
-                    &t("This upload has no share link"),
-                    ToastKind::Error,
-                    Some(TOAST_ERROR),
-                ),
+            let gesture = gtk4::GestureClick::new();
+            gesture.set_button(gtk4::gdk::BUTTON_PRIMARY);
+            gesture.set_propagation_phase(gtk4::PropagationPhase::Capture);
+            gesture.connect_pressed(move |_, n_press, _, _| {
+                if n_press != 2 {
+                    return;
+                }
+                match url.as_deref() {
+                    Some(url) => report(&toast, actions::open_in_browser(url)),
+                    None => toast.show(
+                        &t("This upload has no share link"),
+                        ToastKind::Error,
+                        Some(TOAST_ERROR),
+                    ),
+                }
             });
+            clickable.add_controller(gesture);
         }
 
         {
@@ -681,16 +691,21 @@ fn show_cloud_popover(
 ) {
     let popover = gtk4::Popover::new();
     popover.add_css_class("history-action-popover");
+    popover.add_css_class("settings-select-popover");
     popover.set_has_arrow(false);
     popover.set_autohide(true);
+    // File-manager geometry: below the pointer, body extending to the right.
     popover.set_position(gtk4::PositionType::Bottom);
     popover.set_parent(anchor);
 
     let menu = GtkBox::new(Orientation::Vertical, 2);
+    menu.add_css_class("settings-select-menu");
 
     let add_action = |label_text: &str| {
         let btn = Button::new();
         btn.add_css_class("history-action-btn");
+        // Same row height as a Settings menu option.
+        btn.set_size_request(-1, 32);
         btn.set_focus_on_click(false);
         let label = Label::new(Some(label_text));
         label.set_halign(Align::Start);
@@ -735,7 +750,15 @@ fn show_cloud_popover(
         }
     }
 
-    popover.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+    // Anchor a strip as wide as the menu, starting at the pointer, so the
+    // menu's top-left corner lands at the cursor like the local pages' menu.
+    let (_, natural_width, _, _) = popover.measure(gtk4::Orientation::Horizontal, -1);
+    popover.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(
+        x as i32,
+        y as i32,
+        natural_width.max(1),
+        1,
+    )));
     popover.popup();
 }
 
