@@ -5094,6 +5094,17 @@ pub(super) fn install_css() {
             border: 2px solid #ff670d;
             background: alpha(#ff670d, 0.12);
         }}
+        /* Section cards stand clear of the column behind them, so a closed
+           card still reads as a card. */
+        .recording-editor-tools-column .video-editor-section {{
+            padding: 12px;
+            margin-bottom: 4px;
+            border-radius: 10px;
+            background: alpha(white, 0.045);
+        }}
+        .editor-theme-light .recording-editor-tools-column .video-editor-section {{
+            background: alpha(#111827, 0.05);
+        }}
         .video-editor-value-row {{
             min-height: {value_h}px;
             margin: {value_gap}px 0 0 0;
