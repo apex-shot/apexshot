@@ -4044,6 +4044,10 @@ impl Timeline {
         self.project.adopt(restored.clone());
         let incoming = restored.or(imported.clone());
         self.cursor.set_settings(incoming_cursor(incoming.as_ref()));
+        // The cursor model draws the captions, so it takes the opened
+        // project's caption settings now rather than at the next edit.
+        let captions = self.data.borrow().effects.captions;
+        self.cursor.set_caption_settings(captions);
         if let Some(listener) = self.cursor_listener.borrow().as_ref() {
             listener();
         }

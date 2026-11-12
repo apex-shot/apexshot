@@ -1,5 +1,5 @@
 //! Keyboard shortcut captions for the video editor: recorded key presses are
-//! grouped into captions, and a caption is drawn as a row of keycaps.
+//! grouped into captions, and a caption is drawn as one keycap tile.
 
 use crate::recording::editor::sidecar::KeySample;
 use gtk4::cairo::Context;
@@ -15,27 +15,21 @@ const SHIFT_TYPING_GAP: f64 = 1.0;
 /// Two plain letters or digits this close are typing while single letters are shown.
 const LETTER_RUN_GAP: f64 = 1.0;
 
-/// A key's height as a share of the frame height.
-const KEY_HEIGHT: f64 = 0.075;
+/// A tile's height as a share of the frame height.
+const KEY_HEIGHT: f64 = 0.09;
 const BOTTOM_INSET: f64 = 0.033;
-/// Space between the pill's edge and its keys.
-const PILL_PADDING: f64 = 6.0 / 34.0;
-/// The pill's corner radius.
-const PILL_RADIUS: f64 = 9.0 / 34.0;
-/// A key's corner radius.
-const KEY_RADIUS: f64 = 5.0 / 34.0;
-/// Space either side of a key's label.
-const KEY_PADDING: f64 = 14.0 / 34.0;
-/// Space between two keys.
-const GAP: f64 = 6.0 / 34.0;
-/// The label's size.
-const FONT_SIZE: f64 = 12.0 / 34.0 * 1.25;
-/// The pill's fill, `#0f0f0f`, slightly see-through over footage.
-const PILL_FILL: (f64, f64, f64, f64) = (15.0 / 255.0, 15.0 / 255.0, 15.0 / 255.0, 0.92);
-/// A key's fill over the pill.
-const KEY_FILL: (f64, f64, f64, f64) = (1.0, 1.0, 1.0, 0.08);
+/// The tile's corner radius, as a share of its height.
+const TILE_RADIUS: f64 = 0.24;
+/// Space between the tile's edge and its label, as a share of its height.
+const TILE_PADDING: f64 = 0.42;
+/// The label's size, as a share of the tile's height.
+const FONT_SIZE: f64 = 0.4;
+/// The tile's fill: near-black, slightly see-through over the footage.
+const TILE_FILL: (f64, f64, f64, f64) = (0.04, 0.035, 0.055, 0.88);
+/// The repeat count's colour, dimmer than the keys.
+const COUNT_COLOR: (f64, f64, f64, f64) = (0.93, 0.93, 0.95, 0.55);
 /// The label colour.
-const LABEL_COLOR: (f64, f64, f64, f64) = (1.0, 1.0, 1.0, 0.86);
+const LABEL_COLOR: (f64, f64, f64, f64) = (0.93, 0.93, 0.95, 0.9);
 const ROW_WIDTH_SHARE: f64 = 0.9;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -312,6 +306,26 @@ pub(super) fn vk_name(key: i32) -> &'static str {
     }
 }
 
+/// How a key name is drawn: arrows and keys with a common symbol use the
+/// symbol, the rest a short word.
+fn display_name(name: &str) -> &str {
+    match name {
+        "Enter" => "↵",
+        "Tab" => "⇥",
+        "Space" => "␣",
+        "Backspace" => "⌫",
+        "Left" => "←",
+        "Up" => "↑",
+        "Right" => "→",
+        "Down" => "↓",
+        "Escape" => "Esc",
+        "Delete" => "Del",
+        "PageUp" => "PgUp",
+        "PageDown" => "PgDn",
+        other => other,
+    }
+}
+
 pub(super) fn draw(cr: &Context, width: f64, height: f64, captions: &[Caption], time: f64) {
     if !(width.is_finite() && width > 0.0 && height.is_finite() && height > 0.0) {
         return;
@@ -330,71 +344,76 @@ pub(super) fn draw(cr: &Context, width: f64, height: f64, captions: &[Caption], 
 }
 
 fn draw_row(cr: &Context, width: f64, height: f64, caption: &Caption) {
-    let mut items = caption.keys.clone();
-    if caption.count > 1 {
-        items.push(format!("×{}", caption.count));
-    }
+    let text = caption
+        .keys
+        .iter()
+        .map(|key| display_name(key))
+        .collect::<Vec<_>>()
+        .join("  ");
+    let count_text = (caption.count > 1).then(|| format!("×{}", caption.count));
+    // A key drawn as a lone symbol (an arrow, Enter, Tab) reads small at the
+    // letters' size, so it is drawn larger.
+    let font_size = if text.chars().count() == 1 && !text.chars().all(char::is_alphanumeric) {
+        FONT_SIZE * 1.5
+    } else {
+        FONT_SIZE
+    };
 
     let base_height = KEY_HEIGHT * height;
-    let natural = keycaps(cr, &items, base_height);
-    let natural_pill_width =
-        row_width(&natural, base_height * GAP) + 2.0 * base_height * PILL_PADDING;
-    let scale = (ROW_WIDTH_SHARE * width / natural_pill_width).min(1.0);
+    let mut label = Label::new(cr, &text, base_height * font_size);
+    let mut count_label = count_text
+        .as_deref()
+        .map(|text| Label::new(cr, text, base_height * FONT_SIZE * 0.8));
+    let (mut label_width, mut label_height) = label.size(cr);
+    let mut count_width = count_label.as_ref().map(|count| count.size(cr).0);
+    let mut natural = natural_tile_width(label_width, count_width, base_height);
+    let scale = (ROW_WIDTH_SHARE * width / natural).min(1.0);
+    let mut tile_height = base_height;
+    if scale < 1.0 {
+        tile_height = base_height * scale;
+        label = Label::new(cr, &text, tile_height * font_size);
+        count_label = count_text
+            .as_deref()
+            .map(|text| Label::new(cr, text, tile_height * FONT_SIZE * 0.8));
+        (label_width, label_height) = label.size(cr);
+        count_width = count_label.as_ref().map(|count| count.size(cr).0);
+        natural = natural_tile_width(label_width, count_width, tile_height);
+    }
+    let tile_width = natural;
 
-    let key_height = base_height * scale;
-    let caps = keycaps(cr, &items, key_height);
-    let gap = key_height * GAP;
-    let pad = key_height * PILL_PADDING;
-    let pill_width = row_width(&caps, gap) + 2.0 * pad;
-    let pill_height = key_height + 2.0 * pad;
-
-    let pill_top = height * (1.0 - BOTTOM_INSET) - pill_height;
-    let pill_left = (width - pill_width) / 2.0;
+    let top = height * (1.0 - BOTTOM_INSET) - tile_height;
+    let left = (width - tile_width) / 2.0;
 
     rounded_rect(
         cr,
-        pill_left,
-        pill_top,
-        pill_width,
-        pill_height,
-        key_height * PILL_RADIUS,
+        left,
+        top,
+        tile_width,
+        tile_height,
+        tile_height * TILE_RADIUS,
     );
-    cr.set_source_rgba(PILL_FILL.0, PILL_FILL.1, PILL_FILL.2, PILL_FILL.3);
+    cr.set_source_rgba(TILE_FILL.0, TILE_FILL.1, TILE_FILL.2, TILE_FILL.3);
     let _ = cr.fill();
 
-    let mut x = pill_left + pad;
-    let y = pill_top + pad;
-    for (label, cap_width) in &caps {
-        rounded_rect(cr, x, y, *cap_width, key_height, key_height * KEY_RADIUS);
-        cr.set_source_rgba(KEY_FILL.0, KEY_FILL.1, KEY_FILL.2, KEY_FILL.3);
-        let _ = cr.fill();
-
-        let (text_width, text_height) = label.size(cr);
-        cr.set_source_rgba(LABEL_COLOR.0, LABEL_COLOR.1, LABEL_COLOR.2, LABEL_COLOR.3);
-        label.show(
+    let count_width_plus_gap = count_width.map_or(0.0, |count| count + 0.3 * tile_height);
+    let label_x = left + (tile_width - (label_width + count_width_plus_gap)) / 2.0;
+    cr.set_source_rgba(LABEL_COLOR.0, LABEL_COLOR.1, LABEL_COLOR.2, LABEL_COLOR.3);
+    label.show(cr, label_x, top + (tile_height - label_height) / 2.0);
+    if let Some(count) = &count_label {
+        let (_, count_height) = count.size(cr);
+        cr.set_source_rgba(COUNT_COLOR.0, COUNT_COLOR.1, COUNT_COLOR.2, COUNT_COLOR.3);
+        count.show(
             cr,
-            x + (cap_width - text_width) / 2.0,
-            y + (key_height - text_height) / 2.0,
+            label_x + label_width + 0.3 * tile_height,
+            top + (tile_height - count_height) / 2.0,
         );
-        x += cap_width + gap;
     }
 }
 
-fn keycaps(cr: &Context, items: &[String], key_height: f64) -> Vec<(Label, f64)> {
-    let padding = key_height * KEY_PADDING;
-    items
-        .iter()
-        .map(|item| {
-            let label = Label::new(cr, item, key_height * FONT_SIZE);
-            let (text_width, _) = label.size(cr);
-            (label, (text_width + 2.0 * padding).max(key_height))
-        })
-        .collect()
-}
-
-fn row_width(caps: &[(Label, f64)], gap: f64) -> f64 {
-    let widths: f64 = caps.iter().map(|(_, width)| width).sum();
-    widths + gap * caps.len().saturating_sub(1) as f64
+/// The width a tile needs for its label and an optional repeat count.
+fn natural_tile_width(label_width: f64, count_width: Option<f64>, tile_height: f64) -> f64 {
+    let count_width_plus_gap = count_width.map_or(0.0, |count| count + 0.3 * tile_height);
+    (label_width + count_width_plus_gap + 2.0 * tile_height * TILE_PADDING).max(tile_height)
 }
 
 fn rounded_rect(cr: &Context, x: f64, y: f64, width: f64, height: f64, radius: f64) {
