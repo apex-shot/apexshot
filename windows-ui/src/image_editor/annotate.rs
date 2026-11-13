@@ -187,6 +187,9 @@ struct BaseKey {
     device_scale: f64,
 }
 
+/// A pen-drag frame: base key, action count, re-edited action, raster.
+type CachedDragFrame = (BaseKey, usize, Option<usize>, ImageSurface);
+
 pub struct EditorHost {
     pub editor: Shared,
     #[cfg(test)]
@@ -207,6 +210,12 @@ pub struct EditorHost {
     base_cache: RefCell<Option<(BaseKey, ImageSurface)>>,
     #[cfg(test)]
     pub(super) base_builds: Cell<usize>,
+    /// During a pen or highlighter drag: the base plus every committed
+    /// annotation at the on-screen size, keyed by the base key, the action
+    /// count and the action being re-edited.
+    drag_frame_cache: RefCell<Option<CachedDragFrame>>,
+    #[cfg(test)]
+    pub(super) drag_frame_builds: Cell<usize>,
     studio_unlock_cache: RefCell<Option<(std::time::Instant, bool)>>,
     studio_text_ratio: Cell<Option<f64>>,
     background_source: RefCell<Option<(Arc<RgbaImage>, ImageSurface)>>,
@@ -245,6 +254,9 @@ impl EditorHost {
             base_cache: RefCell::new(None),
             #[cfg(test)]
             base_builds: Cell::new(0),
+            drag_frame_cache: RefCell::new(None),
+            #[cfg(test)]
+            drag_frame_builds: Cell::new(0),
             studio_unlock_cache: RefCell::new(None),
             studio_text_ratio: Cell::new(None),
             background_source: RefCell::new(None),
@@ -284,6 +296,7 @@ impl EditorHost {
         *self.shadow_cache.borrow_mut() = None;
         *self.background_cache.borrow_mut() = None;
         *self.base_cache.borrow_mut() = None;
+        *self.drag_frame_cache.borrow_mut() = None;
         *self.background_source.borrow_mut() = None;
         self.cancel_background_load();
         self.session_generation
@@ -711,6 +724,7 @@ impl EditorHost {
         };
         if st.drag_start.is_none() {
             let _ = self.annotation_cache.borrow_mut().take();
+            let _ = self.drag_frame_cache.borrow_mut().take();
         }
         let Some(surface) = self.working_surface(st) else {
             return;
@@ -734,7 +748,6 @@ impl EditorHost {
             Default::default()
         };
         let pen_drag = !motion
-            && !t.has_background
             && st.drag_start.is_some()
             && matches!(st.selected_tool, Tool::Pen | Tool::Highlighter)
             && !st.auto_expand_canvas;
@@ -742,13 +755,14 @@ impl EditorHost {
         // directly instead of rebuilding the cache per pointer event.
         let appearance_drag =
             st.selected_tool == Tool::Background && st.history_interaction_before.is_some();
+        // Each pointer event changes the base, so it is painted with the cheap
+        // live filters; the release repaints it at full quality from the cache.
+        let live = live || appearance_drag;
         let cached_base = part == MotionPaintPart::Complete
             && !motion
             && !live
-            && !pen_drag
-            && !appearance_drag
             && pose.is_identity()
-            && self.paint_cached_base(context, st, t, layout);
+            && self.paint_cached_base(context, st, t, layout, pen_drag);
         let mut drag_annotations: Option<ImageSurface> = None;
         if !cached_base {
             if part != MotionPaintPart::Foreground {
@@ -984,7 +998,7 @@ impl EditorHost {
             let _ = context.save();
             context.translate(t.offset_x, t.offset_y);
             context.scale(t.scale, t.scale);
-            drag_annotations = if pen_drag {
+            drag_annotations = if pen_drag && !t.has_background {
                 self.drag_annotation_frame(st)
             } else {
                 None
@@ -1047,7 +1061,7 @@ impl EditorHost {
                 .as_ref()
                 .and_then(|input| input.editing_action_index)
         };
-        if drag_annotations.is_none() {
+        if drag_annotations.is_none() && !(cached_base && pen_drag) {
             for (index, action) in st.actions.iter().enumerate() {
                 if Some(index) == editing
                     || matches!(
@@ -1090,12 +1104,15 @@ impl EditorHost {
     /// Paint the base layer from a raster kept at the on-screen size, built
     /// with the same quality filters as a direct paint. Returns false when no
     /// raster can be made, so the caller paints the base directly.
+    /// With `with_annotations`, the raster also carries every committed
+    /// annotation, for the length of a pen or highlighter drag.
     fn paint_cached_base(
         &self,
         context: &gtk4::cairo::Context,
         st: &EditorState,
         t: ViewTransform,
         layout: crate::capture::editor::state::background::Layout,
+        with_annotations: bool,
     ) -> bool {
         let (device_x, device_y) = context.target().device_scale();
         let device_scale = device_x.max(device_y).max(1.0);
@@ -1161,9 +1178,74 @@ impl EditorHost {
                 surface.flush();
                 #[cfg(test)]
                 self.base_builds.set(self.base_builds.get() + 1);
-                *self.base_cache.borrow_mut() = Some((key, surface.clone()));
+                *self.base_cache.borrow_mut() = Some((key.clone(), surface.clone()));
                 surface
             }
+        };
+        let surface = if with_annotations {
+            let editing = st
+                .active_text_input
+                .as_ref()
+                .and_then(|input| input.editing_action_index);
+            let cached = self
+                .drag_frame_cache
+                .borrow()
+                .as_ref()
+                .filter(|(cached_key, actions, cached_editing, _)| {
+                    *cached_key == key && *actions == st.actions.len() && *cached_editing == editing
+                })
+                .map(|(_, _, _, frame)| frame.clone());
+            match cached {
+                Some(frame) => frame,
+                None => {
+                    let Ok(frame) = ImageSurface::create(
+                        gtk4::cairo::Format::ARgb32,
+                        width as i32,
+                        height as i32,
+                    ) else {
+                        return false;
+                    };
+                    {
+                        let Ok(drawing) = gtk4::cairo::Context::new(&frame) else {
+                            return false;
+                        };
+                        let _ = drawing.set_source_surface(&surface, 0.0, 0.0);
+                        drawing.source().set_filter(gtk4::cairo::Filter::Fast);
+                        let _ = drawing.paint();
+                        drawing.scale(device_scale, device_scale);
+                        let local = ViewTransform {
+                            offset_x: t.offset_x - t.canvas_offset_x,
+                            offset_y: t.offset_y - t.canvas_offset_y,
+                            canvas_offset_x: 0.0,
+                            canvas_offset_y: 0.0,
+                            ..t
+                        };
+                        drawing.translate(local.offset_x, local.offset_y);
+                        drawing.scale(local.scale, local.scale);
+                        clip_annotation_content_to_canvas(&drawing, local);
+                        for (index, action) in st.actions.iter().enumerate() {
+                            if Some(index) == editing
+                                || matches!(
+                                    action,
+                                    AnnotationAction::Obfuscate { .. }
+                                        | AnnotationAction::Focus { .. }
+                                )
+                            {
+                                continue;
+                            }
+                            draw_annotation_action(&drawing, action);
+                        }
+                    }
+                    frame.flush();
+                    #[cfg(test)]
+                    self.drag_frame_builds.set(self.drag_frame_builds.get() + 1);
+                    *self.drag_frame_cache.borrow_mut() =
+                        Some((key, st.actions.len(), editing, frame.clone()));
+                    frame
+                }
+            }
+        } else {
+            surface
         };
         let _ = context.save();
         context.translate(
@@ -3226,6 +3308,72 @@ mod tests {
             host.base_builds.get(),
             2,
             "an appearance change rebuilds it"
+        );
+    }
+
+    #[test]
+    fn pen_drag_frame_matches_a_direct_paint_and_is_built_once() {
+        let host = host();
+        let mut state = EditorState::new(RgbaImage::from_fn(240, 160, |x, y| {
+            image::Rgba([(x % 200) as u8, (y % 150) as u8, 120, 255])
+        }));
+        state.selected_tool = Tool::Highlighter;
+        state.actions = vec![AnnotationAction::Highlighter {
+            points: vec![
+                Point { x: 20.0, y: 30.0 },
+                Point { x: 120.0, y: 60.0 },
+                Point { x: 200.0, y: 40.0 },
+            ],
+            color: crate::capture::editor::types::DrawColor::new(1.0, 0.85, 0.1, 1.0),
+            stroke_size: 14.0,
+        }];
+        *host.editor.borrow_mut() = Some(state);
+        let t = ViewTransform {
+            scale: 0.5,
+            offset_x: 10.0,
+            offset_y: 6.0,
+            canvas_offset_x: 10.0,
+            canvas_offset_y: 6.0,
+            canvas_scale: 0.5,
+            ..ViewTransform::for_image(240.0, 160.0)
+        };
+        let render = |dragging: bool| {
+            host.with_state(|st| {
+                st.drag_start = dragging.then_some(Point { x: 10.0, y: 10.0 });
+            });
+            let mut surface = ImageSurface::create(gtk4::cairo::Format::ARgb32, 160, 120).unwrap();
+            let context = gtk4::cairo::Context::new(&surface).unwrap();
+            host.paint_document_inner(&context, t, None, MotionPaintPart::Complete, false);
+            drop(context);
+            surface.flush();
+            let data = surface.data().unwrap().to_vec();
+            drop(surface);
+            data
+        };
+        let direct = render(false);
+        let dragged = render(true);
+        render(true);
+        assert_eq!(
+            host.drag_frame_builds.get(),
+            1,
+            "the frame is reused across a drag"
+        );
+        let worst = direct
+            .iter()
+            .zip(&dragged)
+            .map(|(a, b)| a.abs_diff(*b))
+            .max()
+            .unwrap_or(0);
+        assert!(
+            worst <= 2,
+            "pen drag frame differs from a direct paint by {worst}"
+        );
+        render(false);
+        render(true);
+        assert_eq!(
+            host.drag_frame_builds.get(),
+            2,
+            "a new drag rebuilds the frame"
         );
     }
 
