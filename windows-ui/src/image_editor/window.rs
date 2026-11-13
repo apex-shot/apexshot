@@ -970,7 +970,7 @@ fn install_keys(
         let window = window.clone();
         let workspace = workspace.clone();
         let mode_confirm = mode_confirm.clone();
-        move |_, key, _, modifiers| {
+        move |controller, key, _, modifiers| {
             if mode_confirm.visible() {
                 if key == gdk::Key::Escape {
                     mode_confirm.cancel();
@@ -987,6 +987,14 @@ fn install_keys(
                 .is_some_and(|w| w.is::<gtk4::Editable>() || w.is::<gtk4::TextView>())
             {
                 return Propagation::Proceed;
+            }
+            // The input method composes and commits text for the live text
+            // box; keys it keeps never reach the editor commands.
+            if controller
+                .current_event()
+                .is_some_and(|event| canvas.host.filter_text_input_key(&event))
+            {
+                return Propagation::Stop;
             }
             // The document handles editing keys first (text input, tools,
             // history, delete, cancel cascades); what it passes on falls
@@ -1028,6 +1036,20 @@ fn install_keys(
                     Propagation::Stop
                 }
                 _ => Propagation::Proceed,
+            }
+        }
+    });
+    keys.connect_key_released({
+        let canvas = canvas.clone();
+        let window = window.clone();
+        move |controller, _, _, _| {
+            if gtk4::prelude::RootExt::focus(&window)
+                .is_some_and(|w| w.is::<gtk4::Editable>() || w.is::<gtk4::TextView>())
+            {
+                return;
+            }
+            if let Some(event) = controller.current_event() {
+                canvas.host.filter_text_input_key(&event);
             }
         }
     });
