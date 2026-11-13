@@ -2330,7 +2330,7 @@ fn webcam_icon_button(scale: f64, icon_name: &str, tooltip: &str) -> Button {
     button
 }
 
-fn webcam_scope_button(label: &str) -> (ToggleButton, Label) {
+pub(super) fn webcam_scope_button(label: &str) -> (ToggleButton, Label) {
     let button = ToggleButton::new();
     button.add_css_class("recording-editor-webcam-scope-btn");
     button.set_has_frame(false);
@@ -2452,7 +2452,7 @@ fn webcam_hint(text: &str) -> Label {
     hint
 }
 
-pub(super) fn webcam_kicker(label: &str) -> Label {
+fn webcam_kicker(label: &str) -> Label {
     let kicker = Label::new(Some(label));
     kicker.add_css_class("recording-editor-webcam-kicker");
     kicker.set_xalign(0.0);
@@ -2461,13 +2461,13 @@ pub(super) fn webcam_kicker(label: &str) -> Label {
 
 /// A titled group of controls whose body folds under its header: the same
 /// raised card, uppercase title and chevron the image editor's inspector uses.
-struct WebcamSection {
-    root: GtkBox,
-    body: GtkBox,
+pub(super) struct WebcamSection {
+    pub(super) root: GtkBox,
+    pub(super) body: GtkBox,
     revealer: Revealer,
 }
 
-fn webcam_section(scale: f64, title: &str, open: bool) -> WebcamSection {
+pub(super) fn webcam_section(scale: f64, title: &str, open: bool) -> WebcamSection {
     let px = |value: f64| (value * scale).round() as i32;
     let root = GtkBox::new(Orientation::Vertical, px(8.0));
     root.add_css_class("video-editor-section");
@@ -4198,7 +4198,7 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
 }
 
 /// A labelled switch row, the shape every panel uses for an on/off setting.
-pub(super) fn setting_switch_row(label: &str, tooltip: &str) -> (GtkBox, Switch) {
+fn setting_switch_row(label: &str, tooltip: &str) -> (GtkBox, Switch) {
     let row = GtkBox::new(Orientation::Horizontal, 8);
     row.add_css_class("recording-editor-zoom-classic");
     row.set_hexpand(true);
@@ -4216,7 +4216,7 @@ pub(super) fn setting_switch_row(label: &str, tooltip: &str) -> (GtkBox, Switch)
     (row, switch)
 }
 
-fn panel_header(title: &str) -> GtkBox {
+pub(super) fn panel_header(title: &str) -> GtkBox {
     let header = GtkBox::new(Orientation::Horizontal, 8);
     header.add_css_class("recording-editor-zoom-header");
     header.set_hexpand(true);
@@ -4228,7 +4228,7 @@ fn panel_header(title: &str) -> GtkBox {
     header
 }
 
-pub(super) fn panel_frame(title: &str, body: GtkBox) -> GtkBox {
+fn panel_frame(title: &str, body: GtkBox) -> GtkBox {
     let panel = GtkBox::new(Orientation::Vertical, 0);
     panel.add_css_class("recording-editor-zoom-panel");
     panel.set_hexpand(true);

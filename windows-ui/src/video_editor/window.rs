@@ -172,49 +172,52 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
                 .ripple_at(frame.source_seconds, stage.source_size.get());
             stage.preview.set_ripple(ripple);
             stage.cursor_layer.queue_draw();
-            if frame.playing {
-                if let Some(footage) = timeline.export_footage() {
-                    let fps = timeline.plan_fps();
-                    let duration = timeline.composition_duration();
-                    let key = format!(
-                        "{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{}|{}|{}",
-                        footage.source,
-                        footage.cuts,
-                        footage.segment_speeds,
-                        footage.effects,
-                        sound_sources.borrow().as_ref(),
-                        (footage.trim_start, footage.trim_end),
-                        footage.freeze_tail,
-                        duration,
-                        fps
-                    );
-                    sound.update(true, frame.composition_time, key, || {
-                        let spans = super::export::frame_plan(
-                            footage.trim_start,
-                            footage.trim_end,
-                            &footage.cuts,
-                            &footage.segment_speeds,
-                            fps,
-                        );
-                        let sidecar = stage.cursor.sidecar();
-                        Some(super::sound::SoundPlan::new(
-                            sound_sources.borrow().clone().unwrap_or_default(),
-                            &footage.effects,
-                            sidecar.as_ref(),
-                            &spans,
-                            fps,
-                            duration,
-                            footage.trim_start,
-                            footage.trim_end,
-                            &footage.cuts,
-                        ))
-                    });
-                } else {
-                    sound.stop();
-                }
-            } else {
+            let Some(footage) = timeline.export_footage() else {
                 sound.stop();
-            }
+                return;
+            };
+            let fps = timeline.plan_fps();
+            let duration = timeline.composition_duration();
+            let key = format!(
+                "{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{}|{}|{}",
+                footage.source,
+                footage.cuts,
+                footage.segment_speeds,
+                footage.effects,
+                sound_sources.borrow().as_ref(),
+                (footage.trim_start, footage.trim_end),
+                footage.freeze_tail,
+                duration,
+                fps
+            );
+            let plan_stage = stage.clone();
+            let plan_sources = sound_sources.clone();
+            sound.update(frame.playing, frame.composition_time, key, move || {
+                let spans = super::export::frame_plan(
+                    footage.trim_start,
+                    footage.trim_end,
+                    &footage.cuts,
+                    &footage.segment_speeds,
+                    fps,
+                );
+                let sidecar = footage
+                    .effects
+                    .click_sound
+                    .is_some()
+                    .then(|| plan_stage.cursor.sidecar())
+                    .flatten();
+                Some(super::sound::SoundPlan::new(
+                    plan_sources.borrow().clone().unwrap_or_default(),
+                    &footage.effects,
+                    sidecar.as_ref(),
+                    &spans,
+                    fps,
+                    duration,
+                    footage.trim_start,
+                    footage.trim_end,
+                    &footage.cuts,
+                ))
+            });
         })
     });
     stage.connect_placement({

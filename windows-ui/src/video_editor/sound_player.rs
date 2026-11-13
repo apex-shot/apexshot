@@ -8,8 +8,9 @@
 use super::sound::{SoundGraph, SoundPlan};
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Instant;
 
 #[cfg(target_os = "windows")]
@@ -32,6 +33,13 @@ const BUFFER_COUNT: usize = 6;
 /// How often a wait for the device checks for a stop.
 #[cfg(target_os = "windows")]
 const POLL: std::time::Duration = std::time::Duration::from_millis(5);
+/// Bytes read ahead while paused: half a second, so a prepared player starts on
+/// sound rather than on a decode.
+#[cfg(target_os = "windows")]
+const PREPARE_BYTES: usize = 48_000 / 2 * BLOCK_ALIGN;
+/// How often a prepared player checks for a stop while it waits for go.
+#[cfg(target_os = "windows")]
+const GO_POLL: std::time::Duration = std::time::Duration::from_millis(20);
 
 /// How far the playhead may drift from the sound before it is restarted.
 const SYNC_TOLERANCE_SECONDS: f64 = 0.3;
@@ -40,30 +48,70 @@ const SYNC_TOLERANCE_SECONDS: f64 = 0.3;
 #[cfg(target_os = "windows")]
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+/// The go signal: the instant playback was asked for, and the seconds the
+/// playhead has already run past the position the graph starts at.
+type Go = Arc<(Mutex<Option<(Instant, f64)>>, Condvar)>;
+
 /// One run of the composition's sound from a composition time.
 pub(super) struct SoundPlayer {
     stop: Arc<AtomicBool>,
     child: Arc<Mutex<Option<std::process::Child>>>,
+    go: Go,
 }
 
 impl SoundPlayer {
     /// Start playing `graph` now. Returns at once; decoding and output run on
     /// a thread.
     pub fn start(graph: SoundGraph) -> Self {
+        let player = Self::launch(graph, 0);
+        player.go(0.0);
+        player
+    }
+
+    /// Decode `graph` in advance and hold its first half second until
+    /// [`go`](Self::go), so a later play starts on sound.
+    pub fn prepare(graph: SoundGraph) -> Self {
+        #[cfg(target_os = "windows")]
+        let preread = PREPARE_BYTES;
+        #[cfg(not(target_os = "windows"))]
+        let preread = 0;
+        Self::launch(graph, preread)
+    }
+
+    /// Let the thread start output. `late` is how many seconds of the stream
+    /// the playhead has already run past the graph's position. Only the first
+    /// call counts.
+    pub fn go(&self, late: f64) {
+        let (signal, wake) = &*self.go;
+        let Ok(mut slot) = signal.lock() else {
+            return;
+        };
+        if slot.is_some() {
+            return;
+        }
+        *slot = Some((Instant::now(), late.max(0.0)));
+        drop(slot);
+        wake.notify_all();
+    }
+
+    /// Spawn the thread. `preread` is how many bytes it reads before it waits
+    /// for the go signal.
+    fn launch(graph: SoundGraph, preread: usize) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let child = Arc::new(Mutex::new(None));
-        let requested = Instant::now();
+        let go: Go = Arc::new((Mutex::new(None), Condvar::new()));
         #[cfg(target_os = "windows")]
         {
             let thread_stop = stop.clone();
             let thread_child = child.clone();
-            std::thread::spawn(move || play(graph, requested, thread_stop, thread_child));
+            let thread_go = go.clone();
+            std::thread::spawn(move || play(graph, preread, thread_go, thread_stop, thread_child));
         }
         #[cfg(not(target_os = "windows"))]
         {
-            let _ = (graph, requested);
+            let _ = (graph, preread);
         }
-        Self { stop, child }
+        Self { stop, child, go }
     }
 }
 
@@ -84,7 +132,8 @@ impl Drop for SoundPlayer {
 #[cfg(target_os = "windows")]
 fn play(
     graph: SoundGraph,
-    requested: Instant,
+    preread: usize,
+    go: Go,
     stop: Arc<AtomicBool>,
     child_slot: Arc<Mutex<Option<std::process::Child>>>,
 ) {
@@ -103,7 +152,7 @@ fn play(
         } else if let Ok(mut slot) = child_slot.lock() {
             *slot = Some(child);
             drop(slot);
-            output(&mut stdout, requested, &stop);
+            output(&mut stdout, &go, preread, &stop);
         } else {
             let _ = child.kill();
             let _ = child.wait();
@@ -154,7 +203,7 @@ fn spawn(
 /// Open the default device and queue the stream into it until it ends or the
 /// player is stopped.
 #[cfg(target_os = "windows")]
-fn output(stdout: &mut std::process::ChildStdout, requested: Instant, stop: &AtomicBool) {
+fn output(stdout: &mut std::process::ChildStdout, go: &Go, preread: usize, stop: &AtomicBool) {
     use std::io::Read;
     let format = WaveFormatEx {
         format_tag: WAVE_FORMAT_PCM,
@@ -172,16 +221,20 @@ fn output(stdout: &mut std::process::ChildStdout, requested: Instant, stop: &Ato
     let mut buffers: Vec<Buffer> = (0..BUFFER_COUNT).map(|_| Buffer::new()).collect();
     let mut scratch = vec![0u8; BUFFER_FRAMES * BLOCK_ALIGN];
     let mut ended = false;
-    let mut first = 0usize;
-    while !stop.load(Ordering::SeqCst) {
+    // The stream is read ahead of the go signal, so a prepared player holds
+    // its first half second by the time playback starts.
+    let mut pending: Vec<u8> = Vec::new();
+    while !ended && !stop.load(Ordering::SeqCst) {
         match stdout.read(&mut scratch) {
             Ok(0) => {
                 ended = true;
                 break;
             }
             Ok(read) => {
-                first = read;
-                break;
+                pending.extend_from_slice(&scratch[..read]);
+                if pending.len() >= preread {
+                    break;
+                }
             }
             Err(ref error) if error.kind() == std::io::ErrorKind::Interrupted => {}
             Err(_) => {
@@ -190,16 +243,20 @@ fn output(stdout: &mut std::process::ChildStdout, requested: Instant, stop: &Ato
             }
         }
     }
-    // The picture kept moving while ffmpeg started, so the stream has to skip
-    // as much sound as the playhead has already run. Measured here, once the
-    // first bytes exist, so ffmpeg's own start-up is counted too.
-    let mut pending: Vec<u8> = Vec::new();
+    let mut started = None;
     if !ended {
-        let mut skip =
-            ((requested.elapsed().as_secs_f64() * f64::from(SAMPLE_RATE)) as usize) * BLOCK_ALIGN;
-        let discard = skip.min(first);
+        started = wait_for_go(go, stop);
+        ended = started.is_none();
+    }
+    // The picture kept moving while ffmpeg started, so the stream has to skip
+    // as much sound as the playhead has already run. Measured from the go
+    // signal, so a prepared player skips only what the playhead ran past it.
+    if let Some((instant, late)) = started {
+        let mut skip = ((late + instant.elapsed().as_secs_f64()) * f64::from(SAMPLE_RATE)) as usize
+            * BLOCK_ALIGN;
+        let discard = skip.min(pending.len());
+        pending.drain(..discard);
         skip -= discard;
-        pending.extend_from_slice(&scratch[discard..first]);
         while skip > 0 && !stop.load(Ordering::SeqCst) {
             let want = skip.min(scratch.len());
             match stdout.read(&mut scratch[..want]) {
@@ -230,8 +287,8 @@ fn output(stdout: &mut std::process::ChildStdout, requested: Instant, stop: &Ato
             break;
         }
         let mut filled = 0usize;
-        // What the skip left over starts the first buffer; only that one ever
-        // has any.
+        // Bytes read ahead, and whatever the skip left of them, fill the
+        // buffers before the stream is read again.
         if !pending.is_empty() {
             let take = pending.len().min(buffer.samples.len());
             buffer.samples[..take].copy_from_slice(&pending[..take]);
@@ -280,6 +337,21 @@ fn output(stdout: &mut std::process::ChildStdout, requested: Instant, stop: &Ato
         }
         waveOutClose(handle);
     }
+}
+
+/// Wait for the go signal, checking for a stop while it does. None when the
+/// player was stopped before it was told to go.
+#[cfg(target_os = "windows")]
+fn wait_for_go(go: &Go, stop: &AtomicBool) -> Option<(Instant, f64)> {
+    let (signal, wake) = &**go;
+    let mut slot = signal.lock().ok()?;
+    while slot.is_none() {
+        if stop.load(Ordering::SeqCst) {
+            return None;
+        }
+        slot = wake.wait_timeout(slot, GO_POLL).ok()?.0;
+    }
+    slot.take()
 }
 
 /// The size of the header struct the device API takes.
@@ -420,13 +492,23 @@ fn needs_restart(running: bool, same_key: bool, started: Option<(f64, f64)>, tim
     (time - (at + elapsed)).abs() > SYNC_TOLERANCE_SECONDS
 }
 
+/// Whether a prepared player still matches the playhead: the same sound, and a
+/// position inside the half second it read ahead.
+fn primed_matches(primed_key: &str, primed_time: f64, key: &str, time: f64) -> bool {
+    primed_key == key && (0.0..0.5).contains(&(time - primed_time))
+}
+
 /// Keeps one player running while the preview plays, restarting it on a seek or
-/// on an edit that changes the sound.
+/// on an edit that changes the sound, and prepares one for the position the
+/// preview is paused on.
 pub(super) struct SoundSync {
     player: RefCell<Option<SoundPlayer>>,
     key: RefCell<Option<String>>,
     started: Cell<Option<(Instant, f64)>>,
     click: RefCell<Option<PathBuf>>,
+    primed: RefCell<Option<(SoundPlayer, String, f64)>>,
+    prime_timer: RefCell<Option<gtk4::glib::SourceId>>,
+    wanted: RefCell<Option<(String, f64)>>,
 }
 
 impl SoundSync {
@@ -436,23 +518,66 @@ impl SoundSync {
             key: RefCell::new(None),
             started: Cell::new(None),
             click: RefCell::new(None),
+            primed: RefCell::new(None),
+            prime_timer: RefCell::new(None),
+            wanted: RefCell::new(None),
         }
     }
 
     /// Called on every preview frame. `key` describes everything the sound
-    /// depends on; `plan` builds the plan only when a (re)start is needed.
+    /// depends on; `plan` builds the plan only when a (re)start or a
+    /// preparation is needed.
     pub fn update(
-        &self,
+        self: &Rc<Self>,
         playing: bool,
         time: f64,
         key: String,
-        plan: impl FnOnce() -> Option<SoundPlan>,
+        plan: impl FnOnce() -> Option<SoundPlan> + 'static,
     ) {
         if !playing {
-            self.stop();
+            // Paused: the player stops, and one is prepared for the position
+            // the preview has settled on.
+            self.player.borrow_mut().take();
+            *self.key.borrow_mut() = None;
+            self.started.set(None);
+            let primed = self.primed.borrow();
+            let settled = primed.as_ref().is_some_and(|(_, primed_key, primed_time)| {
+                primed_key == &key && (primed_time - time).abs() < 1e-6
+            });
+            drop(primed);
+            if settled {
+                return;
+            }
+            let wanted = self.wanted.borrow();
+            let queued = wanted.as_ref().is_some_and(|(wanted_key, wanted_time)| {
+                wanted_key == &key && *wanted_time == time
+            });
+            drop(wanted);
+            if queued {
+                return;
+            }
+            *self.primed.borrow_mut() = None;
+            *self.wanted.borrow_mut() = Some((key.clone(), time));
+            self.cancel_prime();
+            self.schedule_prime(key, time, Box::new(plan));
             return;
         }
+        self.cancel_prime();
+        // The preparation the timer was going to run is gone with it.
+        *self.wanted.borrow_mut() = None;
         let running = self.player.borrow().is_some() || self.started.get().is_some();
+        if !running {
+            if let Some((player, primed_key, primed_time)) = self.primed.borrow_mut().take() {
+                if primed_matches(&primed_key, primed_time, &key, time) {
+                    player.go(time - primed_time);
+                    *self.player.borrow_mut() = Some(player);
+                    *self.key.borrow_mut() = Some(key);
+                    self.started.set(Some((Instant::now(), time)));
+                    return;
+                }
+            }
+        }
+        *self.primed.borrow_mut() = None;
         let same_key = self.key.borrow().as_deref() == Some(key.as_str());
         let started = self
             .started
@@ -471,11 +596,58 @@ impl SoundSync {
         self.started.set(Some((Instant::now(), time)));
     }
 
-    /// Stop any sound at once.
+    /// Prepare a player for `key` at `time` once the playhead has settled on
+    /// it for longer than a scrub takes.
+    fn schedule_prime(
+        self: &Rc<Self>,
+        key: String,
+        time: f64,
+        plan: Box<dyn FnOnce() -> Option<SoundPlan>>,
+    ) {
+        let sync = Rc::downgrade(self);
+        let source =
+            gtk4::glib::timeout_add_local_once(std::time::Duration::from_millis(200), move || {
+                let Some(sync) = sync.upgrade() else {
+                    return;
+                };
+                // A source that has fired is out of the loop already, so its
+                // id is taken out before anything could remove it again.
+                sync.prime_timer.borrow_mut().take();
+                let wanted = sync.wanted.borrow();
+                let current = wanted.as_ref().is_some_and(|(wanted_key, wanted_time)| {
+                    wanted_key == &key && *wanted_time == time
+                });
+                drop(wanted);
+                if !current {
+                    return;
+                }
+                *sync.wanted.borrow_mut() = None;
+                let graph = plan().and_then(|plan| {
+                    let click = sync.click_path(&plan);
+                    plan.graph_from(time, click.as_deref(), 0)
+                });
+                if let Some(graph) = graph {
+                    *sync.primed.borrow_mut() = Some((SoundPlayer::prepare(graph), key, time));
+                }
+            });
+        *self.prime_timer.borrow_mut() = Some(source);
+    }
+
+    /// Drop a scheduled preparation, if any.
+    fn cancel_prime(&self) {
+        if let Some(source) = self.prime_timer.borrow_mut().take() {
+            source.remove();
+        }
+    }
+
+    /// Stop any sound at once, prepared or not.
     pub fn stop(&self) {
+        self.cancel_prime();
         self.player.borrow_mut().take();
+        *self.primed.borrow_mut() = None;
         *self.key.borrow_mut() = None;
         self.started.set(None);
+        *self.wanted.borrow_mut() = None;
     }
 
     /// The click-sound file, written once the first plan carries cues.
@@ -502,7 +674,28 @@ impl Drop for SoundSync {
 
 #[cfg(test)]
 mod tests {
-    use super::needs_restart;
+    use super::{needs_restart, primed_matches};
+
+    #[test]
+    fn a_prepared_player_matches_its_own_position() {
+        assert!(primed_matches("a", 2.0, "a", 2.0));
+    }
+
+    #[test]
+    fn a_prepared_player_covers_the_half_second_it_read() {
+        assert!(primed_matches("a", 2.0, "a", 2.1));
+    }
+
+    #[test]
+    fn a_playhead_off_the_prepared_player_does_not_match() {
+        assert!(!primed_matches("a", 2.0, "a", 1.9));
+        assert!(!primed_matches("a", 2.0, "a", 2.5));
+    }
+
+    #[test]
+    fn a_changed_sound_does_not_match_a_prepared_player() {
+        assert!(!primed_matches("a", 2.0, "b", 2.0));
+    }
 
     #[test]
     fn a_player_that_is_not_running_starts() {

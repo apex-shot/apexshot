@@ -18,7 +18,7 @@ use std::rc::Rc;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use gtk4::cairo::{Context, FontSlant, FontWeight, LinearGradient};
+use gtk4::cairo::{Context, FontSlant, FontWeight, LineCap, LinearGradient};
 use gtk4::prelude::*;
 use gtk4::{
     Adjustment, Align, ApplicationWindow, AspectFrame, Box as GtkBox, Button, CssProvider,
@@ -747,10 +747,49 @@ impl Data {
         (self.has_media() && self.segment_count() == 1).then_some(0)
     }
 
+    /// How loud piece `index` plays, 0 when nothing of it is heard: its own
+    /// mute and volumes, the project's microphone and system mutes, and the
+    /// master volume. A recording whose sources are not known yet counts as one
+    /// voice track.
+    fn piece_gain(&self, index: usize) -> f64 {
+        let clip = self
+            .effects
+            .clip_sounds
+            .get(index)
+            .copied()
+            .unwrap_or_default();
+        let sound = &self.effects.sound;
+        let voice = if self.has_microphone && !sound.mute_microphone {
+            clip.mic_gain()
+        } else {
+            0.0
+        };
+        let system = if self.has_system && !sound.mute_system {
+            clip.system_gain()
+        } else {
+            0.0
+        };
+        let base = if !self.has_microphone && !self.has_system {
+            if clip.muted {
+                0.0
+            } else {
+                1.0
+            }
+        } else {
+            voice.max(system)
+        };
+        (base * sound.volume).clamp(0.0, 1.0)
+    }
+
+    fn piece_muted(&self, index: usize) -> bool {
+        self.piece_gain(index) <= 1e-6
+    }
+
     /// Set one piece's speed and slide the pieces after it, so the composition
     /// stays continuous instead of leaving a gap where the length changed. The
-    /// step is the caller's to record.
-    fn set_segment_speed(&mut self, index: usize, speed: f64) -> bool {
+    /// step is the caller's to record, and `continuous` folds a slider sweep
+    /// into the one step it opens.
+    fn set_segment_speed(&mut self, index: usize, speed: f64, continuous: bool) -> bool {
         if !speed.is_finite() {
             return false;
         }
@@ -764,7 +803,12 @@ impl Data {
         if (speed - old_speed).abs() <= 1e-9 {
             return false;
         }
-        let before = self.snapshot();
+        let before = if continuous {
+            self.record_continuous_edit();
+            None
+        } else {
+            Some(self.snapshot())
+        };
         let footage = (source_end - source_start).max(0.0);
         let delta = footage / speed - footage / old_speed;
         self.segment_speeds[index] = speed;
@@ -779,7 +823,9 @@ impl Data {
         self.clamp_effects();
         self.clamp_playhead();
         self.clamp_scroll();
-        self.record_edit(before);
+        if let Some(before) = before {
+            self.record_edit(before);
+        }
         true
     }
 
@@ -3407,14 +3453,26 @@ impl Timeline {
     }
 
     /// Change the selected piece's speed as one undo step. The pieces after it
-    /// move so the composition stays continuous.
+    /// move so the composition stays continuous, and the edit pauses playback.
     pub fn set_selected_clip_speed(&self, speed: f64) {
+        self.apply_selected_clip_speed(speed, false);
+    }
+
+    /// Change the selected piece's speed from a slider: a sweep is one undo step.
+    pub fn sweep_selected_clip_speed(&self, speed: f64) {
+        self.apply_selected_clip_speed(speed, true);
+    }
+
+    /// The shared body of the two speed controls. The edit pauses playback, so
+    /// a sweep does not restart the sound player on every slider tick.
+    fn apply_selected_clip_speed(&self, speed: f64, continuous: bool) {
         {
             let mut data = self.data.borrow_mut();
             let Some(index) = data.clip_segment() else {
                 return;
             };
-            if !data.set_segment_speed(index, speed) {
+            data.playing = false;
+            if !data.set_segment_speed(index, speed, continuous) {
                 return;
             }
         }
@@ -3422,14 +3480,16 @@ impl Timeline {
         self.publish_frame();
     }
 
-    /// Change the selected piece's sound. Sound is heard live, so this never
-    /// stops playback; a slider sweep is one undo step.
+    /// Change the selected piece's sound. The edit pauses playback so the
+    /// sound player is planned once, when play resumes; a slider sweep is one
+    /// undo step.
     pub fn update_selected_clip_sound(&self, update: impl FnOnce(&mut super::sound::ClipSound)) {
         {
             let mut data = self.data.borrow_mut();
             let Some(index) = data.clip_segment() else {
                 return;
             };
+            data.playing = false;
             let count = data.segment_count();
             data.update_effects(|effects| {
                 effects.clip_sounds.truncate(count);
@@ -3445,11 +3505,12 @@ impl Timeline {
         self.publish_frame();
     }
 
-    /// Change the project's sound. Like a piece's own sound it is heard live,
-    /// so playback keeps running.
+    /// Change the project's sound. Like a piece's own sound, the edit pauses
+    /// playback so the new settings are heard from the next play.
     pub fn update_sound(&self, update: impl FnOnce(&mut super::sound::SoundSettings)) {
         {
             let mut data = self.data.borrow_mut();
+            data.playing = false;
             data.update_effects(|effects| update(&mut effects.sound));
         }
         (self.repaint)();
@@ -4618,12 +4679,11 @@ pub(super) fn build(
                 let bars: Vec<_> = (0..data.segment_count())
                     .filter_map(|index| {
                         let (start, end) = data.segment_span(index)?;
-                        let muted = data
-                            .effects
-                            .clip_sounds
-                            .get(index)
-                            .is_some_and(|clip| clip.muted);
-                        Some((start, end, sound_tone(prefers_dark, muted).fill))
+                        Some((
+                            start,
+                            end,
+                            sound_tone(prefers_dark, data.piece_muted(index)).fill,
+                        ))
                     })
                     .collect();
                 draw_thin_lane(
@@ -7371,13 +7431,8 @@ fn draw_sound_lane(
         let pill_w = x1 - x0;
         let y = 2.0 * scale;
         let pill_h = (height - 4.0 * scale).max(10.0);
-        let clip = data
-            .effects
-            .clip_sounds
-            .get(index)
-            .copied()
-            .unwrap_or_default();
-        let tone = sound_tone(prefers_dark, clip.muted);
+        let muted = data.piece_muted(index);
+        let tone = sound_tone(prefers_dark, muted);
 
         rounded_rect(context, x0, y, pill_w, pill_h, 8.0 * scale);
         context.set_source_rgba(tone.fill.0, tone.fill.1, tone.fill.2, tone.fill.3);
@@ -7385,23 +7440,7 @@ fn draw_sound_lane(
 
         let wave_left = x0 + inset;
         let wave_right = x1 - inset;
-        let gain = if clip.muted {
-            0.0
-        } else if data.has_microphone || data.has_system {
-            let microphone = if data.has_microphone {
-                clip.mic_volume
-            } else {
-                0.0
-            };
-            let system = if data.has_system {
-                clip.system_volume
-            } else {
-                0.0
-            };
-            microphone.max(system)
-        } else {
-            1.0
-        };
+        let gain = data.piece_gain(index);
         match data.sound_peaks.as_deref() {
             Some(peaks) if wave_right > wave_left => {
                 let tallest = (pill_h - 8.0 * scale).max(2.0);
@@ -7431,27 +7470,70 @@ fn draw_sound_lane(
             }
         }
 
+        if muted {
+            // Hatch the pill so a silent piece reads as struck out even at a
+            // glance, without changing the span it keeps.
+            let _ = context.save();
+            rounded_rect(context, x0, y, pill_w, pill_h, 8.0 * scale);
+            context.clip();
+            context.set_source_rgba(tone.wave.0, tone.wave.1, tone.wave.2, 0.30);
+            context.set_line_width(1.0 * scale);
+            let pitch = 6.0 * scale;
+            let mut offset = -pill_h;
+            while offset < pill_w {
+                context.move_to(x0 + offset, y + pill_h);
+                context.line_to(x0 + offset + pill_h, y);
+                let _ = context.stroke();
+                offset += pitch;
+            }
+            let _ = context.restore();
+        }
+
         context.select_font_face("DM Sans", FontSlant::Normal, FontWeight::Normal);
         context.set_font_size((11.0 * scale).round());
         let padding = EFFECT_LABEL_PADDING * scale;
-        if clip.muted {
-            let labels = [t("Muted")];
-            if let Some(label) = first_fitting_label(context, &labels, pill_w - padding * 2.0) {
-                let text_w = context
-                    .text_extents(label)
-                    .map(|extents| extents.x_advance())
-                    .unwrap_or(0.0);
-                context.set_source_rgba(1.0, 1.0, 1.0, 0.92);
-                context.move_to(x0 + (pill_w - text_w) / 2.0, y + pill_h * 0.62);
-                let _ = context.show_text(label);
+        let mut label_x = x0 + padding;
+        let mut label_room = pill_w - padding * 2.0;
+        if muted {
+            let glyph = 12.0 * scale;
+            let glyph_x = x0 + inset;
+            let right = x1 - inset;
+            if glyph_x + glyph <= right {
+                draw_mute_glyph(
+                    context,
+                    glyph_x,
+                    y + (pill_h - glyph) / 2.0,
+                    glyph,
+                    tone.edge,
+                );
+                let mut content_end = glyph_x + glyph;
+                let labels = [t("Muted")];
+                let text_x = glyph_x + glyph + 4.0 * scale;
+                if let Some(label) = first_fitting_label(context, &labels, right - text_x) {
+                    context.set_source_rgba(tone.edge.0, tone.edge.1, tone.edge.2, tone.edge.3);
+                    context.move_to(text_x, y + pill_h * 0.62);
+                    let _ = context.show_text(label);
+                    if let Ok(extents) = context.text_extents(label) {
+                        content_end = content_end.max(
+                            text_x
+                                + extents
+                                    .x_advance()
+                                    .max(extents.x_bearing() + extents.width()),
+                        );
+                    }
+                }
+                // The speed label follows the mute mark and its word, so the
+                // two never sit on top of each other on a silent piece.
+                label_x = content_end + 6.0 * scale;
+                label_room = right - label_x;
             }
         }
         let speed = data.segment_speed(index);
         if (speed - 1.0).abs() > 1e-9 {
             let labels = [speed_label(speed)];
-            if let Some(label) = first_fitting_label(context, &labels, pill_w - padding * 2.0) {
-                context.set_source_rgba(1.0, 1.0, 1.0, 0.92);
-                context.move_to(x0 + padding, y + pill_h * 0.62);
+            if let Some(label) = first_fitting_label(context, &labels, label_room) {
+                context.set_source_rgba(tone.edge.0, tone.edge.1, tone.edge.2, tone.edge.3);
+                context.move_to(label_x, y + pill_h * 0.62);
                 let _ = context.show_text(label);
             }
         }
@@ -7644,15 +7726,15 @@ struct SoundTone {
 fn sound_tone(prefers_dark: bool, muted: bool) -> SoundTone {
     let mut tone = if prefers_dark {
         SoundTone {
-            fill: (0.09, 0.24, 0.22, 1.0),
-            wave: (0.36, 0.86, 0.73, 0.95),
-            edge: (0.36, 0.86, 0.73, 1.0),
+            fill: (0.19, 0.13, 0.34, 1.0),
+            wave: (0.72, 0.58, 1.0, 0.95),
+            edge: (0.80, 0.70, 1.0, 1.0),
         }
     } else {
         SoundTone {
-            fill: (0.84, 0.95, 0.92, 1.0),
-            wave: (0.10, 0.55, 0.45, 0.95),
-            edge: (0.10, 0.55, 0.45, 1.0),
+            fill: (0.90, 0.86, 0.99, 1.0),
+            wave: (0.40, 0.24, 0.76, 0.95),
+            edge: (0.34, 0.18, 0.68, 1.0),
         }
     };
     if muted {
@@ -7662,6 +7744,44 @@ fn sound_tone(prefers_dark: bool, muted: bool) -> SoundTone {
         tone.wave.3 = 0.35;
     }
     tone
+}
+
+/// A speaker with a cross, `size` square, drawn from its top-left corner.
+fn draw_mute_glyph(context: &Context, x: f64, y: f64, size: f64, color: (f64, f64, f64, f64)) {
+    let _ = context.save();
+    context.set_source_rgba(color.0, color.1, color.2, color.3);
+    let point = |across: f64, down: f64| (x + across * size, y + down * size);
+    let body = [
+        (0.08, 0.36),
+        (0.30, 0.36),
+        (0.55, 0.14),
+        (0.55, 0.86),
+        (0.30, 0.64),
+        (0.08, 0.64),
+    ];
+    for (index, (across, down)) in body.iter().enumerate() {
+        let (across, down) = point(*across, *down);
+        if index == 0 {
+            context.move_to(across, down);
+        } else {
+            context.line_to(across, down);
+        }
+    }
+    context.close_path();
+    let _ = context.fill();
+
+    context.set_line_width(0.10 * size);
+    context.set_line_cap(LineCap::Round);
+    for (from_across, from_down, to_across, to_down) in
+        [(0.68, 0.36, 0.94, 0.64), (0.94, 0.36, 0.68, 0.64)]
+    {
+        let (from_across, from_down) = point(from_across, from_down);
+        let (to_across, to_down) = point(to_across, to_down);
+        context.move_to(from_across, from_down);
+        context.line_to(to_across, to_down);
+        let _ = context.stroke();
+    }
+    let _ = context.restore();
 }
 
 /// The short layout names the camera lane uses on its chips and in its
@@ -8305,6 +8425,26 @@ fn draw_video_clip(
                     let _ = context.show_text(&label);
                 }
             }
+        }
+
+        if (data.has_microphone || data.has_system)
+            && data.piece_muted(index)
+            && body_width >= 28.0 * scale
+        {
+            let size = 16.0 * scale;
+            let badge_x = right - size - 4.0 * scale;
+            let badge_y = y + 4.0 * scale;
+            rounded_rect(context, badge_x, badge_y, size, size, 4.0 * scale);
+            context.set_source_rgba(0.0, 0.0, 0.0, 0.55);
+            let _ = context.fill();
+            let glyph = 11.0 * scale;
+            draw_mute_glyph(
+                context,
+                badge_x + (size - glyph) / 2.0,
+                badge_y + (size - glyph) / 2.0,
+                glyph,
+                (1.0, 1.0, 1.0, 0.95),
+            );
         }
 
         if data.selected {
@@ -9623,6 +9763,55 @@ mod tests {
     }
 
     #[test]
+    fn a_muted_microphone_silences_every_piece() {
+        let mut data = loaded();
+        data.has_microphone = true;
+        data.effects.clip_sounds = default_effects(1).clip_sounds;
+
+        data.effects.sound.mute_microphone = true;
+        assert!(data.piece_muted(0));
+
+        data.effects.sound.mute_microphone = false;
+        assert!(!data.piece_muted(0));
+        assert!((data.piece_gain(0) - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_piece_keeps_sound_from_the_system_track_when_the_microphone_is_muted() {
+        let mut data = loaded();
+        data.has_microphone = true;
+        data.has_system = true;
+        data.effects.clip_sounds = default_effects(1).clip_sounds;
+
+        data.effects.sound.mute_microphone = true;
+        assert!((data.piece_gain(0) - 1.0).abs() < 1e-9);
+        assert!(!data.piece_muted(0));
+    }
+
+    #[test]
+    fn master_volume_zero_mutes_everything() {
+        let mut data = loaded();
+        data.has_microphone = true;
+        data.has_system = true;
+        data.effects.clip_sounds = default_effects(1).clip_sounds;
+
+        data.effects.sound.volume = 0.0;
+        assert!(data.piece_muted(0));
+    }
+
+    #[test]
+    fn an_unknown_recording_follows_the_clip_mute() {
+        let mut data = loaded();
+        assert!((data.piece_gain(0) - 1.0).abs() < 1e-9);
+
+        data.effects.clip_sounds = vec![super::super::sound::ClipSound {
+            muted: true,
+            ..Default::default()
+        }];
+        assert!(data.piece_muted(0));
+    }
+
+    #[test]
     fn a_single_piece_is_the_clip_without_a_selection() {
         let mut data = loaded();
         assert!(!data.selected);
@@ -9644,16 +9833,37 @@ mod tests {
         assert!(data.add_cut(4.0));
         assert_eq!(data.segment_starts, vec![0.0, 2.0, 4.0]);
 
-        assert!(data.set_segment_speed(1, 2.0));
+        assert!(data.set_segment_speed(1, 2.0, false));
 
         assert!((data.segment_start(1) - 2.0).abs() < 1e-9);
         assert!((data.segment_start(2) - 3.0).abs() < 1e-9);
         assert!((data.total_duration() - 5.0).abs() < 1e-9);
         assert!(
-            !data.set_segment_speed(1, 2.0),
+            !data.set_segment_speed(1, 2.0, false),
             "the same speed adds no step"
         );
-        assert!(!data.set_segment_speed(9, 2.0), "there is no such piece");
+        assert!(
+            !data.set_segment_speed(9, 2.0, false),
+            "there is no such piece"
+        );
+    }
+
+    #[test]
+    fn a_speed_sweep_is_one_undo_step() {
+        let mut data = loaded();
+        data.trim_end = 6.0;
+        assert!(data.add_cut(2.0));
+        assert!(data.add_cut(4.0));
+        data.selected = true;
+        data.selected_segment = Some(1);
+
+        for speed in [1.2, 1.5, 2.0] {
+            assert!(data.set_segment_speed(1, speed, true));
+        }
+        assert!((data.segment_speed(1) - 2.0).abs() < 1e-9);
+
+        assert!(data.undo_edit());
+        assert!((data.segment_speed(1) - 1.0).abs() < 1e-9);
     }
 
     #[test]
