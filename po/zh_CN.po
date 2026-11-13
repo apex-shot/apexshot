@@ -4623,3 +4623,111 @@ msgstr "导出的动态视频会显示在“录音”中。Windows 版暂不保�
 
 msgid "Expires in {time}"
 msgstr "{time} 后过期"
+
+msgid "Background music"
+msgstr "背景音乐"
+
+msgid "Choose background music"
+msgstr "选择背景音乐"
+
+msgid "Clip {current} of {total}"
+msgstr "第 {current} 个片段，共 {total} 个"
+
+msgid "Clips"
+msgstr "片段"
+
+msgid "Length {original}"
+msgstr "时长 {original}"
+
+msgid "Microphone"
+msgstr "麦克风"
+
+msgid "Microphone volume"
+msgstr "麦克风音量"
+
+msgid "Music volume"
+msgstr "音乐音量"
+
+msgid "Mute clip"
+msgstr "静音片段"
+
+msgid "Mute microphone"
+msgstr "麦克风静音"
+
+msgid "Mute music"
+msgstr "音乐静音"
+
+msgid "Mute system sound"
+msgstr "系统音频静音"
+
+msgid "Muted"
+msgstr "已静音"
+
+msgid "Remove music"
+msgstr "移除音乐"
+
+msgid "Select a clip on the timeline to change its speed and sound."
+msgstr "在时间轴上选择片段即可更改其速度和声音。"
+
+msgid "Select music…"
+msgstr "选择音乐…"
+
+msgid "System sound"
+msgstr "系统音频"
+
+msgid "System sound volume"
+msgstr "系统音频音量"
+
+msgid "This recording has no sound. Turn on the microphone or system audio before recording."
+msgstr "此录制没有声音。请在录制前开启麦克风或系统音频。"
+
+msgid "{original} at 1× · {now} at {speed}"
+msgstr "{original}（1×）· {now}（{speed}）"
+
+msgid "Loud"
+msgstr "响亮"
+
+msgid "Noise reduction"
+msgstr "降噪"
+
+msgid "Podcast"
+msgstr "播客"
+
+msgid "Warm"
+msgstr "温暖"
+
+msgid "Even, natural voice"
+msgstr "自然均匀的人声"
+
+msgid "Punchy and compressed"
+msgstr "强劲且压缩"
+
+msgid "Removes steady noise"
+msgstr "去除稳定噪声"
+
+msgid "Warm, polished voice"
+msgstr "温暖润泽的人声"
+
+msgid "Fuller, deeper tone"
+msgstr "更饱满低沉的音色"
+
+msgid "As recorded"
+msgstr "保持原声"
+
+msgid "Evens out your voice so it stays at one level."
+msgstr "使人声更均匀，保持在同一音量水平。"
+
+msgid "Louder, compressed voice that cuts through music."
+msgstr "更响亮、更压缩的人声，在音乐中也能听清。"
+
+msgid "Removes steady background noise, then evens out the voice."
+msgstr "去除稳定的背景噪声，然后使人声更均匀。"
+
+msgid "Full, warm voice with softened hiss and sibilance."
+msgstr "饱满温暖的人声，弱化嘶声和齿音。"
+
+msgid "Adds body to thin microphones."
+msgstr "为单薄的麦克风增加厚度。"
+
+msgid "Keeps the microphone exactly as it was recorded."
+msgstr "完全保留麦克风的原始录音。"

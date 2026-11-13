@@ -4660,3 +4660,111 @@ msgstr "تظهر مقاطع فيديو الحركة التي تصدّرها في
 
 msgid "Expires in {time}"
 msgstr "تنتهي الصلاحية خلال {time}"
+
+msgid "Background music"
+msgstr "موسيقى الخلفية"
+
+msgid "Choose background music"
+msgstr "اختر موسيقى الخلفية"
+
+msgid "Clip {current} of {total}"
+msgstr "المقطع {current} من {total}"
+
+msgid "Clips"
+msgstr "المقاطع"
+
+msgid "Length {original}"
+msgstr "المدة {original}"
+
+msgid "Microphone"
+msgstr "الميكروفون"
+
+msgid "Microphone volume"
+msgstr "مستوى صوت الميكروفون"
+
+msgid "Music volume"
+msgstr "مستوى صوت الموسيقى"
+
+msgid "Mute clip"
+msgstr "كتم صوت المقطع"
+
+msgid "Mute microphone"
+msgstr "كتم صوت الميكروفون"
+
+msgid "Mute music"
+msgstr "كتم صوت الموسيقى"
+
+msgid "Mute system sound"
+msgstr "كتم صوت النظام"
+
+msgid "Muted"
+msgstr "مكتوم"
+
+msgid "Remove music"
+msgstr "إزالة الموسيقى"
+
+msgid "Select a clip on the timeline to change its speed and sound."
+msgstr "اختر مقطعًا على الخط الزمني لتغيير سرعته وصوته."
+
+msgid "Select music…"
+msgstr "اختر الموسيقى…"
+
+msgid "System sound"
+msgstr "صوت النظام"
+
+msgid "System sound volume"
+msgstr "مستوى صوت النظام"
+
+msgid "This recording has no sound. Turn on the microphone or system audio before recording."
+msgstr "هذا التسجيل بلا صوت. فعّل الميكروفون أو صوت النظام قبل التسجيل."
+
+msgid "{original} at 1× · {now} at {speed}"
+msgstr "{original} بسرعة 1× · {now} بسرعة {speed}"
+
+msgid "Loud"
+msgstr "عالي"
+
+msgid "Noise reduction"
+msgstr "تقليل الضوضاء"
+
+msgid "Podcast"
+msgstr "بودكاست"
+
+msgid "Warm"
+msgstr "دافئ"
+
+msgid "Even, natural voice"
+msgstr "صوت طبيعي متوازن"
+
+msgid "Punchy and compressed"
+msgstr "قوي ومضغوط"
+
+msgid "Removes steady noise"
+msgstr "يزيل الضوضاء الثابتة"
+
+msgid "Warm, polished voice"
+msgstr "صوت دافئ ومصقول"
+
+msgid "Fuller, deeper tone"
+msgstr "نبرة أعمق وأكثر امتلاءً"
+
+msgid "As recorded"
+msgstr "كما تم التسجيل"
+
+msgid "Evens out your voice so it stays at one level."
+msgstr "يوازن صوتك ليبقى عند مستوى واحد."
+
+msgid "Louder, compressed voice that cuts through music."
+msgstr "صوت أعلى ومضغوط يبرز عبر الموسيقى."
+
+msgid "Removes steady background noise, then evens out the voice."
+msgstr "يزيل ضوضاء الخلفية الثابتة ثم يوازن الصوت."
+
+msgid "Full, warm voice with softened hiss and sibilance."
+msgstr "صوت ممتلئ ودافئ مع تخفيف الأزيز وأصوات السين."
+
+msgid "Adds body to thin microphones."
+msgstr "يضيف عمقًا للميكروفونات الرقيقة."
+
+msgid "Keeps the microphone exactly as it was recorded."
+msgstr "يُبقي الميكروفون كما سُجّل تمامًا."

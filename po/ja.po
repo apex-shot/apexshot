@@ -4634,3 +4634,111 @@ msgstr "書き出したモーション動画は「録音」に表示されます
 
 msgid "Expires in {time}"
 msgstr "有効期限まで {time}"
+
+msgid "Background music"
+msgstr "BGM"
+
+msgid "Choose background music"
+msgstr "BGM を選択"
+
+msgid "Clip {current} of {total}"
+msgstr "クリップ {current} / {total}"
+
+msgid "Clips"
+msgstr "クリップ"
+
+msgid "Length {original}"
+msgstr "長さ {original}"
+
+msgid "Microphone"
+msgstr "マイク"
+
+msgid "Microphone volume"
+msgstr "マイクの音量"
+
+msgid "Music volume"
+msgstr "BGM の音量"
+
+msgid "Mute clip"
+msgstr "クリップをミュート"
+
+msgid "Mute microphone"
+msgstr "マイクをミュート"
+
+msgid "Mute music"
+msgstr "BGM をミュート"
+
+msgid "Mute system sound"
+msgstr "システム音声をミュート"
+
+msgid "Muted"
+msgstr "ミュート済み"
+
+msgid "Remove music"
+msgstr "BGM を削除"
+
+msgid "Select a clip on the timeline to change its speed and sound."
+msgstr "タイムラインでクリップを選択すると、速度とサウンドを変更できます。"
+
+msgid "Select music…"
+msgstr "BGM を選択…"
+
+msgid "System sound"
+msgstr "システム音声"
+
+msgid "System sound volume"
+msgstr "システム音声の音量"
+
+msgid "This recording has no sound. Turn on the microphone or system audio before recording."
+msgstr "この録画には音がありません。録画前にマイクまたはシステム音声をオンにしてください。"
+
+msgid "{original} at 1× · {now} at {speed}"
+msgstr "{original}（1×）· {now}（{speed}）"
+
+msgid "Loud"
+msgstr "ラウド"
+
+msgid "Noise reduction"
+msgstr "ノイズ低減"
+
+msgid "Podcast"
+msgstr "ポッドキャスト"
+
+msgid "Warm"
+msgstr "ウォーム"
+
+msgid "Even, natural voice"
+msgstr "自然で均一な声"
+
+msgid "Punchy and compressed"
+msgstr "力強く圧縮された声"
+
+msgid "Removes steady noise"
+msgstr "一定のノイズを除去"
+
+msgid "Warm, polished voice"
+msgstr "温かみのある整った声"
+
+msgid "Fuller, deeper tone"
+msgstr "より豊かで深い音色"
+
+msgid "As recorded"
+msgstr "録音そのまま"
+
+msgid "Evens out your voice so it stays at one level."
+msgstr "声の音量を一定に整えます。"
+
+msgid "Louder, compressed voice that cuts through music."
+msgstr "音楽の中でも埋もれない、より大きく圧縮された声。"
+
+msgid "Removes steady background noise, then evens out the voice."
+msgstr "一定の背景ノイズを除去してから、声を整えます。"
+
+msgid "Full, warm voice with softened hiss and sibilance."
+msgstr "歯擦音やサーッというノイズを抑えた、豊かで温かい声。"
+
+msgid "Adds body to thin microphones."
+msgstr "薄い音のマイクに厚みを加えます。"
+
+msgid "Keeps the microphone exactly as it was recorded."
+msgstr "マイクの音を録音したままに保ちます。"

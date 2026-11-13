@@ -4736,3 +4736,111 @@ msgstr "Exportierte Motion-Videos erscheinen unter Aufnahmen. Gespeicherte Motio
 
 msgid "Expires in {time}"
 msgstr "Läuft ab in {time}"
+
+msgid "Background music"
+msgstr "Hintergrundmusik"
+
+msgid "Choose background music"
+msgstr "Hintergrundmusik wählen"
+
+msgid "Clip {current} of {total}"
+msgstr "Clip {current} von {total}"
+
+msgid "Clips"
+msgstr "Clips"
+
+msgid "Length {original}"
+msgstr "Länge {original}"
+
+msgid "Microphone"
+msgstr "Mikrofon"
+
+msgid "Microphone volume"
+msgstr "Mikrofonlautstärke"
+
+msgid "Music volume"
+msgstr "Musiklautstärke"
+
+msgid "Mute clip"
+msgstr "Clip stummschalten"
+
+msgid "Mute microphone"
+msgstr "Mikrofon stummschalten"
+
+msgid "Mute music"
+msgstr "Musik stummschalten"
+
+msgid "Mute system sound"
+msgstr "Systemton stummschalten"
+
+msgid "Muted"
+msgstr "Stumm"
+
+msgid "Remove music"
+msgstr "Musik entfernen"
+
+msgid "Select a clip on the timeline to change its speed and sound."
+msgstr "Wähle einen Clip in der Zeitleiste, um Geschwindigkeit und Ton zu ändern."
+
+msgid "Select music…"
+msgstr "Musik auswählen…"
+
+msgid "System sound"
+msgstr "Systemton"
+
+msgid "System sound volume"
+msgstr "Systemtonlautstärke"
+
+msgid "This recording has no sound. Turn on the microphone or system audio before recording."
+msgstr "Diese Aufnahme hat keinen Ton. Aktiviere das Mikrofon oder den Systemton vor der Aufnahme."
+
+msgid "{original} at 1× · {now} at {speed}"
+msgstr "{original} bei 1× · {now} bei {speed}"
+
+msgid "Loud"
+msgstr "Laut"
+
+msgid "Noise reduction"
+msgstr "Rauschunterdrückung"
+
+msgid "Podcast"
+msgstr "Podcast"
+
+msgid "Warm"
+msgstr "Warm"
+
+msgid "Even, natural voice"
+msgstr "Gleichmäßige, natürliche Stimme"
+
+msgid "Punchy and compressed"
+msgstr "Druckvoll und komprimiert"
+
+msgid "Removes steady noise"
+msgstr "Entfernt gleichmäßiges Rauschen"
+
+msgid "Warm, polished voice"
+msgstr "Warme, polierte Stimme"
+
+msgid "Fuller, deeper tone"
+msgstr "Vollerer, tieferer Klang"
+
+msgid "As recorded"
+msgstr "Wie aufgenommen"
+
+msgid "Evens out your voice so it stays at one level."
+msgstr "Gleicht deine Stimme aus, damit sie auf einem Pegel bleibt."
+
+msgid "Louder, compressed voice that cuts through music."
+msgstr "Lautere, komprimierte Stimme, die sich gegen Musik durchsetzt."
+
+msgid "Removes steady background noise, then evens out the voice."
+msgstr "Entfernt gleichmäßiges Hintergrundrauschen und gleicht dann die Stimme aus."
+
+msgid "Full, warm voice with softened hiss and sibilance."
+msgstr "Volle, warme Stimme mit gedämpftem Zischen und Zischlauten."
+
+msgid "Adds body to thin microphones."
+msgstr "Verleiht dünnen Mikrofonen mehr Fülle."
+
+msgid "Keeps the microphone exactly as it was recorded."
+msgstr "Lässt das Mikrofon genau so, wie es aufgenommen wurde."
