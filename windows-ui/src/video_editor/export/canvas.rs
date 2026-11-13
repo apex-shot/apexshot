@@ -571,12 +571,25 @@ impl FramedSink {
     }
 
     pub(super) fn submit(&mut self, frame: Vec<u8>) -> Result<(), End> {
+        self.submit_with(frame, |_| Ok(()))
+    }
+
+    /// [`Self::submit`], running `overlay` on the whole output frame after
+    /// framing and before the captions, for layers placed on the canvas.
+    pub(super) fn submit_with(
+        &mut self,
+        frame: Vec<u8>,
+        overlay: impl FnOnce(&mut [u8]) -> Result<(), End>,
+    ) -> Result<(), End> {
         let Some(framer) = self.framer.as_ref() else {
+            let mut frame = frame;
+            overlay(&mut frame)?;
             return self.submit_output(frame);
         };
         let mut canvas = self.sink.buffer(self.pending)?;
         framer.compose(&frame, &mut canvas);
         self.spare.push(frame);
+        overlay(&mut canvas)?;
         self.submit_output(canvas)
     }
 
@@ -596,21 +609,26 @@ impl FramedSink {
             .map(|framer| (framer.rest(), framer.area()))
     }
 
-    /// Submit a frame drawn on a zoomed card. `outer` is the card's footage over
-    /// the whole canvas, NV12 at the export size.
-    pub(super) fn submit_card(
+    /// Submit a frame drawn on a zoomed card, then run `overlay` on the whole
+    /// output frame as [`Self::submit_with`] does. `outer` is the card's
+    /// footage over the whole canvas, NV12 at the export size.
+    pub(super) fn submit_card_with(
         &mut self,
         frame: Vec<u8>,
         card: CardFrame,
         outer: &[u8],
         converter: &Nv12Converter,
+        overlay: impl FnOnce(&mut [u8]) -> Result<(), End>,
     ) -> Result<(), End> {
         let Some(framer) = self.framer.as_mut() else {
+            let mut frame = frame;
+            overlay(&mut frame)?;
             return self.submit_output(frame);
         };
         let mut canvas = self.sink.buffer(self.pending)?;
         framer.compose_card(&frame, card, outer, converter, &mut canvas);
         self.spare.push(frame);
+        overlay(&mut canvas)?;
         self.submit_output(canvas)
     }
 

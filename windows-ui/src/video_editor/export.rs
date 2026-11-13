@@ -907,6 +907,15 @@ fn render_range(
         .map(|webcam| webcam.layouts.clone().clamped())
         .unwrap_or_default();
     let source_aspect = f64::from(model.source_size.0) / f64::from(model.source_size.1);
+    // The studied camera bubble sits on the whole output canvas, so with a
+    // canvas it is drawn after the framer has laid the video onto it.
+    let canvas_rect = model
+        .canvas
+        .as_ref()
+        .map(|layout| webcam::canvas_in_video(layout.video, layout.size));
+    let stage_canvas = canvas_rect.unwrap_or_else(webcam::Rect::full);
+    let camera_on_canvas = webcam.is_some() && canvas_rect.is_some();
+    let mut camera_canvas_scratch = webcam::CameraCanvasScratch::default();
     let mut staged = if staged_path {
         vec![0u8; size.0 as usize * size.1 as usize * 4]
     } else {
@@ -942,6 +951,7 @@ fn render_range(
                 split_gap: webcam.split_gap,
                 pane_radius: webcam.pane_radius,
                 split_rest: 0.0,
+                canvas: stage_canvas,
             },
             camera_aspect,
             zooms: model.zooms.clone(),
@@ -1205,11 +1215,15 @@ fn render_range(
                 || model.sidecar.clone(),
             );
             let early_layout = webcam.as_ref().map(|webcam| {
-                layouts.frame_at(
+                layouts.frame_at_staged(
                     composition_time,
                     webcam.settings,
-                    source_aspect,
+                    webcam::StageShape {
+                        canvas: stage_canvas,
+                        ..webcam::StageShape::plain(source_aspect)
+                    },
                     camera_aspect,
+                    0.0,
                 )
             });
             // The card for a camera value, as the preview frames it: none
@@ -1559,6 +1573,8 @@ fn render_range(
                 }
                 None => None,
             };
+            let mut canvas_trail: Vec<webcam::LayoutFrame> = Vec::new();
+            let mut canvas_mask: Option<Vec<f32>> = None;
             if let Some(webcam) = webcam.as_ref() {
                 let hidden = webcam::silence_hide_at(
                     &webcam.silence,
@@ -1584,6 +1600,7 @@ fn render_range(
                                     .as_ref()
                                     .map(|plan| plan.value_at(time))
                                     .unwrap_or(0.0),
+                                canvas: stage_canvas,
                             },
                             camera_aspect,
                             shrink,
@@ -1660,11 +1677,24 @@ fn render_range(
                     Some((pixels, size)) => (pixels, size),
                     None => (&[][..], (0, 0)),
                 };
+                // With a canvas the stage only places the screen; the camera
+                // goes onto the canvas after framing.
+                let stage_trail: Vec<webcam::LayoutFrame> = if camera_on_canvas {
+                    trail
+                        .iter()
+                        .map(|frame| webcam::LayoutFrame {
+                            camera_alpha: 0.0,
+                            ..*frame
+                        })
+                        .collect()
+                } else {
+                    trail.clone()
+                };
                 let composited = if staged_path {
                     webcam::composite_stage_trail_into(
                         &mut staged,
                         size,
-                        &trail,
+                        &stage_trail,
                         frame,
                         screen_size,
                         stage_background.as_deref(),
@@ -1676,7 +1706,7 @@ fn render_range(
                     webcam::composite_layout_trail_into(
                         frame,
                         size,
-                        &trail,
+                        &stage_trail,
                         camera_pixels,
                         camera_size,
                         mask.as_deref(),
@@ -1686,6 +1716,17 @@ fn render_range(
                     let _ = decoder.kill();
                     let _ = decoder.wait();
                     return Err(End::Failed(error));
+                }
+                if camera_on_canvas {
+                    canvas_trail = trail
+                        .iter()
+                        .map(|frame| webcam::LayoutFrame {
+                            screen: webcam::Rect::full(),
+                            camera: webcam::rect_in_canvas(frame.camera, stage_canvas),
+                            ..*frame
+                        })
+                        .collect();
+                    canvas_mask = mask;
                 }
             }
 
@@ -1699,9 +1740,30 @@ fn render_range(
             };
             let picture: &[u8] = if staged_path { &staged } else { frame };
             converter.convert_into(picture, size, &mut nv12);
+            let overlay_camera = |canvas: &mut [u8]| -> Result<(), End> {
+                if canvas_trail.is_empty() {
+                    return Ok(());
+                }
+                let Some((pixels, frame_size)) = camera_frame else {
+                    return Ok(());
+                };
+                webcam::composite_camera_nv12(
+                    canvas,
+                    plan.output,
+                    &canvas_trail,
+                    pixels,
+                    frame_size,
+                    canvas_mask.as_deref(),
+                    &converter,
+                    &mut camera_canvas_scratch,
+                )
+                .map_err(End::Failed)
+            };
             let submitted = match card_frame {
-                Some(card_frame) => sink.submit_card(nv12, card_frame, &outer_nv12, &converter),
-                None => sink.submit(nv12),
+                Some(card_frame) => {
+                    sink.submit_card_with(nv12, card_frame, &outer_nv12, &converter, overlay_camera)
+                }
+                None => sink.submit_with(nv12, overlay_camera),
             };
             if let Err(error) = submitted {
                 let _ = decoder.kill();
@@ -5194,9 +5256,10 @@ mod webcam_export_tests {
             return;
         }
 
-        // A round 96px bubble centred at (144, 108). The studied light sits far
-        // up-left, so the shadow lies against the bubble's lower-right edge and
-        // is gone 150 stage units (33px at 240 tall) out; nothing up-left.
+        // A round 96px bubble centred near (146, 110) once the studied inset
+        // places it. The studied light sits far up-left, so the shadow lies
+        // against the bubble's lower-right edge and is gone 150 stage units
+        // (33px at 240 tall) out; nothing up-left.
         let bubble = LayerSettings {
             x: 0.3,
             y: 0.25,
@@ -5213,10 +5276,27 @@ mod webcam_export_tests {
             bubble,
             LayoutSettings::default(),
         );
-        let background = pixel(&frame, 320, 10, 10);
-        let lit = pixel(&frame, 320, 104, 68);
-        let shaded = pixel(&frame, 320, 184, 148);
-        let beyond = pixel(&frame, 320, 215, 179);
+        // Each probe averages a 5x5 patch, so the encoder's noise around the
+        // bubble's edge cannot pass for a shadow.
+        let patch = |cx: u32, cy: u32| -> [u8; 3] {
+            let mut sum = [0u32; 3];
+            for y in cy - 2..=cy + 2 {
+                for x in cx - 2..=cx + 2 {
+                    let value = pixel(&frame, 320, x, y);
+                    for channel in 0..3 {
+                        sum[channel] += u32::from(value[channel]);
+                    }
+                }
+            }
+            sum.map(|total| (total / 25) as u8)
+        };
+        let background = patch(10, 10);
+        let lit = patch(104, 68);
+        let shaded = patch(186, 150);
+        let beyond = patch(222, 186);
+        // The encoder tints the corner the bright camera sits towards, so the
+        // falloff is judged against that same corner rather than the far one.
+        let corner = patch(300, 220);
         for channel in 0..3 {
             assert!(
                 i32::from(shaded[channel]) < i32::from(background[channel]) - 8,
@@ -5227,8 +5307,8 @@ mod webcam_export_tests {
                 "nothing should darken up-left of the bubble: {lit:?} vs {background:?}"
             );
             assert!(
-                (i32::from(beyond[channel]) - i32::from(background[channel])).abs() <= 4,
-                "the shadow should be gone past its falloff: {beyond:?} vs {background:?}"
+                (i32::from(beyond[channel]) - i32::from(corner[channel])).abs() <= 4,
+                "the shadow should be gone past its falloff: {beyond:?} vs {corner:?}"
             );
         }
 

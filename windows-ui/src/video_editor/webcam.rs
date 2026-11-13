@@ -398,22 +398,6 @@ impl LayerSettings {
             self.resize_overlay(w, h / w);
         }
     }
-
-    /// The layer at `factor` of its size, still at the alignment it had, so
-    /// an anchored corner stays where it is.
-    pub(super) fn scaled_in_place(self, factor: f64) -> Self {
-        let sane = self.clamped();
-        if !factor.is_finite() || (factor - 1.0).abs() < 1e-12 {
-            return sane;
-        }
-        let (alignment_x, alignment_y) = sane.overlay_alignment();
-        let mut scaled = sane;
-        scaled.w = sane.w * factor;
-        scaled.h = sane.h * factor;
-        scaled.x = travel_offset(alignment_x, 1.0 - scaled.w);
-        scaled.y = travel_offset(alignment_y, 1.0 - scaled.h);
-        scaled
-    }
 }
 
 /// How far along its travel a layer sits, as a 0..=1 fraction. A layer with no
@@ -699,6 +683,7 @@ impl LayoutSettings {
             } else {
                 0.0
             },
+            canvas: sane_canvas(stage.canvas),
         };
         // A layer switched off paints the screen alone at every instant. The
         // recorded geometry and the layout timeline stay as they are, so
@@ -827,6 +812,8 @@ struct Geometry {
     cutout_position_x: f64,
     cutout_size: f64,
     zoom_shrink: f64,
+    /// The output canvas in fractions of the stage.
+    canvas: Rect,
 }
 
 fn sane_aspect(aspect: f64) -> f64 {
@@ -854,13 +841,11 @@ fn canonical(layout: CameraLayout, geometry: Geometry) -> LayoutFrame {
             let camera = if geometry.overlay.fullscreen {
                 full
             } else {
-                geometry
-                    .overlay
-                    .scaled_in_place(zoomed_scale(
-                        geometry.zoom_shrink,
-                        geometry.overlay.zoomed_scale,
-                    ))
-                    .rect_in(full)
+                overlay_rect(
+                    geometry,
+                    zoomed_scale(geometry.zoom_shrink, geometry.overlay.zoomed_scale),
+                    overlay_padding_scale(geometry),
+                )
             };
             LayoutFrame {
                 screen,
@@ -918,7 +903,7 @@ fn canonical(layout: CameraLayout, geometry: Geometry) -> LayoutFrame {
         }
         CameraLayout::ScreenOnly => LayoutFrame {
             screen,
-            camera: geometry.overlay.rect_in(full),
+            camera: overlay_rect(geometry, 1.0, 1.0),
             camera_alpha: 0.0,
             camera_radius: geometry.overlay.radius,
             screen_radius: 0.0,
@@ -1046,6 +1031,9 @@ pub(super) struct StageShape {
     /// Where the split's screen rests, 0..=1: 0 against its own outer edge,
     /// 1 against the edge beside the camera.
     pub split_rest: f64,
+    /// The output canvas in fractions of the stage, see [`canvas_in_video`];
+    /// [`Rect::full`] when the stage fills the output.
+    pub canvas: Rect,
 }
 
 impl StageShape {
@@ -1057,6 +1045,7 @@ impl StageShape {
             split_gap: 0.0,
             pane_radius: 0.0,
             split_rest: 0.0,
+            canvas: Rect::full(),
         }
     }
 }
@@ -1086,6 +1075,48 @@ pub(super) fn contained_screen(stage_aspect: f64, screen_aspect: f64) -> Rect {
             width: 1.0,
             height,
         }
+    }
+}
+
+/// The output canvas in fractions of the video rect centred inside it. The
+/// whole frame when the two match; a canvas that pads the video reaches past
+/// 0..1 on the padded sides.
+pub(super) fn canvas_in_video(video: (u32, u32), canvas: (u32, u32)) -> Rect {
+    if video.0 == 0 || video.1 == 0 || canvas.0 == 0 || canvas.1 == 0 {
+        return Rect::full();
+    }
+    let (video_w, video_h) = (f64::from(video.0), f64::from(video.1));
+    let (canvas_w, canvas_h) = (f64::from(canvas.0), f64::from(canvas.1));
+    Rect {
+        x: -(canvas_w - video_w) / 2.0 / video_w,
+        y: -(canvas_h - video_h) / 2.0 / video_h,
+        width: canvas_w / video_w,
+        height: canvas_h / video_h,
+    }
+}
+
+/// `rect`, given in fractions of the stage, in fractions of `canvas`.
+pub(super) fn rect_in_canvas(rect: Rect, canvas: Rect) -> Rect {
+    if !(canvas.width > 0.0 && canvas.height > 0.0) {
+        return rect;
+    }
+    Rect {
+        x: (rect.x - canvas.x) / canvas.width,
+        y: (rect.y - canvas.y) / canvas.height,
+        width: rect.width / canvas.width,
+        height: rect.height / canvas.height,
+    }
+}
+
+fn sane_canvas(canvas: Rect) -> Rect {
+    let finite = canvas.x.is_finite()
+        && canvas.y.is_finite()
+        && canvas.width.is_finite()
+        && canvas.height.is_finite();
+    if finite && canvas.width > 0.0 && canvas.height > 0.0 {
+        canvas
+    } else {
+        Rect::full()
     }
 }
 
@@ -1403,6 +1434,82 @@ fn cutout_rect(geometry: Geometry) -> Rect {
         width,
         height,
     }
+}
+
+/// The studied overlay padding setting, the share of the way from the
+/// smallest inset to the stage's own padding.
+const OVERLAY_PADDING_SHARE: f64 = 0.5;
+/// The smallest studied overlay inset, as a padding ratio.
+const OVERLAY_MIN_PADDING_RATIO: f64 = 0.025;
+/// Below this stage padding ratio the studied inset range ends here instead.
+const OVERLAY_SMALL_PADDING_RATIO: f64 = 0.1;
+/// The share of its padding a zoomed overlay gives up.
+const ZOOMED_OVERLAY_PADDING_DROP: f64 = 0.5;
+
+/// The camera bubble, the studied way: a square of the canvas's shortest side
+/// times the layer's size ratio, the bubble's aspect fitted inside it, aligned
+/// inside the canvas inset by the resolved padding. `scale` shrinks the size
+/// and `padding_scale` the inset, for the zoomed camera.
+///
+/// The layer's stored rect is read as an alignment, a size ratio and an aspect
+/// against the screen's own aspect, the frame the panel edits it in, so a
+/// project keeps its Size, Position and shape while the bubble moves onto the
+/// canvas. The result is in fractions of the stage.
+fn overlay_rect(geometry: Geometry, scale: f64, padding_scale: f64) -> Rect {
+    let overlay = geometry.overlay.clamped();
+    let reference = geometry.screen_aspect;
+    let (align_x, align_y) = overlay.overlay_alignment();
+    let size = overlay.overlay_size_ratio(reference);
+    let aspect = sane_aspect(overlay.pixel_aspect(reference));
+    let stage = geometry.video_aspect;
+    let canvas = geometry.canvas;
+    // The canvas in units of the stage's height.
+    let (canvas_x, canvas_y) = (canvas.x * stage, canvas.y);
+    let (canvas_w, canvas_h) = (canvas.width * stage, canvas.height);
+    let shortest = canvas_w.min(canvas_h);
+    if shortest.is_nan() || size.is_nan() || shortest <= 0.0 || size <= 0.0 {
+        return overlay.rect_in(Rect::full());
+    }
+    let side = shortest * size * scale.max(0.0);
+    let (width, height) = if aspect >= 1.0 {
+        (side, side / aspect)
+    } else {
+        (side * aspect, side)
+    };
+    // The stage's own padding as the studied ratio: an inset of
+    // `shortest * ratio / (1 + 2 * ratio)` on each side.
+    let padding = (-canvas_x).min(-canvas_y).max(0.0);
+    let ratio = if shortest - 2.0 * padding > 1e-9 {
+        padding / (shortest - 2.0 * padding)
+    } else {
+        0.0
+    };
+    let upper = ratio.max(OVERLAY_SMALL_PADDING_RATIO);
+    let resolved = (OVERLAY_MIN_PADDING_RATIO
+        + OVERLAY_PADDING_SHARE * (upper - OVERLAY_MIN_PADDING_RATIO))
+        * padding_scale.max(0.0);
+    let inset = shortest * resolved / (1.0 + 2.0 * resolved);
+    let box_x = canvas_x + inset;
+    let box_y = canvas_y + inset;
+    let box_w = (canvas_w - 2.0 * inset).max(0.0);
+    let box_h = (canvas_h - 2.0 * inset).max(0.0);
+    let x = box_x + align_x * (box_w - width);
+    let y = box_y + align_y * (box_h - height);
+    Rect {
+        x: x / stage,
+        y,
+        width: width / stage,
+        height,
+    }
+}
+
+/// How much of its padding the bubble keeps at this zoom: the studied zoomed
+/// camera keeps half, and a camera with the shrink switched off stays put.
+fn overlay_padding_scale(geometry: Geometry) -> f64 {
+    if geometry.overlay.zoomed_scale >= 1.0 - 1e-9 {
+        return 1.0;
+    }
+    1.0 - ZOOMED_OVERLAY_PADDING_DROP * geometry.zoom_shrink
 }
 
 /// Whether the studied rule shrinks the camera at `time`: inside an enabled
@@ -1960,6 +2067,8 @@ struct State {
     composition_seconds: Cell<f64>,
     /// The preview stage's aspect when it is wider than the screen, else 0.
     stage_aspect: Cell<f64>,
+    /// The output canvas in fractions of the stage, see [`canvas_in_video`].
+    canvas: Cell<Rect>,
     split_gap: Cell<f64>,
     pane_radius: Cell<f64>,
     zoom_shrink: Cell<f64>,
@@ -2019,6 +2128,7 @@ impl WebcamModel {
                 layouts_custom: Cell::new(false),
                 composition_seconds: Cell::new(0.0),
                 stage_aspect: Cell::new(0.0),
+                canvas: Cell::new(Rect::full()),
                 split_gap: Cell::new(0.0),
                 pane_radius: Cell::new(0.0),
                 zoom_shrink: Cell::new(0.0),
@@ -2207,6 +2317,17 @@ impl WebcamModel {
         (self.state.repaint)();
     }
 
+    /// The output canvas around the stage, which the camera bubble is placed
+    /// on.
+    pub fn set_canvas(&self, canvas: Rect) {
+        let canvas = sane_canvas(canvas);
+        if self.state.canvas.get() == canvas {
+            return;
+        }
+        self.state.canvas.set(canvas);
+        (self.state.repaint)();
+    }
+
     /// The padded split's gap and pane radius, in stage heights.
     pub fn set_split_padding(&self, gap: f64, radius: f64) {
         let gap = finite_non_negative(gap);
@@ -2305,6 +2426,7 @@ impl WebcamModel {
                 split_gap: self.state.split_gap.get(),
                 pane_radius: self.state.pane_radius.get(),
                 split_rest: 0.0,
+                canvas: self.state.canvas.get(),
             },
             camera_aspect,
             zooms: zooms.to_vec(),
@@ -2378,6 +2500,7 @@ impl WebcamModel {
                 split_gap: self.state.split_gap.get(),
                 pane_radius: self.state.pane_radius.get(),
                 split_rest: self.state.split_rest.get(),
+                canvas: self.state.canvas.get(),
             },
             camera_aspect,
             self.state.zoom_shrink.get(),
@@ -2571,6 +2694,12 @@ impl WebcamModel {
                 }
             }
         };
+        let canvas = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: f64::from(allocation_width.max(0)),
+            height: f64::from(allocation_height.max(0)),
+        };
         let rect = frame.camera.inside(video);
         if rect.width < 1.0 || rect.height < 1.0 {
             return;
@@ -2579,7 +2708,7 @@ impl WebcamModel {
             return;
         };
         let radius = frame.camera_radius * rect.width.min(rect.height) / 2.0;
-        self.draw_shadow(context, video, rect, radius, &frame, &image);
+        self.draw_shadow(context, canvas, rect, radius, &frame, &image);
         draw_camera_cover_blurred(
             context,
             rect,
@@ -2587,7 +2716,7 @@ impl WebcamModel {
             frame.mirror,
             frame.camera_alpha,
             &image,
-            fade_blur_sigma_px(frame.camera_alpha, video.height),
+            fade_blur_sigma_px(frame.camera_alpha, canvas.height),
         );
     }
 
@@ -3592,6 +3721,108 @@ pub(super) fn composite_stage_trail_into(
     Ok(())
 }
 
+/// How far above and below its rect the camera's shadow can reach, as a share
+/// of the canvas height.
+const CANVAS_CAMERA_SHADOW_MARGIN: f64 = 0.2;
+
+/// Buffers [`composite_camera_nv12`] reuses from frame to frame.
+#[derive(Default)]
+pub(super) struct CameraCanvasScratch {
+    /// A full-canvas RGBA frame; only the camera's band is ever filled.
+    frame: Vec<u8>,
+    band_nv12: Vec<u8>,
+    band_rgba: Vec<u8>,
+}
+
+/// Composite the camera along its trail onto a whole NV12 output canvas.
+/// `frames` are in fractions of the canvas. Only the band of rows the camera
+/// and its shadow can reach is converted to RGBA and back, with one chroma
+/// row of margin each side so its edges see their real neighbours; every
+/// other row is left exactly as it was.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn composite_camera_nv12(
+    nv12: &mut [u8],
+    size: (u32, u32),
+    frames: &[LayoutFrame],
+    camera: &[u8],
+    camera_size: (u32, u32),
+    mask: Option<&[f32]>,
+    converter: &super::pixels::Nv12Converter,
+    scratch: &mut CameraCanvasScratch,
+) -> Result<(), String> {
+    let width = (size.0 & !1) as usize;
+    let height = (size.1 & !1) as usize;
+    if width < 2 || height < 2 || !frames.iter().any(|frame| frame.camera_alpha > 0.0) {
+        return Ok(());
+    }
+    if nv12.len() < width * height * 3 / 2 {
+        return Err("the output frame is smaller than its size".to_string());
+    }
+    let frames: Vec<LayoutFrame> = frames
+        .iter()
+        .map(|frame| LayoutFrame {
+            screen: Rect::full(),
+            ..*frame
+        })
+        .collect();
+    let canvas_h = height as f64;
+    let margin = canvas_h * CANVAS_CAMERA_SHADOW_MARGIN;
+    let mut top = f64::INFINITY;
+    let mut bottom = f64::NEG_INFINITY;
+    for frame in frames.iter().filter(|frame| frame.camera_alpha > 0.0) {
+        top = top.min(frame.camera.y * canvas_h);
+        bottom = bottom.max((frame.camera.y + frame.camera.height) * canvas_h);
+    }
+    if !top.is_finite() || !bottom.is_finite() {
+        return Ok(());
+    }
+    let y0 = ((top - margin).floor().max(0.0) as usize & !1).min(height);
+    let y1 = (((bottom + margin).ceil().max(0.0) as usize + 1) & !1).min(height);
+    if y1 <= y0 {
+        return Ok(());
+    }
+    let oy0 = y0.saturating_sub(2);
+    let oy1 = (y1 + 2).min(height);
+    let rows = oy1 - oy0;
+    let luma = width * rows;
+    scratch.frame.resize(width * height * 4, 0);
+    scratch.band_nv12.resize(luma * 3 / 2, 0);
+    scratch.band_rgba.resize(luma * 4, 0);
+    scratch.band_nv12[..luma].copy_from_slice(&nv12[oy0 * width..oy1 * width]);
+    let chroma = width * height;
+    scratch.band_nv12[luma..]
+        .copy_from_slice(&nv12[chroma + (oy0 / 2) * width..chroma + (oy1 / 2) * width]);
+    converter.to_rgba_into(
+        &scratch.band_nv12,
+        (width as u32, rows as u32),
+        &mut scratch.band_rgba,
+    );
+    scratch.frame[oy0 * width * 4..oy1 * width * 4].copy_from_slice(&scratch.band_rgba);
+    composite_layout_trail_into(
+        &mut scratch.frame,
+        (width as u32, height as u32),
+        &frames,
+        camera,
+        camera_size,
+        mask,
+    )?;
+    scratch
+        .band_rgba
+        .copy_from_slice(&scratch.frame[oy0 * width * 4..oy1 * width * 4]);
+    converter.convert_into(
+        &scratch.band_rgba,
+        (width as u32, rows as u32),
+        &mut scratch.band_nv12,
+    );
+    let skip = y0 - oy0;
+    nv12[y0 * width..y1 * width]
+        .copy_from_slice(&scratch.band_nv12[skip * width..(skip + (y1 - y0)) * width]);
+    nv12[chroma + (y0 / 2) * width..chroma + (y1 / 2) * width].copy_from_slice(
+        &scratch.band_nv12[luma + (skip / 2) * width..luma + ((skip + (y1 - y0)) / 2) * width],
+    );
+    Ok(())
+}
+
 fn camera_surface(
     camera: &[u8],
     camera_size: (u32, u32),
@@ -3877,6 +4108,7 @@ fn pixel_rect(rect: Rect, size: (u32, u32)) -> (u32, u32, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::video_editor::pixels::{Nv12Converter, YuvSpace};
     use crate::video_editor::timeline::{ZoomClip, ZoomMode};
 
     fn solid(width: u32, height: u32, bgra: [u8; 4]) -> Vec<u8> {
@@ -4011,19 +4243,21 @@ mod tests {
             ],
             ..LayoutSettings::default()
         };
+        // The studied inset on an unpadded stage, in stage heights.
+        let inset = 0.0625 / 1.125;
         let shared = layouts.frame_at(1.0, layer, frame, 1.0).camera;
         assert!(
-            (shared.x + shared.width - 1.0).abs() < 1e-9,
+            (shared.x + shared.width - (1.0 - inset / frame)).abs() < 1e-9,
             "the default sits bottom-right"
         );
         let own = layouts.frame_at(5.0, layer, frame, 1.0).camera;
         assert!(
-            own.x.abs() < 1e-9 && own.y.abs() < 1e-9,
+            (own.x - inset / frame).abs() < 1e-9 && (own.y - inset).abs() < 1e-9,
             "the change sits top-left: {own:?}"
         );
         let back = layouts.frame_at(9.0, layer, frame, 1.0).camera;
         assert!(
-            (back.x + back.width - 1.0).abs() < 1e-9,
+            (back.x + back.width - (1.0 - inset / frame)).abs() < 1e-9,
             "a change without a position uses the shared one"
         );
     }
@@ -4268,6 +4502,7 @@ mod tests {
                 1.0,
             )
         };
+        let overlay = resting(&settings, 0.5).camera;
         let before = resting(&settings, 1.0);
         let middle = resting(&settings, 1.5);
         let end = resting(&settings, 5.0);
@@ -4279,7 +4514,7 @@ mod tests {
             (middle.screen.height - 1.0).abs() < 1e-9,
             "the growing split pane keeps the frame's full height"
         );
-        assert!((middle.camera.y - 0.55 * (1.0 - p)).abs() < 1e-9);
+        assert!((middle.camera.y - overlay.y * (1.0 - p)).abs() < 1e-9);
         // Under the fullscreen camera the screen keeps the split's pane.
         assert!((end.screen.width - 0.5).abs() < 1e-9);
         assert!(end.camera.is_full());
@@ -5458,13 +5693,18 @@ mod tests {
         assert!((full.width - 0.8 * rest.width).abs() < 1e-9);
         assert!((full.height - 0.8 * rest.height).abs() < 1e-9);
         assert!((half.width - 0.9 * rest.width).abs() < 1e-9);
+        // The studied zoomed camera keeps its corner but gives up half its
+        // padding, so it moves toward the frame's edge as it shrinks.
+        let (rest_inset, full_inset) = (0.0625 / 1.125, 0.03125 / 1.0625);
         assert!(
-            (full.x + full.width - (rest.x + rest.width)).abs() < 1e-9,
-            "right edge stays"
+            (rest.x + rest.width - (1.0 - rest_inset / frame)).abs() < 1e-9
+                && (rest.y + rest.height - (1.0 - rest_inset)).abs() < 1e-9,
+            "the resting camera sits in the corner inset"
         );
         assert!(
-            (full.y + full.height - (rest.y + rest.height)).abs() < 1e-9,
-            "bottom edge stays"
+            (full.x + full.width - (1.0 - full_inset / frame)).abs() < 1e-9
+                && (full.y + full.height - (1.0 - full_inset)).abs() < 1e-9,
+            "the zoomed camera keeps the corner at half the inset"
         );
 
         let cutout = LayoutSettings {
@@ -6019,6 +6259,7 @@ mod tests {
                 split_gap: 0.0,
                 pane_radius: 0.0,
                 split_rest: 0.0,
+                canvas: Rect::full(),
             },
             1.0,
             0.0,
@@ -6051,6 +6292,7 @@ mod tests {
                 split_gap: 0.0,
                 pane_radius: 0.0,
                 split_rest: 0.0,
+                canvas: Rect::full(),
             },
             1.0,
             0.0,
@@ -6090,6 +6332,7 @@ mod tests {
             split_gap: 0.1,
             pane_radius: 0.05,
             split_rest: 0.0,
+            canvas: Rect::full(),
         };
         let layer = LayerSettings {
             enabled: true,
@@ -6126,6 +6369,7 @@ mod tests {
             split_gap: 0.1,
             pane_radius: 0.05,
             split_rest: 0.0,
+            canvas: Rect::full(),
         };
         let plain = StageShape {
             aspect: 2.2625,
@@ -6133,6 +6377,7 @@ mod tests {
             split_gap: 0.0,
             pane_radius: 0.0,
             split_rest: 0.0,
+            canvas: Rect::full(),
         };
         let frame = split.frame_at_staged(0.0, layer, padded, 1.0, 0.0);
         assert_eq!(frame, split.frame_at_staged(0.0, layer, plain, 1.0, 0.0));
@@ -6156,6 +6401,7 @@ mod tests {
             split_gap: 0.05,
             pane_radius: 0.0,
             split_rest: 0.0,
+            canvas: Rect::full(),
         };
         let layer = LayerSettings {
             enabled: true,
@@ -6211,6 +6457,7 @@ mod tests {
                 split_gap: 0.0,
                 pane_radius: 0.0,
                 split_rest: rest,
+                canvas: Rect::full(),
             };
             let frame = flipped.frame_at_staged(0.0, layer, stage, 1.0, 0.0);
             assert!(
@@ -6225,6 +6472,7 @@ mod tests {
             split_gap: 0.0,
             pane_radius: 0.0,
             split_rest: 0.0,
+            canvas: Rect::full(),
         };
         let frame = split.frame_at_staged(0.0, layer, stage, 1.0, 1.0);
         assert!(
@@ -6354,5 +6602,138 @@ mod tests {
             "the rounded corner shows the background: {corner:?}"
         );
         assert_eq!(pixel(&stage, 40, 20, 10), [255, 0, 0, 255]);
+    }
+
+    fn bubble(size: f64, align: (f64, f64)) -> LayerSettings {
+        let frame = 16.0 / 9.0;
+        let mut layer = LayerSettings::default();
+        layer.set_overlay_aspect(1.0, frame);
+        layer.set_overlay_size(size, frame);
+        layer.set_overlay_alignment(align.0, align.1);
+        layer
+    }
+
+    #[test]
+    fn the_canvas_is_measured_in_fractions_of_the_video() {
+        assert_eq!(canvas_in_video((1920, 1080), (1920, 1080)), Rect::full());
+        let canvas = canvas_in_video((1920, 1080), (2112, 1272));
+        assert!((canvas.x + 0.05).abs() < 1e-9);
+        assert!((canvas.y + 96.0 / 1080.0).abs() < 1e-9);
+        assert!((canvas.width - 1.1).abs() < 1e-9);
+        assert!((canvas.height - 1272.0 / 1080.0).abs() < 1e-9);
+        let back = rect_in_canvas(Rect::full(), canvas);
+        assert!((back.x - 0.05 / 1.1).abs() < 1e-9);
+        assert!((back.width - 1.0 / 1.1).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_bubble_rests_inside_the_studied_inset() {
+        let layer = bubble(0.35, (1.0, 1.0));
+        let frame = LayoutSettings::default().frame_at_staged(
+            0.0,
+            layer,
+            StageShape::plain(16.0 / 9.0),
+            1.0,
+            0.0,
+        );
+        let inset = 0.0625 / 1.125;
+        assert!((frame.camera.height - 0.35).abs() < 1e-6);
+        assert!((frame.camera.width - 0.35 * 9.0 / 16.0).abs() < 1e-6);
+        assert!((frame.camera.y + frame.camera.height - (1.0 - inset)).abs() < 1e-6);
+        assert!((frame.camera.x + frame.camera.width - (1.0 - inset * 9.0 / 16.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_padded_canvas_lets_the_bubble_reach_onto_the_background() {
+        let layer = bubble(0.35, (1.0, 1.0));
+        let stage = StageShape {
+            canvas: canvas_in_video((1920, 1080), (2112, 1272)),
+            ..StageShape::plain(16.0 / 9.0)
+        };
+        let frame = LayoutSettings::default().frame_at_staged(0.0, layer, stage, 1.0, 0.0);
+        let shortest = 1272.0 / 1080.0;
+        let inset = shortest * 0.0625 / 1.125;
+        let pad = 96.0 / 1080.0;
+        assert!((frame.camera.height - 0.35 * shortest).abs() < 1e-6);
+        let bottom = -pad + shortest - inset;
+        let right = (-pad + 2112.0 / 1080.0 - inset) / (16.0 / 9.0);
+        assert!((frame.camera.y + frame.camera.height - bottom).abs() < 1e-6);
+        assert!((frame.camera.x + frame.camera.width - right).abs() < 1e-6);
+        assert!(frame.camera.y + frame.camera.height > 1.0);
+        assert!(frame.camera.x + frame.camera.width > 1.0);
+    }
+
+    #[test]
+    fn a_zoom_halves_the_bubble_padding_unless_the_shrink_is_off() {
+        let layer = bubble(0.35, (1.0, 1.0));
+        let zoomed = LayoutSettings::default().frame_at_staged(
+            0.0,
+            layer,
+            StageShape::plain(16.0 / 9.0),
+            1.0,
+            1.0,
+        );
+        let inset = 0.03125 / 1.0625;
+        assert!((zoomed.camera.height - 0.35 * ZOOMED_CAMERA_SCALE).abs() < 1e-6);
+        assert!((zoomed.camera.y + zoomed.camera.height - (1.0 - inset)).abs() < 1e-6);
+        let steady = LayerSettings {
+            zoomed_scale: 1.0,
+            ..layer
+        };
+        let held = LayoutSettings::default().frame_at_staged(
+            0.0,
+            steady,
+            StageShape::plain(16.0 / 9.0),
+            1.0,
+            1.0,
+        );
+        let resting = LayoutSettings::default().frame_at_staged(
+            0.0,
+            steady,
+            StageShape::plain(16.0 / 9.0),
+            1.0,
+            0.0,
+        );
+        assert_eq!(held.camera, resting.camera);
+    }
+
+    #[test]
+    fn the_canvas_camera_only_touches_its_band() {
+        let (width, height) = (64u32, 48u32);
+        let mut nv12 = vec![128u8; (width * height * 3 / 2) as usize];
+        let converter = Nv12Converter::new(YuvSpace::default());
+        let camera = solid(8, 8, RED);
+        let frame = LayoutFrame {
+            screen: Rect::full(),
+            camera: Rect {
+                x: 0.5,
+                y: 0.5,
+                width: 0.25,
+                height: 0.25,
+            },
+            camera_alpha: 1.0,
+            camera_radius: 0.0,
+            screen_radius: 0.0,
+            screen_anchor: 0.5,
+            cutout: 0.0,
+            mirror: false,
+        };
+        let mut scratch = CameraCanvasScratch::default();
+        composite_camera_nv12(
+            &mut nv12,
+            (width, height),
+            &[frame],
+            &camera,
+            (8, 8),
+            None,
+            &converter,
+            &mut scratch,
+        )
+        .unwrap();
+        let centre = (30 * width + 40) as usize;
+        assert_ne!(nv12[centre], 128, "the camera lands in its rect");
+        assert!(nv12[..(4 * width) as usize]
+            .iter()
+            .all(|&value| value == 128));
     }
 }

@@ -453,6 +453,7 @@ mod tests {
                 split_gap: 0.0,
                 pane_radius: 0.0,
                 split_rest: 0.0,
+                canvas: Rect::full(),
             },
             camera_aspect: 1.0,
             zooms: Vec::new(),

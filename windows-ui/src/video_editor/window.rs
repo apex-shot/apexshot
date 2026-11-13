@@ -971,6 +971,10 @@ impl Stage {
         let (video_w, video_h) = video_rect_dimensions(aspect, source, padding, has_fill);
         self.set_stage_ratio(out_w as f32 / out_h.max(1) as f32);
         self.set_video_margins((video_w, video_h), (out_w, out_h));
+        self.webcam.set_canvas(super::webcam::canvas_in_video(
+            (video_w, video_h),
+            (out_w, out_h),
+        ));
         let canvas = canvas_dimensions(aspect, source);
         let pad = padding_px(canvas, padding, has_fill).round().max(0.0);
         let (out_w, out_h) = (f64::from(out_w.max(1)), f64::from(out_h.max(1)));
