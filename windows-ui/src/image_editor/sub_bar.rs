@@ -424,7 +424,7 @@ pub(super) fn build(
             Rc::new(move |index| {
                 if let Some(size) = TEXT_SIZE_OPTIONS.get(index) {
                     host.mutate(|st| {
-                        st.set_text_size(*size as f64);
+                        super::annotate::set_text_size_and_fit(st, *size as f64);
                     });
                 }
             })

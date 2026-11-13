@@ -458,14 +458,17 @@ impl EditorState {
         };
     }
 
-    /// Editable canvas bounds in screenshot pixels. The Appearance backend
-    /// is not wired on Windows, so the editable region is the image itself.
+    /// Editable canvas bounds in screenshot pixels: the whole composed
+    /// canvas, so annotations can sit on the background padding.
     pub fn annotation_canvas_bounds(&self) -> (f64, f64, f64, f64) {
+        let layout = self
+            .background
+            .layout(self.base_image.width(), self.base_image.height());
         (
-            0.0,
-            0.0,
-            self.base_image.width() as f64,
-            self.base_image.height() as f64,
+            -layout.image_x,
+            -layout.image_y,
+            layout.width - layout.image_x,
+            layout.height - layout.image_y,
         )
     }
 
@@ -676,6 +679,19 @@ mod tests {
         state.move_cursor_end();
         assert!(state.commit_active_text_input());
         assert_eq!(state.actions.len(), 1);
+    }
+
+    #[test]
+    fn annotation_canvas_bounds_cover_the_background_padding() {
+        let mut state = EditorState::new(RgbaImage::new(100, 80));
+        assert_eq!(state.annotation_canvas_bounds(), (0.0, 0.0, 100.0, 80.0));
+        state.background.fill = super::background::Fill::Image(std::sync::Arc::new(
+            RgbaImage::from_pixel(1, 1, image::Rgba([0, 0, 255, 255])),
+        ));
+        state.background.set_padding(40.0);
+        let (min_x, min_y, max_x, max_y) = state.annotation_canvas_bounds();
+        assert!(min_x < 0.0 && min_y < 0.0, "({min_x}, {min_y})");
+        assert!(max_x > 100.0 && max_y > 80.0, "({max_x}, {max_y})");
     }
 
     fn sample_state() -> EditorState {

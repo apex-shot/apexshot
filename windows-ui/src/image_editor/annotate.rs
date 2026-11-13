@@ -1361,18 +1361,10 @@ impl EditorHost {
                 }) = st.actions.get(index)
                 {
                     let width =
-                        max_width.unwrap_or_else(|| (image_w - position.x).max(font.size * 1.8));
+                        max_width.unwrap_or_else(|| default_text_wrap_width(st, *position, font));
                     let mut bounds =
                         text_action_bounds(context, *position, text, font, Some(width));
-                    bounds.rect.x = bounds
-                        .rect
-                        .x
-                        .clamp(0, (image_w as i32 - bounds.rect.width).max(0));
-                    bounds.rect.y = bounds
-                        .rect
-                        .y
-                        .clamp(0, (image_h as i32 - bounds.rect.height).max(0));
-                    bounds.sync_handles();
+                    clamp_text_bounds_to_canvas(st, &mut bounds);
                     draw_text_edit_border(context, &bounds, t.scale);
                 }
             }
@@ -1391,18 +1383,10 @@ impl EditorHost {
                 } = selected
                 {
                     let width =
-                        max_width.unwrap_or_else(|| (image_w - position.x).max(font.size * 1.8));
+                        max_width.unwrap_or_else(|| default_text_wrap_width(st, *position, font));
                     let mut bounds =
                         text_action_bounds(context, *position, text, font, Some(width));
-                    bounds.rect.x = bounds
-                        .rect
-                        .x
-                        .clamp(0, (image_w as i32 - bounds.rect.width).max(0));
-                    bounds.rect.y = bounds
-                        .rect
-                        .y
-                        .clamp(0, (image_h as i32 - bounds.rect.height).max(0));
-                    bounds.sync_handles();
+                    clamp_text_bounds_to_canvas(st, &mut bounds);
                     draw_text_edit_border(context, &bounds, t.scale);
                     draw_text_edit_handles(context, &bounds, None, t.scale);
                 }
@@ -1488,15 +1472,7 @@ impl EditorHost {
 
         if let Some(bounds) = st.active_text_bounds.as_ref() {
             let mut bounds = bounds.clone();
-            bounds.rect.x = bounds
-                .rect
-                .x
-                .clamp(0, (image_w as i32 - bounds.rect.width).max(0));
-            bounds.rect.y = bounds
-                .rect
-                .y
-                .clamp(0, (image_h as i32 - bounds.rect.height).max(0));
-            bounds.sync_handles();
+            clamp_text_bounds_to_canvas(st, &mut bounds);
             if let Some(input) = st.active_text_input.as_ref() {
                 let font = FontSettings {
                     family: st.text_font_family.clone(),
@@ -2401,7 +2377,8 @@ impl EditorHost {
     }
 
     /// Shared text-bounds drag for the active edit session and the committed
-    /// text action: move-handle drags move, the resize corner resizes.
+    /// text action. Move handles move or stretch the box and the corner
+    /// resizes it; the text follows live, inside the composed canvas.
     fn update_active_text_drag(&self, st: &mut EditorState, t: &ViewTransform, view: Point) {
         let Some(drag_start) = st.active_text_drag_start else {
             return;
@@ -2412,35 +2389,69 @@ impl EditorHost {
         let point = t.view_to_image(view);
         let dx = point.x - drag_start.x;
         let dy = point.y - drag_start.y;
-        let min_w = st.committed_text_min_width().max(50.0);
+        let resizing = st.active_text_is_resizing;
+        let min_w = if resizing {
+            50.0
+        } else {
+            st.committed_text_min_width().max(50.0)
+        };
+        let min_h = 44.0;
+        let (min_x, _, max_x, max_y) = st.annotation_canvas_bounds();
+        let (min_x, max_x, max_y) = (
+            min_x.round() as i32,
+            max_x.round() as i32,
+            max_y.round() as i32,
+        );
         let drag_handle = st.active_text_drag_handle.clone();
         let Some(bounds) = st.active_text_bounds.as_mut() else {
             return;
         };
-        if st.active_text_is_resizing {
-            bounds.rect.width = (start_bounds.width as f64 + dx).max(min_w) as i32;
-            bounds.sync_handles();
-        } else if let Some(handle) = drag_handle {
-            match handle {
-                MoveHandle::Left => {
+        if resizing {
+            bounds.rect.x = start_bounds.x;
+            bounds.rect.y = start_bounds.y;
+            bounds.rect.width = (f64::from(start_bounds.width) + dx)
+                .clamp(min_w, f64::from(max_x - start_bounds.x).max(min_w))
+                .round() as i32;
+            bounds.rect.height = (f64::from(start_bounds.height) + dy)
+                .clamp(min_h, f64::from(max_y - start_bounds.y).max(min_h))
+                .round() as i32;
+        } else {
+            match drag_handle {
+                Some(MoveHandle::Left) => {
                     let right = start_bounds.x + start_bounds.width;
-                    bounds.rect.x = (start_bounds.x as f64 + dx).min(right as f64 - 50.0) as i32;
-                    bounds.rect.width = (right - bounds.rect.x).max(50);
+                    let x = (start_bounds.x + dx.round() as i32)
+                        .clamp(min_x, (right - min_w as i32).max(min_x));
+                    bounds.rect.x = x;
+                    bounds.rect.y = start_bounds.y;
+                    bounds.rect.width = (right - x).max(min_w as i32);
                 }
-                MoveHandle::Right => {
-                    bounds.rect.width = (start_bounds.width as f64 + dx).max(50.0) as i32;
+                Some(MoveHandle::Right) => {
+                    bounds.rect.x = start_bounds.x;
+                    bounds.rect.y = start_bounds.y;
+                    bounds.rect.width = (f64::from(start_bounds.width) + dx)
+                        .clamp(min_w, f64::from(max_x - start_bounds.x).max(min_w))
+                        .round() as i32;
+                }
+                None => {
+                    bounds.rect.x = (f64::from(start_bounds.x) + dx).round() as i32;
+                    bounds.rect.y = (f64::from(start_bounds.y) + dy).round() as i32;
                 }
             }
-            bounds.sync_handles();
-        } else {
-            bounds.rect.x = (start_bounds.x as f64 + dx) as i32;
-            bounds.rect.y = (start_bounds.y as f64 + dy) as i32;
-            bounds.sync_handles();
         }
+        let mut clamped = bounds.clone();
+        clamp_text_bounds_to_canvas(st, &mut clamped);
+        st.active_text_bounds = Some(clamped);
         if st.active_text_input.is_some() {
-            st.fit_active_text_height_only();
+            if resizing {
+                st.fit_active_text_to_layout_preserving_box();
+            } else {
+                st.fit_active_text_height_only();
+            }
         } else {
-            st.fit_committed_text_height_only();
+            if !resizing {
+                st.fit_committed_text_height_only();
+            }
+            apply_text_bounds_to_selected_action(st, resizing);
         }
     }
 
@@ -2898,27 +2909,12 @@ pub(crate) fn finish_text_drag(st: &mut EditorState) -> bool {
         }
         return true;
     }
-    if let (Some(bounds), Some(index)) = (st.active_text_bounds.take(), st.selected_action_index) {
-        let mut changed = false;
-        if let Some(AnnotationAction::Text {
-            position,
-            font,
-            max_width,
-            ..
-        }) = st.actions.get_mut(index)
-        {
-            let padding_y = 8.0;
-            let next_x = bounds.rect.x as f64;
-            let next_y = bounds.rect.y as f64 + font.size + padding_y;
-            let next_width = Some(bounds.rect.width as f64);
-            changed = position.x != next_x || position.y != next_y || *max_width != next_width;
-            position.x = next_x;
-            position.y = next_y;
-            *max_width = next_width;
-        }
-        if changed {
-            st.clear_redo_history();
-        }
+    let committed = st.active_text_bounds.is_some() && st.selected_action_index.is_some();
+    if committed && apply_text_bounds_to_selected_action(st, was_resizing) {
+        st.clear_redo_history();
+    }
+    st.active_text_bounds = None;
+    if committed {
         st.finish_history_interaction();
     }
     false
@@ -2995,6 +2991,118 @@ fn ensure_arrow_controls(st: &mut EditorState) {
     st.arrow_editing_controls = true;
 }
 
+/// Keep a text box inside the composed canvas, background padding included.
+fn clamp_text_bounds_to_canvas(
+    st: &EditorState,
+    bounds: &mut crate::capture::editor::types::TextEditBounds,
+) {
+    let (min_x, min_y, max_x, max_y) = st.annotation_canvas_bounds();
+    let (min_x, min_y) = (min_x.round() as i32, min_y.round() as i32);
+    let (max_x, max_y) = (max_x.round() as i32, max_y.round() as i32);
+    bounds.rect.x = bounds
+        .rect
+        .x
+        .clamp(min_x, (max_x - bounds.rect.width).max(min_x));
+    bounds.rect.y = bounds
+        .rect
+        .y
+        .clamp(min_y, (max_y - bounds.rect.height).max(min_y));
+    bounds.sync_handles();
+}
+
+/// Wrap width for a text action saved without one: up to the canvas edge.
+fn default_text_wrap_width(st: &EditorState, position: Point, font: &FontSettings) -> f64 {
+    let (_, _, max_x, _) = st.annotation_canvas_bounds();
+    (max_x - position.x).max(font.size * 1.8)
+}
+
+/// Largest offered text size whose wrapped text fits inside `rect`.
+fn fitted_text_size(
+    text: &str,
+    font: &FontSettings,
+    rect: crate::capture::editor::types::Rect,
+) -> f64 {
+    let Some((_surface, context)) = text_context() else {
+        return font.size;
+    };
+    let sizes = crate::capture::editor::color::OFFERED_TEXT_SIZES;
+    let mut best = sizes[0];
+    for size in sizes {
+        let mut candidate = font.clone();
+        candidate.size = size;
+        let measured = text_action_bounds(
+            &context,
+            Point { x: 0.0, y: size },
+            text,
+            &candidate,
+            Some(f64::from(rect.width)),
+        );
+        if measured.rect.width <= rect.width && measured.rect.height <= rect.height {
+            best = size;
+        }
+    }
+    best
+}
+
+/// Write the dragged box back to the selected committed text so it reflows
+/// while the pointer moves; the resize corner also refits its font size.
+/// Returns whether the action changed.
+fn apply_text_bounds_to_selected_action(st: &mut EditorState, fit_font: bool) -> bool {
+    let (Some(rect), Some(index)) = (
+        st.active_text_bounds.as_ref().map(|bounds| bounds.rect),
+        st.selected_action_index,
+    ) else {
+        return false;
+    };
+    let Some(AnnotationAction::Text {
+        position,
+        text,
+        font,
+        max_width,
+        ..
+    }) = st.actions.get_mut(index)
+    else {
+        return false;
+    };
+    let next_size = if fit_font {
+        fitted_text_size(text, font, rect)
+    } else {
+        font.size
+    };
+    let padding_y = 8.0;
+    let next_x = f64::from(rect.x);
+    let next_y = f64::from(rect.y) + next_size + padding_y;
+    let next_width = Some(f64::from(rect.width));
+    let changed = position.x != next_x
+        || position.y != next_y
+        || *max_width != next_width
+        || font.size != next_size;
+    font.size = next_size;
+    position.x = next_x;
+    position.y = next_y;
+    *max_width = next_width;
+    if fit_font {
+        st.text_size = next_size;
+    }
+    changed
+}
+
+/// Set the text size and refit the live text box at once, scaling its width
+/// with the font so it grows and shrinks with the text instead of waiting
+/// for the next keystroke.
+pub(crate) fn set_text_size_and_fit(st: &mut EditorState, size: f64) {
+    let previous = st.text_size;
+    if !st.set_text_size(size) || st.active_text_input.is_none() || previous <= 0.0 {
+        return;
+    }
+    let ratio = st.text_size / previous;
+    if let Some(bounds) = st.active_text_bounds.as_mut() {
+        bounds.rect.width = (f64::from(bounds.rect.width) * ratio).round().max(50.0) as i32;
+        bounds.sync_handles();
+    }
+    st.fit_active_text_to_layout_preserving_font_size();
+}
+
 /// TextEditBounds of a committed text action for handle hit-testing.
 fn committed_text_bounds(
     st: &EditorState,
@@ -3011,8 +3119,7 @@ fn committed_text_bounds(
         return None;
     };
     let (_, context) = text_context()?;
-    let width = max_width
-        .unwrap_or_else(|| (st.base_image.width() as f64 - position.x).max(font.size * 1.8));
+    let width = max_width.unwrap_or_else(|| default_text_wrap_width(st, *position, font));
     Some(text_action_bounds(
         &context,
         *position,
@@ -4202,6 +4309,148 @@ mod tests {
         h.with_state(|st| st.add_text_input_char('x'));
         h.set_tool(Tool::Pen);
         assert_eq!(h.read(|st| st.actions.len()), Some(2));
+    }
+
+    fn text_host(width: u32, height: u32) -> Rc<EditorHost> {
+        let h = host();
+        h.load_document_headless(test_image(width, height));
+        h.set_tool(Tool::Text);
+        h
+    }
+
+    fn start_text_drag(
+        st: &mut EditorState,
+        handle: Option<MoveHandle>,
+        resizing: bool,
+        at: Point,
+    ) {
+        st.active_text_is_dragging = true;
+        st.active_text_drag_handle = handle;
+        st.active_text_is_resizing = resizing;
+        st.active_text_drag_start = Some(at);
+        st.active_text_drag_start_bounds = st.active_text_bounds.as_ref().map(|b| b.rect);
+    }
+
+    #[test]
+    fn resize_corner_scales_the_live_text_while_dragging() {
+        let h = text_host(800, 600);
+        let t = ViewTransform::for_image(800.0, 600.0);
+        h.with_state(|st| {
+            st.begin_text_input(Point { x: 20.0, y: 60.0 }, 220.0, 44.0);
+            st.insert_text_input_str("Hi");
+            st.fit_active_text_to_layout();
+            let before = st.text_size;
+            let rect = st.active_text_bounds.as_ref().unwrap().rect;
+            let corner = Point {
+                x: f64::from(rect.x + rect.width),
+                y: f64::from(rect.y + rect.height),
+            };
+            start_text_drag(st, None, true, corner);
+            h.update_active_text_drag(
+                st,
+                &t,
+                Point {
+                    x: corner.x + 300.0,
+                    y: corner.y + 200.0,
+                },
+            );
+            assert!(st.active_text_is_dragging, "still mid-drag");
+            assert!(st.text_size > before, "{} -> {}", before, st.text_size);
+        });
+    }
+
+    #[test]
+    fn dragging_committed_text_handles_reflows_it_live() {
+        let h = text_host(800, 600);
+        let t = ViewTransform::for_image(800.0, 600.0);
+        h.with_state(|st| {
+            st.begin_text_input(Point { x: 20.0, y: 60.0 }, 400.0, 44.0);
+            st.insert_text_input_str("one two three four");
+            st.fit_active_text_to_layout();
+            assert!(st.commit_active_text_input());
+            let index = st.actions.len() - 1;
+            st.selected_action_index = Some(index);
+            st.active_text_bounds = committed_text_bounds(st, index);
+            let rect = st.active_text_bounds.as_ref().unwrap().rect;
+            let right = Point {
+                x: f64::from(rect.x + rect.width),
+                y: f64::from(rect.y),
+            };
+            start_text_drag(st, Some(MoveHandle::Right), false, right);
+            h.update_active_text_drag(
+                st,
+                &t,
+                Point {
+                    x: right.x + 120.0,
+                    y: right.y,
+                },
+            );
+            let Some(AnnotationAction::Text { max_width, .. }) = st.actions.get(index) else {
+                panic!("text action");
+            };
+            assert_eq!(*max_width, Some(f64::from(rect.width + 120)));
+
+            let size = |st: &EditorState| match st.actions.get(index) {
+                Some(AnnotationAction::Text { font, .. }) => font.size,
+                _ => 0.0,
+            };
+            let before = size(st);
+            st.active_text_drag_start_bounds = st.active_text_bounds.as_ref().map(|b| b.rect);
+            let rect = st.active_text_bounds.as_ref().unwrap().rect;
+            let corner = Point {
+                x: f64::from(rect.x + rect.width),
+                y: f64::from(rect.y + rect.height),
+            };
+            st.active_text_drag_start = Some(corner);
+            st.active_text_drag_handle = None;
+            st.active_text_is_resizing = true;
+            h.update_active_text_drag(
+                st,
+                &t,
+                Point {
+                    x: corner.x + 200.0,
+                    y: corner.y + 200.0,
+                },
+            );
+            assert!(size(st) > before, "{} -> {}", before, size(st));
+        });
+    }
+
+    #[test]
+    fn text_size_changes_resize_the_live_box_both_ways() {
+        let h = text_host(800, 600);
+        h.with_state(|st| {
+            st.set_text_size(24.0);
+            st.begin_text_input(Point { x: 20.0, y: 60.0 }, 220.0, 44.0);
+            st.insert_text_input_str("Hello\nthere");
+            st.fit_active_text_to_layout();
+            let width = |st: &EditorState| st.active_text_bounds.as_ref().unwrap().rect.width;
+            let height = |st: &EditorState| st.active_text_bounds.as_ref().unwrap().rect.height;
+            let (w24, h24) = (width(st), height(st));
+            set_text_size_and_fit(st, 48.0);
+            assert!(width(st) > w24 && height(st) > h24, "grows at once");
+            set_text_size_and_fit(st, 16.0);
+            assert!(width(st) < w24 && height(st) < h24, "shrinks at once");
+        });
+    }
+
+    #[test]
+    fn a_text_box_can_grow_into_the_background_padding() {
+        let h = text_host(200, 100);
+        h.with_state(|st| {
+            st.background.fill = crate::capture::editor::state::background::Fill::Image(Arc::new(
+                RgbaImage::from_pixel(1, 1, image::Rgba([0, 0, 255, 255])),
+            ));
+            st.background.set_padding(60.0);
+            st.begin_text_input(Point { x: 150.0, y: 40.0 }, 220.0, 44.0);
+            st.insert_text_input_str("a much longer line of text");
+            st.fit_active_text_to_layout();
+            let rect = st.active_text_bounds.as_ref().unwrap().rect;
+            assert!(
+                rect.x + rect.width > 200,
+                "box stops at the screenshot: {rect:?}"
+            );
+        });
     }
 
     #[test]
