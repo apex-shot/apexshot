@@ -1,3 +1,4 @@
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::config::{load_config, AppConfig};
@@ -34,6 +35,39 @@ impl std::fmt::Display for UploadError {
 
 impl std::error::Error for UploadError {}
 
+/// Called with the bytes sent so far and the total body size.
+pub type UploadProgress<'a> = &'a dyn Fn(u64, u64);
+
+/// A request body that reports how much of it has been read into the socket.
+pub(crate) struct ProgressReader<'a> {
+    bytes: &'a [u8],
+    sent: usize,
+    progress: UploadProgress<'a>,
+}
+
+impl<'a> ProgressReader<'a> {
+    pub(crate) fn new(bytes: &'a [u8], progress: UploadProgress<'a>) -> Self {
+        Self {
+            bytes,
+            sent: 0,
+            progress,
+        }
+    }
+}
+
+impl Read for ProgressReader<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let remaining = &self.bytes[self.sent..];
+        let count = remaining.len().min(buf.len()).min(64 * 1024);
+        buf[..count].copy_from_slice(&remaining[..count]);
+        self.sent += count;
+        if count > 0 {
+            (self.progress)(self.sent as u64, self.bytes.len() as u64);
+        }
+        Ok(count)
+    }
+}
+
 pub fn is_configured(config: &AppConfig) -> bool {
     Destination::from_config(config).is_configured(config)
 }
@@ -44,7 +78,16 @@ pub fn should_auto_upload_after_capture(config: &AppConfig) -> bool {
 }
 
 pub fn upload_file(config: &AppConfig, path: &Path) -> Result<UploadResult, UploadError> {
-    Destination::from_config(config).upload(config, path)
+    upload_file_with_progress(config, path, &|_, _| {})
+}
+
+/// Upload and report the request body's progress as it is sent.
+pub fn upload_file_with_progress(
+    config: &AppConfig,
+    path: &Path,
+    progress: UploadProgress<'_>,
+) -> Result<UploadResult, UploadError> {
+    Destination::from_config(config).upload(config, path, progress)
 }
 
 pub fn not_configured_notification(config: &AppConfig) -> (String, String) {
@@ -240,5 +283,20 @@ mod tests {
         cfg.cloud_api_token = "tok".to_string();
         cfg.cloud_auto_upload_after_capture = false;
         assert!(!should_defer_text_clipboard_to_share_url(&cfg));
+    }
+
+    #[test]
+    fn progress_reader_reports_every_byte_once() {
+        use std::cell::RefCell;
+        let bytes = vec![7u8; 150_000];
+        let seen = RefCell::new(Vec::new());
+        let report = |sent: u64, total: u64| seen.borrow_mut().push((sent, total));
+        let mut reader = ProgressReader::new(&bytes, &report);
+        let mut copied = Vec::new();
+        reader.read_to_end(&mut copied).unwrap();
+        assert_eq!(copied, bytes);
+        let seen = seen.into_inner();
+        assert_eq!(seen.last(), Some(&(150_000, 150_000)));
+        assert!(seen.windows(2).all(|pair| pair[0].0 < pair[1].0));
     }
 }

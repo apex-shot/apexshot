@@ -33,6 +33,7 @@
 #include <QDir>
 #include <QDrag>
 #include <QElapsedTimer>
+#include <QEasingCurve>
 #include <QFileInfo>
 #include <QFileDialog>
 #include <QEventLoop>
@@ -54,6 +55,7 @@
 #include <QPainterPath>
 #include <QPointer>
 #include <QProcess>
+#include <QPropertyAnimation>
 #include <QPushButton>
 #include <QRegion>
 #include <QScreen>
@@ -1425,6 +1427,10 @@ constexpr int kCardShadowPad = 10;
 constexpr int kCardButtonSize = 30;
 /// How long the Settings preview card stays up.
 constexpr int kCardSampleMs = 2500;
+/// Gap kept between the top card of a stack and the top of the screen.
+constexpr int kCardStackTopMargin = 24;
+constexpr int kCardMotionMs = 180;
+constexpr ushort kGlyphCardCheck = 0xE06C;  // check
 constexpr ushort kGlyphCardClose = 0xE1B2;  // x
 constexpr ushort kGlyphCardPin = 0xE259;    // pin
 constexpr ushort kGlyphCardUpload = 0xE19E; // upload
@@ -1517,6 +1523,8 @@ private:
 
 class ResultCard : public QWidget
 {
+    enum class UploadState { Idle, Uploading, Done, Failed };
+
 public:
     ResultCard(const QImage& image, const QString& path, bool video, bool sample = false)
         : m_image(image), m_path(path), m_video(video), m_sample(sample)
@@ -1538,7 +1546,13 @@ public:
         m_autoCloseSeconds = settings.quickAccess.autoCloseSeconds;
         m_hideOnDismiss = settings.quickAccess.autoCloseAction == QLatin1String("Hide");
         m_closeAfterDragging = settings.quickAccess.closeAfterDragging;
-        m_leftSide = settings.quickAccess.position == QLatin1String("Left");
+        m_screen = QGuiApplication::screenAt(QCursor::pos());
+        if (!m_screen)
+            m_screen = QGuiApplication::primaryScreen();
+        m_motion.setTargetObject(this);
+        m_motion.setPropertyName("pos");
+        m_motion.setDuration(kCardMotionMs);
+        m_motion.setEasingCurve(QEasingCurve::OutCubic);
 
         const qreal overlay = settings.quickAccess.overlayScale;
         const int previewWidth = std::max(1, qRound(kCardPreviewWidth * overlay * m_scale));
@@ -1579,6 +1593,12 @@ public:
         edit->setEnabled(m_sample || !m_path.isEmpty());
         connect(edit, &QAbstractButton::clicked, this, [this] { openEditor(); });
 
+        m_cancelUpload = new CardButton(CardButton::Kind::Close, kGlyphCardClose,
+                                        QStringLiteral("Cancel upload"), m_scale, this);
+        m_cancelUpload->setGeometry(right, bottom, button, button);
+        m_cancelUpload->hide();
+        connect(m_cancelUpload, &QAbstractButton::clicked, this, [this] { cancelUpload(); });
+
         auto* copy = new CardButton(CardButton::Kind::Pill, 0, QStringLiteral("Copy"), m_scale,
                                     this);
         auto* save = new CardButton(CardButton::Kind::Pill, 0, QStringLiteral("Save"), m_scale,
@@ -1605,6 +1625,7 @@ public:
         save->setEnabled(hasContent);
         connect(copy, &QAbstractButton::clicked, this, [this] { copyToClipboard(); });
         connect(save, &QAbstractButton::clicked, this, [this] { saveAs(); });
+        m_controls = {close, m_pin, m_upload, edit, copy, save};
 
         m_pin->setActive(m_pinned);
         m_pin->setToolTip(m_pinned ? QStringLiteral("Unpin") : QStringLiteral("Pin"));
@@ -1615,16 +1636,66 @@ public:
             QTimer::singleShot(kCardSampleMs, this, &QWidget::close);
     }
 
-    /// Show the card in its corner, or bring a hidden one back.
-    void reveal()
+    ~ResultCard() override
     {
-        place();
+        if (QProcess* process = m_uploadProcess) {
+            process->disconnect(this);
+            process->kill();
+        }
+    }
+
+    /// Show the card at the place the shell gave it, sliding in from the
+    /// screen edge on `slideFromLeft`/right when `slideIn` is set.
+    void reveal(bool slideIn = false, bool slideFromLeft = true)
+    {
+        m_shelved = false;
+        if (slideIn) {
+            m_motion.stop();
+            move(m_target + QPoint(slideFromLeft ? -width() : width(), 0));
+        }
         show();
         raise();
         Platform::setTopmost(static_cast<quintptr>(winId()), m_pinned || m_sample);
+        if (slideIn) {
+            m_motion.setStartValue(pos());
+            m_motion.setEndValue(m_target);
+            m_motion.start();
+        }
         m_autoCloseClock.restart();
         m_tick.start();
     }
+
+    /// Where the card sits in its stack; a visible card glides there.
+    void moveTo(const QPoint& target, bool animate)
+    {
+        m_target = target;
+        if (!isVisible() || !animate) {
+            m_motion.stop();
+            move(target);
+            return;
+        }
+        if (pos() == target && m_motion.state() != QAbstractAnimation::Running)
+            return;
+        m_motion.stop();
+        m_motion.setStartValue(pos());
+        m_motion.setEndValue(target);
+        m_motion.start();
+    }
+
+    /// The stack ran out of room: leave the way auto-close would.
+    void dismissForSpace() { dismiss(); }
+
+    void setOnShelved(std::function<void()> callback) { m_onShelved = std::move(callback); }
+    void setSequence(quint64 sequence) { m_sequence = sequence; }
+    quint64 sequence() const { return m_sequence; }
+    QScreen* targetScreen() const
+    {
+        return m_screen ? m_screen.data() : QGuiApplication::primaryScreen();
+    }
+    bool isShelved() const { return m_shelved; }
+    bool isPinned() const { return m_pinned; }
+    bool isUploading() const { return m_uploadState == UploadState::Uploading; }
+    const QString& path() const { return m_path; }
 
 protected:
     void paintEvent(QPaintEvent*) override
@@ -1660,11 +1731,53 @@ protected:
         painter.restore();
         painter.setPen(QPen(QColor(255, 255, 255, 10), 1.0));
         painter.drawPath(frame);
+
+        if (m_uploadState == UploadState::Idle)
+            return;
+        painter.fillPath(frame, QColor(10, 10, 10, 175));
+        const QRectF area(m_frameRect);
+        QFont label = uiFont(qRound(15 * m_scale), true);
+        label.setWeight(QFont::DemiBold);
+        painter.setFont(label);
+        painter.setPen(QColor(Qt::white));
+        if (m_uploadState == UploadState::Uploading) {
+            painter.drawText(area.adjusted(0, 0, 0, -area.height() * 0.18), Qt::AlignCenter,
+                             QStringLiteral("Uploading\u2026"));
+            const QRectF cancel(m_cancelUpload->geometry());
+            const qreal barHeight = 6 * m_scale;
+            const QRectF track(area.left() + 14 * m_scale,
+                               cancel.center().y() - barHeight / 2,
+                               std::max<qreal>(0.0, cancel.left() - 10 * m_scale
+                                                        - (area.left() + 14 * m_scale)),
+                               barHeight);
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(QColor(255, 255, 255, 55));
+            painter.drawRoundedRect(track, barHeight / 2, barHeight / 2);
+            QRectF fill = track;
+            fill.setWidth(track.width() * std::clamp(m_uploadProgress, 0.0, 1.0));
+            if (fill.width() > 0.5) {
+                painter.setBrush(QColor(Qt::white));
+                painter.drawRoundedRect(fill, barHeight / 2, barHeight / 2);
+            }
+            return;
+        }
+        const bool done = m_uploadState == UploadState::Done;
+        const qreal glyphSize = 28 * m_scale;
+        const QRectF glyphRect(area.center().x() - glyphSize / 2,
+                               area.center().y() - glyphSize - 2 * m_scale,
+                               glyphSize, glyphSize);
+        drawCardGlyph(painter, done ? kGlyphCardCheck : kGlyphCardClose, glyphRect,
+                      QColor(Qt::white), qRound(26 * m_scale));
+        painter.drawText(QRectF(area.left(), area.center().y() + 4 * m_scale, area.width(),
+                                24 * m_scale),
+                         Qt::AlignHCenter | Qt::AlignTop,
+                         done ? QStringLiteral("Link copied") : QStringLiteral("Upload failed"));
     }
 
     void mousePressEvent(QMouseEvent* event) override
     {
-        if (event->button() == Qt::LeftButton && m_cardRect.contains(event->pos())) {
+        if (event->button() == Qt::LeftButton && m_uploadState == UploadState::Idle
+            && m_cardRect.contains(event->pos())) {
             m_pressPos = event->pos();
             m_pressed = true;
         }
@@ -1692,7 +1805,10 @@ protected:
     {
         switch (event->key()) {
         case Qt::Key_Escape:
-            close();
+            if (isUploading())
+                cancelUpload();
+            else if (m_uploadState == UploadState::Idle)
+                close();
             return;
         case Qt::Key_Return:
         case Qt::Key_Enter:
@@ -1704,21 +1820,6 @@ protected:
     }
 
 private:
-    void place()
-    {
-        QScreen* screen = QGuiApplication::screenAt(QCursor::pos());
-        if (!screen)
-            screen = QGuiApplication::primaryScreen();
-        if (!screen)
-            return;
-        const QRect work = screen->availableGeometry();
-        const int side = qRound(kCardEdgeMargin * m_scale);
-        const int bottom = qRound((kCardEdgeMargin + kCardBottomSafeOffset) * m_scale);
-        const int x = m_leftSide ? work.left() + side
-                                 : work.left() + work.width() - side - width();
-        move(x, work.top() + work.height() - bottom - height());
-    }
-
     void setPinned(bool pinned)
     {
         m_pinned = pinned;
@@ -1733,6 +1834,10 @@ private:
     {
         if (m_sample)
             return;
+        if (m_uploadState != UploadState::Idle) {
+            m_autoCloseClock.restart();
+            return;
+        }
         if (m_editOpened) {
             m_tick.stop();
             return;
@@ -1747,13 +1852,18 @@ private:
         }
     }
 
-    /// Auto-close, a finished drag, and a finished upload all follow the
-    /// Settings action: Hide keeps the card for the tray, Close removes it.
+    /// Auto-close, a finished drag, a finished upload, and a full stack all
+    /// follow the Settings action: Hide shelves the card for the tray, Close
+    /// removes it.
     void dismiss()
     {
         if (m_hideOnDismiss) {
             m_tick.stop();
+            m_motion.stop();
+            m_shelved = true;
             hide();
+            if (m_onShelved)
+                m_onShelved();
             return;
         }
         close();
@@ -1818,39 +1928,83 @@ private:
 
     void upload()
     {
-        if (m_uploading || m_path.isEmpty())
+        if (m_uploadState != UploadState::Idle || m_path.isEmpty())
             return;
-        m_uploading = true;
-        m_upload->setEnabled(false);
-        // The Rust helper owns the Cloud transport and reports the outcome in
-        // a notification; its exit code says whether the upload went through.
-        auto* process = new QProcess(qApp);
-        QPointer<ResultCard> card(this);
-        connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), qApp,
-                [process, card](int exitCode, QProcess::ExitStatus status) {
+        // Without a destination the helper explains how to connect one.
+        if (!Platform::loadShellSettings().cloud.configured) {
+            QProcess::startDetached(settingsExecutable(),
+                                    {QStringLiteral("--upload"), QDir::toNativeSeparators(m_path)});
+            return;
+        }
+        m_uploadProgress = 0.0;
+        setUploadState(UploadState::Uploading);
+        // The Rust helper owns the Cloud transport. With --progress it reports
+        // `progress <sent> <total>` lines and leaves the success to this card.
+        auto* process = new QProcess(this);
+        m_uploadProcess = process;
+        connect(process, &QProcess::readyReadStandardOutput, this, [this, process] {
+            while (process->canReadLine()) {
+                const QList<QByteArray> parts = process->readLine().trimmed().split(' ');
+                if (parts.size() == 3 && parts[0] == "progress") {
+                    const double total = parts[2].toDouble();
+                    if (total > 0)
+                        m_uploadProgress = parts[1].toDouble() / total;
+                    update();
+                }
+            }
+        });
+        connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+                [this, process](int exitCode, QProcess::ExitStatus status) {
                     process->deleteLater();
-                    if (card)
-                        card->uploadFinished(status == QProcess::NormalExit && exitCode == 0);
+                    if (m_uploadProcess != process)
+                        return;
+                    m_uploadProcess = nullptr;
+                    uploadFinished(status == QProcess::NormalExit && exitCode == 0);
                 });
-        connect(process, &QProcess::errorOccurred, qApp,
-                [process, card](QProcess::ProcessError error) {
-                    if (error != QProcess::FailedToStart)
+        connect(process, &QProcess::errorOccurred, this,
+                [this, process](QProcess::ProcessError error) {
+                    if (error != QProcess::FailedToStart || m_uploadProcess != process)
                         return;
                     process->deleteLater();
-                    if (card)
-                        card->uploadFinished(false);
+                    m_uploadProcess = nullptr;
+                    uploadFinished(false);
                 });
         process->start(settingsExecutable(),
-                       {QStringLiteral("--upload"), QDir::toNativeSeparators(m_path)});
+                       {QStringLiteral("--upload"), QDir::toNativeSeparators(m_path),
+                        QStringLiteral("--progress")});
+    }
+
+    void cancelUpload()
+    {
+        if (QProcess* process = m_uploadProcess) {
+            m_uploadProcess = nullptr;
+            process->disconnect(this);
+            process->kill();
+            process->deleteLater();
+        }
+        setUploadState(UploadState::Idle);
     }
 
     void uploadFinished(bool succeeded)
     {
-        m_uploading = false;
-        m_upload->setEnabled(true);
-        // Live Settings value, so the toggle applies without reopening the card.
-        if (succeeded && Platform::loadShellSettings().quickAccess.closeAfterUploading)
-            dismiss();
+        m_uploadProgress = 1.0;
+        setUploadState(succeeded ? UploadState::Done : UploadState::Failed);
+        QTimer::singleShot(succeeded ? 1600 : 2200, this, [this, succeeded] {
+            setUploadState(UploadState::Idle);
+            // Live Settings value, so the toggle applies without reopening the card.
+            if (succeeded && Platform::loadShellSettings().quickAccess.closeAfterUploading)
+                dismiss();
+        });
+    }
+
+    void setUploadState(UploadState state)
+    {
+        m_uploadState = state;
+        const bool idle = state == UploadState::Idle;
+        for (CardButton* control : m_controls)
+            control->setVisible(idle);
+        m_cancelUpload->setVisible(state == UploadState::Uploading);
+        update();
     }
 
     void openEditor()
@@ -1885,13 +2039,22 @@ private:
     bool m_pinned = false;
     bool m_hideOnDismiss = false;
     bool m_closeAfterDragging = true;
-    bool m_leftSide = true;
     bool m_editOpened = false;
     bool m_saveDialogOpen = false;
     bool m_dragging = false;
-    bool m_uploading = false;
     bool m_pressed = false;
     QPoint m_pressPos;
+    QPointer<QScreen> m_screen;
+    QPropertyAnimation m_motion;
+    QPoint m_target;
+    quint64 m_sequence = 0;
+    bool m_shelved = false;
+    std::function<void()> m_onShelved;
+    QList<CardButton*> m_controls;
+    CardButton* m_cancelUpload = nullptr;
+    UploadState m_uploadState = UploadState::Idle;
+    double m_uploadProgress = 0.0;
+    QPointer<QProcess> m_uploadProcess;
 };
 
 // --------------------------------------------------------------- shell ------
@@ -2110,22 +2273,148 @@ public:
         });
     }
 
-    /// One card at a time: a new capture replaces whatever card is up.
+    /// A new card joins the stack in its screen's corner. The oldest cards on
+    /// that screen leave first until it fits.
     void showResultCard(const QImage& image, const QString& path, bool video)
     {
-        if (m_card)
-            m_card->close();
-        m_card = new ResultCard(image, path, video);
-        m_card->reveal();
+        auto* card = new ResultCard(image, path, video);
+        card->setSequence(++m_cardSequence);
+        card->setOnShelved([this] { scheduleCardLayout(); });
+        connect(card, &QObject::destroyed, this, [this] { scheduleCardLayout(); });
+        makeRoom(card->targetScreen(), card->height(), card);
+        m_cards.append(card);
+        layoutCards(true);
+        card->reveal(true, cardsOnLeft());
     }
 
-    /// A card the auto-close Hide action put away, waiting in the tray.
-    bool hasHiddenCard() const { return m_card && m_card->isHidden(); }
-
-    void revealHiddenCard()
+    /// Cards the auto-close Hide action put away, waiting in the tray.
+    bool hasHiddenCard() const
     {
-        if (hasHiddenCard())
-            m_card->reveal();
+        for (const QPointer<ResultCard>& card : m_cards) {
+            if (card && card->isShelved())
+                return true;
+        }
+        return false;
+    }
+
+    /// Bring the shelved cards back into their stacks, oldest first.
+    void revealHiddenCards()
+    {
+        QVector<ResultCard*> shelved;
+        for (const QPointer<ResultCard>& card : m_cards) {
+            if (card && card->isShelved())
+                shelved.append(card);
+        }
+        for (ResultCard* card : shelved) {
+            makeRoom(card->targetScreen(), card->height(), card);
+            card->reveal(true, cardsOnLeft());
+        }
+        layoutCards(true);
+    }
+
+    bool cardsOnLeft() const
+    {
+        return Platform::loadShellSettings().quickAccess.position == QLatin1String("Left");
+    }
+
+    /// The bottom-most card slot's window position on `screen`.
+    QPoint cardSlot(QScreen* screen, const QSize& size, int bottomOffset) const
+    {
+        const QRect work = screen->availableGeometry();
+        const qreal scale = uiScale();
+        const int side = qRound(kCardEdgeMargin * scale);
+        const int bottom =
+            qRound((kCardEdgeMargin + kCardBottomSafeOffset) * scale) + bottomOffset;
+        const int x = cardsOnLeft() ? work.left() + side
+                                    : work.left() + work.width() - side - size.width();
+        return QPoint(x, work.top() + work.height() - bottom - size.height());
+    }
+
+    /// Visible cards on `screen`, oldest first.
+    QVector<ResultCard*> stackOn(QScreen* screen, const ResultCard* except = nullptr) const
+    {
+        QVector<ResultCard*> stack;
+        for (const QPointer<ResultCard>& card : m_cards) {
+            if (card && card != except && !card->isShelved() && card->isVisible()
+                && card->targetScreen() == screen)
+                stack.append(card);
+        }
+        std::sort(stack.begin(), stack.end(), [](ResultCard* a, ResultCard* b) {
+            return a->sequence() < b->sequence();
+        });
+        return stack;
+    }
+
+    /// Dismiss the oldest cards on `screen` until `incomingHeight` more fits
+    /// between the bottom slot and the top margin. Unpinned cards go first;
+    /// a card that is uploading stays.
+    void makeRoom(QScreen* screen, int incomingHeight, const ResultCard* incoming)
+    {
+        if (!screen)
+            return;
+        const qreal scale = uiScale();
+        const int available = screen->availableGeometry().height()
+            - qRound((kCardEdgeMargin + kCardBottomSafeOffset) * scale)
+            - qRound(kCardStackTopMargin * scale);
+        QVector<ResultCard*> stack = stackOn(screen, incoming);
+        int used = 0;
+        for (ResultCard* card : stack)
+            used += card->height();
+        while (used + incomingHeight > available && !stack.isEmpty()) {
+            ResultCard* leaving = nullptr;
+            for (ResultCard* card : stack) {
+                if (!card->isPinned() && !card->isUploading()) {
+                    leaving = card;
+                    break;
+                }
+            }
+            if (!leaving) {
+                for (ResultCard* card : stack) {
+                    if (!card->isUploading()) {
+                        leaving = card;
+                        break;
+                    }
+                }
+            }
+            if (!leaving)
+                break;
+            stack.removeOne(leaving);
+            used -= leaving->height();
+            leaving->dismissForSpace();
+        }
+    }
+
+    /// Newest card in the bottom slot, each older one stacked above it.
+    void layoutCards(bool animate)
+    {
+        m_cards.erase(std::remove_if(m_cards.begin(), m_cards.end(),
+                                     [](const QPointer<ResultCard>& card) { return !card; }),
+                      m_cards.end());
+        QVector<QScreen*> screens;
+        for (const QPointer<ResultCard>& card : m_cards) {
+            if (!card->isShelved() && !screens.contains(card->targetScreen()))
+                screens.append(card->targetScreen());
+        }
+        for (QScreen* screen : screens) {
+            QVector<ResultCard*> stack;
+            for (const QPointer<ResultCard>& card : m_cards) {
+                if (!card->isShelved() && card->targetScreen() == screen)
+                    stack.append(card);
+            }
+            std::sort(stack.begin(), stack.end(), [](ResultCard* a, ResultCard* b) {
+                return a->sequence() > b->sequence();
+            });
+            int offset = 0;
+            for (ResultCard* card : stack) {
+                card->moveTo(cardSlot(screen, card->size(), offset), animate);
+                offset += card->height();
+            }
+        }
+    }
+
+    void scheduleCardLayout()
+    {
+        QTimer::singleShot(0, this, [this] { layoutCards(true); });
     }
 
     /// Settings asks for this while Position or Overlay size changes, so the
@@ -2136,18 +2425,27 @@ public:
             m_sampleCard->close();
         const QImage image = m_lastScreenshot.isNull() ? sampleCaptureImage() : m_lastScreenshot;
         m_sampleCard = new ResultCard(image, QString(), false, true);
+        m_sampleCard->moveTo(cardSlot(m_sampleCard->targetScreen(), m_sampleCard->size(), 0),
+                             false);
         m_sampleCard->reveal();
     }
 
     void shortcutShowLastPreview()
     {
         if (hasHiddenCard()) {
-            revealHiddenCard();
+            revealHiddenCards();
             return;
         }
         if (m_lastScreenshot.isNull()) {
             notify(QStringLiteral("No screenshot is available to preview."));
             return;
+        }
+        for (const QPointer<ResultCard>& card : m_cards) {
+            if (card && card->isVisible() && !m_lastScreenshotPath.isEmpty()
+                && card->path() == m_lastScreenshotPath) {
+                card->raise();
+                return;
+            }
         }
         showResultCard(m_lastScreenshot, m_lastScreenshotPath, false);
     }
@@ -3727,7 +4025,8 @@ private:
     bool m_saveDialogOpen = false;
     QImage m_lastScreenshot;
     QString m_lastScreenshotPath;
-    QPointer<ResultCard> m_card;
+    QVector<QPointer<ResultCard>> m_cards;
+    quint64 m_cardSequence = 0;
     QPointer<ResultCard> m_sampleCard;
     Platform::RecordingSession* m_activeSession = nullptr;
     /// Throws the running take away and starts the same recording again; set
@@ -3924,8 +4223,8 @@ int run(QApplication& app)
         decoratePopupMenu(submenu, menuStyle, menuFont);
     };
 
-    // Present only while the auto-close Hide action is holding a card.
-    QAction* showHiddenCard = menu->addAction(QStringLiteral("Show hidden capture"));
+    // Present only while the auto-close Hide action is holding cards.
+    QAction* showHiddenCard = menu->addAction(QStringLiteral("Show hidden captures"));
     showHiddenCard->setVisible(false);
     QAction* capture = menu->addAction(QStringLiteral("Capture..."));
     QAction* crosshair = menu->addAction(QStringLiteral("Crosshair capture"));
@@ -4016,7 +4315,7 @@ int run(QApplication& app)
     });
 
     QObject::connect(showHiddenCard, &QAction::triggered, shell,
-                     [shell] { shell->revealHiddenCard(); });
+                     [shell] { shell->revealHiddenCards(); });
     QObject::connect(capture, &QAction::triggered, shell, [shell] { shell->openMenu(); });
     QObject::connect(crosshair, &QAction::triggered, shell,
                      [shell] { shell->shortcutCaptureCrosshair(); });
