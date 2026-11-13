@@ -162,7 +162,33 @@ enum MotionPaintPart {
     Complete,
     Background,
     Foreground,
+    /// Everything under the annotations, for the cached base layer.
+    Base,
 }
+
+/// Everything the cached base layer depends on. Annotations, the caret and
+/// the text box are drawn over it, so typing and text drags never rebuild it.
+#[derive(Clone, PartialEq)]
+struct BaseKey {
+    working_revision: u64,
+    image_size: (u32, u32),
+    background_revision: u64,
+    fill: usize,
+    padding: f64,
+    blur: f64,
+    radius: f64,
+    noise: f64,
+    frame_aspect: Option<crate::capture::editor::state::background::FrameRatio>,
+    frame_style: crate::capture::editor::types::FrameStyle,
+    shadow: crate::recording::editor::model::MotionSceneShadow,
+    layout: crate::capture::editor::state::background::Layout,
+    scale: f64,
+    canvas_scale: f64,
+    device_scale: f64,
+}
+
+/// A pen-drag frame: base key, action count, re-edited action, raster.
+type CachedDragFrame = (BaseKey, usize, Option<usize>, ImageSurface);
 
 pub struct EditorHost {
     pub editor: Shared,
@@ -180,6 +206,16 @@ pub struct EditorHost {
     annotation_cache: RefCell<Option<CachedAnnotations>>,
     shadow_cache: RefCell<Option<CachedShadow>>,
     background_cache: RefCell<Option<CachedBackground>>,
+    /// The base layer rastered at the on-screen size; see [`BaseKey`].
+    base_cache: RefCell<Option<(BaseKey, ImageSurface)>>,
+    #[cfg(test)]
+    pub(super) base_builds: Cell<usize>,
+    /// During a pen or highlighter drag: the base plus every committed
+    /// annotation at the on-screen size, keyed by the base key, the action
+    /// count and the action being re-edited.
+    drag_frame_cache: RefCell<Option<CachedDragFrame>>,
+    #[cfg(test)]
+    pub(super) drag_frame_builds: Cell<usize>,
     studio_unlock_cache: RefCell<Option<(std::time::Instant, bool)>>,
     studio_text_ratio: Cell<Option<f64>>,
     background_source: RefCell<Option<(Arc<RgbaImage>, ImageSurface)>>,
@@ -196,6 +232,12 @@ pub struct EditorHost {
     /// Current canvas pan offset, for space/middle-drag pan starts.
     view_pan: Rc<dyn Fn() -> (f64, f64)>,
     last_redraw: Rc<Cell<i64>>,
+    /// Input method for the live text box. `install` creates it because it
+    /// needs GTK, so headless hosts have none.
+    text_input_method: RefCell<Option<gtk4::IMMulticontext>>,
+    text_input_area: RefCell<Option<glib::WeakRef<DrawingArea>>>,
+    text_input_transform: RefCell<Option<Rc<dyn Fn() -> ViewTransform>>>,
+    text_input_focused: Cell<bool>,
 }
 
 impl EditorHost {
@@ -215,6 +257,12 @@ impl EditorHost {
             annotation_cache: RefCell::new(None),
             shadow_cache: RefCell::new(None),
             background_cache: RefCell::new(None),
+            base_cache: RefCell::new(None),
+            #[cfg(test)]
+            base_builds: Cell::new(0),
+            drag_frame_cache: RefCell::new(None),
+            #[cfg(test)]
+            drag_frame_builds: Cell::new(0),
             studio_unlock_cache: RefCell::new(None),
             studio_text_ratio: Cell::new(None),
             background_source: RefCell::new(None),
@@ -229,6 +277,10 @@ impl EditorHost {
             drag_transform: Rc::new(RefCell::new(None)),
             view_pan,
             last_redraw: Rc::new(Cell::new(0)),
+            text_input_method: RefCell::new(None),
+            text_input_area: RefCell::new(None),
+            text_input_transform: RefCell::new(None),
+            text_input_focused: Cell::new(false),
         })
     }
 
@@ -253,6 +305,8 @@ impl EditorHost {
         *self.annotation_cache.borrow_mut() = None;
         *self.shadow_cache.borrow_mut() = None;
         *self.background_cache.borrow_mut() = None;
+        *self.base_cache.borrow_mut() = None;
+        *self.drag_frame_cache.borrow_mut() = None;
         *self.background_source.borrow_mut() = None;
         self.cancel_background_load();
         self.session_generation
@@ -270,7 +324,168 @@ impl EditorHost {
 
     /// Redraw after a mutation and refresh bar/pill sensitivity.
     pub fn changed(&self) {
+        self.sync_text_input_method();
         (self.on_change)();
+    }
+
+    /// Keep the input method focused only while a text box is live, and park
+    /// its composition window just under that box.
+    fn sync_text_input_method(&self) {
+        let Some(im) = self.text_input_method.borrow().clone() else {
+            return;
+        };
+        let Ok(borrow) = self.editor.try_borrow() else {
+            return;
+        };
+        let active = borrow.as_ref().and_then(|st| {
+            st.active_text_input.as_ref()?;
+            Some(st.active_text_bounds.as_ref().map(|bounds| bounds.rect))
+        });
+        drop(borrow);
+        let Some(rect) = active else {
+            if self.text_input_focused.replace(false) {
+                im.focus_out();
+            }
+            return;
+        };
+        if !self.text_input_focused.replace(true) {
+            im.focus_in();
+        }
+        let transform_of = self.text_input_transform.borrow().clone();
+        if let (Some(rect), Some(transform_of)) = (rect, transform_of) {
+            let t = transform_of();
+            let top_left = t.image_to_view(Point {
+                x: f64::from(rect.x),
+                y: f64::from(rect.y),
+            });
+            let bottom_right = t.image_to_view(Point {
+                x: f64::from(rect.x + rect.width),
+                y: f64::from(rect.y + rect.height),
+            });
+            im.set_cursor_location(&gdk::Rectangle::new(
+                top_left.x.round() as i32,
+                bottom_right.y.round() as i32,
+                (bottom_right.x - top_left.x).round().max(1.0) as i32,
+                1,
+            ));
+        }
+    }
+
+    /// Offer a key event to the input method while a text box is live.
+    /// Returns true when the input method keeps the key; every key typed
+    /// during a composition belongs to it.
+    pub fn filter_text_input_key(&self, event: &gdk::Event) -> bool {
+        let Some(im) = self.text_input_method.borrow().clone() else {
+            return false;
+        };
+        if !self
+            .read(|st| st.active_text_input.is_some())
+            .unwrap_or(false)
+        {
+            return false;
+        }
+        let composing = !im.preedit_string().0.is_empty();
+        im.filter_keypress(event) || composing
+    }
+
+    /// Insert committed input-method text at the caret of the live text box.
+    fn insert_text(&self, text: &str) {
+        let inserted = self
+            .editor
+            .try_borrow_mut()
+            .ok()
+            .and_then(|mut borrow| borrow.as_mut().map(|st| insert_into_active_text(st, text)))
+            .unwrap_or(false);
+        if inserted {
+            self.changed();
+        }
+    }
+
+    /// Read clipboard text into the live text box. The read is async, so the
+    /// text lands only if a box is still live in the same document.
+    fn paste_text_from_clipboard(&self) {
+        let Some(area) = self
+            .text_input_area
+            .borrow()
+            .as_ref()
+            .and_then(|area| area.upgrade())
+        else {
+            return;
+        };
+        let editor = self.editor.clone();
+        let on_change = self.on_change.clone();
+        let generation = self.session_generation.clone();
+        let started = generation.get();
+        area.clipboard()
+            .read_text_async(gtk4::gio::Cancellable::NONE, move |result| {
+                let Ok(Some(text)) = result else {
+                    return;
+                };
+                if generation.get() != started {
+                    return;
+                }
+                let inserted = editor
+                    .try_borrow_mut()
+                    .ok()
+                    .and_then(|mut borrow| {
+                        borrow.as_mut().map(|st| insert_into_active_text(st, &text))
+                    })
+                    .unwrap_or(false);
+                if inserted {
+                    on_change();
+                }
+            });
+    }
+
+    /// Route input-method commits into the live text box. The canvas draws
+    /// no inline preedit, so the input method shows its own composition
+    /// window at the cursor location `sync_text_input_method` sets.
+    fn install_text_input_method(
+        self: &Rc<Self>,
+        area: &DrawingArea,
+        transform_of: Rc<dyn Fn() -> ViewTransform>,
+    ) {
+        let im = gtk4::IMMulticontext::new();
+        im.set_use_preedit(false);
+        // The input method needs the canvas window, which exists only while
+        // the canvas is realized.
+        area.connect_realize({
+            let host = Rc::downgrade(self);
+            let im = im.downgrade();
+            move |area| {
+                let (Some(host), Some(im)) = (host.upgrade(), im.upgrade()) else {
+                    return;
+                };
+                im.set_client_widget(Some(area));
+                host.text_input_focused.set(false);
+                host.sync_text_input_method();
+            }
+        });
+        area.connect_unrealize({
+            let host = Rc::downgrade(self);
+            let im = im.downgrade();
+            move |_| {
+                let (Some(host), Some(im)) = (host.upgrade(), im.upgrade()) else {
+                    return;
+                };
+                host.text_input_focused.set(false);
+                im.set_client_widget(None::<&gtk4::Widget>);
+            }
+        });
+        if area.is_realized() {
+            im.set_client_widget(Some(area));
+        }
+        im.connect_commit({
+            let host = Rc::downgrade(self);
+            move |_, text| {
+                if let Some(host) = host.upgrade() {
+                    host.insert_text(text);
+                }
+            }
+        });
+        *self.text_input_area.borrow_mut() = Some(area.downgrade());
+        *self.text_input_transform.borrow_mut() = Some(transform_of);
+        *self.text_input_method.borrow_mut() = Some(im);
     }
 
     fn with_state<R>(&self, f: impl FnOnce(&mut EditorState) -> R) -> Option<R> {
@@ -668,7 +883,9 @@ impl EditorHost {
         live: bool,
     ) {
         #[cfg(test)]
-        self.document_paints.set(self.document_paints.get() + 1);
+        if part != MotionPaintPart::Base {
+            self.document_paints.set(self.document_paints.get() + 1);
+        }
         let motion = motion_pose.is_some();
         let Some(borrow) = self.editor.try_borrow().ok() else {
             return;
@@ -678,6 +895,7 @@ impl EditorHost {
         };
         if st.drag_start.is_none() {
             let _ = self.annotation_cache.borrow_mut().take();
+            let _ = self.drag_frame_cache.borrow_mut().take();
         }
         let Some(surface) = self.working_surface(st) else {
             return;
@@ -686,63 +904,6 @@ impl EditorHost {
         let layout = st
             .background
             .layout(st.working_image.width(), st.working_image.height());
-        if part != MotionPaintPart::Foreground {
-            if let crate::capture::editor::state::background::Fill::Image(image) =
-                &st.background.fill
-            {
-                if st.background.blur <= 0.001 {
-                    if let Some(background) = self.background_image_surface(image) {
-                        let _ = context.save();
-                        context.rectangle(
-                            t.canvas_offset_x,
-                            t.canvas_offset_y,
-                            t.canvas_width * t.canvas_scale,
-                            t.canvas_height * t.canvas_scale,
-                        );
-                        context.clip();
-                        context.translate(t.canvas_offset_x, t.canvas_offset_y);
-                        context.scale(t.canvas_scale, t.canvas_scale);
-                        let cover = (t.canvas_width / f64::from(image.width()))
-                            .max(t.canvas_height / f64::from(image.height()));
-                        let _ = context.save();
-                        context.translate(
-                            (t.canvas_width - f64::from(image.width()) * cover) / 2.0,
-                            (t.canvas_height - f64::from(image.height()) * cover) / 2.0,
-                        );
-                        context.scale(cover, cover);
-                        context.set_source_surface(&background, 0.0, 0.0).ok();
-                        context.source().set_extend(gtk4::cairo::Extend::Pad);
-                        // A moving preview downscales the same wallpaper on
-                        // every pointer event or playback frame; Cairo's Good
-                        // filter convolves the whole source each time. The
-                        // parked frame is painted again with Good on release.
-                        context.source().set_filter(if live {
-                            gtk4::cairo::Filter::Bilinear
-                        } else {
-                            gtk4::cairo::Filter::Good
-                        });
-                        let _ = context.paint();
-                        let _ = context.restore();
-                        render::paint_background_noise(
-                            context,
-                            0.0,
-                            0.0,
-                            t.canvas_width,
-                            t.canvas_height,
-                            st.background.noise,
-                        );
-                        let _ = context.restore();
-                    }
-                } else {
-                    self.paint_composited_background(context, st, t, layout, live);
-                }
-            } else if st.background.has_fill() {
-                self.paint_composited_background(context, st, t, layout, live);
-            }
-        }
-        if part == MotionPaintPart::Background {
-            return;
-        }
         let pose = if let Some((transform, _)) = motion_pose {
             crate::capture::editor::image_transform::StaticImageTransform {
                 yaw: transform.rotation_y,
@@ -757,233 +918,306 @@ impl EditorHost {
         } else {
             Default::default()
         };
-        if let Some((transform, anchor)) = motion_pose {
-            let _ = context.save();
-            context.rectangle(
-                t.canvas_offset_x,
-                t.canvas_offset_y,
-                t.canvas_width * t.canvas_scale,
-                t.canvas_height * t.canvas_scale,
-            );
-            context.clip();
-            let width = f64::from(st.working_image.width());
-            let height = f64::from(st.working_image.height());
-            let anchor_pose = crate::capture::editor::image_transform::StaticImageTransform {
-                pos_x: 0.0,
-                pos_y: 0.0,
-                ..pose
-            };
-            let project = crate::capture::editor::transform_render::projector(
-                layout,
-                width,
-                height,
-                anchor_pose,
-            );
-            let (x, y) = project((anchor.0 - 0.5) * width, (anchor.1 - 0.5) * height);
-            let cx = t.canvas_offset_x + x * t.canvas_scale;
-            let cy = t.canvas_offset_y + y * t.canvas_scale;
-            context.translate(cx, cy);
-            context.scale(transform.scale, transform.scale);
-            context.translate(-cx, -cy);
-        }
-        if let Some(shadow) = crate::capture::editor::shadow_render::geometry(
-            layout,
-            f64::from(st.working_image.width()),
-            f64::from(st.working_image.height()),
-            pose,
-            &st.scene_shadow,
-        ) {
-            let interactive = st.history_interaction_before.is_some()
-                || part == MotionPaintPart::Foreground
-                || (motion && live);
-            // During a light/opacity drag, move a cached unoffset silhouette
-            // instead of blurring the same card again for every pointer event.
-            let mut mask_geometry = shadow;
-            if interactive {
-                let margin = shadow.blur * 1.5
-                    + f64::from(st.working_image.width().min(st.working_image.height())) * 0.1;
-                let min_x = shadow.corners.iter().map(|p| p.0).fold(0.0, f64::min);
-                let min_y = shadow.corners.iter().map(|p| p.1).fold(0.0, f64::min);
-                let max_x = shadow
-                    .corners
-                    .iter()
-                    .map(|p| p.0)
-                    .fold(layout.width, f64::max);
-                let max_y = shadow
-                    .corners
-                    .iter()
-                    .map(|p| p.1)
-                    .fold(layout.height, f64::max);
-                mask_geometry.bounds = (
-                    min_x - margin,
-                    min_y - margin,
-                    max_x - min_x + margin * 2.0,
-                    max_y - min_y + margin * 2.0,
-                );
-                mask_geometry.offset = (0.0, 0.0);
-                mask_geometry.opacity = 1.0;
-            }
-            // A live frame keeps a small mask; the parked frame gets the
-            // full-resolution one. The edge is part of the key so a live mask
-            // is never reused as a sharp one.
-            let shadow_edge = if live {
-                96.0
-            } else if interactive {
-                192.0
-            } else {
-                720.0
-            };
-            let cached = self.shadow_cache.borrow();
-            let mask = cached
-                .as_ref()
-                .filter(|(geometry, cached_interactive, edge, _)| {
-                    *geometry == mask_geometry
-                        && *cached_interactive == interactive
-                        && *edge == shadow_edge
-                })
-                .map(|(_, _, _, surface)| surface.clone());
-            drop(cached);
-            let mask = mask.or_else(|| {
-                let surface = render::scene_shadow::shadow_mask(mask_geometry, shadow_edge)?;
-                *self.shadow_cache.borrow_mut() =
-                    Some((mask_geometry, interactive, shadow_edge, surface.clone()));
-                Some(surface)
-            });
-            if let Some(mask) = mask {
-                let _ = context.save();
-                context.translate(t.canvas_offset_x, t.canvas_offset_y);
-                context.scale(t.canvas_scale, t.canvas_scale);
-                context.rectangle(0.0, 0.0, layout.width, layout.height);
-                context.clip();
-                if interactive {
-                    context.translate(shadow.offset.0, shadow.offset.1);
-                }
-                render::scene_shadow::paint_shadow_mask(
-                    context,
-                    &mask,
-                    mask_geometry.bounds,
-                    if interactive { shadow.opacity } else { 1.0 },
-                );
-                let _ = context.restore();
-            }
-        }
-        let mut style = crate::capture::editor::style_render::StyleGeometry::new(
-            layout,
-            f64::from(st.working_image.width()),
-            f64::from(st.working_image.height()),
-            pose,
-            st.background.frame_style,
-        );
-        style.over_fill = st.background.has_fill();
-        let _ = context.save();
-        context.translate(t.canvas_offset_x, t.canvas_offset_y);
-        context.scale(t.canvas_scale, t.canvas_scale);
-        style.paint_backings(context);
-        style.paint_underlay(context);
-        let _ = context.restore();
-        if !pose.is_identity() {
-            let cached = self.card_cache.borrow();
-            let card = cached
-                .as_ref()
-                .filter(|(revision, actions, radius, _)| {
-                    *revision == st.working_image_revision
-                        && *actions == st.actions
-                        && *radius == layout.radius
-                })
-                .map(|(_, _, _, surface)| surface.clone());
-            drop(cached);
-            let card = card.or_else(|| {
-                let (width, height) =
-                    preview_card_size(st.working_image.width(), st.working_image.height());
-                let surface = st
-                    .card_surface_from_source(&surface, layout.radius, width, height)
-                    .ok()?;
-                *self.card_cache.borrow_mut() = Some((
-                    st.working_image_revision,
-                    st.actions.clone(),
-                    layout.radius,
-                    surface.clone(),
-                ));
-                Some(surface)
-            });
-            if let Some(card) = card {
-                let _ = context.save();
-                context.translate(t.canvas_offset_x, t.canvas_offset_y);
-                context.scale(t.canvas_scale, t.canvas_scale);
-                crate::capture::editor::transform_render::paint_card(
-                    context,
-                    &card,
-                    layout,
-                    f64::from(st.working_image.width()),
-                    f64::from(st.working_image.height()),
-                    pose,
-                    if live {
-                        crate::capture::editor::transform_render::Quality::Live
-                    } else {
-                        crate::capture::editor::transform_render::Quality::Preview
-                    },
-                );
-                style.paint_frame(context);
-                let _ = context.restore();
-            }
-            if motion {
-                let _ = context.restore();
-            }
-            return;
-        }
-        let _ = context.save();
-        context.translate(t.offset_x, t.offset_y);
-        context.scale(t.scale, t.scale);
-        let drag_annotations = if !motion
-            && !t.has_background
+        let pen_drag = !motion
             && st.drag_start.is_some()
             && matches!(st.selected_tool, Tool::Pen | Tool::Highlighter)
-            && !st.auto_expand_canvas
-        {
-            self.drag_annotation_frame(st)
-        } else {
-            None
-        };
-        if let Some(cached) = &drag_annotations {
-            // The cached frame already has the rounded image baked in; its
-            // annotations are only clipped to the image rectangle, exactly
-            // like the direct path below.
-            context.rectangle(
-                0.0,
-                0.0,
+            && !st.auto_expand_canvas;
+        // Appearance drags change the base every frame; they keep painting it
+        // directly instead of rebuilding the cache per pointer event.
+        let appearance_drag =
+            st.selected_tool == Tool::Background && st.history_interaction_before.is_some();
+        // Each pointer event changes the base, so it is painted with the cheap
+        // live filters; the release repaints it at full quality from the cache.
+        let live = live || appearance_drag;
+        let cached_base = part == MotionPaintPart::Complete
+            && !motion
+            && !live
+            && pose.is_identity()
+            && self.paint_cached_base(context, st, t, layout, pen_drag);
+        let mut drag_annotations: Option<ImageSurface> = None;
+        if !cached_base {
+            if part != MotionPaintPart::Foreground {
+                if let crate::capture::editor::state::background::Fill::Image(image) =
+                    &st.background.fill
+                {
+                    if st.background.blur <= 0.001 {
+                        if let Some(background) = self.background_image_surface(image) {
+                            let _ = context.save();
+                            context.rectangle(
+                                t.canvas_offset_x,
+                                t.canvas_offset_y,
+                                t.canvas_width * t.canvas_scale,
+                                t.canvas_height * t.canvas_scale,
+                            );
+                            context.clip();
+                            context.translate(t.canvas_offset_x, t.canvas_offset_y);
+                            context.scale(t.canvas_scale, t.canvas_scale);
+                            let cover = (t.canvas_width / f64::from(image.width()))
+                                .max(t.canvas_height / f64::from(image.height()));
+                            let _ = context.save();
+                            context.translate(
+                                (t.canvas_width - f64::from(image.width()) * cover) / 2.0,
+                                (t.canvas_height - f64::from(image.height()) * cover) / 2.0,
+                            );
+                            context.scale(cover, cover);
+                            context.set_source_surface(&background, 0.0, 0.0).ok();
+                            context.source().set_extend(gtk4::cairo::Extend::Pad);
+                            // A moving preview downscales the same wallpaper on
+                            // every pointer event or playback frame; Cairo's Good
+                            // filter convolves the whole source each time. The
+                            // parked frame is painted again with Good on release.
+                            context.source().set_filter(if live {
+                                gtk4::cairo::Filter::Bilinear
+                            } else {
+                                gtk4::cairo::Filter::Good
+                            });
+                            let _ = context.paint();
+                            let _ = context.restore();
+                            render::paint_background_noise(
+                                context,
+                                0.0,
+                                0.0,
+                                t.canvas_width,
+                                t.canvas_height,
+                                st.background.noise,
+                            );
+                            let _ = context.restore();
+                        }
+                    } else {
+                        self.paint_composited_background(context, st, t, layout, live);
+                    }
+                } else if st.background.has_fill() {
+                    self.paint_composited_background(context, st, t, layout, live);
+                }
+            }
+            if part == MotionPaintPart::Background {
+                return;
+            }
+            if let Some((transform, anchor)) = motion_pose {
+                let _ = context.save();
+                context.rectangle(
+                    t.canvas_offset_x,
+                    t.canvas_offset_y,
+                    t.canvas_width * t.canvas_scale,
+                    t.canvas_height * t.canvas_scale,
+                );
+                context.clip();
+                let width = f64::from(st.working_image.width());
+                let height = f64::from(st.working_image.height());
+                let anchor_pose = crate::capture::editor::image_transform::StaticImageTransform {
+                    pos_x: 0.0,
+                    pos_y: 0.0,
+                    ..pose
+                };
+                let project = crate::capture::editor::transform_render::projector(
+                    layout,
+                    width,
+                    height,
+                    anchor_pose,
+                );
+                let (x, y) = project((anchor.0 - 0.5) * width, (anchor.1 - 0.5) * height);
+                let cx = t.canvas_offset_x + x * t.canvas_scale;
+                let cy = t.canvas_offset_y + y * t.canvas_scale;
+                context.translate(cx, cy);
+                context.scale(transform.scale, transform.scale);
+                context.translate(-cx, -cy);
+            }
+            if let Some(shadow) = crate::capture::editor::shadow_render::geometry(
+                layout,
                 f64::from(st.working_image.width()),
                 f64::from(st.working_image.height()),
-            );
-            context.clip();
-            context.set_source_surface(cached, 0.0, 0.0).ok();
-        } else {
-            render::rounded_rect_path(
-                context,
-                0.0,
-                0.0,
+                pose,
+                &st.scene_shadow,
+            ) {
+                let interactive =
+                    appearance_drag || part == MotionPaintPart::Foreground || (motion && live);
+                // During a light/opacity drag, move a cached unoffset silhouette
+                // instead of blurring the same card again for every pointer event.
+                let mut mask_geometry = shadow;
+                if interactive {
+                    let margin = shadow.blur * 1.5
+                        + f64::from(st.working_image.width().min(st.working_image.height())) * 0.1;
+                    let min_x = shadow.corners.iter().map(|p| p.0).fold(0.0, f64::min);
+                    let min_y = shadow.corners.iter().map(|p| p.1).fold(0.0, f64::min);
+                    let max_x = shadow
+                        .corners
+                        .iter()
+                        .map(|p| p.0)
+                        .fold(layout.width, f64::max);
+                    let max_y = shadow
+                        .corners
+                        .iter()
+                        .map(|p| p.1)
+                        .fold(layout.height, f64::max);
+                    mask_geometry.bounds = (
+                        min_x - margin,
+                        min_y - margin,
+                        max_x - min_x + margin * 2.0,
+                        max_y - min_y + margin * 2.0,
+                    );
+                    mask_geometry.offset = (0.0, 0.0);
+                    mask_geometry.opacity = 1.0;
+                }
+                // A live frame keeps a small mask; the parked frame gets the
+                // full-resolution one. The edge is part of the key so a live mask
+                // is never reused as a sharp one.
+                let shadow_edge = if live {
+                    96.0
+                } else if interactive {
+                    192.0
+                } else {
+                    720.0
+                };
+                let cached = self.shadow_cache.borrow();
+                let mask = cached
+                    .as_ref()
+                    .filter(|(geometry, cached_interactive, edge, _)| {
+                        *geometry == mask_geometry
+                            && *cached_interactive == interactive
+                            && *edge == shadow_edge
+                    })
+                    .map(|(_, _, _, surface)| surface.clone());
+                drop(cached);
+                let mask = mask.or_else(|| {
+                    let surface = render::scene_shadow::shadow_mask(mask_geometry, shadow_edge)?;
+                    *self.shadow_cache.borrow_mut() =
+                        Some((mask_geometry, interactive, shadow_edge, surface.clone()));
+                    Some(surface)
+                });
+                if let Some(mask) = mask {
+                    let _ = context.save();
+                    context.translate(t.canvas_offset_x, t.canvas_offset_y);
+                    context.scale(t.canvas_scale, t.canvas_scale);
+                    context.rectangle(0.0, 0.0, layout.width, layout.height);
+                    context.clip();
+                    if interactive {
+                        context.translate(shadow.offset.0, shadow.offset.1);
+                    }
+                    render::scene_shadow::paint_shadow_mask(
+                        context,
+                        &mask,
+                        mask_geometry.bounds,
+                        if interactive { shadow.opacity } else { 1.0 },
+                    );
+                    let _ = context.restore();
+                }
+            }
+            let mut style = crate::capture::editor::style_render::StyleGeometry::new(
+                layout,
                 f64::from(st.working_image.width()),
                 f64::from(st.working_image.height()),
-                layout.radius,
+                pose,
+                st.background.frame_style,
             );
-            context.clip();
-            context.set_source_surface(&surface, 0.0, 0.0).ok();
-        }
-        // A live frame resamples the screenshot under a moving scale; the
-        // quality convolution costs tens of milliseconds there. The parked
-        // frame is painted again with the full filter.
-        context.source().set_filter(if live {
-            render::editor_interactive_image_filter()
-        } else {
-            render::editor_image_filter_for_scale(t.scale)
-        });
-        let _ = context.paint();
-        let _ = context.restore();
+            style.over_fill = st.background.has_fill();
+            let _ = context.save();
+            context.translate(t.canvas_offset_x, t.canvas_offset_y);
+            context.scale(t.canvas_scale, t.canvas_scale);
+            style.paint_backings(context);
+            style.paint_underlay(context);
+            let _ = context.restore();
+            if !pose.is_identity() {
+                let cached = self.card_cache.borrow();
+                let card = cached
+                    .as_ref()
+                    .filter(|(revision, actions, radius, _)| {
+                        *revision == st.working_image_revision
+                            && *actions == st.actions
+                            && *radius == layout.radius
+                    })
+                    .map(|(_, _, _, surface)| surface.clone());
+                drop(cached);
+                let card = card.or_else(|| {
+                    let (width, height) =
+                        preview_card_size(st.working_image.width(), st.working_image.height());
+                    let surface = st
+                        .card_surface_from_source(&surface, layout.radius, width, height)
+                        .ok()?;
+                    *self.card_cache.borrow_mut() = Some((
+                        st.working_image_revision,
+                        st.actions.clone(),
+                        layout.radius,
+                        surface.clone(),
+                    ));
+                    Some(surface)
+                });
+                if let Some(card) = card {
+                    let _ = context.save();
+                    context.translate(t.canvas_offset_x, t.canvas_offset_y);
+                    context.scale(t.canvas_scale, t.canvas_scale);
+                    crate::capture::editor::transform_render::paint_card(
+                        context,
+                        &card,
+                        layout,
+                        f64::from(st.working_image.width()),
+                        f64::from(st.working_image.height()),
+                        pose,
+                        if live {
+                            crate::capture::editor::transform_render::Quality::Live
+                        } else {
+                            crate::capture::editor::transform_render::Quality::Preview
+                        },
+                    );
+                    style.paint_frame(context);
+                    let _ = context.restore();
+                }
+                if motion {
+                    let _ = context.restore();
+                }
+                return;
+            }
+            let _ = context.save();
+            context.translate(t.offset_x, t.offset_y);
+            context.scale(t.scale, t.scale);
+            drag_annotations = if pen_drag && !t.has_background {
+                self.drag_annotation_frame(st)
+            } else {
+                None
+            };
+            if let Some(cached) = &drag_annotations {
+                // The cached frame already has the rounded image baked in; its
+                // annotations are only clipped to the image rectangle, exactly
+                // like the direct path below.
+                context.rectangle(
+                    0.0,
+                    0.0,
+                    f64::from(st.working_image.width()),
+                    f64::from(st.working_image.height()),
+                );
+                context.clip();
+                context.set_source_surface(cached, 0.0, 0.0).ok();
+            } else {
+                render::rounded_rect_path(
+                    context,
+                    0.0,
+                    0.0,
+                    f64::from(st.working_image.width()),
+                    f64::from(st.working_image.height()),
+                    layout.radius,
+                );
+                context.clip();
+                context.set_source_surface(&surface, 0.0, 0.0).ok();
+            }
+            // A live frame resamples the screenshot under a moving scale; the
+            // quality convolution costs tens of milliseconds there. The parked
+            // frame is painted again with the full filter.
+            context.source().set_filter(if live {
+                render::editor_interactive_image_filter()
+            } else {
+                render::editor_image_filter_for_scale(t.scale)
+            });
+            let _ = context.paint();
+            let _ = context.restore();
 
-        let _ = context.save();
-        context.translate(t.canvas_offset_x, t.canvas_offset_y);
-        context.scale(t.canvas_scale, t.canvas_scale);
-        style.paint_frame(context);
-        let _ = context.restore();
+            let _ = context.save();
+            context.translate(t.canvas_offset_x, t.canvas_offset_y);
+            context.scale(t.canvas_scale, t.canvas_scale);
+            style.paint_frame(context);
+            let _ = context.restore();
+            if part == MotionPaintPart::Base {
+                return;
+            }
+        }
 
         let _ = context.save();
         context.translate(t.offset_x, t.offset_y);
@@ -998,7 +1232,7 @@ impl EditorHost {
                 .as_ref()
                 .and_then(|input| input.editing_action_index)
         };
-        if drag_annotations.is_none() {
+        if drag_annotations.is_none() && !(cached_base && pen_drag) {
             for (index, action) in st.actions.iter().enumerate() {
                 if Some(index) == editing
                     || matches!(
@@ -1036,6 +1270,165 @@ impl EditorHost {
         let surface = rgba_image_to_surface(image)?;
         *self.background_source.borrow_mut() = Some((Arc::clone(image), surface.clone()));
         Some(surface)
+    }
+
+    /// Paint the base layer from a raster kept at the on-screen size, built
+    /// with the same quality filters as a direct paint. Returns false when no
+    /// raster can be made, so the caller paints the base directly.
+    /// With `with_annotations`, the raster also carries every committed
+    /// annotation, for the length of a pen or highlighter drag.
+    fn paint_cached_base(
+        &self,
+        context: &gtk4::cairo::Context,
+        st: &EditorState,
+        t: ViewTransform,
+        layout: crate::capture::editor::state::background::Layout,
+        with_annotations: bool,
+    ) -> bool {
+        let (device_x, device_y) = context.target().device_scale();
+        let device_scale = device_x.max(device_y).max(1.0);
+        let width = (layout.width * t.canvas_scale * device_scale).ceil();
+        let height = (layout.height * t.canvas_scale * device_scale).ceil();
+        if !(width >= 1.0 && height >= 1.0) || width * height > 40_000_000.0 {
+            return false;
+        }
+        let fill = match &st.background.fill {
+            crate::capture::editor::state::background::Fill::None => 0,
+            crate::capture::editor::state::background::Fill::Image(image) => {
+                Arc::as_ptr(image) as usize
+            }
+            crate::capture::editor::state::background::Fill::Custom(painter) => {
+                Rc::as_ptr(painter) as *const () as usize
+            }
+        };
+        let key = BaseKey {
+            working_revision: st.working_image_revision,
+            image_size: st.working_image.dimensions(),
+            background_revision: st.background.revision,
+            fill,
+            padding: st.background.padding,
+            blur: st.background.blur,
+            radius: st.background.radius,
+            noise: st.background.noise,
+            frame_aspect: st.background.frame_aspect,
+            frame_style: st.background.frame_style,
+            shadow: st.scene_shadow.clone(),
+            layout,
+            scale: t.scale,
+            canvas_scale: t.canvas_scale,
+            device_scale,
+        };
+        let cached = self
+            .base_cache
+            .borrow()
+            .as_ref()
+            .filter(|(cached_key, _)| *cached_key == key)
+            .map(|(_, surface)| surface.clone());
+        let surface = match cached {
+            Some(surface) => surface,
+            None => {
+                let Ok(surface) =
+                    ImageSurface::create(gtk4::cairo::Format::ARgb32, width as i32, height as i32)
+                else {
+                    return false;
+                };
+                {
+                    let Ok(base) = gtk4::cairo::Context::new(&surface) else {
+                        return false;
+                    };
+                    base.scale(device_scale, device_scale);
+                    let local = ViewTransform {
+                        offset_x: t.offset_x - t.canvas_offset_x,
+                        offset_y: t.offset_y - t.canvas_offset_y,
+                        canvas_offset_x: 0.0,
+                        canvas_offset_y: 0.0,
+                        ..t
+                    };
+                    self.paint_document_inner(&base, local, None, MotionPaintPart::Base, false);
+                }
+                surface.flush();
+                #[cfg(test)]
+                self.base_builds.set(self.base_builds.get() + 1);
+                *self.base_cache.borrow_mut() = Some((key.clone(), surface.clone()));
+                surface
+            }
+        };
+        let surface = if with_annotations {
+            let editing = st
+                .active_text_input
+                .as_ref()
+                .and_then(|input| input.editing_action_index);
+            let cached = self
+                .drag_frame_cache
+                .borrow()
+                .as_ref()
+                .filter(|(cached_key, actions, cached_editing, _)| {
+                    *cached_key == key && *actions == st.actions.len() && *cached_editing == editing
+                })
+                .map(|(_, _, _, frame)| frame.clone());
+            match cached {
+                Some(frame) => frame,
+                None => {
+                    let Ok(frame) = ImageSurface::create(
+                        gtk4::cairo::Format::ARgb32,
+                        width as i32,
+                        height as i32,
+                    ) else {
+                        return false;
+                    };
+                    {
+                        let Ok(drawing) = gtk4::cairo::Context::new(&frame) else {
+                            return false;
+                        };
+                        let _ = drawing.set_source_surface(&surface, 0.0, 0.0);
+                        drawing.source().set_filter(gtk4::cairo::Filter::Fast);
+                        let _ = drawing.paint();
+                        drawing.scale(device_scale, device_scale);
+                        let local = ViewTransform {
+                            offset_x: t.offset_x - t.canvas_offset_x,
+                            offset_y: t.offset_y - t.canvas_offset_y,
+                            canvas_offset_x: 0.0,
+                            canvas_offset_y: 0.0,
+                            ..t
+                        };
+                        drawing.translate(local.offset_x, local.offset_y);
+                        drawing.scale(local.scale, local.scale);
+                        clip_annotation_content_to_canvas(&drawing, local);
+                        for (index, action) in st.actions.iter().enumerate() {
+                            if Some(index) == editing
+                                || matches!(
+                                    action,
+                                    AnnotationAction::Obfuscate { .. }
+                                        | AnnotationAction::Focus { .. }
+                                )
+                            {
+                                continue;
+                            }
+                            draw_annotation_action(&drawing, action);
+                        }
+                    }
+                    frame.flush();
+                    #[cfg(test)]
+                    self.drag_frame_builds.set(self.drag_frame_builds.get() + 1);
+                    *self.drag_frame_cache.borrow_mut() =
+                        Some((key, st.actions.len(), editing, frame.clone()));
+                    frame
+                }
+            }
+        } else {
+            surface
+        };
+        let _ = context.save();
+        context.translate(
+            (t.canvas_offset_x * device_scale).round() / device_scale,
+            (t.canvas_offset_y * device_scale).round() / device_scale,
+        );
+        context.scale(1.0 / device_scale, 1.0 / device_scale);
+        let _ = context.set_source_surface(&surface, 0.0, 0.0);
+        context.source().set_filter(gtk4::cairo::Filter::Fast);
+        let _ = context.paint();
+        let _ = context.restore();
+        true
     }
 
     fn paint_composited_background(
@@ -1190,18 +1583,10 @@ impl EditorHost {
                 }) = st.actions.get(index)
                 {
                     let width =
-                        max_width.unwrap_or_else(|| (image_w - position.x).max(font.size * 1.8));
+                        max_width.unwrap_or_else(|| default_text_wrap_width(st, *position, font));
                     let mut bounds =
                         text_action_bounds(context, *position, text, font, Some(width));
-                    bounds.rect.x = bounds
-                        .rect
-                        .x
-                        .clamp(0, (image_w as i32 - bounds.rect.width).max(0));
-                    bounds.rect.y = bounds
-                        .rect
-                        .y
-                        .clamp(0, (image_h as i32 - bounds.rect.height).max(0));
-                    bounds.sync_handles();
+                    clamp_text_bounds_to_canvas(st, &mut bounds);
                     draw_text_edit_border(context, &bounds, t.scale);
                 }
             }
@@ -1220,18 +1605,10 @@ impl EditorHost {
                 } = selected
                 {
                     let width =
-                        max_width.unwrap_or_else(|| (image_w - position.x).max(font.size * 1.8));
+                        max_width.unwrap_or_else(|| default_text_wrap_width(st, *position, font));
                     let mut bounds =
                         text_action_bounds(context, *position, text, font, Some(width));
-                    bounds.rect.x = bounds
-                        .rect
-                        .x
-                        .clamp(0, (image_w as i32 - bounds.rect.width).max(0));
-                    bounds.rect.y = bounds
-                        .rect
-                        .y
-                        .clamp(0, (image_h as i32 - bounds.rect.height).max(0));
-                    bounds.sync_handles();
+                    clamp_text_bounds_to_canvas(st, &mut bounds);
                     draw_text_edit_border(context, &bounds, t.scale);
                     draw_text_edit_handles(context, &bounds, None, t.scale);
                 }
@@ -1317,15 +1694,7 @@ impl EditorHost {
 
         if let Some(bounds) = st.active_text_bounds.as_ref() {
             let mut bounds = bounds.clone();
-            bounds.rect.x = bounds
-                .rect
-                .x
-                .clamp(0, (image_w as i32 - bounds.rect.width).max(0));
-            bounds.rect.y = bounds
-                .rect
-                .y
-                .clamp(0, (image_h as i32 - bounds.rect.height).max(0));
-            bounds.sync_handles();
+            clamp_text_bounds_to_canvas(st, &mut bounds);
             if let Some(input) = st.active_text_input.as_ref() {
                 let font = FontSettings {
                     family: st.text_font_family.clone(),
@@ -1519,6 +1888,7 @@ impl EditorHost {
         hover: Rc<super::canvas::Hover>,
         pan_to: Rc<dyn Fn(f64, f64)>,
     ) {
+        self.install_text_input_method(area, transform_of.clone());
         // ---- pointer motion: text hover + handle cursors ----
         let motion = gtk4::EventControllerMotion::new();
         motion.connect_motion({
@@ -2229,7 +2599,8 @@ impl EditorHost {
     }
 
     /// Shared text-bounds drag for the active edit session and the committed
-    /// text action: move-handle drags move, the resize corner resizes.
+    /// text action. Move handles move or stretch the box and the corner
+    /// resizes it; the text follows live, inside the composed canvas.
     fn update_active_text_drag(&self, st: &mut EditorState, t: &ViewTransform, view: Point) {
         let Some(drag_start) = st.active_text_drag_start else {
             return;
@@ -2240,35 +2611,69 @@ impl EditorHost {
         let point = t.view_to_image(view);
         let dx = point.x - drag_start.x;
         let dy = point.y - drag_start.y;
-        let min_w = st.committed_text_min_width().max(50.0);
+        let resizing = st.active_text_is_resizing;
+        let min_w = if resizing {
+            50.0
+        } else {
+            st.committed_text_min_width().max(50.0)
+        };
+        let min_h = 44.0;
+        let (min_x, _, max_x, max_y) = st.annotation_canvas_bounds();
+        let (min_x, max_x, max_y) = (
+            min_x.round() as i32,
+            max_x.round() as i32,
+            max_y.round() as i32,
+        );
         let drag_handle = st.active_text_drag_handle.clone();
         let Some(bounds) = st.active_text_bounds.as_mut() else {
             return;
         };
-        if st.active_text_is_resizing {
-            bounds.rect.width = (start_bounds.width as f64 + dx).max(min_w) as i32;
-            bounds.sync_handles();
-        } else if let Some(handle) = drag_handle {
-            match handle {
-                MoveHandle::Left => {
+        if resizing {
+            bounds.rect.x = start_bounds.x;
+            bounds.rect.y = start_bounds.y;
+            bounds.rect.width = (f64::from(start_bounds.width) + dx)
+                .clamp(min_w, f64::from(max_x - start_bounds.x).max(min_w))
+                .round() as i32;
+            bounds.rect.height = (f64::from(start_bounds.height) + dy)
+                .clamp(min_h, f64::from(max_y - start_bounds.y).max(min_h))
+                .round() as i32;
+        } else {
+            match drag_handle {
+                Some(MoveHandle::Left) => {
                     let right = start_bounds.x + start_bounds.width;
-                    bounds.rect.x = (start_bounds.x as f64 + dx).min(right as f64 - 50.0) as i32;
-                    bounds.rect.width = (right - bounds.rect.x).max(50);
+                    let x = (start_bounds.x + dx.round() as i32)
+                        .clamp(min_x, (right - min_w as i32).max(min_x));
+                    bounds.rect.x = x;
+                    bounds.rect.y = start_bounds.y;
+                    bounds.rect.width = (right - x).max(min_w as i32);
                 }
-                MoveHandle::Right => {
-                    bounds.rect.width = (start_bounds.width as f64 + dx).max(50.0) as i32;
+                Some(MoveHandle::Right) => {
+                    bounds.rect.x = start_bounds.x;
+                    bounds.rect.y = start_bounds.y;
+                    bounds.rect.width = (f64::from(start_bounds.width) + dx)
+                        .clamp(min_w, f64::from(max_x - start_bounds.x).max(min_w))
+                        .round() as i32;
+                }
+                None => {
+                    bounds.rect.x = (f64::from(start_bounds.x) + dx).round() as i32;
+                    bounds.rect.y = (f64::from(start_bounds.y) + dy).round() as i32;
                 }
             }
-            bounds.sync_handles();
-        } else {
-            bounds.rect.x = (start_bounds.x as f64 + dx) as i32;
-            bounds.rect.y = (start_bounds.y as f64 + dy) as i32;
-            bounds.sync_handles();
         }
+        let mut clamped = bounds.clone();
+        clamp_text_bounds_to_canvas(st, &mut clamped);
+        st.active_text_bounds = Some(clamped);
         if st.active_text_input.is_some() {
-            st.fit_active_text_height_only();
+            if resizing {
+                st.fit_active_text_to_layout_preserving_box();
+            } else {
+                st.fit_active_text_height_only();
+            }
         } else {
-            st.fit_committed_text_height_only();
+            if !resizing {
+                st.fit_committed_text_height_only();
+            }
+            apply_text_bounds_to_selected_action(st, resizing);
         }
     }
 
@@ -2396,6 +2801,7 @@ impl EditorHost {
             let mut handled = true;
             let mut commit = false;
             let mut cancel = false;
+            let mut paste = false;
             match key {
                 gdk::Key::Escape => cancel = true,
                 gdk::Key::Return | gdk::Key::KP_Enter => {
@@ -2411,6 +2817,8 @@ impl EditorHost {
                 gdk::Key::Right => st.move_cursor_right(),
                 gdk::Key::Home => st.move_cursor_home(),
                 gdk::Key::End => st.move_cursor_end(),
+                gdk::Key::v | gdk::Key::V if ctrl => paste = true,
+                gdk::Key::Insert if shift => paste = true,
                 _ => {
                     if !ctrl {
                         if let Some(ch) = key.to_unicode() {
@@ -2435,10 +2843,13 @@ impl EditorHost {
                 st.fit_active_text_to_layout();
                 st.reset_text_cursor_blink();
             }
-            Some(handled || cancel || commit)
+            Some((handled || cancel || commit, paste))
         });
-        if let Some(Some(consumed)) = text_result {
+        if let Some(Some((consumed, paste))) = text_result {
             self.changed();
+            if paste {
+                self.paste_text_from_clipboard();
+            }
             return if consumed {
                 Propagation::Stop
             } else {
@@ -2720,27 +3131,12 @@ pub(crate) fn finish_text_drag(st: &mut EditorState) -> bool {
         }
         return true;
     }
-    if let (Some(bounds), Some(index)) = (st.active_text_bounds.take(), st.selected_action_index) {
-        let mut changed = false;
-        if let Some(AnnotationAction::Text {
-            position,
-            font,
-            max_width,
-            ..
-        }) = st.actions.get_mut(index)
-        {
-            let padding_y = 8.0;
-            let next_x = bounds.rect.x as f64;
-            let next_y = bounds.rect.y as f64 + font.size + padding_y;
-            let next_width = Some(bounds.rect.width as f64);
-            changed = position.x != next_x || position.y != next_y || *max_width != next_width;
-            position.x = next_x;
-            position.y = next_y;
-            *max_width = next_width;
-        }
-        if changed {
-            st.clear_redo_history();
-        }
+    let committed = st.active_text_bounds.is_some() && st.selected_action_index.is_some();
+    if committed && apply_text_bounds_to_selected_action(st, was_resizing) {
+        st.clear_redo_history();
+    }
+    st.active_text_bounds = None;
+    if committed {
         st.finish_history_interaction();
     }
     false
@@ -2756,6 +3152,19 @@ pub(crate) fn crop_apply_enabled(st: &EditorState) -> bool {
                 && rect.width >= st.base_image.width() as i32
                 && rect.height >= st.base_image.height() as i32)
     })
+}
+
+/// Insert text at the live caret, turning CRLF and lone CR line breaks into
+/// newlines. Returns false when no text box is live.
+fn insert_into_active_text(st: &mut EditorState, text: &str) -> bool {
+    if st.active_text_input.is_none() {
+        return false;
+    }
+    let text = text.replace("\r\n", "\n").replace('\r', "\n");
+    st.insert_text_input_str(&text);
+    st.fit_active_text_to_layout();
+    st.reset_text_cursor_blink();
+    true
 }
 
 fn text_context() -> Option<(ImageSurface, gtk4::cairo::Context)> {
@@ -2804,6 +3213,118 @@ fn ensure_arrow_controls(st: &mut EditorState) {
     st.arrow_editing_controls = true;
 }
 
+/// Keep a text box inside the composed canvas, background padding included.
+fn clamp_text_bounds_to_canvas(
+    st: &EditorState,
+    bounds: &mut crate::capture::editor::types::TextEditBounds,
+) {
+    let (min_x, min_y, max_x, max_y) = st.annotation_canvas_bounds();
+    let (min_x, min_y) = (min_x.round() as i32, min_y.round() as i32);
+    let (max_x, max_y) = (max_x.round() as i32, max_y.round() as i32);
+    bounds.rect.x = bounds
+        .rect
+        .x
+        .clamp(min_x, (max_x - bounds.rect.width).max(min_x));
+    bounds.rect.y = bounds
+        .rect
+        .y
+        .clamp(min_y, (max_y - bounds.rect.height).max(min_y));
+    bounds.sync_handles();
+}
+
+/// Wrap width for a text action saved without one: up to the canvas edge.
+fn default_text_wrap_width(st: &EditorState, position: Point, font: &FontSettings) -> f64 {
+    let (_, _, max_x, _) = st.annotation_canvas_bounds();
+    (max_x - position.x).max(font.size * 1.8)
+}
+
+/// Largest offered text size whose wrapped text fits inside `rect`.
+fn fitted_text_size(
+    text: &str,
+    font: &FontSettings,
+    rect: crate::capture::editor::types::Rect,
+) -> f64 {
+    let Some((_surface, context)) = text_context() else {
+        return font.size;
+    };
+    let sizes = crate::capture::editor::color::OFFERED_TEXT_SIZES;
+    let mut best = sizes[0];
+    for size in sizes {
+        let mut candidate = font.clone();
+        candidate.size = size;
+        let measured = text_action_bounds(
+            &context,
+            Point { x: 0.0, y: size },
+            text,
+            &candidate,
+            Some(f64::from(rect.width)),
+        );
+        if measured.rect.width <= rect.width && measured.rect.height <= rect.height {
+            best = size;
+        }
+    }
+    best
+}
+
+/// Write the dragged box back to the selected committed text so it reflows
+/// while the pointer moves; the resize corner also refits its font size.
+/// Returns whether the action changed.
+fn apply_text_bounds_to_selected_action(st: &mut EditorState, fit_font: bool) -> bool {
+    let (Some(rect), Some(index)) = (
+        st.active_text_bounds.as_ref().map(|bounds| bounds.rect),
+        st.selected_action_index,
+    ) else {
+        return false;
+    };
+    let Some(AnnotationAction::Text {
+        position,
+        text,
+        font,
+        max_width,
+        ..
+    }) = st.actions.get_mut(index)
+    else {
+        return false;
+    };
+    let next_size = if fit_font {
+        fitted_text_size(text, font, rect)
+    } else {
+        font.size
+    };
+    let padding_y = 8.0;
+    let next_x = f64::from(rect.x);
+    let next_y = f64::from(rect.y) + next_size + padding_y;
+    let next_width = Some(f64::from(rect.width));
+    let changed = position.x != next_x
+        || position.y != next_y
+        || *max_width != next_width
+        || font.size != next_size;
+    font.size = next_size;
+    position.x = next_x;
+    position.y = next_y;
+    *max_width = next_width;
+    if fit_font {
+        st.text_size = next_size;
+    }
+    changed
+}
+
+/// Set the text size and refit the live text box at once, scaling its width
+/// with the font so it grows and shrinks with the text instead of waiting
+/// for the next keystroke.
+pub(crate) fn set_text_size_and_fit(st: &mut EditorState, size: f64) {
+    let previous = st.text_size;
+    if !st.set_text_size(size) || st.active_text_input.is_none() || previous <= 0.0 {
+        return;
+    }
+    let ratio = st.text_size / previous;
+    if let Some(bounds) = st.active_text_bounds.as_mut() {
+        bounds.rect.width = (f64::from(bounds.rect.width) * ratio).round().max(50.0) as i32;
+        bounds.sync_handles();
+    }
+    st.fit_active_text_to_layout_preserving_font_size();
+}
+
 /// TextEditBounds of a committed text action for handle hit-testing.
 fn committed_text_bounds(
     st: &EditorState,
@@ -2820,8 +3341,7 @@ fn committed_text_bounds(
         return None;
     };
     let (_, context) = text_context()?;
-    let width = max_width
-        .unwrap_or_else(|| (st.base_image.width() as f64 - position.x).max(font.size * 1.8));
+    let width = max_width.unwrap_or_else(|| default_text_wrap_width(st, *position, font));
     Some(text_action_bounds(
         &context,
         *position,
@@ -2900,6 +3420,152 @@ mod tests {
         };
 
         assert_eq!(render(true), render(false));
+    }
+
+    #[test]
+    fn cached_base_matches_a_direct_paint_and_survives_typing() {
+        let host = host();
+        let mut state = EditorState::new(RgbaImage::from_fn(240, 160, |x, y| {
+            image::Rgba([(x % 200) as u8, (y % 150) as u8, 120, 255])
+        }));
+        state.background.fill = crate::capture::editor::state::background::Fill::Image(Arc::new(
+            RgbaImage::from_pixel(8, 8, image::Rgba([20, 90, 200, 255])),
+        ));
+        state.background.set_padding(40.0);
+        state.background.noise = 0.2;
+        state.background.radius = 12.0;
+        state.background.changed();
+        state.selected_tool = Tool::Text;
+        *host.editor.borrow_mut() = Some(state);
+        let layout = host
+            .read(|st| st.background.layout(240, 160))
+            .expect("document");
+        let t = ViewTransform {
+            scale: 0.5,
+            offset_x: 10.0 + layout.image_x * 0.5,
+            offset_y: 6.0 + layout.image_y * 0.5,
+            has_background: true,
+            canvas_offset_x: 10.0,
+            canvas_offset_y: 6.0,
+            canvas_scale: 0.5,
+            canvas_width: layout.width,
+            canvas_height: layout.height,
+            image_rect_x: layout.image_x,
+            image_rect_y: layout.image_y,
+            ..ViewTransform::for_image(240.0, 160.0)
+        };
+        let render = |part: MotionPaintPart| {
+            let mut surface = ImageSurface::create(gtk4::cairo::Format::ARgb32, 260, 200).unwrap();
+            let context = gtk4::cairo::Context::new(&surface).unwrap();
+            host.paint_document_inner(&context, t, None, part, false);
+            drop(context);
+            surface.flush();
+            let data = surface.data().unwrap().to_vec();
+            drop(surface);
+            data
+        };
+        let cached = render(MotionPaintPart::Complete);
+        let direct = render(MotionPaintPart::Base);
+        assert_eq!(host.base_builds.get(), 1);
+        let worst = cached
+            .iter()
+            .zip(&direct)
+            .map(|(a, b)| a.abs_diff(*b))
+            .max()
+            .unwrap_or(0);
+        assert!(
+            worst <= 2,
+            "cached base differs from a direct paint by {worst}"
+        );
+
+        host.with_state(|st| {
+            st.begin_text_input(
+                crate::capture::editor::types::Point { x: 20.0, y: 40.0 },
+                220.0,
+                44.0,
+            );
+            st.insert_text_input_str("typing never rebuilds the base");
+            st.fit_active_text_to_layout();
+        });
+        render(MotionPaintPart::Complete);
+        assert_eq!(host.base_builds.get(), 1, "typing reused the cached base");
+
+        host.with_state(|st| {
+            st.background.set_padding(60.0);
+            st.background.changed();
+        });
+        render(MotionPaintPart::Complete);
+        assert_eq!(
+            host.base_builds.get(),
+            2,
+            "an appearance change rebuilds it"
+        );
+    }
+
+    #[test]
+    fn pen_drag_frame_matches_a_direct_paint_and_is_built_once() {
+        let host = host();
+        let mut state = EditorState::new(RgbaImage::from_fn(240, 160, |x, y| {
+            image::Rgba([(x % 200) as u8, (y % 150) as u8, 120, 255])
+        }));
+        state.selected_tool = Tool::Highlighter;
+        state.actions = vec![AnnotationAction::Highlighter {
+            points: vec![
+                Point { x: 20.0, y: 30.0 },
+                Point { x: 120.0, y: 60.0 },
+                Point { x: 200.0, y: 40.0 },
+            ],
+            color: crate::capture::editor::types::DrawColor::new(1.0, 0.85, 0.1, 1.0),
+            stroke_size: 14.0,
+        }];
+        *host.editor.borrow_mut() = Some(state);
+        let t = ViewTransform {
+            scale: 0.5,
+            offset_x: 10.0,
+            offset_y: 6.0,
+            canvas_offset_x: 10.0,
+            canvas_offset_y: 6.0,
+            canvas_scale: 0.5,
+            ..ViewTransform::for_image(240.0, 160.0)
+        };
+        let render = |dragging: bool| {
+            host.with_state(|st| {
+                st.drag_start = dragging.then_some(Point { x: 10.0, y: 10.0 });
+            });
+            let mut surface = ImageSurface::create(gtk4::cairo::Format::ARgb32, 160, 120).unwrap();
+            let context = gtk4::cairo::Context::new(&surface).unwrap();
+            host.paint_document_inner(&context, t, None, MotionPaintPart::Complete, false);
+            drop(context);
+            surface.flush();
+            let data = surface.data().unwrap().to_vec();
+            drop(surface);
+            data
+        };
+        let direct = render(false);
+        let dragged = render(true);
+        render(true);
+        assert_eq!(
+            host.drag_frame_builds.get(),
+            1,
+            "the frame is reused across a drag"
+        );
+        let worst = direct
+            .iter()
+            .zip(&dragged)
+            .map(|(a, b)| a.abs_diff(*b))
+            .max()
+            .unwrap_or(0);
+        assert!(
+            worst <= 2,
+            "pen drag frame differs from a direct paint by {worst}"
+        );
+        render(false);
+        render(true);
+        assert_eq!(
+            host.drag_frame_builds.get(),
+            2,
+            "a new drag rebuilds the frame"
+        );
     }
 
     #[test]
@@ -4011,6 +4677,222 @@ mod tests {
         h.with_state(|st| st.add_text_input_char('x'));
         h.set_tool(Tool::Pen);
         assert_eq!(h.read(|st| st.actions.len()), Some(2));
+    }
+
+    fn text_host(width: u32, height: u32) -> Rc<EditorHost> {
+        let h = host();
+        h.load_document_headless(test_image(width, height));
+        h.set_tool(Tool::Text);
+        h
+    }
+
+    fn start_text_drag(
+        st: &mut EditorState,
+        handle: Option<MoveHandle>,
+        resizing: bool,
+        at: Point,
+    ) {
+        st.active_text_is_dragging = true;
+        st.active_text_drag_handle = handle;
+        st.active_text_is_resizing = resizing;
+        st.active_text_drag_start = Some(at);
+        st.active_text_drag_start_bounds = st.active_text_bounds.as_ref().map(|b| b.rect);
+    }
+
+    #[test]
+    fn resize_corner_scales_the_live_text_while_dragging() {
+        let h = text_host(800, 600);
+        let t = ViewTransform::for_image(800.0, 600.0);
+        h.with_state(|st| {
+            st.begin_text_input(Point { x: 20.0, y: 60.0 }, 220.0, 44.0);
+            st.insert_text_input_str("Hi");
+            st.fit_active_text_to_layout();
+            let before = st.text_size;
+            let rect = st.active_text_bounds.as_ref().unwrap().rect;
+            let corner = Point {
+                x: f64::from(rect.x + rect.width),
+                y: f64::from(rect.y + rect.height),
+            };
+            start_text_drag(st, None, true, corner);
+            h.update_active_text_drag(
+                st,
+                &t,
+                Point {
+                    x: corner.x + 300.0,
+                    y: corner.y + 200.0,
+                },
+            );
+            assert!(st.active_text_is_dragging, "still mid-drag");
+            assert!(st.text_size > before, "{} -> {}", before, st.text_size);
+        });
+    }
+
+    #[test]
+    fn dragging_committed_text_handles_reflows_it_live() {
+        let h = text_host(800, 600);
+        let t = ViewTransform::for_image(800.0, 600.0);
+        h.with_state(|st| {
+            st.begin_text_input(Point { x: 20.0, y: 60.0 }, 400.0, 44.0);
+            st.insert_text_input_str("one two three four");
+            st.fit_active_text_to_layout();
+            assert!(st.commit_active_text_input());
+            let index = st.actions.len() - 1;
+            st.selected_action_index = Some(index);
+            st.active_text_bounds = committed_text_bounds(st, index);
+            let rect = st.active_text_bounds.as_ref().unwrap().rect;
+            let right = Point {
+                x: f64::from(rect.x + rect.width),
+                y: f64::from(rect.y),
+            };
+            start_text_drag(st, Some(MoveHandle::Right), false, right);
+            h.update_active_text_drag(
+                st,
+                &t,
+                Point {
+                    x: right.x + 120.0,
+                    y: right.y,
+                },
+            );
+            let Some(AnnotationAction::Text { max_width, .. }) = st.actions.get(index) else {
+                panic!("text action");
+            };
+            assert_eq!(*max_width, Some(f64::from(rect.width + 120)));
+
+            let size = |st: &EditorState| match st.actions.get(index) {
+                Some(AnnotationAction::Text { font, .. }) => font.size,
+                _ => 0.0,
+            };
+            let before = size(st);
+            st.active_text_drag_start_bounds = st.active_text_bounds.as_ref().map(|b| b.rect);
+            let rect = st.active_text_bounds.as_ref().unwrap().rect;
+            let corner = Point {
+                x: f64::from(rect.x + rect.width),
+                y: f64::from(rect.y + rect.height),
+            };
+            st.active_text_drag_start = Some(corner);
+            st.active_text_drag_handle = None;
+            st.active_text_is_resizing = true;
+            h.update_active_text_drag(
+                st,
+                &t,
+                Point {
+                    x: corner.x + 200.0,
+                    y: corner.y + 200.0,
+                },
+            );
+            assert!(size(st) > before, "{} -> {}", before, size(st));
+        });
+    }
+
+    #[test]
+    fn text_size_changes_resize_the_live_box_both_ways() {
+        let h = text_host(800, 600);
+        h.with_state(|st| {
+            st.set_text_size(24.0);
+            st.begin_text_input(Point { x: 20.0, y: 60.0 }, 220.0, 44.0);
+            st.insert_text_input_str("Hello\nthere");
+            st.fit_active_text_to_layout();
+            let width = |st: &EditorState| st.active_text_bounds.as_ref().unwrap().rect.width;
+            let height = |st: &EditorState| st.active_text_bounds.as_ref().unwrap().rect.height;
+            let (w24, h24) = (width(st), height(st));
+            set_text_size_and_fit(st, 48.0);
+            assert!(width(st) > w24 && height(st) > h24, "grows at once");
+            set_text_size_and_fit(st, 16.0);
+            assert!(width(st) < w24 && height(st) < h24, "shrinks at once");
+        });
+    }
+
+    #[test]
+    fn a_text_box_can_grow_into_the_background_padding() {
+        let h = text_host(200, 100);
+        h.with_state(|st| {
+            st.background.fill = crate::capture::editor::state::background::Fill::Image(Arc::new(
+                RgbaImage::from_pixel(1, 1, image::Rgba([0, 0, 255, 255])),
+            ));
+            st.background.set_padding(60.0);
+            st.begin_text_input(Point { x: 150.0, y: 40.0 }, 220.0, 44.0);
+            st.insert_text_input_str("a much longer line of text");
+            st.fit_active_text_to_layout();
+            let rect = st.active_text_bounds.as_ref().unwrap().rect;
+            assert!(
+                rect.x + rect.width > 200,
+                "box stops at the screenshot: {rect:?}"
+            );
+        });
+    }
+
+    #[test]
+    fn pasted_text_lands_at_the_caret_with_newline_breaks() {
+        let h = loaded(Tool::Text);
+        h.with_state(|st| {
+            st.begin_text_input(
+                crate::capture::editor::types::Point { x: 5.0, y: 5.0 },
+                100.0,
+                24.0,
+            );
+            st.insert_text_input_str("ab");
+            st.move_cursor_left();
+            assert!(insert_into_active_text(st, "Tiếng\r\nViệt\r"));
+            assert_eq!(
+                st.get_text_input().map(|input| input.text.clone()),
+                Some("aTiếng\nViệt\nb".to_string())
+            );
+            st.cancel_text_input();
+            assert!(!insert_into_active_text(st, "x"));
+        });
+    }
+
+    #[test]
+    fn paste_shortcuts_stay_with_the_live_text_box() {
+        let h = loaded(Tool::Text);
+        h.with_state(|st| {
+            st.begin_text_input(
+                crate::capture::editor::types::Point { x: 5.0, y: 5.0 },
+                100.0,
+                24.0,
+            )
+        });
+        assert_eq!(h.handle_key(gdk::Key::v, ctrl()), Propagation::Stop);
+        assert_eq!(
+            h.handle_key(gdk::Key::Insert, gdk::ModifierType::SHIFT_MASK),
+            Propagation::Stop
+        );
+        assert_eq!(
+            h.read(|st| st.get_text_input().map(|input| input.text.is_empty())),
+            Some(Some(true))
+        );
+    }
+
+    #[test]
+    fn input_method_commits_into_the_live_text_box_only() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let h = loaded(Tool::Text);
+            let area = DrawingArea::new();
+            h.install_text_input_method(&area, Rc::new(|| ViewTransform::for_image(64.0, 64.0)));
+            let im = h.text_input_method.borrow().clone().expect("input method");
+            im.emit_by_name::<()>("commit", &[&"dropped"]);
+            assert_eq!(h.read(|st| st.active_text_input.is_none()), Some(true));
+            h.with_state(|st| {
+                st.begin_text_input(
+                    crate::capture::editor::types::Point { x: 5.0, y: 5.0 },
+                    100.0,
+                    24.0,
+                )
+            });
+            h.changed();
+            assert!(h.text_input_focused.get());
+            im.emit_by_name::<()>("commit", &[&"Tiếng Việt"]);
+            assert_eq!(
+                h.read(|st| st.get_text_input().map(|input| input.text.clone())),
+                Some(Some("Tiếng Việt".to_string()))
+            );
+            h.with_state(|st| st.cancel_text_input());
+            h.changed();
+            assert!(!h.text_input_focused.get());
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
     }
 
     #[test]

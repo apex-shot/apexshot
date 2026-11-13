@@ -216,62 +216,160 @@ pub fn layout_wrapped_text(
     max_width: f64,
 ) -> TextLayout {
     let allowed_width = max_width.max(font.size * 0.8).max(1.0);
+    let _ = context.save();
+    apply_font_settings(context, font);
+    let measure = |s: &str| -> f64 {
+        if s.is_empty() {
+            return 0.0;
+        }
+        context
+            .text_extents(s)
+            .map(|extents| extents.x_advance().max(extents.width()))
+            .unwrap_or(0.0)
+    };
+    let chars: Vec<char> = text.chars().collect();
     let mut lines = Vec::new();
-    let mut current = String::new();
-    let mut current_start = 0usize;
-    let mut current_end = 0usize;
     let mut max_line_width: f64 = 0.0;
-
-    for (char_idx, ch) in text.chars().enumerate() {
-        if ch == '\n' {
-            max_line_width = max_line_width.max(measure_text_width(context, &current, font));
-            lines.push(TextLayoutLine {
-                text: current.clone(),
-                start_char: current_start,
-                end_char: current_end,
-            });
-            current.clear();
-            current_start = char_idx + 1;
-            current_end = char_idx + 1;
-            continue;
+    let mut paragraph_start = 0usize;
+    loop {
+        let paragraph_end = chars[paragraph_start..]
+            .iter()
+            .position(|ch| *ch == '\n')
+            .map_or(chars.len(), |offset| paragraph_start + offset);
+        wrap_paragraph(
+            &chars,
+            paragraph_start,
+            paragraph_end,
+            allowed_width,
+            &measure,
+            &mut lines,
+            &mut max_line_width,
+        );
+        if paragraph_end >= chars.len() {
+            break;
         }
-
-        let mut candidate = current.clone();
-        candidate.push(ch);
-        let candidate_width = measure_text_width(context, &candidate, font);
-
-        if !current.is_empty() && candidate_width > allowed_width {
-            max_line_width = max_line_width.max(measure_text_width(context, &current, font));
-            lines.push(TextLayoutLine {
-                text: current.clone(),
-                start_char: current_start,
-                end_char: current_end,
-            });
-            current.clear();
-            current.push(ch);
-            current_start = char_idx;
-            current_end = char_idx + 1;
-        } else {
-            current = candidate;
-            current_end = char_idx + 1;
-            max_line_width = max_line_width.max(candidate_width.min(allowed_width));
-        }
+        paragraph_start = paragraph_end + 1;
     }
-
-    let ends_with_newline = text.ends_with('\n');
-    if !current.is_empty() || lines.is_empty() || ends_with_newline {
-        max_line_width = max_line_width.max(measure_text_width(context, &current, font));
-        lines.push(TextLayoutLine {
-            text: current,
-            start_char: current_start,
-            end_char: current_end,
-        });
-    }
-
+    let _ = context.restore();
     TextLayout {
         lines,
         max_width: max_line_width.min(allowed_width),
     }
+}
+
+/// Greedy word wrap of `chars[start..end]` (one paragraph, no newlines).
+fn wrap_paragraph(
+    chars: &[char],
+    start: usize,
+    end: usize,
+    allowed_width: f64,
+    measure: &dyn Fn(&str) -> f64,
+    lines: &mut Vec<TextLayoutLine>,
+    max_line_width: &mut f64,
+) {
+    let mut line_start = start;
+    let mut pos = start;
+    while pos < end {
+        let word_start = pos;
+        let mut word_end = pos;
+        while word_end < end && !chars[word_end].is_whitespace() {
+            word_end += 1;
+        }
+        let mut token_end = word_end;
+        while token_end < end && chars[token_end].is_whitespace() {
+            token_end += 1;
+        }
+        let candidate: String = chars[line_start..word_end].iter().collect();
+        if measure(&candidate) <= allowed_width {
+            pos = token_end;
+            continue;
+        }
+        if line_start < word_start {
+            push_wrapped_line(
+                chars,
+                line_start,
+                word_start,
+                false,
+                measure,
+                lines,
+                max_line_width,
+            );
+            line_start = word_start;
+            continue;
+        }
+        line_start = break_long_word(
+            chars,
+            line_start,
+            word_end,
+            allowed_width,
+            measure,
+            lines,
+            max_line_width,
+        );
+        pos = token_end;
+    }
+    push_wrapped_line(chars, line_start, end, true, measure, lines, max_line_width);
+}
+
+/// Split a word too wide for a line into the widest prefixes that fit,
+/// pushing each full line; returns where the remainder starts.
+fn break_long_word(
+    chars: &[char],
+    start: usize,
+    word_end: usize,
+    allowed_width: f64,
+    measure: &dyn Fn(&str) -> f64,
+    lines: &mut Vec<TextLayoutLine>,
+    max_line_width: &mut f64,
+) -> usize {
+    let mut line_start = start;
+    loop {
+        let rest: String = chars[line_start..word_end].iter().collect();
+        if measure(&rest) <= allowed_width {
+            return line_start;
+        }
+        let mut split = line_start + 1;
+        while split < word_end {
+            let prefix: String = chars[line_start..=split].iter().collect();
+            if measure(&prefix) > allowed_width {
+                break;
+            }
+            split += 1;
+        }
+        push_wrapped_line(
+            chars,
+            line_start,
+            split,
+            false,
+            measure,
+            lines,
+            max_line_width,
+        );
+        line_start = split;
+    }
+}
+
+fn push_wrapped_line(
+    chars: &[char],
+    start: usize,
+    end: usize,
+    last_in_paragraph: bool,
+    measure: &dyn Fn(&str) -> f64,
+    lines: &mut Vec<TextLayoutLine>,
+    max_line_width: &mut f64,
+) {
+    let text: String = chars[start..end].iter().collect();
+    let width = if last_in_paragraph {
+        measure(&text)
+    } else {
+        measure(text.trim_end())
+    };
+    *max_line_width = max_line_width.max(width);
+    lines.push(TextLayoutLine {
+        text,
+        start_char: start,
+        end_char: end,
+    });
 }
 pub fn draw_text(
     context: &gtk4::cairo::Context,
@@ -549,4 +647,86 @@ pub fn draw_active_text_input(
     }
 
     let _ = context.restore();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn context() -> gtk4::cairo::Context {
+        let surface =
+            gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::ARgb32, 1, 1).expect("surface");
+        gtk4::cairo::Context::new(&surface).expect("context")
+    }
+
+    fn font() -> FontSettings {
+        FontSettings {
+            family: "Sans".into(),
+            size: 24.0,
+            style: FontStyle::Normal,
+            decoration: TextDecoration::None,
+            alignment: TextAlignment::Left,
+        }
+    }
+
+    #[test]
+    fn wraps_at_word_boundaries() {
+        let context = context();
+        let font = font();
+        let text = "godwin mayodi is the best in the world";
+        let width = measure_text_width(&context, "godwin mayodi is", &font) + 2.0;
+        let layout = layout_wrapped_text(&context, text, &font, width);
+        assert!(layout.lines.len() > 1);
+        let joined: String = layout.lines.iter().map(|line| line.text.as_str()).collect();
+        assert_eq!(joined, text);
+        for pair in layout.lines.windows(2) {
+            assert_eq!(pair[0].end_char, pair[1].start_char);
+            assert!(
+                pair[0].text.ends_with(' '),
+                "{:?} breaks mid-word",
+                pair[0].text
+            );
+        }
+        for line in &layout.lines {
+            assert!(measure_text_width(&context, line.text.trim_end(), &font) <= width);
+        }
+    }
+
+    #[test]
+    fn breaks_a_word_wider_than_the_line_by_characters() {
+        let context = context();
+        let font = font();
+        let text = "supercalifragilistic";
+        let width = measure_text_width(&context, "superca", &font) + 1.0;
+        let layout = layout_wrapped_text(&context, text, &font, width);
+        assert!(layout.lines.len() > 1);
+        let joined: String = layout.lines.iter().map(|line| line.text.as_str()).collect();
+        assert_eq!(joined, text);
+        for line in &layout.lines {
+            assert!(!line.text.is_empty());
+            assert!(measure_text_width(&context, &line.text, &font) <= width);
+        }
+    }
+
+    #[test]
+    fn newlines_and_empty_text_keep_their_char_ranges() {
+        let context = context();
+        let font = font();
+        let ranges = |text: &str| {
+            layout_wrapped_text(&context, text, &font, 1000.0)
+                .lines
+                .iter()
+                .map(|line| (line.text.clone(), line.start_char, line.end_char))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ranges(""), vec![(String::new(), 0, 0)]);
+        assert_eq!(
+            ranges("a\n"),
+            vec![("a".to_string(), 0, 1), (String::new(), 2, 2)]
+        );
+        assert_eq!(
+            ranges("a\nb"),
+            vec![("a".to_string(), 0, 1), ("b".to_string(), 2, 3)]
+        );
+    }
 }

@@ -4516,11 +4516,11 @@ msgstr "Tamaño estimado: {size}"
 msgid "Export time ≈ {time}"
 msgstr "Tiempo de exportación ≈ {time}"
 
-msgid "Backgrounds and style"
-msgstr "Fondos y estilo"
+msgid "Frame styles and shadows"
+msgstr "Estilos de marco y sombras"
 
-msgid "Wallpapers, padding, rounded corners, shadows and frames for stills."
-msgstr "Fondos de pantalla, márgenes, esquinas redondeadas, sombras y marcos para imágenes fijas."
+msgid "Frame styles and shadows for stills."
+msgstr "Estilos de marco y sombras para imágenes fijas."
 
 msgid "Included with Studio"
 msgstr "Incluido en Studio"
@@ -4746,3 +4746,111 @@ msgstr "Los vídeos de movimiento que exportes aparecen en Grabaciones. Los proy
 
 msgid "Expires in {time}"
 msgstr "Caduca en {time}"
+
+msgid "Background music"
+msgstr "Música de fondo"
+
+msgid "Choose background music"
+msgstr "Elegir música de fondo"
+
+msgid "Clip {current} of {total}"
+msgstr "Vídeo {current} de {total}"
+
+msgid "Clips"
+msgstr "Vídeos"
+
+msgid "Length {original}"
+msgstr "Duración {original}"
+
+msgid "Microphone"
+msgstr "Micrófono"
+
+msgid "Microphone volume"
+msgstr "Volumen del micrófono"
+
+msgid "Music volume"
+msgstr "Volumen de la música"
+
+msgid "Mute clip"
+msgstr "Silenciar vídeo"
+
+msgid "Mute microphone"
+msgstr "Silenciar micrófono"
+
+msgid "Mute music"
+msgstr "Silenciar música"
+
+msgid "Mute system sound"
+msgstr "Silenciar el audio del sistema"
+
+msgid "Muted"
+msgstr "Silenciado"
+
+msgid "Remove music"
+msgstr "Eliminar música"
+
+msgid "Select a clip on the timeline to change its speed and sound."
+msgstr "Selecciona un vídeo en la línea de tiempo para cambiar su velocidad y su sonido."
+
+msgid "Select music…"
+msgstr "Seleccionar música…"
+
+msgid "System sound"
+msgstr "Audio del sistema"
+
+msgid "System sound volume"
+msgstr "Volumen del audio del sistema"
+
+msgid "This recording has no sound. Turn on the microphone or system audio before recording."
+msgstr "Esta grabación no tiene sonido. Activa el micrófono o el audio del sistema antes de grabar."
+
+msgid "{original} at 1× · {now} at {speed}"
+msgstr "{original} a 1× · {now} a {speed}"
+
+msgid "Loud"
+msgstr "Alto"
+
+msgid "Noise reduction"
+msgstr "Reducción de ruido"
+
+msgid "Podcast"
+msgstr "Pódcast"
+
+msgid "Warm"
+msgstr "Cálido"
+
+msgid "Even, natural voice"
+msgstr "Voz natural y uniforme"
+
+msgid "Punchy and compressed"
+msgstr "Potente y comprimida"
+
+msgid "Removes steady noise"
+msgstr "Elimina el ruido constante"
+
+msgid "Warm, polished voice"
+msgstr "Voz cálida y pulida"
+
+msgid "Fuller, deeper tone"
+msgstr "Tono más lleno y profundo"
+
+msgid "As recorded"
+msgstr "Tal como se grabó"
+
+msgid "Evens out your voice so it stays at one level."
+msgstr "Iguala tu voz para que se mantenga en un mismo nivel."
+
+msgid "Louder, compressed voice that cuts through music."
+msgstr "Voz más alta y comprimida que se abre paso sobre la música."
+
+msgid "Removes steady background noise, then evens out the voice."
+msgstr "Elimina el ruido de fondo constante y luego iguala la voz."
+
+msgid "Full, warm voice with softened hiss and sibilance."
+msgstr "Voz llena y cálida con el siseo y la sibilancia suavizados."
+
+msgid "Adds body to thin microphones."
+msgstr "Da cuerpo a los micrófonos de sonido fino."
+
+msgid "Keeps the microphone exactly as it was recorded."
+msgstr "Mantiene el micrófono tal como se grabó."

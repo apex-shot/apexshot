@@ -2,11 +2,11 @@ use super::*;
 
 #[test]
 fn draft_action_uses_selected_color() {
-    let mut state = EditorState::new(RgbaImage::new(20, 20));
+    let mut state = EditorState::new(RgbaImage::new(100, 100));
     state.set_tool(Tool::Arrow);
     state.set_color_index(3);
-    state.begin_drag(Point { x: 2.0, y: 2.0 });
-    state.update_drag(Point { x: 8.0, y: 8.0 });
+    state.begin_drag(Point { x: 10.0, y: 10.0 });
+    state.update_drag(Point { x: 80.0, y: 80.0 });
 
     match state.draft_action().unwrap() {
         AnnotationAction::Arrow { color, .. } => {

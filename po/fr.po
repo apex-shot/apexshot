@@ -4528,11 +4528,11 @@ msgstr "Taille estimée : {size}"
 msgid "Export time ≈ {time}"
 msgstr "Durée d’exportation ≈ {time}"
 
-msgid "Backgrounds and style"
-msgstr "Arrière-plans et style"
+msgid "Frame styles and shadows"
+msgstr "Styles de cadre et ombres"
 
-msgid "Wallpapers, padding, rounded corners, shadows and frames for stills."
-msgstr "Fonds d’écran, marges, coins arrondis, ombres et cadres pour les images fixes."
+msgid "Frame styles and shadows for stills."
+msgstr "Styles de cadre et ombres pour les images fixes."
 
 msgid "Included with Studio"
 msgstr "Inclus dans Studio"
@@ -4758,3 +4758,111 @@ msgstr "Les vidéos Motion que vous exportez apparaissent dans Enregistrements. 
 
 msgid "Expires in {time}"
 msgstr "Expire dans {time}"
+
+msgid "Background music"
+msgstr "Musique d’arrière-plan"
+
+msgid "Choose background music"
+msgstr "Choisir une musique d’arrière-plan"
+
+msgid "Clip {current} of {total}"
+msgstr "Extrait {current} sur {total}"
+
+msgid "Clips"
+msgstr "Extraits"
+
+msgid "Length {original}"
+msgstr "Durée {original}"
+
+msgid "Microphone"
+msgstr "Microphone"
+
+msgid "Microphone volume"
+msgstr "Volume du microphone"
+
+msgid "Music volume"
+msgstr "Volume de la musique"
+
+msgid "Mute clip"
+msgstr "Désactiver le son de l’extrait"
+
+msgid "Mute microphone"
+msgstr "Désactiver le son du microphone"
+
+msgid "Mute music"
+msgstr "Désactiver le son de la musique"
+
+msgid "Mute system sound"
+msgstr "Désactiver le son du système"
+
+msgid "Muted"
+msgstr "Son coupé"
+
+msgid "Remove music"
+msgstr "Supprimer la musique"
+
+msgid "Select a clip on the timeline to change its speed and sound."
+msgstr "Sélectionnez un extrait sur la timeline pour modifier sa vitesse et son audio."
+
+msgid "Select music…"
+msgstr "Choisir une musique…"
+
+msgid "System sound"
+msgstr "Son du système"
+
+msgid "System sound volume"
+msgstr "Volume du son système"
+
+msgid "This recording has no sound. Turn on the microphone or system audio before recording."
+msgstr "Cet enregistrement n’a pas de son. Activez le microphone ou l’audio système avant d’enregistrer."
+
+msgid "{original} at 1× · {now} at {speed}"
+msgstr "{original} à 1× · {now} à {speed}"
+
+msgid "Loud"
+msgstr "Fort"
+
+msgid "Noise reduction"
+msgstr "Réduction du bruit"
+
+msgid "Podcast"
+msgstr "Podcast"
+
+msgid "Warm"
+msgstr "Chaleureux"
+
+msgid "Even, natural voice"
+msgstr "Voix naturelle et régulière"
+
+msgid "Punchy and compressed"
+msgstr "Percutante et compressée"
+
+msgid "Removes steady noise"
+msgstr "Élimine le bruit constant"
+
+msgid "Warm, polished voice"
+msgstr "Voix chaleureuse et soignée"
+
+msgid "Fuller, deeper tone"
+msgstr "Timbre plus plein et plus grave"
+
+msgid "As recorded"
+msgstr "Tel qu’enregistré"
+
+msgid "Evens out your voice so it stays at one level."
+msgstr "Uniformise votre voix pour qu’elle reste à un niveau constant."
+
+msgid "Louder, compressed voice that cuts through music."
+msgstr "Une voix plus forte et compressée qui passe au-dessus de la musique."
+
+msgid "Removes steady background noise, then evens out the voice."
+msgstr "Élimine le bruit de fond constant, puis uniformise la voix."
+
+msgid "Full, warm voice with softened hiss and sibilance."
+msgstr "Voix pleine et chaleureuse, avec souffle et sibilantes adoucis."
+
+msgid "Adds body to thin microphones."
+msgstr "Donne du corps aux microphones au son fin."
+
+msgid "Keeps the microphone exactly as it was recorded."
+msgstr "Conserve le microphone exactement tel qu’il a été enregistré."

@@ -1,8 +1,8 @@
 #[cfg(test)]
 use super::color::SELECT_HANDLE_HIT_RADIUS;
 use super::color::{highlighter_stroke_width, SELECT_MIN_RESIZE_SIZE};
-use super::render::{double_arrow_outline_points, text_action_bounds, thorn_arrow_outline_points};
-use super::types::{AnnotationAction, ArrowStyle, Point, Rect, SelectHandle};
+use super::render::{arrow_geometry, text_action_bounds};
+use super::types::{AnnotationAction, Point, Rect, SelectHandle};
 
 pub fn action_bounds_with_padding(action: &AnnotationAction, padding: f64) -> Option<Rect> {
     match action {
@@ -50,23 +50,16 @@ pub fn action_bounds_with_padding(action: &AnnotationAction, padding: f64) -> Op
             control_points,
             ..
         } => {
-            let pad = padding;
-            let outline = match style {
-                ArrowStyle::Double => {
-                    double_arrow_outline_points(*start, *end, *stroke_size, control_points)
-                }
-                ArrowStyle::Fancy => {
-                    thorn_arrow_outline_points(*start, *end, *stroke_size, false, control_points)
-                }
-                _ => thorn_arrow_outline_points(*start, *end, *stroke_size, true, control_points),
-            };
-            if let Some(bounds) = polygon_bounds(&outline) {
-                Rect::from_bounds(
-                    bounds.x as f64 - pad,
-                    bounds.y as f64 - pad,
-                    (bounds.x + bounds.width) as f64 + pad,
-                    (bounds.y + bounds.height) as f64 + pad,
-                )
+            if let Some(geometry) =
+                arrow_geometry(*start, *end, *stroke_size, *style, control_points)
+            {
+                let points: Vec<Point> = geometry
+                    .body
+                    .iter()
+                    .copied()
+                    .chain(geometry.heads.iter().flatten().copied())
+                    .collect();
+                stroke_bounds(&points, geometry.line_width / 2.0 + padding)
             } else {
                 // Fallback to centerline bounds
                 let p = *stroke_size + padding;
@@ -145,24 +138,16 @@ pub fn action_contains_point_with_padding(
             control_points,
             ..
         } => {
-            let outline = match style {
-                ArrowStyle::Double => {
-                    double_arrow_outline_points(*start, *end, *stroke_size, control_points)
-                }
-                ArrowStyle::Fancy => {
-                    thorn_arrow_outline_points(*start, *end, *stroke_size, false, control_points)
-                }
-                _ => thorn_arrow_outline_points(*start, *end, *stroke_size, true, control_points),
-            };
-            if outline.is_empty() {
+            let Some(geometry) = arrow_geometry(*start, *end, *stroke_size, *style, control_points)
+            else {
                 return false;
-            }
-            // Check if point is inside the rendered outline polygon
-            if point_in_polygon(point, &outline) {
-                return true;
-            }
-            // Also allow clicking within padding distance of the outline edges
-            distance_to_polygon(point, &outline) <= padding + 4.0
+            };
+            let threshold = geometry.line_width / 2.0 + padding + 2.0;
+            stroke_contains_point(&geometry.body, point, threshold)
+                || geometry
+                    .heads
+                    .iter()
+                    .any(|head| stroke_contains_point(head, point, threshold))
         }
         _ => action_bounds_with_padding(action, padding)
             .map(|rect| rect_contains_point(rect, point, 0.0))
@@ -536,60 +521,4 @@ fn stroke_contains_point(points: &[Point], point: Point, threshold: f64) -> bool
     points
         .windows(2)
         .any(|pair| distance_to_segment(point, pair[0], pair[1]) <= threshold)
-}
-
-/// Ray-casting point-in-polygon test.
-fn point_in_polygon(point: Point, polygon: &[Point]) -> bool {
-    if polygon.len() < 3 {
-        return false;
-    }
-    let mut inside = false;
-    let n = polygon.len();
-    let mut j = n - 1;
-    for i in 0..n {
-        let pi = &polygon[i];
-        let pj = &polygon[j];
-        if ((pi.y > point.y) != (pj.y > point.y))
-            && (point.x < (pj.x - pi.x) * (point.y - pi.y) / (pj.y - pi.y) + pi.x)
-        {
-            inside = !inside;
-        }
-        j = i;
-    }
-    inside
-}
-
-/// Minimum distance from a point to any edge of a polygon.
-fn distance_to_polygon(point: Point, polygon: &[Point]) -> f64 {
-    if polygon.len() < 2 {
-        return f64::INFINITY;
-    }
-    let mut min_dist = f64::INFINITY;
-    let n = polygon.len();
-    for i in 0..n {
-        let j = (i + 1) % n;
-        let d = distance_to_segment(point, polygon[i], polygon[j]);
-        if d < min_dist {
-            min_dist = d;
-        }
-    }
-    min_dist
-}
-
-/// Bounding box of a polygon.
-fn polygon_bounds(polygon: &[Point]) -> Option<Rect> {
-    if polygon.is_empty() {
-        return None;
-    }
-    let mut min_x = polygon[0].x;
-    let mut min_y = polygon[0].y;
-    let mut max_x = polygon[0].x;
-    let mut max_y = polygon[0].y;
-    for p in &polygon[1..] {
-        min_x = min_x.min(p.x);
-        min_y = min_y.min(p.y);
-        max_x = max_x.max(p.x);
-        max_y = max_y.max(p.y);
-    }
-    Rect::from_bounds(min_x, min_y, max_x, max_y)
 }

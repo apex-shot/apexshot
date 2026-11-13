@@ -71,21 +71,6 @@ fn studio_badge() -> Label {
     badge
 }
 
-/// [`section_card`] with a Studio badge at the end of its heading row.
-fn studio_section_card(title: &str, scale: f64) -> GtkBox {
-    let section = GtkBox::new(Orientation::Vertical, px(8.0, scale));
-    section.add_css_class("image-editor-section");
-    let header = GtkBox::new(Orientation::Horizontal, px(8.0, scale));
-    let heading = Label::new(Some(&t(title)));
-    heading.add_css_class("image-editor-section-title");
-    heading.set_xalign(0.0);
-    heading.set_hexpand(true);
-    header.append(&heading);
-    header.append(&studio_badge());
-    section.append(&header);
-    section
-}
-
 fn disclosure_row(title: &str, body: &GtkBox, scale: f64) -> GtkBox {
     disclosure_row_with_badge(title, body, scale, false)
 }
@@ -2065,7 +2050,7 @@ fn background_card(
     column: &GtkBox,
     window: &gtk4::ApplicationWindow,
 ) -> (GtkBox, Rc<dyn Fn()>, BackdropAction) {
-    let section = studio_section_card("Background", scale);
+    let section = section_card("Background", scale);
 
     // "None" clears the fill outright. It is not a fourth source tab, so it
     // sits under the tray on every tab rather than inside it, and it carries
@@ -2767,8 +2752,8 @@ mod tests {
             assert_eq!(count(free.upcast_ref()), 0);
             let (shadow, _) = shadow_disclosure(1.0, None);
             assert_eq!(count(shadow.upcast_ref()), 1);
-            let background = studio_section_card("Background", 1.0);
-            assert_eq!(count(background.upcast_ref()), 1);
+            let background = section_card("Background", 1.0);
+            assert_eq!(count(background.upcast_ref()), 0);
         }) else {
             return;
         };

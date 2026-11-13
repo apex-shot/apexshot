@@ -819,8 +819,8 @@ fn themed_icon(dark: bool, dark_icon: &'static str, light_icon: &'static str) ->
 fn feature_copy(feature: Feature, dark: bool) -> (String, String, &'static str) {
     match feature {
         Feature::Style => (
-            t("Backgrounds and style"),
-            t("Wallpapers, padding, rounded corners, shadows and frames for stills."),
+            t("Frame styles and shadows"),
+            t("Frame styles and shadows for stills."),
             custom::IMAGE_ALT_SYMBOLIC,
         ),
         Feature::Motion => (

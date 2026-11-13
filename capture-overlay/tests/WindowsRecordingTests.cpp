@@ -535,6 +535,8 @@ int recordOnce(bool pauseAndResume)
     request.includeCursor = false;
     request.captureKeystrokes = !qEnvironmentVariableIsEmpty("APEXSHOT_TEST_KEYSTROKES");
     request.includeMicrophone = !qEnvironmentVariableIsEmpty("APEXSHOT_TEST_MIC");
+    if (!qEnvironmentVariableIsEmpty("APEXSHOT_TEST_SYSTEM_AUDIO"))
+        request.systemAudio = Platform::RecordingRequest::SystemAudio::AllApps;
     request.fps = fps;
     request.crf = 28;
     request.hevc = !qEnvironmentVariableIsEmpty("APEXSHOT_TEST_HEVC");
@@ -597,6 +599,27 @@ int recordOnce(bool pauseAndResume)
                                  && qEnvironmentVariableIsEmpty("APEXSHOT_TEST_FULL_SCREEN_ONCE")
                                  && !validateSidecar(output, recordedSeconds))
                                  result = 1;
+                             if (!pauseAndResume) {
+                                 const QString trackBase = Platform::sidecarPathFor(output);
+                                 QStringList soundTracks;
+                                 if (request.includeMicrophone)
+                                     soundTracks << trackBase + QStringLiteral(".mic.m4a");
+                                 if (request.systemAudio
+                                     != Platform::RecordingRequest::SystemAudio::Off)
+                                     soundTracks << trackBase + QStringLiteral(".system.m4a");
+                                 for (const QString& track : soundTracks) {
+                                     const QFileInfo trackInfo(track);
+                                     if (trackInfo.exists() && trackInfo.size() > 0) {
+                                         std::printf("OK sound track: %s (%lld bytes)\n",
+                                                     qPrintable(track),
+                                                     static_cast<long long>(trackInfo.size()));
+                                     } else {
+                                         std::printf("FAIL sound track missing: %s\n",
+                                                     qPrintable(track));
+                                         result = 1;
+                                     }
+                                 }
+                             }
                              if (pauseAndResume) {
                                  QFile manifestFile(Platform::recordingManifestPathFor(output));
                                  const QJsonObject manifest =

@@ -238,11 +238,11 @@ mod tests {
 
     #[test]
     fn reversed_arrow_state_survives_selection_and_history() {
-        let mut state = EditorState::new(RgbaImage::new(32, 32));
+        let mut state = EditorState::new(RgbaImage::new(100, 100));
         state.selected_tool = crate::capture::editor::types::Tool::Arrow;
         state.inverse_arrow_direction = true;
-        state.begin_drag(Point { x: 2.0, y: 2.0 });
-        state.update_drag(Point { x: 20.0, y: 20.0 });
+        state.begin_drag(Point { x: 10.0, y: 10.0 });
+        state.update_drag(Point { x: 80.0, y: 80.0 });
         let arrow = state.finalize_drag_action().unwrap();
         assert!(matches!(
             arrow,

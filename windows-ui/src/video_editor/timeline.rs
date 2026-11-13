@@ -4,8 +4,9 @@
 //! the source editor. Every lane is a flat, full-width row, so time zero lands
 //! on one x for the ruler, the filmstrip, the effect pills and the camera lane.
 //! The video lane holds
-//! the trimmed, filmstripped clip; the zoom and cursor-hide lanes always stay
-//! open so clips can be dropped into them, and a recording with a camera track
+//! the trimmed, filmstripped clip; the zoom lane always stays open so clips
+//! can be dropped into it, a recording with sound gets a sound lane beneath it
+//! that draws each piece's waveform, and a recording with a camera track
 //! gets a compact camera-layout lane beneath them whose chips select the
 //! layout changes the Webcam panel edits. The playhead scrubs, playback
 //! advances the clocks, and the zoom pill (or the wheel and scrollbar) scales
@@ -17,7 +18,7 @@ use std::rc::Rc;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use gtk4::cairo::{Context, FontSlant, FontWeight, LinearGradient};
+use gtk4::cairo::{Context, FontSlant, FontWeight, LineCap, LinearGradient};
 use gtk4::prelude::*;
 use gtk4::{
     Adjustment, Align, ApplicationWindow, AspectFrame, Box as GtkBox, Button, CssProvider,
@@ -56,6 +57,9 @@ const MAX_ZOOM_SCALE: f64 = 5.0;
 const HANDLE_INSET: f64 = 6.0;
 const HANDLE_WIDTH: f64 = 4.0;
 const HANDLE_HIT: f64 = 6.0;
+/// Space kept between an effect pill's edge and its label, on both sides, so
+/// the label clears the edge handles a selected pill draws.
+const EFFECT_LABEL_PADDING: f64 = 14.0;
 const PLAYHEAD_HIT: f64 = 6.0;
 /// How far the extend band's white mover line sits inside the panel's edge.
 const EXTEND_MOVER_INSET: f64 = 10.0;
@@ -103,24 +107,24 @@ enum EffectTrack {
 enum TimelineLane {
     #[default]
     Zoom,
-    Hide,
+    Sound,
     Layout,
 }
 
 impl TimelineLane {
-    const ALL: [Self; 3] = [Self::Zoom, Self::Hide, Self::Layout];
+    const ALL: [Self; 3] = [Self::Zoom, Self::Sound, Self::Layout];
 
     fn of_effect(track: EffectTrack) -> Self {
         match track {
             EffectTrack::Zoom => Self::Zoom,
-            EffectTrack::Hide => Self::Hide,
+            EffectTrack::Hide => Self::Sound,
         }
     }
 
     fn index(self) -> usize {
         match self {
             Self::Zoom => 0,
-            Self::Hide => 1,
+            Self::Sound => 1,
             Self::Layout => 2,
         }
     }
@@ -132,7 +136,7 @@ impl TimelineLane {
 struct LaneState {
     camera: bool,
     zoom: bool,
-    hide: bool,
+    sound: bool,
     expanded: TimelineLane,
 }
 
@@ -250,6 +254,21 @@ struct Data {
     /// piece covers stays what it is; its composition length is that footage
     /// divided by this. A missing or unusable entry plays at 1×.
     segment_speeds: Vec<f64>,
+    /// The cut piece the clip controls edit: the piece the user picked on the
+    /// video lane. Absent until one is picked, so a recording that was never
+    /// cut falls back to its only piece.
+    selected_segment: Option<usize>,
+    /// Bumped every time a cut piece is selected, including a repeated click
+    /// on the piece already selected. The Clips panel reveals itself on a new
+    /// selection, and a counter is what tells that apart from a repaint.
+    segment_selection_epoch: u64,
+    /// The recording's loudness over source time, for the sound lane's
+    /// waveform. Absent until the window has measured it.
+    sound_peaks: Option<std::sync::Arc<super::sound::Peaks>>,
+    /// What the recording's sound sources are, set by the window once it has
+    /// looked for them. A silent recording shows no sound lane.
+    has_microphone: bool,
+    has_system: bool,
     /// Source starts of typing suggestions the user applied or removed. A
     /// suggestion whose start is listed here is not offered again.
     typing_suggestions_resolved: Vec<f64>,
@@ -325,6 +344,11 @@ impl Default for Data {
             cuts: Vec::new(),
             segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
+            selected_segment: None,
+            segment_selection_epoch: 0,
+            sound_peaks: None,
+            has_microphone: false,
+            has_system: false,
             typing_suggestions_resolved: Vec::new(),
             moving_segment: None,
             freeze_tail: 0.0,
@@ -699,6 +723,112 @@ impl Data {
         self.segment_speeds.resize(count, 1.0);
     }
 
+    /// Keep one sound per cut piece, and drop a selection the edit took away.
+    /// A list shorter than the segment count is filled with the default, so a
+    /// piece the file never named plays as recorded.
+    fn normalize_clip_sounds(&mut self) {
+        let count = self.segment_count();
+        self.effects.clip_sounds.truncate(count);
+        self.effects
+            .clip_sounds
+            .resize(count, super::sound::ClipSound::default());
+        if self.selected_segment.is_some_and(|index| index >= count) {
+            self.selected_segment = None;
+        }
+    }
+
+    /// The piece the clip controls edit: the selected one, or the only piece a
+    /// recording has. A composition cut into several pieces with nothing
+    /// selected has none.
+    fn clip_segment(&self) -> Option<usize> {
+        if self.selected {
+            return self.selected_segment;
+        }
+        (self.has_media() && self.segment_count() == 1).then_some(0)
+    }
+
+    /// How loud piece `index` plays, 0 when nothing of it is heard: its own
+    /// mute and volumes, the project's microphone and system mutes, and the
+    /// master volume. A recording whose sources are not known yet counts as one
+    /// voice track.
+    fn piece_gain(&self, index: usize) -> f64 {
+        let clip = self
+            .effects
+            .clip_sounds
+            .get(index)
+            .copied()
+            .unwrap_or_default();
+        let sound = &self.effects.sound;
+        let voice = if self.has_microphone && !sound.mute_microphone {
+            clip.mic_gain()
+        } else {
+            0.0
+        };
+        let system = if self.has_system && !sound.mute_system {
+            clip.system_gain()
+        } else {
+            0.0
+        };
+        let base = if !self.has_microphone && !self.has_system {
+            if clip.muted {
+                0.0
+            } else {
+                1.0
+            }
+        } else {
+            voice.max(system)
+        };
+        (base * sound.volume).clamp(0.0, 1.0)
+    }
+
+    fn piece_muted(&self, index: usize) -> bool {
+        self.piece_gain(index) <= 1e-6
+    }
+
+    /// Set one piece's speed and slide the pieces after it, so the composition
+    /// stays continuous instead of leaving a gap where the length changed. The
+    /// step is the caller's to record, and `continuous` folds a slider sweep
+    /// into the one step it opens.
+    fn set_segment_speed(&mut self, index: usize, speed: f64, continuous: bool) -> bool {
+        if !speed.is_finite() {
+            return false;
+        }
+        self.normalize_segment_speeds();
+        self.normalize_clip_sounds();
+        let Some(&(source_start, source_end)) = self.segment_boundaries().get(index) else {
+            return false;
+        };
+        let speed = speed.clamp(MIN_SEGMENT_SPEED, MAX_SEGMENT_SPEED);
+        let old_speed = self.segment_speed(index);
+        if (speed - old_speed).abs() <= 1e-9 {
+            return false;
+        }
+        let before = if continuous {
+            self.record_continuous_edit();
+            None
+        } else {
+            Some(self.snapshot())
+        };
+        let footage = (source_end - source_start).max(0.0);
+        let delta = footage / speed - footage / old_speed;
+        self.segment_speeds[index] = speed;
+        let count = self.segment_count();
+        let mut starts: Vec<f64> = (0..count).map(|piece| self.segment_start(piece)).collect();
+        for start in starts.iter_mut().skip(index + 1) {
+            *start = (*start + delta).max(0.0);
+        }
+        self.segment_starts = starts;
+        self.normalize_segment_starts();
+        self.reproject_anchored_zooms();
+        self.clamp_effects();
+        self.clamp_playhead();
+        self.clamp_scroll();
+        if let Some(before) = before {
+            self.record_edit(before);
+        }
+        true
+    }
+
     fn visible_span(&self) -> f64 {
         if !self.has_media() {
             return PLACEHOLDER_SECONDS;
@@ -797,6 +927,7 @@ impl Data {
         self.scale = 0.0;
         self.playing = false;
         self.selected = false;
+        self.selected_segment = None;
         self.hover = None;
         self.frames.clear();
         self.zoom_clips.clear();
@@ -1089,6 +1220,8 @@ impl Data {
             cursor_click_sound_volume: self.effects.click_sound_volume,
             captions_shortcuts: self.effects.captions.shortcuts,
             captions_show_single_letters: self.effects.captions.show_single_letters,
+            sound: self.effects.sound.clone(),
+            clip_sounds: self.effects.clip_sounds.clone(),
             cursor: Default::default(),
         })
     }
@@ -1204,6 +1337,7 @@ impl Data {
         }
         self.selected_layout = None;
         self.effects = file.effects();
+        self.normalize_clip_sounds();
         self.scale = if file.timeline_scale.is_finite() {
             file.timeline_scale.clamp(0.0, 100.0)
         } else {
@@ -1280,8 +1414,16 @@ impl Data {
             self.segment_speeds.resize(split_index + 1, 1.0);
         }
         self.segment_speeds.insert(split_index + 1, speed);
+        if self.effects.clip_sounds.len() <= split_index {
+            self.effects
+                .clip_sounds
+                .resize(split_index + 1, super::sound::ClipSound::default());
+        }
+        let sound = self.effects.clip_sounds[split_index];
+        self.effects.clip_sounds.insert(split_index + 1, sound);
         self.normalize_segment_starts();
         self.normalize_segment_speeds();
+        self.normalize_clip_sounds();
         self.reproject_anchored_zooms();
         self.record_edit(before);
         true
@@ -1340,6 +1482,7 @@ impl Data {
         let old_speeds: Vec<f64> = (0..old_boundaries.len())
             .map(|index| self.segment_speed(index))
             .collect();
+        let old_clips = self.effects.clip_sounds.clone();
         let old_ends: Vec<f64> = old_boundaries
             .iter()
             .enumerate()
@@ -1403,10 +1546,17 @@ impl Data {
             starts.push(starts[index - 1] + previous_duration + gap);
         }
 
+        let mut clips = Vec::with_capacity(boundaries.len());
+        for &owner in &owners {
+            clips.push(old_clips.get(owner).copied().unwrap_or_default());
+        }
+
         self.segment_starts = starts;
         self.segment_speeds = speeds;
+        self.effects.clip_sounds = clips;
         self.normalize_segment_starts();
         self.normalize_segment_speeds();
+        self.normalize_clip_sounds();
         if !self
             .typing_suggestions_resolved
             .iter()
@@ -1467,22 +1617,24 @@ impl Data {
     }
 
     /// Trimming can leave cuts outside the kept footage; those segments no
-    /// longer exist, and their starts and speeds go with them. A piece that
-    /// survives keeps the start and speed of the old piece whose source span
-    /// holds its new first frame, so trimming across a cut never resets a
-    /// moved or sped piece. The old topology comes from the cuts as they were
-    /// before the trim, because the new trim can hide the very cut that
-    /// identifies the piece.
+    /// longer exist, and their starts, speeds and sound go with them. A piece
+    /// that survives keeps the start, speed and sound of the old piece whose
+    /// source span holds its new first frame, so trimming across a cut never
+    /// resets a moved, sped or silenced piece. The old topology comes from the
+    /// cuts as they were before the trim, because the new trim can hide the
+    /// very cut that identifies the piece.
     fn clamp_cuts(&mut self) {
         let old_cuts = self.cuts.clone();
         let old_starts = self.segment_starts.clone();
         let old_speeds = self.segment_speeds.clone();
+        let old_clips = self.effects.clip_sounds.clone();
         let (start, end) = (self.trim_start, self.trim_end);
         self.cuts
             .retain(|cut| *cut > start + 1e-9 && *cut < end - 1e-9);
         let after = self.segment_boundaries();
         let mut starts = Vec::with_capacity(after.len());
         let mut speeds = Vec::with_capacity(after.len());
+        let mut clips = Vec::with_capacity(after.len());
         for &(source_start, _) in &after {
             let owner = old_cuts.partition_point(|cut| *cut <= source_start + 1e-9);
             starts.push(old_starts.get(owner).copied().unwrap_or(0.0));
@@ -1494,11 +1646,14 @@ impl Data {
                     .map(|speed| speed.clamp(MIN_SEGMENT_SPEED, MAX_SEGMENT_SPEED))
                     .unwrap_or(1.0),
             );
+            clips.push(old_clips.get(owner).copied().unwrap_or_default());
         }
         self.segment_starts = starts;
         self.segment_speeds = speeds;
+        self.effects.clip_sounds = clips;
         self.normalize_segment_starts();
         self.normalize_segment_speeds();
+        self.normalize_clip_sounds();
     }
 
     fn effect_count(&self, track: EffectTrack) -> usize {
@@ -1578,6 +1733,7 @@ impl Data {
         }
         if index.is_some() {
             self.selected = false;
+            self.selected_segment = None;
             // Selecting a clip puts the Add zoom tool away, as in the studied build.
             self.add_zoom_tool = false;
             self.expanded_lane = TimelineLane::of_effect(track);
@@ -1854,8 +2010,9 @@ impl Data {
     }
 
     /// The lane flags come from one snapshot, so the rows cannot disagree
-    /// about which ones exist. Both effect rows are permanent drop targets:
-    /// an empty lane still shows where a clip can go.
+    /// about which ones exist. The zoom row is a permanent drop target: an
+    /// empty lane still shows where a clip can go. The sound row has nothing
+    /// to drop into, so it only shows for a recording that has sound.
     fn lane_state(&self) -> LaneState {
         LaneState {
             camera: self
@@ -1863,7 +2020,7 @@ impl Data {
                 .as_ref()
                 .is_some_and(|webcam| webcam.has_track()),
             zoom: true,
-            hide: true,
+            sound: self.has_microphone || self.has_system || self.effects.sound.background_active(),
             expanded: self.expanded_lane,
         }
     }
@@ -2008,6 +2165,7 @@ impl Data {
         if armed {
             self.playing = false;
             self.selected = false;
+            self.selected_segment = None;
             self.selected_zoom = None;
             self.selected_hide = None;
         }
@@ -3002,6 +3160,27 @@ pub(super) struct ZoomPanelState {
     pub auto_available: bool,
 }
 
+/// What the Clips panel shows: the cut piece its controls edit, and the sound
+/// the whole composition plays with.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct ClipPanelState {
+    /// The cut piece the clip controls edit: the selected one, or the only one.
+    pub segment: Option<usize>,
+    pub segment_count: usize,
+    /// Bumped whenever a video segment is selected (even the same one again).
+    pub selection_epoch: u64,
+    /// The selected piece's speed (1 when none).
+    pub speed: f64,
+    /// The selected piece's footage length in source seconds (0 when none).
+    pub source_length: f64,
+    /// The selected piece's sound (default when none).
+    pub clip: super::sound::ClipSound,
+    pub settings: super::sound::SoundSettings,
+    pub has_media: bool,
+    pub has_microphone: bool,
+    pub has_system: bool,
+}
+
 /// What the Webcam panel shows: the layer, its layout timeline, and where the
 /// playhead and the cue selection stand. The playhead is part of the state so
 /// the panel's "at the playhead" line follows a scrub or playback.
@@ -3067,6 +3246,10 @@ pub(super) struct Timeline {
     zoom_listener: ChangeListener,
     webcam_listener: ChangeListener,
     effects_listener: ChangeListener,
+    /// Told when the cut piece the clip controls edit, or the sound they carry,
+    /// changes, so the Clips panel rebuilds without doing so on every playback
+    /// repaint.
+    clip_listener: ChangeListener,
     /// Told when the typing suggestions or the ranges already resolved change,
     /// so the Cursor panel can rebuild its cards without doing so on every
     /// playback repaint.
@@ -3239,6 +3422,136 @@ impl Timeline {
     pub fn set_effects_listener(&self, listener: Rc<dyn Fn()>) {
         *self.effects_listener.borrow_mut() = Some(listener.clone());
         listener();
+    }
+
+    /// What the Clips panel shows: the piece its controls edit and the sound
+    /// the composition plays with.
+    pub fn clip_panel_state(&self) -> ClipPanelState {
+        let data = self.data.borrow();
+        let segment = data.clip_segment();
+        ClipPanelState {
+            segment,
+            segment_count: data.segment_count(),
+            selection_epoch: data.segment_selection_epoch,
+            speed: segment
+                .map(|index| data.segment_speed(index))
+                .unwrap_or(1.0),
+            source_length: segment
+                .and_then(|index| data.segment_boundaries().get(index).copied())
+                .map_or(0.0, |(start, end)| (end - start).max(0.0)),
+            clip: segment
+                .and_then(|index| data.effects.clip_sounds.get(index).copied())
+                .unwrap_or_default(),
+            settings: data.effects.sound.clone(),
+            has_media: data.has_media(),
+            has_microphone: data.has_microphone,
+            has_system: data.has_system,
+        }
+    }
+
+    /// Ask to be told whenever the piece the clip controls edit, or the sound
+    /// it carries, changes. The first call delivers the state already on
+    /// screen.
+    pub fn set_clip_listener(&self, listener: Rc<dyn Fn()>) {
+        *self.clip_listener.borrow_mut() = Some(listener.clone());
+        listener();
+    }
+
+    /// Change the selected piece's speed as one undo step. The pieces after it
+    /// move so the composition stays continuous, and the edit pauses playback.
+    pub fn set_selected_clip_speed(&self, speed: f64) {
+        self.apply_selected_clip_speed(speed, false);
+    }
+
+    /// Change the selected piece's speed from a slider: a sweep is one undo step.
+    pub fn sweep_selected_clip_speed(&self, speed: f64) {
+        self.apply_selected_clip_speed(speed, true);
+    }
+
+    /// The shared body of the two speed controls. The edit pauses playback, so
+    /// a sweep does not restart the sound player on every slider tick.
+    fn apply_selected_clip_speed(&self, speed: f64, continuous: bool) {
+        {
+            let mut data = self.data.borrow_mut();
+            let Some(index) = data.clip_segment() else {
+                return;
+            };
+            data.playing = false;
+            if !data.set_segment_speed(index, speed, continuous) {
+                return;
+            }
+        }
+        (self.repaint)();
+        self.publish_frame();
+    }
+
+    /// Change the selected piece's sound. The edit pauses playback so the
+    /// sound player is planned once, when play resumes; a slider sweep is one
+    /// undo step.
+    pub fn update_selected_clip_sound(&self, update: impl FnOnce(&mut super::sound::ClipSound)) {
+        {
+            let mut data = self.data.borrow_mut();
+            let Some(index) = data.clip_segment() else {
+                return;
+            };
+            data.playing = false;
+            let count = data.segment_count();
+            data.update_effects(|effects| {
+                effects.clip_sounds.truncate(count);
+                effects
+                    .clip_sounds
+                    .resize(count, super::sound::ClipSound::default());
+                if let Some(clip) = effects.clip_sounds.get_mut(index) {
+                    update(clip);
+                }
+            });
+        }
+        (self.repaint)();
+        self.publish_frame();
+    }
+
+    /// Change the project's sound. Like a piece's own sound, the edit pauses
+    /// playback so the new settings are heard from the next play.
+    pub fn update_sound(&self, update: impl FnOnce(&mut super::sound::SoundSettings)) {
+        {
+            let mut data = self.data.borrow_mut();
+            data.playing = false;
+            data.update_effects(|effects| update(&mut effects.sound));
+        }
+        (self.repaint)();
+        self.publish_frame();
+    }
+
+    /// What the recording's sound sources are, as the window found them. A
+    /// silent recording shows no sound lane.
+    pub fn set_sound_sources(&self, has_microphone: bool, has_system: bool) {
+        {
+            let mut data = self.data.borrow_mut();
+            data.has_microphone = has_microphone;
+            data.has_system = has_system;
+        }
+        (self.repaint)();
+    }
+
+    /// The sound lane's waveform, as the window measured it. `None` clears it,
+    /// and the lane falls back to a flat line.
+    pub fn set_sound_peaks(&self, peaks: Option<std::sync::Arc<super::sound::Peaks>>) {
+        {
+            let mut data = self.data.borrow_mut();
+            data.sound_peaks = peaks;
+        }
+        (self.repaint)();
+    }
+
+    /// The composition's frame rate for planning: the recording's, or 30 when
+    /// it is unknown.
+    pub fn plan_fps(&self) -> f64 {
+        let fps = self.data.borrow().fps;
+        if fps > 0.0 && fps.is_finite() {
+            fps
+        } else {
+            30.0
+        }
     }
 
     /// Change the click sound or the captions. The change is one undo step,
@@ -4225,11 +4538,6 @@ pub(super) fn build(
         &t("Zoom"),
         &t("Add zoom: click the preview to place it"),
     );
-    let hide = tool_button(
-        "view-conceal-symbolic",
-        &t("Hide"),
-        &t("Hide cursor at playhead"),
-    );
     let split = tool_button(
         icon_names::custom::SQUARE_SPLIT_HORIZONTAL_SYMBOLIC,
         &t("Split"),
@@ -4249,7 +4557,6 @@ pub(super) fn build(
     left.set_halign(Align::Start);
     left.set_hexpand(true);
     left.append(&zoom);
-    left.append(&hide);
     left.append(&split);
     left.append(&detect);
 
@@ -4363,27 +4670,25 @@ pub(super) fn build(
         }
     });
 
-    let hide_track = DrawingArea::new();
-    hide_track.add_css_class("recording-editor-card-hide-track");
-    hide_track.set_hexpand(true);
-    hide_track.set_size_request(-1, (THIN_LANE_HEIGHT * scale).round() as i32);
-    hide_track.set_draw_func({
+    let sound_track = DrawingArea::new();
+    sound_track.add_css_class("recording-editor-card-sound-track");
+    sound_track.set_hexpand(true);
+    sound_track.set_size_request(-1, (THIN_LANE_HEIGHT * scale).round() as i32);
+    sound_track.set_tooltip_text(Some(&t("Sound")));
+    sound_track.set_draw_func({
         let data = data.clone();
         move |_, context, width, height| {
             let data = data.borrow();
-            let lane = TimelineLane::of_effect(EffectTrack::Hide);
-            let progress = data.lane_progress(lane);
+            let progress = data.lane_progress(TimelineLane::Sound);
             let thin = |context: &Context| {
-                let bars: Vec<_> = data
-                    .effect_spans(EffectTrack::Hide)
-                    .into_iter()
-                    .map(|(index, start, end)| {
-                        let tone = effect_tone(
-                            EffectTrack::Hide,
-                            prefers_dark,
-                            data.effect_hidden(EffectTrack::Hide, index),
-                        );
-                        (start, end, tone.fill)
+                let bars: Vec<_> = (0..data.segment_count())
+                    .filter_map(|index| {
+                        let (start, end) = data.segment_span(index)?;
+                        Some((
+                            start,
+                            end,
+                            sound_tone(prefers_dark, data.piece_muted(index)).fill,
+                        ))
                     })
                     .collect();
                 draw_thin_lane(
@@ -4391,22 +4696,14 @@ pub(super) fn build(
                     width,
                     height,
                     &data,
-                    &t("Hide"),
+                    &t("Sound"),
                     &bars,
                     prefers_dark,
                     scale,
                 );
             };
             let full = |context: &Context| {
-                draw_effect_clips(
-                    context,
-                    width,
-                    height,
-                    &data,
-                    EffectTrack::Hide,
-                    prefers_dark,
-                    scale,
-                );
+                draw_sound_lane(context, width, height, &data, prefers_dark, scale);
             };
             if progress >= 0.999 {
                 full(context);
@@ -4489,13 +4786,13 @@ pub(super) fn build(
     lanes.set_hexpand(true);
     lanes.append(&video_track);
     lanes.append(&zoom_track_lane);
-    lanes.append(&hide_track);
+    lanes.append(&sound_track);
     lanes.append(&layout_track);
 
     lanes.add_tick_callback({
         let data = data.clone();
         let zoom = zoom_track_lane.clone();
-        let hide = hide_track.clone();
+        let sound = sound_track.clone();
         let layout = layout_track.clone();
         let last = Rc::new(Cell::new(None::<i64>));
         // The heights on screen. Every tick derives them from the progress
@@ -4517,18 +4814,18 @@ pub(super) fn build(
             };
             let heights = lane_heights(
                 progress,
-                [zoom.is_visible(), hide.is_visible(), layout.is_visible()],
+                [zoom.is_visible(), sound.is_visible(), layout.is_visible()],
                 scale,
             );
             if heights != applied.get() {
                 applied.set(heights);
                 zoom.set_size_request(-1, heights[0]);
-                hide.set_size_request(-1, heights[1]);
+                sound.set_size_request(-1, heights[1]);
                 layout.set_size_request(-1, heights[2]);
             }
             if moving {
                 zoom.queue_draw();
-                hide.queue_draw();
+                sound.queue_draw();
                 layout.queue_draw();
             }
             gtk4::glib::ControlFlow::Continue
@@ -4536,7 +4833,7 @@ pub(super) fn build(
     });
 
     // The frosted extend area is one layer over the lanes, so it spans the
-    // video, zoom, hide and camera-layout rows (and the gaps between them)
+    // video, zoom, sound and camera-layout rows (and the gaps between them)
     // instead of stopping at the video lane's seam. It sits above the lanes
     // but lets input through, because the lanes own the pointer.
     let band_hover = Rc::new(Cell::new(false));
@@ -4622,6 +4919,7 @@ pub(super) fn build(
     let zoom_listener: ChangeListener = Rc::new(RefCell::new(None));
     let webcam_listener: ChangeListener = Rc::new(RefCell::new(None));
     let effects_listener: ChangeListener = Rc::new(RefCell::new(None));
+    let clip_listener: ChangeListener = Rc::new(RefCell::new(None));
     let typing_listener: ChangeListener = Rc::new(RefCell::new(None));
     let cursor_listener: ChangeListener = Rc::new(RefCell::new(None));
     let repaint: Rc<dyn Fn()> = {
@@ -4629,7 +4927,7 @@ pub(super) fn build(
         let ruler = ruler.clone();
         let video_track = video_track.clone();
         let zoom_track_lane = zoom_track_lane.clone();
-        let hide_track = hide_track.clone();
+        let sound_track = sound_track.clone();
         let layout_track = layout_track.clone();
         let playhead = playhead.clone();
         let extend = extend.clone();
@@ -4641,6 +4939,7 @@ pub(super) fn build(
         let zoom_listener = zoom_listener.clone();
         let webcam_listener = webcam_listener.clone();
         let effects_listener = effects_listener.clone();
+        let clip_listener = clip_listener.clone();
         let typing_listener = typing_listener.clone();
         let project = project.clone();
         Rc::new(move || {
@@ -4658,16 +4957,16 @@ pub(super) fn build(
             ruler.queue_draw();
             video_track.queue_draw();
             zoom_track_lane.queue_draw();
-            hide_track.queue_draw();
+            sound_track.queue_draw();
             layout_track.queue_draw();
             extend.queue_draw();
             playhead.queue_draw();
-            // The camera row follows the track; the two effect rows never
-            // move. A playback tick leaves the state alone and with it the
+            // The camera and sound rows follow the track; the zoom row never
+            // moves. A playback tick leaves the state alone and with it the
             // lane heights.
             if lane_state.get() != Some(state) {
                 lane_state.set(Some(state));
-                apply_lane_state(state, &layout_track, &zoom_track_lane, &hide_track);
+                apply_lane_state(state, &layout_track, &zoom_track_lane, &sound_track);
             }
             if let Some(listener) = zoom_listener.borrow().as_ref() {
                 listener();
@@ -4676,6 +4975,9 @@ pub(super) fn build(
                 listener();
             }
             if let Some(listener) = effects_listener.borrow().as_ref() {
+                listener();
+            }
+            if let Some(listener) = clip_listener.borrow().as_ref() {
                 listener();
             }
             if let Some(listener) = typing_listener.borrow().as_ref() {
@@ -4752,35 +5054,7 @@ pub(super) fn build(
         sync_play_icon.clone(),
         scale,
     );
-    bind_effect_lane(
-        &hide_track,
-        EffectTrack::Hide,
-        data.clone(),
-        cursor.clone(),
-        source_size.clone(),
-        repaint.clone(),
-        sync_play_icon.clone(),
-        scale,
-    );
-
-    hide.connect_clicked({
-        let data = data.clone();
-        let cursor = cursor.clone();
-        let source_size = source_size.clone();
-        let repaint = repaint.clone();
-        move |_| {
-            {
-                let mut data = data.borrow_mut();
-                data.set_frame_size(source_size.get());
-                data.pointer_available = cursor
-                    .sidecar()
-                    .is_some_and(|sidecar| !sidecar.pointer.is_empty());
-                let at = data.playhead;
-                data.add_effect(EffectTrack::Hide, at);
-            }
-            repaint();
-        }
-    });
+    bind_sound_lane(&sound_track, data.clone(), repaint.clone(), scale);
 
     // The Zoom button arms the Add zoom tool rather than adding at once, as in
     // the studied build: the next click on the preview places the zoom.
@@ -5026,6 +5300,9 @@ pub(super) fn build(
         let zoom_button = zoom.clone();
         let last_armed = Rc::new(Cell::new(false));
         let stage = canvas.clone();
+        // The wall clock the last tick ran at. The timer fires late, so the
+        // step is measured instead of assumed to be its 50 ms period.
+        let last_tick = Rc::new(Cell::new(None::<Instant>));
         move || {
             let (playing, changed, preview) = {
                 let mut data = data.borrow_mut();
@@ -5033,11 +5310,18 @@ pub(super) fn build(
                 data.stage_aspect = f64::from(stage.ratio());
                 let was_playing = data.playing;
                 if was_playing {
-                    data.playhead += 0.05;
+                    let now = Instant::now();
+                    let step = last_tick.get().map_or(0.05, |previous| {
+                        now.duration_since(previous).as_secs_f64().min(0.25)
+                    });
+                    last_tick.set(Some(now));
+                    data.playhead += step;
                     if data.playhead >= data.total_duration() {
                         data.playhead = 0.0;
                         data.playing = false;
                     }
+                } else {
+                    last_tick.set(None);
                 }
                 let composition_time = data.playhead;
                 data.sync_webcam_to_playhead(|| cursor.sidecar());
@@ -5149,6 +5433,7 @@ pub(super) fn build(
         zoom_listener,
         webcam_listener,
         effects_listener,
+        clip_listener,
         typing_listener,
         cursor_listener,
         typing_epoch: Rc::new(Cell::new(0)),
@@ -5212,13 +5497,13 @@ fn apply_lane_state(
     state: LaneState,
     layout_track: &DrawingArea,
     zoom_track: &DrawingArea,
-    hide_track: &DrawingArea,
+    sound_track: &DrawingArea,
 ) {
     layout_track.set_visible(state.camera);
-    // Both effect lanes are permanent drop targets, so their rows never
-    // collapse, even while empty.
+    // The zoom lane is a permanent drop target, so its row never collapses,
+    // even while empty.
     zoom_track.set_visible(state.zoom);
-    hide_track.set_visible(state.hide);
+    sound_track.set_visible(state.sound);
 }
 
 /// The one stylesheet this card adds on top of the shared editor sheet.
@@ -5256,7 +5541,7 @@ fn timeline_css(scale: f64) -> String {
     min-height: {video};
 }}
 .recording-editor-timeline-compact .recording-editor-card-zoom-track,
-.recording-editor-timeline-compact .recording-editor-card-hide-track {{
+.recording-editor-timeline-compact .recording-editor-card-sound-track {{
     min-height: {effect};
 }}
 .recording-editor-timeline-compact .recording-editor-card-layout-track {{
@@ -5605,20 +5890,26 @@ fn bind_clip(
             {
                 let mut data = data.borrow_mut();
                 let edge = clip_edge_at(&data, width, x, scale);
+                let segment = segment_at_x(&data, width, x, scale);
                 if in_extend_band(&data, width, x, scale) {
                     // The band is the clip's extend affordance, so pressing it
                     // selects the clip rather than seeking.
                     data.selected = true;
+                    data.selected_segment = segment;
+                    data.segment_selection_epoch += 1;
                     data.selected_zoom = None;
                     data.selected_hide = None;
                 } else if near_playhead(&data, width, x, scale) && edge.is_none() {
                     seek_to_x(&mut data, width, x);
                 } else if edge.is_some() || inside_clip(&data, width, x, scale) {
                     data.selected = true;
+                    data.selected_segment = segment;
+                    data.segment_selection_epoch += 1;
                     data.selected_zoom = None;
                     data.selected_hide = None;
                 } else {
                     data.selected = false;
+                    data.selected_segment = None;
                 }
             }
             sync_play_icon();
@@ -5640,7 +5931,10 @@ fn bind_clip(
                 if !inside_clip(&data, width, x, scale) {
                     return;
                 }
+                let segment = segment_at_x(&data, width, x, scale);
                 data.selected = true;
+                data.selected_segment = segment;
+                data.segment_selection_epoch += 1;
                 data.selected_zoom = None;
                 data.selected_hide = None;
             }
@@ -5690,6 +5984,8 @@ fn bind_clip(
                     },
                     None if segment.is_some() => {
                         data.selected = true;
+                        data.selected_segment = segment;
+                        data.segment_selection_epoch += 1;
                         data.selected_zoom = None;
                         data.selected_hide = None;
                         DragKind::None
@@ -5700,6 +5996,8 @@ fn bind_clip(
             match kind {
                 DragKind::TrimStart | DragKind::TrimEnd | DragKind::Extend => {
                     data.selected = true;
+                    data.selected_segment = segment;
+                    data.segment_selection_epoch += 1;
                     data.selected_zoom = None;
                     data.selected_hide = None;
                     data.playing = false;
@@ -5710,6 +6008,8 @@ fn bind_clip(
                 }
                 DragKind::MoveSegment(index) => {
                     data.selected = true;
+                    data.selected_segment = Some(index);
+                    data.segment_selection_epoch += 1;
                     data.selected_zoom = None;
                     data.selected_hide = None;
                     data.playing = false;
@@ -6015,6 +6315,37 @@ enum EffectDrag {
     Move(usize),
     /// The frosted band past the clip, shared by every lane.
     Extend,
+}
+
+/// Pressing the sound lane opens it and picks the piece under the pointer, so
+/// the Clips panel edits the sound of the piece that was clicked. The lane has
+/// no clips of its own: it draws the composition's pieces and their sound.
+fn bind_sound_lane(lane: &DrawingArea, data: Rc<RefCell<Data>>, repaint: Rc<dyn Fn()>, scale: f64) {
+    let click = GestureClick::new();
+    click.set_button(1);
+    click.connect_pressed({
+        let data = data.clone();
+        let repaint = repaint.clone();
+        move |gesture, _, x, _| {
+            let width = gesture
+                .widget()
+                .map(|widget| widget.allocated_width().max(1) as f64)
+                .unwrap_or(1.0);
+            {
+                let mut data = data.borrow_mut();
+                data.expand_lane(TimelineLane::Sound);
+                if let Some(index) = segment_at_x(&data, width, x, scale) {
+                    data.selected = true;
+                    data.selected_segment = Some(index);
+                    data.segment_selection_epoch += 1;
+                    data.selected_zoom = None;
+                    data.selected_hide = None;
+                }
+            }
+            repaint();
+        }
+    });
+    lane.add_controller(click);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -7036,25 +7367,19 @@ fn draw_effect_clips(
             let _ = context.stroke();
         }
 
-        if pill_w > 40.0 * scale {
+        let labels = match track {
+            EffectTrack::Zoom => {
+                zoom_clip_labels(data.zoom_clips[index].mode, data.zoom_scale_at(index))
+            }
+            EffectTrack::Hide => vec![t("Hide")],
+        };
+        context.select_font_face("DM Sans", FontSlant::Normal, FontWeight::Normal);
+        context.set_font_size((11.0 * scale).round());
+        let padding = EFFECT_LABEL_PADDING * scale;
+        if let Some(label) = first_fitting_label(context, &labels, pill_w - padding * 2.0) {
             context.set_source_rgba(1.0, 1.0, 1.0, 0.92);
-            context.select_font_face("DM Sans", FontSlant::Normal, FontWeight::Normal);
-            context.set_font_size((11.0 * scale).round());
-            let label = match track {
-                EffectTrack::Zoom if pill_w > 92.0 * scale => format!(
-                    "{}  {}",
-                    if data.zoom_clips[index].mode == ZoomMode::Auto {
-                        t("Auto")
-                    } else {
-                        t("Manual")
-                    },
-                    format_zoom_scale(data.zoom_scale_at(index))
-                ),
-                EffectTrack::Zoom => t("Zoom"),
-                EffectTrack::Hide => t("Hide"),
-            };
-            context.move_to(x0 + 14.0 * scale, y + pill_h * 0.62);
-            let _ = context.show_text(&label);
+            context.move_to(x0 + padding, y + pill_h * 0.62);
+            let _ = context.show_text(label);
         }
     }
 
@@ -7075,6 +7400,188 @@ fn draw_effect_clips(
                 prefers_dark,
                 scale,
             );
+        }
+    }
+}
+
+/// The expanded sound lane: one pill per cut piece, its waveform inside it.
+///
+/// A piece's pill is the piece itself, so the row reads as the same composition
+/// the video lane shows. The waveform is the recording's loudness at the footage
+/// under each x, scaled by the piece's own gain; a piece with no measurement
+/// yet shows a flat line instead of an empty pill.
+fn draw_sound_lane(
+    context: &Context,
+    width: i32,
+    height: i32,
+    data: &Data,
+    prefers_dark: bool,
+    scale: f64,
+) {
+    if !data.has_media() {
+        return;
+    }
+    let width = width.max(1) as f64;
+    let height = height.max(1) as f64;
+    let step = (3.0 * scale).max(1.0);
+    let inset = 4.0 * scale;
+    let clip_segment = data.clip_segment().filter(|_| data.selected);
+
+    for index in 0..data.segment_count() {
+        let Some((start, end)) = data.segment_span(index) else {
+            continue;
+        };
+        let x0 = data.time_to_x(start, width);
+        let x1 = data.time_to_x(end, width).max(x0 + 22.0 * scale);
+        let pill_w = x1 - x0;
+        let y = 2.0 * scale;
+        let pill_h = (height - 4.0 * scale).max(10.0);
+        let muted = data.piece_muted(index);
+        let tone = sound_tone(prefers_dark, muted);
+
+        rounded_rect(context, x0, y, pill_w, pill_h, 8.0 * scale);
+        context.set_source_rgba(tone.fill.0, tone.fill.1, tone.fill.2, tone.fill.3);
+        let _ = context.fill();
+
+        let wave_left = x0 + inset;
+        let wave_right = x1 - inset;
+        let gain = data.piece_gain(index);
+        match data.sound_peaks.as_deref() {
+            Some(peaks) if wave_right > wave_left => {
+                let tallest = (pill_h - 8.0 * scale).max(2.0);
+                let bar_w = (2.0 * scale).min(step);
+                let mut x = wave_left;
+                while x < wave_right {
+                    let from = data.source_time_at(data.x_to_time(x, width));
+                    let to = data.source_time_at(data.x_to_time((x + step).min(wave_right), width));
+                    let level = match (from, to) {
+                        (Some(from), Some(to)) => f64::from(peaks.level(from, to)),
+                        _ => 0.0,
+                    };
+                    let bar_h = (level.sqrt() * gain.min(1.0) * tallest).max(1.0 * scale);
+                    let bar_y = y + (pill_h - bar_h) / 2.0;
+                    rounded_rect(context, x, bar_y, bar_w, bar_h, bar_w / 2.0);
+                    context.set_source_rgba(tone.wave.0, tone.wave.1, tone.wave.2, tone.wave.3);
+                    let _ = context.fill();
+                    x += step;
+                }
+            }
+            _ => {
+                context.set_source_rgba(tone.wave.0, tone.wave.1, tone.wave.2, tone.wave.3);
+                context.set_line_width(1.0);
+                context.move_to(wave_left, y + pill_h / 2.0);
+                context.line_to(wave_right.max(wave_left), y + pill_h / 2.0);
+                let _ = context.stroke();
+            }
+        }
+
+        if muted {
+            // Hatch the pill so a silent piece reads as struck out even at a
+            // glance, without changing the span it keeps.
+            let _ = context.save();
+            rounded_rect(context, x0, y, pill_w, pill_h, 8.0 * scale);
+            context.clip();
+            context.set_source_rgba(tone.wave.0, tone.wave.1, tone.wave.2, 0.30);
+            context.set_line_width(1.0 * scale);
+            let pitch = 6.0 * scale;
+            let mut offset = -pill_h;
+            while offset < pill_w {
+                context.move_to(x0 + offset, y + pill_h);
+                context.line_to(x0 + offset + pill_h, y);
+                let _ = context.stroke();
+                offset += pitch;
+            }
+            let _ = context.restore();
+        }
+
+        context.select_font_face("DM Sans", FontSlant::Normal, FontWeight::Normal);
+        context.set_font_size((11.0 * scale).round());
+        let padding = EFFECT_LABEL_PADDING * scale;
+        let baseline = y + pill_h * 0.62;
+        let mut label_x = x0 + padding;
+        let mut label_room = pill_w - padding * 2.0;
+        // A muted piece carries one chip across its mark, its word and its
+        // speed, so no label sits straight on the waveform bars.
+        let mut chip_painted = false;
+        if muted {
+            let glyph = 12.0 * scale;
+            let glyph_x = x0 + inset;
+            let right = x1 - inset;
+            if glyph_x + glyph <= right {
+                let mut content_end = glyph_x + glyph;
+                let labels = [t("Muted")];
+                let text_x = glyph_x + glyph + 4.0 * scale;
+                let muted_label = first_fitting_label(context, &labels, right - text_x);
+                if let Some(label) = muted_label {
+                    content_end = content_end.max(text_x + text_width(context, label));
+                }
+                // The speed label follows the mute mark and its word, so the
+                // two never sit on top of each other on a silent piece.
+                label_x = content_end + 6.0 * scale;
+                label_room = right - label_x;
+                let speed = data.segment_speed(index);
+                let mut chip_end = content_end;
+                if (speed - 1.0).abs() > 1e-9 {
+                    let labels = [speed_label(speed)];
+                    if let Some(label) = first_fitting_label(context, &labels, label_room) {
+                        chip_end = chip_end.max(label_x + text_width(context, label));
+                    }
+                }
+                draw_label_chip(
+                    context,
+                    glyph_x - 4.0 * scale,
+                    chip_end + 4.0 * scale,
+                    baseline,
+                    tone.fill,
+                    scale,
+                );
+                chip_painted = true;
+                draw_mute_glyph(
+                    context,
+                    glyph_x,
+                    y + (pill_h - glyph) / 2.0,
+                    glyph,
+                    tone.edge,
+                );
+                if let Some(label) = muted_label {
+                    context.set_source_rgba(tone.edge.0, tone.edge.1, tone.edge.2, tone.edge.3);
+                    context.move_to(text_x, baseline);
+                    let _ = context.show_text(label);
+                }
+            }
+        }
+        let speed = data.segment_speed(index);
+        if (speed - 1.0).abs() > 1e-9 {
+            let labels = [speed_label(speed)];
+            if let Some(label) = first_fitting_label(context, &labels, label_room) {
+                if !chip_painted {
+                    draw_label_chip(
+                        context,
+                        label_x - 4.0 * scale,
+                        label_x + text_width(context, label) + 4.0 * scale,
+                        baseline,
+                        tone.fill,
+                        scale,
+                    );
+                }
+                context.set_source_rgba(tone.edge.0, tone.edge.1, tone.edge.2, tone.edge.3);
+                context.move_to(label_x, baseline);
+                let _ = context.show_text(label);
+            }
+        }
+
+        if clip_segment == Some(index) {
+            rounded_rect(
+                context,
+                x0 + 1.0,
+                y + 1.0,
+                (pill_w - 2.0).max(0.0),
+                (pill_h - 2.0).max(0.0),
+                7.0 * scale,
+            );
+            context.set_source_rgba(tone.edge.0, tone.edge.1, tone.edge.2, tone.edge.3);
+            context.set_line_width(2.0 * scale);
+            let _ = context.stroke();
         }
     }
 }
@@ -7194,13 +7701,14 @@ fn draw_effect_ghost(
     let _ = context.stroke();
     context.set_dash(&[], 0.0);
 
-    if pill_w > 40.0 * scale {
+    context.select_font_face("DM Sans", FontSlant::Normal, FontWeight::Normal);
+    context.set_font_size((11.0 * scale).round());
+    let labels = [if free { t("Paste") } else { t("Occupied") }];
+    let padding = EFFECT_LABEL_PADDING * scale;
+    if let Some(label) = first_fitting_label(context, &labels, pill_w - padding * 2.0) {
         context.set_source_rgba(1.0, 1.0, 1.0, if free { 0.92 } else { 0.55 });
-        context.select_font_face("DM Sans", FontSlant::Normal, FontWeight::Normal);
-        context.set_font_size((11.0 * scale).round());
-        context.move_to(x0 + 14.0 * scale, y + pill_h * 0.62);
-        let label = if free { t("Paste") } else { t("Occupied") };
-        let _ = context.show_text(&label);
+        context.move_to(x0 + padding, y + pill_h * 0.62);
+        let _ = context.show_text(label);
     }
 }
 
@@ -7236,6 +7744,119 @@ fn effect_tone(track: EffectTrack, prefers_dark: bool, hidden: bool) -> ClipTone
         };
     }
     tone
+}
+
+/// The sound lane's colours: the pill, the waveform inside it and the ring a
+/// selected piece draws.
+#[derive(Clone, Copy)]
+struct SoundTone {
+    fill: (f64, f64, f64, f64),
+    wave: (f64, f64, f64, f64),
+    edge: (f64, f64, f64, f64),
+}
+
+fn sound_tone(prefers_dark: bool, muted: bool) -> SoundTone {
+    let mut tone = if prefers_dark {
+        SoundTone {
+            fill: (0.19, 0.13, 0.34, 1.0),
+            wave: (0.72, 0.58, 1.0, 0.95),
+            edge: (0.80, 0.70, 1.0, 1.0),
+        }
+    } else {
+        SoundTone {
+            fill: (0.90, 0.86, 0.99, 1.0),
+            wave: (0.40, 0.24, 0.76, 0.95),
+            edge: (0.34, 0.18, 0.68, 1.0),
+        }
+    };
+    if muted {
+        // A muted piece keeps its span and ring; the fill and the waveform
+        // drop back so "silent" reads differently from "quiet".
+        tone.fill.3 = 0.45;
+        tone.wave.3 = 0.35;
+    }
+    tone
+}
+
+/// The width `label` takes at the current font, measured the way
+/// `first_fitting_label` measures it.
+fn text_width(context: &Context, label: &str) -> f64 {
+    context
+        .text_extents(label)
+        .map(|extents| {
+            extents
+                .x_advance()
+                .max(extents.x_bearing() + extents.width())
+        })
+        .unwrap_or(0.0)
+}
+
+/// The opaque chip a lane label sits on: without it the text and the waveform
+/// bars share the same violet and the label is hard to read.
+fn draw_label_chip(
+    context: &Context,
+    left: f64,
+    right: f64,
+    baseline: f64,
+    fill: (f64, f64, f64, f64),
+    scale: f64,
+) {
+    let chip_h = 16.0 * scale;
+    // Centre the chip on the text's own box rather than on its baseline, so
+    // the ink sits evenly inside it.
+    let centre = context
+        .font_extents()
+        .map_or(baseline - chip_h / 4.0, |extents| {
+            baseline + (extents.descent() - extents.ascent()) / 2.0
+        });
+    rounded_rect(
+        context,
+        left,
+        centre - chip_h / 2.0,
+        (right - left).max(0.0),
+        chip_h,
+        4.0 * scale,
+    );
+    context.set_source_rgba(fill.0, fill.1, fill.2, 1.0);
+    let _ = context.fill();
+}
+
+/// A speaker with a cross, `size` square, drawn from its top-left corner.
+fn draw_mute_glyph(context: &Context, x: f64, y: f64, size: f64, color: (f64, f64, f64, f64)) {
+    let _ = context.save();
+    context.set_source_rgba(color.0, color.1, color.2, color.3);
+    let point = |across: f64, down: f64| (x + across * size, y + down * size);
+    let body = [
+        (0.08, 0.36),
+        (0.30, 0.36),
+        (0.55, 0.14),
+        (0.55, 0.86),
+        (0.30, 0.64),
+        (0.08, 0.64),
+    ];
+    for (index, (across, down)) in body.iter().enumerate() {
+        let (across, down) = point(*across, *down);
+        if index == 0 {
+            context.move_to(across, down);
+        } else {
+            context.line_to(across, down);
+        }
+    }
+    context.close_path();
+    let _ = context.fill();
+
+    context.set_line_width(0.10 * size);
+    context.set_line_cap(LineCap::Round);
+    for (from_across, from_down, to_across, to_down) in
+        [(0.68, 0.36, 0.94, 0.64), (0.94, 0.36, 0.68, 0.64)]
+    {
+        let (from_across, from_down) = point(from_across, from_down);
+        let (to_across, to_down) = point(to_across, to_down);
+        context.move_to(from_across, from_down);
+        context.line_to(to_across, to_down);
+        let _ = context.stroke();
+    }
+    let _ = context.restore();
 }
 
 /// The short layout names the camera lane uses on its chips and in its
@@ -7381,6 +8002,50 @@ fn layout_chip_label_color(selected: bool, prefers_dark: bool) -> (f64, f64, f64
         (false, true) => (0.90, 0.98, 0.96, 0.92),
         (false, false) => (0.07, 0.22, 0.20, 0.88),
     }
+}
+
+/// The labels a zoom pill can show, most detailed first. The scale is the
+/// detail worth keeping on a short pill, but only once it differs from the
+/// default; an untouched clip falls back to its name.
+fn zoom_clip_labels(mode: ZoomMode, scale: f64) -> Vec<String> {
+    let scale_label = format_zoom_scale(scale);
+    let mode_label = if mode == ZoomMode::Auto {
+        t("Auto")
+    } else {
+        t("Manual")
+    };
+    let short = if (scale - DEFAULT_ZOOM_SCALE).abs() > 1e-6 {
+        scale_label.clone()
+    } else {
+        t("Zoom")
+    };
+    vec![format!("{mode_label}  {scale_label}"), short]
+}
+
+/// The first of `labels` whose whole text fits in `max_width`, or `None` when
+/// none does. Effect pills never cut a label or let it run past their edge.
+fn first_fitting_label<'a>(
+    context: &Context,
+    labels: &'a [String],
+    max_width: f64,
+) -> Option<&'a str> {
+    if !max_width.is_finite() || max_width <= 0.0 {
+        return None;
+    }
+    labels
+        .iter()
+        .find(|label| {
+            context
+                .text_extents(label)
+                .map(|extents| {
+                    extents
+                        .x_advance()
+                        .max(extents.x_bearing() + extents.width())
+                        <= max_width
+                })
+                .unwrap_or(false)
+        })
+        .map(String::as_str)
 }
 
 /// Truncate `text` to `max_width` with an ellipsis. `None` means not even the
@@ -7808,6 +8473,9 @@ fn draw_video_clip(
             }
         }
 
+        // The speed badge's own slot is remembered so the mute badge can take
+        // the place beside it rather than share the corner with it.
+        let mut speed_badge: Option<(f64, f64, f64)> = None;
         if (speed - 1.0).abs() > 1e-9 {
             let label = speed_label(speed);
             context.select_font_face("DM Sans", FontSlant::Normal, FontWeight::Bold);
@@ -7833,6 +8501,76 @@ fn draw_video_clip(
                     let text_top = badge_y + (badge_h - extents.height()) / 2.0;
                     context.move_to(badge_x + pad, text_top - extents.y_bearing());
                     let _ = context.show_text(&label);
+                    speed_badge = Some((badge_x, badge_y, badge_h));
+                }
+            }
+        }
+
+        if (data.has_microphone || data.has_system)
+            && data.piece_muted(index)
+            && body_width >= 28.0 * scale
+        {
+            // The speed badge and the right edge handle both claim the
+            // corner, so the mute badge sits just left of the speed badge,
+            // or in the slot the speed badge would have taken.
+            let gap = 4.0 * scale;
+            let (pill_h, pill_centre) = match speed_badge {
+                Some((_, speed_y, speed_h)) => {
+                    ((22.0 * scale).max(speed_h), speed_y + speed_h / 2.0)
+                }
+                None => {
+                    let pill_h = 22.0 * scale;
+                    (pill_h, y + clip_height - gap - pill_h / 2.0)
+                }
+            };
+            let pill_right = match speed_badge {
+                Some((speed_x, _, _)) => speed_x - gap,
+                None => right - gap,
+            };
+            let glyph = 15.0 * scale;
+            let left_pad = 6.0 * scale;
+            let right_pad = 8.0 * scale;
+            let word = t("Muted");
+            context.select_font_face("DM Sans", FontSlant::Normal, FontWeight::Bold);
+            context.set_font_size((11.0 * scale).round());
+            let glyph_w = left_pad + glyph + right_pad;
+            let word_w = left_pad + glyph + gap + text_width(context, &word) + right_pad;
+            // The badge never eats into the piece's left edge: a word only
+            // rides along when the pill still clears it.
+            let room = pill_right - left - 8.0 * scale;
+            let (pill_w, with_word) = if word_w <= room {
+                (word_w, true)
+            } else if glyph_w <= room {
+                (glyph_w, false)
+            } else {
+                (0.0, false)
+            };
+            if pill_w > 0.0 {
+                let pill_x = pill_right - pill_w;
+                let pill_y = pill_centre - pill_h / 2.0;
+                rounded_rect(context, pill_x, pill_y, pill_w, pill_h, pill_h / 2.0);
+                context.set_source_rgba(0.0, 0.0, 0.0, 0.72);
+                let _ = context.fill_preserve();
+                context.set_source_rgba(1.0, 1.0, 1.0, 0.35);
+                context.set_line_width(1.0 * scale);
+                let _ = context.stroke();
+                draw_mute_glyph(
+                    context,
+                    pill_x + left_pad,
+                    pill_y + (pill_h - glyph) / 2.0,
+                    glyph,
+                    (1.0, 1.0, 1.0, 1.0),
+                );
+                if with_word {
+                    if let Ok(extents) = context.text_extents(&word) {
+                        context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+                        let text_top = pill_y + (pill_h - extents.height()) / 2.0;
+                        context.move_to(
+                            pill_x + left_pad + glyph + gap,
+                            text_top - extents.y_bearing(),
+                        );
+                        let _ = context.show_text(&word);
+                    }
                 }
             }
         }
@@ -8059,6 +8797,15 @@ mod tests {
         }
     }
 
+    /// The effects a freshly loaded document holds: the defaults, with one
+    /// default sound per cut piece.
+    fn default_effects(segments: usize) -> project::EffectsSettings {
+        project::EffectsSettings {
+            clip_sounds: vec![super::super::sound::ClipSound::default(); segments],
+            ..project::EffectsSettings::default()
+        }
+    }
+
     /// A recording on disk, which is what a project file is keyed to.
     fn recording(name: &str) -> PathBuf {
         let directory = std::env::temp_dir().join(format!(
@@ -8202,6 +8949,8 @@ mod tests {
             cursor_click_sound_volume: 0.25,
             captions_shortcuts: false,
             captions_show_single_letters: false,
+            sound: Default::default(),
+            clip_sounds: Vec::new(),
             cursor: Default::default(),
         });
 
@@ -8393,6 +9142,8 @@ mod tests {
             cursor_click_sound_volume: 0.25,
             captions_shortcuts: false,
             captions_show_single_letters: false,
+            sound: Default::default(),
+            clip_sounds: Vec::new(),
             cursor: Default::default(),
         });
 
@@ -8463,6 +9214,8 @@ mod tests {
             cursor_click_sound_volume: 0.25,
             captions_shortcuts: false,
             captions_show_single_letters: false,
+            sound: Default::default(),
+            clip_sounds: Vec::new(),
             cursor: Default::default(),
         });
 
@@ -9093,6 +9846,155 @@ mod tests {
     }
 
     #[test]
+    fn splitting_a_piece_copies_its_sound() {
+        let mut data = loaded();
+        data.effects.clip_sounds = vec![super::super::sound::ClipSound {
+            muted: true,
+            ..Default::default()
+        }];
+
+        assert!(data.add_cut(5.0));
+
+        assert_eq!(data.effects.clip_sounds.len(), 2);
+        assert!(data.effects.clip_sounds.iter().all(|clip| clip.muted));
+    }
+
+    #[test]
+    fn trimming_keeps_the_sound_of_the_piece_it_keeps() {
+        let mut data = loaded();
+        assert!(data.add_cut(4.0));
+        data.effects.clip_sounds = vec![
+            super::super::sound::ClipSound {
+                mic_volume: 0.5,
+                system_volume: 0.5,
+                muted: false,
+            },
+            super::super::sound::ClipSound {
+                mic_volume: 0.25,
+                system_volume: 0.25,
+                muted: true,
+            },
+        ];
+
+        data.trim_start = 1.0;
+        data.clamp_cuts();
+        assert_eq!(data.segment_boundaries(), vec![(1.0, 4.0), (4.0, 10.0)]);
+        assert_eq!(data.effects.clip_sounds.len(), 2);
+        assert!((data.effects.clip_sounds[0].mic_volume - 0.5).abs() < 1e-9);
+
+        data.trim_start = 5.0;
+        data.clamp_cuts();
+        assert_eq!(data.segment_boundaries(), vec![(5.0, 10.0)]);
+        assert_eq!(data.effects.clip_sounds.len(), 1);
+        assert!(data.effects.clip_sounds[0].muted);
+        assert!((data.effects.clip_sounds[0].mic_volume - 0.25).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_muted_microphone_silences_every_piece() {
+        let mut data = loaded();
+        data.has_microphone = true;
+        data.effects.clip_sounds = default_effects(1).clip_sounds;
+
+        data.effects.sound.mute_microphone = true;
+        assert!(data.piece_muted(0));
+
+        data.effects.sound.mute_microphone = false;
+        assert!(!data.piece_muted(0));
+        assert!((data.piece_gain(0) - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_piece_keeps_sound_from_the_system_track_when_the_microphone_is_muted() {
+        let mut data = loaded();
+        data.has_microphone = true;
+        data.has_system = true;
+        data.effects.clip_sounds = default_effects(1).clip_sounds;
+
+        data.effects.sound.mute_microphone = true;
+        assert!((data.piece_gain(0) - 1.0).abs() < 1e-9);
+        assert!(!data.piece_muted(0));
+    }
+
+    #[test]
+    fn master_volume_zero_mutes_everything() {
+        let mut data = loaded();
+        data.has_microphone = true;
+        data.has_system = true;
+        data.effects.clip_sounds = default_effects(1).clip_sounds;
+
+        data.effects.sound.volume = 0.0;
+        assert!(data.piece_muted(0));
+    }
+
+    #[test]
+    fn an_unknown_recording_follows_the_clip_mute() {
+        let mut data = loaded();
+        assert!((data.piece_gain(0) - 1.0).abs() < 1e-9);
+
+        data.effects.clip_sounds = vec![super::super::sound::ClipSound {
+            muted: true,
+            ..Default::default()
+        }];
+        assert!(data.piece_muted(0));
+    }
+
+    #[test]
+    fn a_single_piece_is_the_clip_without_a_selection() {
+        let mut data = loaded();
+        assert!(!data.selected);
+        assert_eq!(data.clip_segment(), Some(0));
+
+        assert!(data.add_cut(5.0));
+        assert_eq!(data.clip_segment(), None, "a cut composition has no pick");
+
+        data.selected = true;
+        data.selected_segment = Some(1);
+        assert_eq!(data.clip_segment(), Some(1));
+    }
+
+    #[test]
+    fn setting_a_piece_speed_moves_the_later_pieces() {
+        let mut data = loaded();
+        data.trim_end = 6.0;
+        assert!(data.add_cut(2.0));
+        assert!(data.add_cut(4.0));
+        assert_eq!(data.segment_starts, vec![0.0, 2.0, 4.0]);
+
+        assert!(data.set_segment_speed(1, 2.0, false));
+
+        assert!((data.segment_start(1) - 2.0).abs() < 1e-9);
+        assert!((data.segment_start(2) - 3.0).abs() < 1e-9);
+        assert!((data.total_duration() - 5.0).abs() < 1e-9);
+        assert!(
+            !data.set_segment_speed(1, 2.0, false),
+            "the same speed adds no step"
+        );
+        assert!(
+            !data.set_segment_speed(9, 2.0, false),
+            "there is no such piece"
+        );
+    }
+
+    #[test]
+    fn a_speed_sweep_is_one_undo_step() {
+        let mut data = loaded();
+        data.trim_end = 6.0;
+        assert!(data.add_cut(2.0));
+        assert!(data.add_cut(4.0));
+        data.selected = true;
+        data.selected_segment = Some(1);
+
+        for speed in [1.2, 1.5, 2.0] {
+            assert!(data.set_segment_speed(1, speed, true));
+        }
+        assert!((data.segment_speed(1) - 2.0).abs() < 1e-9);
+
+        assert!(data.undo_edit());
+        assert!((data.segment_speed(1) - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
     fn speeding_a_range_keeps_the_gaps_between_moved_pieces() {
         let mut data = loaded();
         assert!(data.add_cut(3.0));
@@ -9246,6 +10148,41 @@ mod tests {
         assert_eq!(speed_label(3.0), "3×");
         assert_eq!(speed_label(1.5), "1.5×");
         assert_eq!(speed_label(1.0), "1×");
+    }
+
+    #[test]
+    fn a_short_zoom_pill_keeps_only_a_changed_scale() {
+        assert_eq!(
+            super::zoom_clip_labels(ZoomMode::Auto, 2.0),
+            vec![format!("{}  2×", t("Auto")), t("Zoom")]
+        );
+        assert_eq!(
+            super::zoom_clip_labels(ZoomMode::Manual, 1.5),
+            vec![format!("{}  1.5×", t("Manual")), "1.5×".to_string()]
+        );
+    }
+
+    #[test]
+    fn an_effect_label_that_does_not_fit_is_left_off() {
+        let surface = ImageSurface::create(Format::ARgb32, 200, 40).unwrap();
+        let context = Context::new(&surface).unwrap();
+        context.set_font_size(11.0);
+        let labels = vec!["Manual  1.5×".to_string(), "1.5×".to_string()];
+        let short = context.text_extents("1.5×").unwrap().x_advance();
+        let long = context.text_extents("Manual  1.5×").unwrap().x_advance();
+        assert_eq!(
+            super::first_fitting_label(&context, &labels, long + 1.0),
+            Some("Manual  1.5×")
+        );
+        assert_eq!(
+            super::first_fitting_label(&context, &labels, short + 1.0),
+            Some("1.5×")
+        );
+        assert_eq!(
+            super::first_fitting_label(&context, &labels, short - 1.0),
+            None
+        );
+        assert_eq!(super::first_fitting_label(&context, &labels, 0.0), None);
     }
 
     #[test]
@@ -10093,6 +11030,8 @@ mod tests {
             cursor_click_sound_volume: 0.25,
             captions_shortcuts: false,
             captions_show_single_letters: false,
+            sound: Default::default(),
+            clip_sounds: Vec::new(),
             cursor: Default::default(),
         });
 
@@ -10638,14 +11577,27 @@ mod tests {
     }
 
     #[test]
-    fn both_effect_lanes_stay_open_without_clips() {
-        // The lane flags drive the drawing areas, so both true means both drop
-        // targets are on screen from the start.
-        let data = loaded();
+    fn the_sound_lane_appears_only_with_sound() {
+        // The lane flags drive the drawing areas, so the zoom row is always
+        // there and the sound row follows the recording.
+        let mut data = loaded();
         let state = data.lane_state();
         assert!(state.zoom);
-        assert!(state.hide);
+        assert!(!state.sound);
         assert!(!state.camera);
+
+        data.has_microphone = true;
+        assert!(data.lane_state().sound);
+        data.has_microphone = false;
+        data.has_system = true;
+        assert!(data.lane_state().sound);
+
+        data.has_system = false;
+        data.effects.sound.background_file = Some(PathBuf::from("music.m4a"));
+        assert!(
+            data.lane_state().sound,
+            "background music needs the row too"
+        );
     }
 
     #[test]
@@ -10901,10 +11853,10 @@ mod tests {
             data.lane_expanded(TimelineLane::Zoom),
             "zoom starts expanded"
         );
-        assert!(!data.lane_expanded(TimelineLane::Hide));
-        assert!(data.expand_lane(TimelineLane::Hide));
-        assert!(!data.expand_lane(TimelineLane::Hide), "already expanded");
-        assert!(data.lane_expanded(TimelineLane::Hide) && !data.lane_expanded(TimelineLane::Zoom));
+        assert!(!data.lane_expanded(TimelineLane::Sound));
+        assert!(data.expand_lane(TimelineLane::Sound));
+        assert!(!data.expand_lane(TimelineLane::Sound), "already expanded");
+        assert!(data.lane_expanded(TimelineLane::Sound) && !data.lane_expanded(TimelineLane::Zoom));
         data.select_effect(EffectTrack::Zoom, Some(0));
         assert!(
             data.lane_expanded(TimelineLane::Zoom),
@@ -10919,7 +11871,7 @@ mod tests {
         let resting: i32 = lane_heights(data.lane_progress, [true; 3], 1.25)
             .iter()
             .sum();
-        data.expand_lane(TimelineLane::Hide);
+        data.expand_lane(TimelineLane::Sound);
         for frame in 0..40 {
             if frame == 6 {
                 // A second switch mid-move keeps three lanes moving at once.
@@ -10937,12 +11889,12 @@ mod tests {
     fn a_lane_eases_to_its_new_height_and_settles() {
         let mut data = Data::default();
         assert_eq!(data.lane_progress, [1.0, 0.0, 0.0]);
-        data.expand_lane(TimelineLane::Hide);
+        data.expand_lane(TimelineLane::Sound);
         assert!(data.step_lane_progress(0.016), "a change starts moving");
         let zoom = data.lane_progress(TimelineLane::Zoom);
-        let hide = data.lane_progress(TimelineLane::Hide);
+        let sound = data.lane_progress(TimelineLane::Sound);
         assert!(zoom < 1.0 && zoom > 0.5, "zoom shrinks gradually: {zoom}");
-        assert!(hide > 0.0 && hide < 0.5, "hide grows gradually: {hide}");
+        assert!(sound > 0.0 && sound < 0.5, "sound grows gradually: {sound}");
         let mut steps = 0;
         while data.step_lane_progress(0.016) {
             steps += 1;
@@ -11024,6 +11976,7 @@ mod tests {
 
         let mut reopened = loaded();
         reopened.apply_project(&file);
+        data.normalize_clip_sounds();
         assert_eq!(reopened.effects, data.effects);
     }
 
@@ -11033,7 +11986,7 @@ mod tests {
         data.update_effects(|effects| effects.captions.shortcuts = true);
         data.update_effects(|effects| effects.captions.shortcuts = true);
         assert!(data.undo_edit());
-        assert_eq!(data.effects, project::EffectsSettings::default());
+        assert_eq!(data.effects, default_effects(data.segment_count()));
         assert!(!data.undo_edit());
         assert!(data.redo_edit());
         assert!(data.effects.captions.shortcuts);
@@ -11061,9 +12014,10 @@ mod tests {
 
         let mut data = loaded();
         data.apply_project(&first);
-        assert_eq!(data.effects, with_effects.effects);
+        assert_eq!(data.effects.click_sound, with_effects.effects.click_sound);
+        assert_eq!(data.effects.captions, with_effects.effects.captions);
         data.apply_project(&second);
-        assert_eq!(data.effects, project::EffectsSettings::default());
+        assert_eq!(data.effects, default_effects(data.segment_count()));
         data.apply_project(&first);
         data.reset_media();
         assert_eq!(data.effects, project::EffectsSettings::default());

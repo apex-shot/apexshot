@@ -1488,6 +1488,7 @@ void RecordingSession::Private::completeSystemAudio(const QString& videoPath)
         QString path;
         double offsetSeconds;
         QString select;
+        QString kind;
     };
     QVector<AudioInput> inputs;
     const auto usable = [](const QString& path) {
@@ -1508,12 +1509,13 @@ void RecordingSession::Private::completeSystemAudio(const QString& videoPath)
                          .arg(spans.join(QStringLiteral("+")));
         }
         inputs.append(
-            {micPath, std::max<qint64>(0, micOffsetMs) / 1000.0, select});
+            {micPath, std::max<qint64>(0, micOffsetMs) / 1000.0, select,
+             QStringLiteral("mic")});
     }
     if (usable(systemAudioPath)) {
         inputs.append({systemAudioPath,
                        std::max<qint64>(0, systemAudioOffsetMs) / 1000.0,
-                       QString()});
+                       QString(), QStringLiteral("system")});
     }
     micPath.clear();
     systemAudioPath.clear();
@@ -1525,6 +1527,20 @@ void RecordingSession::Private::completeSystemAudio(const QString& videoPath)
 
     const QString mixedPath = QDir(workDir).filePath(QStringLiteral("mixed-audio.mp4"));
     QFile::remove(mixedPath);
+
+    // The editor gives each source its own volume, so every source is also kept
+    // on its own beside the pointer data.
+    QString trackBase = recordingId.isEmpty() ? QString()
+                                              : Platform::recordingSidecarPathFor(recordingId);
+    if (trackBase.isEmpty())
+        trackBase = Platform::sidecarPathFor(videoPath);
+    QStringList trackTemps;
+    for (int i = 0; i < inputs.size(); ++i) {
+        const QString temp = QDir(workDir).filePath(QStringLiteral("track-%1.m4a").arg(i));
+        QFile::remove(temp);
+        trackTemps << temp;
+    }
+
     recordingLog(QStringLiteral("audio: mux %1 tracks onto %2")
                      .arg(inputs.size())
                      .arg(videoPath));
@@ -1534,11 +1550,13 @@ void RecordingSession::Private::completeSystemAudio(const QString& videoPath)
     QStringList parts;
     for (int i = 0; i < inputs.size(); ++i) {
         labels << QStringLiteral("[a%1]").arg(i);
-        parts << QStringLiteral("[%1:a]atrim=start=%2,asetpts=PTS-STARTPTS%3,apad%4")
+        parts << QStringLiteral("[%1:a]atrim=start=%2,asetpts=PTS-STARTPTS%3,"
+                                "asplit=2[k%5][p%5];[p%5]apad%4")
                      .arg(i + 1)
                      .arg(inputs[i].offsetSeconds, 0, 'f', 3)
                      .arg(inputs[i].select)
-                     .arg(labels.last());
+                     .arg(labels.last())
+                     .arg(i);
     }
     QStringList mix = labels;
     if (videoHasAudio)
@@ -1578,6 +1596,13 @@ void RecordingSession::Private::completeSystemAudio(const QString& videoPath)
         arguments << QStringLiteral("-tag:v") << QStringLiteral("hvc1");
     appendRecordingIdTag(arguments, recordingId);
     arguments << mixedPath;
+    for (int i = 0; i < inputs.size(); ++i) {
+        arguments << QStringLiteral("-map") << QStringLiteral("[k%1]").arg(i)
+                  << QStringLiteral("-c:a") << QStringLiteral("aac")
+                  << QStringLiteral("-b:a") << QStringLiteral("128k")
+                  << QStringLiteral("-movflags") << QStringLiteral("+faststart")
+                  << trackTemps.at(i);
+    }
 
     auto* mixer = new QProcess(q);
     mixer->setProgram(ffmpegExecutable());
@@ -1587,8 +1612,8 @@ void RecordingSession::Private::completeSystemAudio(const QString& videoPath)
         mixer,
         QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
         q,
-        [this, mixer, mixedPath, videoPath, next, inputs](int code,
-                                                        QProcess::ExitStatus status) {
+        [this, mixer, mixedPath, videoPath, next, inputs, trackTemps, trackBase](
+            int code, QProcess::ExitStatus status) {
             const QString detail = tailLines(QString::fromUtf8(mixer->readAll()), 6);
             mixer->deleteLater();
             for (const AudioInput& input : inputs)
@@ -1607,6 +1632,24 @@ void RecordingSession::Private::completeSystemAudio(const QString& videoPath)
                 const bool parked = QFile::rename(videoPath, originalPath);
                 if (parked && QFile::rename(mixedPath, videoPath)) {
                     QFile::remove(originalPath);
+                    // The separate tracks are best effort: a failure to keep
+                    // them must not disturb the recording itself.
+                    if (!trackBase.isEmpty()) {
+                        QDir().mkpath(QFileInfo(trackBase).absolutePath());
+                        int kept = 0;
+                        for (int i = 0; i < inputs.size(); ++i) {
+                            const QString target = trackBase + QStringLiteral(".")
+                                                   + inputs[i].kind + QStringLiteral(".m4a");
+                            QFile::remove(target);
+                            if (QFileInfo(trackTemps[i]).size() > 0
+                                && QFile::rename(trackTemps[i], target))
+                                ++kept;
+                        }
+                        recordingLog(
+                            QStringLiteral("audio: kept %1 separate tracks beside %2")
+                                .arg(kept)
+                                .arg(trackBase));
+                    }
                 } else {
                     if (parked)
                         QFile::rename(originalPath, videoPath);
@@ -1621,6 +1664,8 @@ void RecordingSession::Private::completeSystemAudio(const QString& videoPath)
                     QStringLiteral("The system audio could not be added to the recording: %1")
                         .arg(detail.isEmpty() ? QStringLiteral("the audio join failed") : detail));
             }
+            for (const QString& temp : trackTemps)
+                QFile::remove(temp);
             next(videoPath);
         });
     mixer->start();
@@ -1630,6 +1675,8 @@ void RecordingSession::Private::completeSystemAudio(const QString& videoPath)
         systemAudio.reset();
         QFile::remove(systemAudioPath);
         systemAudioPath.clear();
+        for (const QString& temp : trackTemps)
+            QFile::remove(temp);
         emit q->warning(QStringLiteral("The system audio could not be added: %1").arg(detail));
         next(videoPath);
     }
@@ -1994,6 +2041,8 @@ void RecordingSession::Private::removeDiscardedSidecar()
         return;
     QFile::remove(path);
     QFile::remove(path + QStringLiteral(".webcam.mp4"));
+    QFile::remove(path + QStringLiteral(".mic.m4a"));
+    QFile::remove(path + QStringLiteral(".system.m4a"));
     QFile::remove(path + QStringLiteral(".recording.json"));
     QDir(path + QStringLiteral(".cursors")).removeRecursively();
     // A tagged recording owns a whole folder under the recordings root.

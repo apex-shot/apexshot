@@ -40,6 +40,15 @@ fn main() {
             // Cloud sign-in: the back pill and the link's open glyph.
             "chevron-left-regular",
             "open-regular",
+            // The Clips panel's rail icon and the glyphs its sound controls
+            // name: the clip itself, its two tracks, music and speed.
+            "video-clip-regular",
+            "speaker-2-regular",
+            "speaker-mute-regular",
+            "mic-regular",
+            "music-note-2-regular",
+            "dismiss-regular",
+            "top-speed-regular",
         ],
     );
 }
