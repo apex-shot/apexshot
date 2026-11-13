@@ -3134,11 +3134,23 @@ msgstr "Licence enregistrée. Cette version n’est pas couverte par les mises �
 msgid "I have a license"
 msgstr "J’ai une licence"
 
-msgid "In this export"
-msgstr "Dans cet export"
+msgid "$39 once"
+msgstr "39 $ en une fois"
 
-msgid "Includes 12 months of updates. Versions you get keep working forever."
-msgstr "Inclut 12 mois de mises à jour. Les versions que vous obtenez continuent de fonctionner pour toujours."
+msgid "12 months of updates"
+msgstr "12 mois de mises à jour"
+
+msgid "14-day refund"
+msgstr "Remboursement sous 14 jours"
+
+msgid "Versions you get keep working forever."
+msgstr "Les versions que vous obtenez continuent de fonctionner pour toujours."
+
+msgid "Uses {feature}"
+msgstr "Utilise {feature}"
+
+msgid "This export uses {features}"
+msgstr "Cet export utilise {features}"
 
 msgid "Instant zooms, speed, smoothness and motion blur for recordings."
 msgstr "Zooms instantanés, vitesse, fluidité et flou de mouvement pour les enregistrements."

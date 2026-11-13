@@ -3091,11 +3091,23 @@ msgstr "تم حفظ الترخيص. هذا الإصدار غير مشمول با
 msgid "I have a license"
 msgstr "لدي ترخيص"
 
-msgid "In this export"
-msgstr "في هذا التصدير"
+msgid "$39 once"
+msgstr "39 دولارًا لمرة واحدة"
 
-msgid "Includes 12 months of updates. Versions you get keep working forever."
-msgstr "يتضمن تحديثات لمدة 12 شهرًا. الإصدارات التي تحصل عليها تستمر في العمل إلى الأبد."
+msgid "12 months of updates"
+msgstr "تحديثات لمدة 12 شهرًا"
+
+msgid "14-day refund"
+msgstr "استرداد خلال 14 يومًا"
+
+msgid "Versions you get keep working forever."
+msgstr "الإصدارات التي تحصل عليها تستمر في العمل إلى الأبد."
+
+msgid "Uses {feature}"
+msgstr "يستخدم {feature}"
+
+msgid "This export uses {features}"
+msgstr "يستخدم هذا التصدير {features}"
 
 msgid "Instant zooms, speed, smoothness and motion blur for recordings."
 msgstr "تكبير فوري، وسرعة، وسلاسة، وضبابية حركة للتسجيلات."

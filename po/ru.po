@@ -3120,11 +3120,23 @@ msgstr "Лицензия сохранена. Эта сборка не входи
 msgid "I have a license"
 msgstr "У меня есть лицензия"
 
-msgid "In this export"
-msgstr "В этом экспорте"
+msgid "$39 once"
+msgstr "39 $ единоразово"
 
-msgid "Includes 12 months of updates. Versions you get keep working forever."
-msgstr "Включает 12 месяцев обновлений. Полученные вами версии продолжают работать навсегда."
+msgid "12 months of updates"
+msgstr "12 месяцев обновлений"
+
+msgid "14-day refund"
+msgstr "Возврат в течение 14 дней"
+
+msgid "Versions you get keep working forever."
+msgstr "Полученные вами версии продолжают работать навсегда."
+
+msgid "Uses {feature}"
+msgstr "Использует: {feature}"
+
+msgid "This export uses {features}"
+msgstr "В этом экспорте используется: {features}"
 
 msgid "Instant zooms, speed, smoothness and motion blur for recordings."
 msgstr "Мгновенные зумы, скорость, плавность и размытие движения для записей."

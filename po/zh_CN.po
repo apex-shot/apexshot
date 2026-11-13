@@ -3071,11 +3071,23 @@ msgstr "许可证已保存。此版本不在所含更新的覆盖范围内；请
 msgid "I have a license"
 msgstr "我已有许可证"
 
-msgid "In this export"
-msgstr "本次导出使用"
+msgid "$39 once"
+msgstr "一次性 $39"
 
-msgid "Includes 12 months of updates. Versions you get keep working forever."
-msgstr "包含 12 个月更新。你获得的版本将永远可用。"
+msgid "12 months of updates"
+msgstr "12 个月更新"
+
+msgid "14-day refund"
+msgstr "14 天退款"
+
+msgid "Versions you get keep working forever."
+msgstr "你获得的版本将永远可用。"
+
+msgid "Uses {feature}"
+msgstr "使用了{feature}"
+
+msgid "This export uses {features}"
+msgstr "本次导出使用了{features}"
 
 msgid "Instant zooms, speed, smoothness and motion blur for recordings."
 msgstr "为录制提供即时缩放、速度、平滑度和运动模糊。"
