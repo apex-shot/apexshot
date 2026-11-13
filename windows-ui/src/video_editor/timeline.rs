@@ -3171,6 +3171,8 @@ pub(super) struct ClipPanelState {
     pub selection_epoch: u64,
     /// The selected piece's speed (1 when none).
     pub speed: f64,
+    /// The selected piece's footage length in source seconds (0 when none).
+    pub source_length: f64,
     /// The selected piece's sound (default when none).
     pub clip: super::sound::ClipSound,
     pub settings: super::sound::SoundSettings,
@@ -3434,6 +3436,9 @@ impl Timeline {
             speed: segment
                 .map(|index| data.segment_speed(index))
                 .unwrap_or(1.0),
+            source_length: segment
+                .and_then(|index| data.segment_boundaries().get(index).copied())
+                .map_or(0.0, |(start, end)| (end - start).max(0.0)),
             clip: segment
                 .and_then(|index| data.effects.clip_sounds.get(index).copied())
                 .unwrap_or_default(),
@@ -7492,13 +7497,45 @@ fn draw_sound_lane(
         context.select_font_face("DM Sans", FontSlant::Normal, FontWeight::Normal);
         context.set_font_size((11.0 * scale).round());
         let padding = EFFECT_LABEL_PADDING * scale;
+        let baseline = y + pill_h * 0.62;
         let mut label_x = x0 + padding;
         let mut label_room = pill_w - padding * 2.0;
+        // A muted piece carries one chip across its mark, its word and its
+        // speed, so no label sits straight on the waveform bars.
+        let mut chip_painted = false;
         if muted {
             let glyph = 12.0 * scale;
             let glyph_x = x0 + inset;
             let right = x1 - inset;
             if glyph_x + glyph <= right {
+                let mut content_end = glyph_x + glyph;
+                let labels = [t("Muted")];
+                let text_x = glyph_x + glyph + 4.0 * scale;
+                let muted_label = first_fitting_label(context, &labels, right - text_x);
+                if let Some(label) = muted_label {
+                    content_end = content_end.max(text_x + text_width(context, label));
+                }
+                // The speed label follows the mute mark and its word, so the
+                // two never sit on top of each other on a silent piece.
+                label_x = content_end + 6.0 * scale;
+                label_room = right - label_x;
+                let speed = data.segment_speed(index);
+                let mut chip_end = content_end;
+                if (speed - 1.0).abs() > 1e-9 {
+                    let labels = [speed_label(speed)];
+                    if let Some(label) = first_fitting_label(context, &labels, label_room) {
+                        chip_end = chip_end.max(label_x + text_width(context, label));
+                    }
+                }
+                draw_label_chip(
+                    context,
+                    glyph_x - 4.0 * scale,
+                    chip_end + 4.0 * scale,
+                    baseline,
+                    tone.fill,
+                    scale,
+                );
+                chip_painted = true;
                 draw_mute_glyph(
                     context,
                     glyph_x,
@@ -7506,34 +7543,29 @@ fn draw_sound_lane(
                     glyph,
                     tone.edge,
                 );
-                let mut content_end = glyph_x + glyph;
-                let labels = [t("Muted")];
-                let text_x = glyph_x + glyph + 4.0 * scale;
-                if let Some(label) = first_fitting_label(context, &labels, right - text_x) {
+                if let Some(label) = muted_label {
                     context.set_source_rgba(tone.edge.0, tone.edge.1, tone.edge.2, tone.edge.3);
-                    context.move_to(text_x, y + pill_h * 0.62);
+                    context.move_to(text_x, baseline);
                     let _ = context.show_text(label);
-                    if let Ok(extents) = context.text_extents(label) {
-                        content_end = content_end.max(
-                            text_x
-                                + extents
-                                    .x_advance()
-                                    .max(extents.x_bearing() + extents.width()),
-                        );
-                    }
                 }
-                // The speed label follows the mute mark and its word, so the
-                // two never sit on top of each other on a silent piece.
-                label_x = content_end + 6.0 * scale;
-                label_room = right - label_x;
             }
         }
         let speed = data.segment_speed(index);
         if (speed - 1.0).abs() > 1e-9 {
             let labels = [speed_label(speed)];
             if let Some(label) = first_fitting_label(context, &labels, label_room) {
+                if !chip_painted {
+                    draw_label_chip(
+                        context,
+                        label_x - 4.0 * scale,
+                        label_x + text_width(context, label) + 4.0 * scale,
+                        baseline,
+                        tone.fill,
+                        scale,
+                    );
+                }
                 context.set_source_rgba(tone.edge.0, tone.edge.1, tone.edge.2, tone.edge.3);
-                context.move_to(label_x, y + pill_h * 0.62);
+                context.move_to(label_x, baseline);
                 let _ = context.show_text(label);
             }
         }
@@ -7744,6 +7776,49 @@ fn sound_tone(prefers_dark: bool, muted: bool) -> SoundTone {
         tone.wave.3 = 0.35;
     }
     tone
+}
+
+/// The width `label` takes at the current font, measured the way
+/// `first_fitting_label` measures it.
+fn text_width(context: &Context, label: &str) -> f64 {
+    context
+        .text_extents(label)
+        .map(|extents| {
+            extents
+                .x_advance()
+                .max(extents.x_bearing() + extents.width())
+        })
+        .unwrap_or(0.0)
+}
+
+/// The opaque chip a lane label sits on: without it the text and the waveform
+/// bars share the same violet and the label is hard to read.
+fn draw_label_chip(
+    context: &Context,
+    left: f64,
+    right: f64,
+    baseline: f64,
+    fill: (f64, f64, f64, f64),
+    scale: f64,
+) {
+    let chip_h = 16.0 * scale;
+    // Centre the chip on the text's own box rather than on its baseline, so
+    // the ink sits evenly inside it.
+    let centre = context
+        .font_extents()
+        .map_or(baseline - chip_h / 4.0, |extents| {
+            baseline + (extents.descent() - extents.ascent()) / 2.0
+        });
+    rounded_rect(
+        context,
+        left,
+        centre - chip_h / 2.0,
+        (right - left).max(0.0),
+        chip_h,
+        4.0 * scale,
+    );
+    context.set_source_rgba(fill.0, fill.1, fill.2, 1.0);
+    let _ = context.fill();
 }
 
 /// A speaker with a cross, `size` square, drawn from its top-left corner.
@@ -8398,6 +8473,9 @@ fn draw_video_clip(
             }
         }
 
+        // The speed badge's own slot is remembered so the mute badge can take
+        // the place beside it rather than share the corner with it.
+        let mut speed_badge: Option<(f64, f64, f64)> = None;
         if (speed - 1.0).abs() > 1e-9 {
             let label = speed_label(speed);
             context.select_font_face("DM Sans", FontSlant::Normal, FontWeight::Bold);
@@ -8423,6 +8501,7 @@ fn draw_video_clip(
                     let text_top = badge_y + (badge_h - extents.height()) / 2.0;
                     context.move_to(badge_x + pad, text_top - extents.y_bearing());
                     let _ = context.show_text(&label);
+                    speed_badge = Some((badge_x, badge_y, badge_h));
                 }
             }
         }
@@ -8431,20 +8510,69 @@ fn draw_video_clip(
             && data.piece_muted(index)
             && body_width >= 28.0 * scale
         {
-            let size = 16.0 * scale;
-            let badge_x = right - size - 4.0 * scale;
-            let badge_y = y + 4.0 * scale;
-            rounded_rect(context, badge_x, badge_y, size, size, 4.0 * scale);
-            context.set_source_rgba(0.0, 0.0, 0.0, 0.55);
-            let _ = context.fill();
-            let glyph = 11.0 * scale;
-            draw_mute_glyph(
-                context,
-                badge_x + (size - glyph) / 2.0,
-                badge_y + (size - glyph) / 2.0,
-                glyph,
-                (1.0, 1.0, 1.0, 0.95),
-            );
+            // The speed badge and the right edge handle both claim the
+            // corner, so the mute badge sits just left of the speed badge,
+            // or in the slot the speed badge would have taken.
+            let gap = 4.0 * scale;
+            let (pill_h, pill_centre) = match speed_badge {
+                Some((_, speed_y, speed_h)) => {
+                    ((22.0 * scale).max(speed_h), speed_y + speed_h / 2.0)
+                }
+                None => {
+                    let pill_h = 22.0 * scale;
+                    (pill_h, y + clip_height - gap - pill_h / 2.0)
+                }
+            };
+            let pill_right = match speed_badge {
+                Some((speed_x, _, _)) => speed_x - gap,
+                None => right - gap,
+            };
+            let glyph = 15.0 * scale;
+            let left_pad = 6.0 * scale;
+            let right_pad = 8.0 * scale;
+            let word = t("Muted");
+            context.select_font_face("DM Sans", FontSlant::Normal, FontWeight::Bold);
+            context.set_font_size((11.0 * scale).round());
+            let glyph_w = left_pad + glyph + right_pad;
+            let word_w = left_pad + glyph + gap + text_width(context, &word) + right_pad;
+            // The badge never eats into the piece's left edge: a word only
+            // rides along when the pill still clears it.
+            let room = pill_right - left - 8.0 * scale;
+            let (pill_w, with_word) = if word_w <= room {
+                (word_w, true)
+            } else if glyph_w <= room {
+                (glyph_w, false)
+            } else {
+                (0.0, false)
+            };
+            if pill_w > 0.0 {
+                let pill_x = pill_right - pill_w;
+                let pill_y = pill_centre - pill_h / 2.0;
+                rounded_rect(context, pill_x, pill_y, pill_w, pill_h, pill_h / 2.0);
+                context.set_source_rgba(0.0, 0.0, 0.0, 0.72);
+                let _ = context.fill_preserve();
+                context.set_source_rgba(1.0, 1.0, 1.0, 0.35);
+                context.set_line_width(1.0 * scale);
+                let _ = context.stroke();
+                draw_mute_glyph(
+                    context,
+                    pill_x + left_pad,
+                    pill_y + (pill_h - glyph) / 2.0,
+                    glyph,
+                    (1.0, 1.0, 1.0, 1.0),
+                );
+                if with_word {
+                    if let Ok(extents) = context.text_extents(&word) {
+                        context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+                        let text_top = pill_y + (pill_h - extents.height()) / 2.0;
+                        context.move_to(
+                            pill_x + left_pad + glyph + gap,
+                            text_top - extents.y_bearing(),
+                        );
+                        let _ = context.show_text(&word);
+                    }
+                }
+            }
         }
 
         if data.selected {

@@ -47,6 +47,7 @@ fn main() {
             "speaker-mute-regular",
             "mic-regular",
             "music-note-2-regular",
+            "dismiss-regular",
             "top-speed-regular",
         ],
     );

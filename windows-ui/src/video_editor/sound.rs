@@ -67,6 +67,19 @@ impl MicPreset {
         }
     }
 
+    /// One short line for inside the mode's tile, passed through `t()` by the
+    /// caller.
+    pub fn summary(self) -> &'static str {
+        match self {
+            Self::Standard => "Even, natural voice",
+            Self::Loud => "Punchy and compressed",
+            Self::NoiseReduction => "Removes steady noise",
+            Self::Podcast => "Warm, polished voice",
+            Self::Warm => "Fuller, deeper tone",
+            Self::Off => "As recorded",
+        }
+    }
+
     /// The filter chain this mode applies to the voice track, if any.
     pub(super) fn filter(self) -> Option<&'static str> {
         match self {
@@ -1438,6 +1451,19 @@ mod tests {
             ..SoundSettings::default()
         };
         assert!(!quiet.background_active());
+    }
+
+    #[test]
+    fn every_microphone_mode_fits_its_tile() {
+        for preset in MicPreset::ALL {
+            let summary = preset.summary();
+            assert!(!summary.is_empty(), "{preset:?} has no summary");
+            assert!(
+                summary.chars().count() <= 22,
+                "{preset:?}'s summary is {} characters: {summary}",
+                summary.chars().count()
+            );
+        }
     }
 
     #[test]

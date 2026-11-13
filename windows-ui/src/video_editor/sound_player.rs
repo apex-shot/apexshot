@@ -7,10 +7,13 @@
 
 use super::sound::{SoundGraph, SoundPlan};
 use std::cell::{Cell, RefCell};
+use std::collections::hash_map::DefaultHasher;
+use std::collections::HashSet;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::Instant;
 
 #[cfg(target_os = "windows")]
@@ -498,6 +501,27 @@ fn primed_matches(primed_key: &str, primed_time: f64, key: &str, time: f64) -> b
     primed_key == key && (0.0..0.5).contains(&(time - primed_time))
 }
 
+/// Whether the diagnostic log is on. Read once: the environment does not
+/// change while the editor runs.
+fn debug_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("APEXSHOT_SOUND_DEBUG").is_some())
+}
+
+/// Print a diagnostic line when `APEXSHOT_SOUND_DEBUG` is set.
+fn debug(message: impl FnOnce() -> String) {
+    if debug_enabled() {
+        eprintln!("[sound] {}", message());
+    }
+}
+
+/// A short identity for a sound key, so a log line stays readable.
+fn key_hash(key: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    key.hash(&mut hasher);
+    hasher.finish()
+}
+
 /// Keeps one player running while the preview plays, restarting it on a seek or
 /// on an edit that changes the sound, and prepares one for the position the
 /// preview is paused on.
@@ -509,6 +533,7 @@ pub(super) struct SoundSync {
     primed: RefCell<Option<(SoundPlayer, String, f64)>>,
     prime_timer: RefCell<Option<gtk4::glib::SourceId>>,
     wanted: RefCell<Option<(String, f64)>>,
+    seen: RefCell<HashSet<u64>>,
 }
 
 impl SoundSync {
@@ -521,7 +546,16 @@ impl SoundSync {
             primed: RefCell::new(None),
             prime_timer: RefCell::new(None),
             wanted: RefCell::new(None),
+            seen: RefCell::new(HashSet::new()),
         }
+    }
+
+    /// The full text of a sound key, printed the first time its hash is logged.
+    fn note_key(&self, hash: u64, key: &str) {
+        if !self.seen.borrow_mut().insert(hash) {
+            return;
+        }
+        debug(|| format!("key#{hash:016x} = {key}"));
     }
 
     /// Called on every preview frame. `key` describes everything the sound
@@ -559,6 +593,9 @@ impl SoundSync {
             *self.primed.borrow_mut() = None;
             *self.wanted.borrow_mut() = Some((key.clone(), time));
             self.cancel_prime();
+            let hash = key_hash(&key);
+            self.note_key(hash, &key);
+            debug(|| format!("prepare scheduled at {time:.3} key#{hash:016x}"));
             self.schedule_prime(key, time, Box::new(plan));
             return;
         }
@@ -569,12 +606,28 @@ impl SoundSync {
         if !running {
             if let Some((player, primed_key, primed_time)) = self.primed.borrow_mut().take() {
                 if primed_matches(&primed_key, primed_time, &key, time) {
+                    let hash = key_hash(&key);
+                    self.note_key(hash, &key);
+                    debug(|| {
+                        format!(
+                            "go primed at {time:.3} (prepared {primed_time:.3}) key#{hash:016x}"
+                        )
+                    });
                     player.go(time - primed_time);
                     *self.player.borrow_mut() = Some(player);
                     *self.key.borrow_mut() = Some(key);
                     self.started.set(Some((Instant::now(), time)));
                     return;
                 }
+                let primed_hash = key_hash(&primed_key);
+                let hash = key_hash(&key);
+                self.note_key(primed_hash, &primed_key);
+                self.note_key(hash, &key);
+                debug(|| {
+                    format!(
+                        "primed mismatch: key#{primed_hash:016x} at {primed_time:.3} vs key#{hash:016x} at {time:.3}"
+                    )
+                });
             }
         }
         *self.primed.borrow_mut() = None;
@@ -587,6 +640,11 @@ impl SoundSync {
             return;
         }
         self.player.borrow_mut().take();
+        let hash = key_hash(&key);
+        self.note_key(hash, &key);
+        debug(|| {
+            format!("start at {time:.3} key#{hash:016x} (running {running}, same key {same_key})")
+        });
         let graph = plan().and_then(|plan| {
             let click = self.click_path(&plan);
             plan.graph_from(time, click.as_deref(), 0)
@@ -619,16 +677,25 @@ impl SoundSync {
                 });
                 drop(wanted);
                 if !current {
+                    debug(|| "prepare skipped: stale".to_string());
                     return;
                 }
-                *sync.wanted.borrow_mut() = None;
+                let hash = key_hash(&key);
                 let graph = plan().and_then(|plan| {
                     let click = sync.click_path(&plan);
                     plan.graph_from(time, click.as_deref(), 0)
                 });
-                if let Some(graph) = graph {
-                    *sync.primed.borrow_mut() = Some((SoundPlayer::prepare(graph), key, time));
-                }
+                let Some(graph) = graph else {
+                    // `wanted` stays set for this (key, time) so the paused
+                    // branch's queued check returns early instead of scheduling
+                    // the same silent plan on every frame.
+                    debug(|| "prepare skipped: silent plan".to_string());
+                    return;
+                };
+                sync.note_key(hash, &key);
+                debug(|| format!("prepared at {time:.3} key#{hash:016x}"));
+                *sync.primed.borrow_mut() = Some((SoundPlayer::prepare(graph), key, time));
+                *sync.wanted.borrow_mut() = None;
             });
         *self.prime_timer.borrow_mut() = Some(source);
     }
@@ -642,6 +709,7 @@ impl SoundSync {
 
     /// Stop any sound at once, prepared or not.
     pub fn stop(&self) {
+        debug(|| "stop".to_string());
         self.cancel_prime();
         self.player.borrow_mut().take();
         *self.primed.borrow_mut() = None;

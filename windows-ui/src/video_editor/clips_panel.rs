@@ -15,20 +15,39 @@ use crate::i18n::{t, tfmt};
 use gtk4::prelude::*;
 use gtk4::{
     Align, ApplicationWindow, Box as GtkBox, Button, FileChooserAction, FileChooserNative,
-    FileFilter, Grid, Label, Orientation, PolicyType, ResponseType, ScrolledWindow, Stack,
-    StackTransitionType, ToggleButton,
+    FileFilter, Grid, Image, Justification, Label, Orientation, PolicyType, ResponseType,
+    ScrolledWindow, Stack, StackTransitionType, ToggleButton,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-/// The speed chips, in the order the row lays them out.
-const SPEED_CHIPS: [(f64, &str); 5] = [
+/// The speed presets, in the order the segmented control lays them out.
+const SPEED_PRESETS: [(f64, &str); 5] = [
     (0.5, "0.5×"),
     (1.0, "1×"),
     (1.5, "1.5×"),
     (2.0, "2×"),
-    (4.0, "4×"),
+    (3.0, "3×"),
 ];
+
+/// A length in `m:ss`, or one decimal under ten seconds so a short piece does
+/// not read as a flat zero.
+fn format_length(seconds: f64) -> String {
+    let seconds = seconds.max(0.0);
+    if seconds < 10.0 {
+        return format!("{seconds:.1}s");
+    }
+    let total = seconds.round() as u64;
+    format!("{}:{:02}", total / 60, total % 60)
+}
+
+/// A speed the way the presets spell it: at most two decimals, no trailing
+/// zeros, then the multiplication sign.
+fn format_speed(speed: f64) -> String {
+    let text = format!("{speed:.2}");
+    let text = text.trim_end_matches('0').trim_end_matches('.');
+    format!("{text}×")
+}
 
 /// Apply only the latest value of a dragged slider, at most once every 60 ms,
 /// so a sweep does not redo the timeline and the preview for every pixel.
@@ -117,39 +136,32 @@ pub(super) fn build_clips_panel(
 
     let speed_section = webcam_section(scale, &t("Speed"), true);
 
-    let speed_row = GtkBox::new(Orientation::Horizontal, px(6.0));
-    speed_row.add_css_class("recording-editor-click-effect-row");
-    speed_row.set_hexpand(true);
-    speed_row.set_homogeneous(true);
-    let speed_card = |label: &str| {
-        let card = ToggleButton::new();
-        card.add_css_class("recording-editor-click-effect-card");
-        card.set_has_frame(false);
-        card.set_hexpand(true);
-        let name = Label::new(Some(label));
-        name.add_css_class("recording-editor-click-effect-label");
-        name.set_xalign(0.5);
-        card.set_child(Some(&name));
-        card
-    };
-    let chips: Vec<ToggleButton> = SPEED_CHIPS
+    let speed_presets = GtkBox::new(Orientation::Horizontal, 0);
+    speed_presets.add_css_class("recording-editor-webcam-scope");
+    speed_presets.set_homogeneous(true);
+    speed_presets.set_hexpand(true);
+    let presets: Vec<ToggleButton> = SPEED_PRESETS
         .iter()
-        .map(|(_, label)| speed_card(label))
+        .map(|(_, label)| {
+            let (button, _) = webcam_scope_button(label);
+            button.set_hexpand(true);
+            button
+        })
         .collect();
-    for (chip, (chip_speed, _)) in chips.iter().zip(SPEED_CHIPS) {
-        speed_row.append(chip);
-        chip.connect_toggled({
+    for (preset, (preset_speed, _)) in presets.iter().zip(SPEED_PRESETS) {
+        speed_presets.append(preset);
+        preset.connect_toggled({
             let timeline = timeline.clone();
             let syncing = syncing.clone();
-            move |chip| {
-                if !chip.is_active() || syncing.get() {
+            move |preset| {
+                if !preset.is_active() || syncing.get() {
                     return;
                 }
-                timeline.set_selected_clip_speed(chip_speed);
+                timeline.set_selected_clip_speed(preset_speed);
             }
         });
     }
-    speed_section.body.append(&speed_row);
+    speed_section.body.append(&speed_presets);
 
     let speed_slider = value_slider_control(&t("Speed"), 0.25, 4.0, 1.0, 0.05, 2, scale, {
         let syncing = syncing.clone();
@@ -162,8 +174,15 @@ pub(super) fn build_clips_panel(
                 apply(value);
             }
         }
-    });
+    })
+    .with_suffix("×");
     speed_section.body.append(&speed_slider.widget());
+
+    let speed_length = Label::new(None);
+    speed_length.add_css_class("recording-editor-zoom-hint");
+    speed_length.set_xalign(0.0);
+    speed_length.set_wrap(true);
+    speed_section.body.append(&speed_length);
     clip_page.append(&speed_section.root);
 
     let clip_sound_section = webcam_section(scale, &t("Sound"), true);
@@ -194,7 +213,8 @@ pub(super) fn build_clips_panel(
                     apply(value);
                 }
             }
-        });
+        })
+        .with_suffix("%");
     clip_sound_section.body.append(&mic_slider.widget());
 
     let system_slider = value_slider_control(
@@ -219,7 +239,8 @@ pub(super) fn build_clips_panel(
                 }
             }
         },
-    );
+    )
+    .with_suffix("%");
     clip_sound_section.body.append(&system_slider.widget());
     clip_page.append(&clip_sound_section.root);
 
@@ -237,7 +258,8 @@ pub(super) fn build_clips_panel(
                 apply(value);
             }
         }
-    });
+    })
+    .with_suffix("%");
     volume_section.body.append(&volume_slider.widget());
 
     let no_sound_hint = Label::new(Some(&t(
@@ -276,10 +298,19 @@ pub(super) fn build_clips_panel(
         tile.set_hexpand(true);
         let inner = GtkBox::new(Orientation::Vertical, px(2.0));
         inner.set_valign(Align::Center);
+        inner.set_margin_top(px(6.0));
+        inner.set_margin_bottom(px(6.0));
         let name = Label::new(Some(&t(preset.label())));
         name.add_css_class("recording-editor-click-effect-label");
         name.set_xalign(0.5);
         inner.append(&name);
+        let summary = Label::new(Some(&t(preset.summary())));
+        summary.add_css_class("recording-editor-zoom-hint");
+        summary.set_xalign(0.5);
+        summary.set_justify(Justification::Center);
+        summary.set_wrap(true);
+        summary.set_max_width_chars(14);
+        inner.append(&summary);
         tile.set_child(Some(&inner));
         tile.set_tooltip_text(Some(&t(preset.description())));
         tiles.push((preset, tile));
@@ -320,24 +351,38 @@ pub(super) fn build_clips_panel(
     sound_page.append(&system_section.root);
 
     let music_section = webcam_section(scale, &t("Background music"), true);
-    let music_row = GtkBox::new(Orientation::Horizontal, px(8.0));
+    let music_row = GtkBox::new(Orientation::Horizontal, px(6.0));
     music_row.set_hexpand(true);
-    let music_name = Label::new(Some(&t("No music")));
-    music_name.add_css_class("recording-editor-zoom-hint");
-    music_name.set_xalign(0.0);
+    let music_picker = Button::new();
+    music_picker.add_css_class("recording-editor-bg-image-row");
+    music_picker.set_has_frame(false);
+    music_picker.set_hexpand(true);
+    let music_picker_inner = GtkBox::new(Orientation::Horizontal, 8);
+    let music_icon = Image::from_icon_name("music-note-2-regular");
+    music_icon.set_pixel_size(px(15.0));
+    let music_name = Label::new(Some(&t("Select music…")));
     music_name.set_hexpand(true);
-    music_name.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-    let choose = Button::with_label(&t("Choose…"));
-    choose.add_css_class("recording-editor-secondary-button");
-    let remove = Button::with_label(&t("Remove"));
-    remove.add_css_class("recording-editor-secondary-button");
-    music_row.append(&music_name);
-    music_row.append(&choose);
-    music_row.append(&remove);
+    music_name.set_xalign(0.0);
+    music_name.set_ellipsize(gtk4::pango::EllipsizeMode::Middle);
+    let music_browse = Image::from_icon_name("folder-open-symbolic");
+    music_browse.set_pixel_size(px(14.0));
+    music_picker_inner.append(&music_icon);
+    music_picker_inner.append(&music_name);
+    music_picker_inner.append(&music_browse);
+    music_picker.set_child(Some(&music_picker_inner));
+    let music_remove = Button::new();
+    music_remove.add_css_class("recording-editor-bg-image-row");
+    music_remove.set_has_frame(false);
+    let music_remove_icon = Image::from_icon_name("dismiss-regular");
+    music_remove_icon.set_pixel_size(px(12.0));
+    music_remove.set_child(Some(&music_remove_icon));
+    music_remove.set_tooltip_text(Some(&t("Remove music")));
+    music_row.append(&music_picker);
+    music_row.append(&music_remove);
     music_section.body.append(&music_row);
 
     let chooser_slot: Rc<RefCell<Option<FileChooserNative>>> = Rc::new(RefCell::new(None));
-    choose.connect_clicked({
+    music_picker.connect_clicked({
         let window = window.clone();
         let timeline = timeline.clone();
         let chooser_slot = chooser_slot.clone();
@@ -379,7 +424,7 @@ pub(super) fn build_clips_panel(
             chooser.show();
         }
     });
-    remove.connect_clicked({
+    music_remove.connect_clicked({
         let timeline = timeline.clone();
         let syncing = syncing.clone();
         move |_| {
@@ -404,7 +449,8 @@ pub(super) fn build_clips_panel(
                 apply(value);
             }
         }
-    });
+    })
+    .with_suffix("%");
     music_controls.append(&music_volume.widget());
     let (mute_music_row, mute_music_switch) = switch_row(&t("Mute music"));
     music_controls.append(&mute_music_row);
@@ -440,8 +486,9 @@ pub(super) fn build_clips_panel(
         let clip_count = clip_count.clone();
         let clip_hint = clip_hint.clone();
         let speed_section = speed_section.root.clone();
-        let chips = chips.clone();
+        let presets = presets.clone();
         let speed_slider = speed_slider.clone();
+        let speed_length = speed_length.clone();
         let clip_sound_section = clip_sound_section.root.clone();
         let mute_switch = mute_switch.clone();
         let mic_slider = mic_slider.clone();
@@ -457,7 +504,7 @@ pub(super) fn build_clips_panel(
         let mute_system_switch = mute_system_switch.clone();
         let music_section = music_section.root.clone();
         let music_name = music_name.clone();
-        let remove = remove.clone();
+        let music_remove = music_remove.clone();
         let music_controls = music_controls.clone();
         let music_volume = music_volume.clone();
         let mute_music_switch = mute_music_switch.clone();
@@ -481,10 +528,26 @@ pub(super) fn build_clips_panel(
             clip_hint.set_visible(state.segment.is_none());
             speed_section.set_visible(state.segment.is_some());
             clip_sound_section.set_visible(state.segment.is_some());
-            for (chip, (chip_speed, _)) in chips.iter().zip(SPEED_CHIPS) {
-                chip.set_active((state.speed - chip_speed).abs() < 1e-6);
+            for (preset, (preset_speed, _)) in presets.iter().zip(SPEED_PRESETS) {
+                preset.set_active((state.speed - preset_speed).abs() < 1e-6);
             }
             speed_slider.set_value(state.speed);
+            let original = format_length(state.source_length);
+            let length_text = if (state.speed - 1.0).abs() < 1e-6 {
+                tfmt("Length {original}", &[("original", original.as_str())])
+            } else {
+                let now = format_length(state.source_length / state.speed);
+                let speed = format_speed(state.speed);
+                tfmt(
+                    "{original} at 1× · {now} at {speed}",
+                    &[
+                        ("original", original.as_str()),
+                        ("now", now.as_str()),
+                        ("speed", speed.as_str()),
+                    ],
+                )
+            };
+            speed_length.set_text(&length_text);
             mute_switch.set_active(state.clip.muted);
             mic_slider.set_value(state.clip.mic_volume * 100.0);
             mic_slider.widget().set_visible(state.has_microphone);
@@ -504,12 +567,11 @@ pub(super) fn build_clips_panel(
             system_section.set_visible(state.has_media && state.has_system);
             mute_system_switch.set_active(state.settings.mute_system);
             let music = state.settings.background_file.as_ref();
-            music_name.set_text(
-                &music
-                    .and_then(|path| path.file_name())
-                    .map_or_else(|| t("No music"), |name| name.to_string_lossy().into_owned()),
-            );
-            remove.set_visible(music.is_some());
+            music_name.set_text(&music.and_then(|path| path.file_name()).map_or_else(
+                || t("Select music…"),
+                |name| name.to_string_lossy().into_owned(),
+            ));
+            music_remove.set_visible(music.is_some());
             music_section.set_visible(state.has_media);
             music_controls.set_visible(music.is_some());
             music_volume.set_value(state.settings.background_volume * 100.0);
@@ -522,4 +584,33 @@ pub(super) fn build_clips_panel(
     };
 
     (panel, refresh)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{format_length, format_speed};
+
+    #[test]
+    fn lengths_read_as_minutes_and_seconds() {
+        assert_eq!(format_length(12.0), "0:12");
+        assert_eq!(format_length(90.4), "1:30");
+        assert_eq!(format_length(125.6), "2:06");
+        assert_eq!(format_length(600.0), "10:00");
+    }
+
+    #[test]
+    fn short_lengths_keep_a_decimal() {
+        assert_eq!(format_length(6.4), "6.4s");
+        assert_eq!(format_length(0.0), "0.0s");
+        assert_eq!(format_length(-3.0), "0.0s");
+    }
+
+    #[test]
+    fn speeds_drop_trailing_zeros() {
+        assert_eq!(format_speed(1.0), "1×");
+        assert_eq!(format_speed(2.0), "2×");
+        assert_eq!(format_speed(1.5), "1.5×");
+        assert_eq!(format_speed(1.25), "1.25×");
+        assert_eq!(format_speed(0.5), "0.5×");
+    }
 }
