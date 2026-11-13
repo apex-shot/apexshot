@@ -87,7 +87,7 @@ fn upload_now(path: &Path, automatic: bool, report_progress: bool) -> i32 {
         if !report_progress {
             return;
         }
-        let percent = if total == 0 { 100 } else { sent * 100 / total };
+        let percent = (sent * 100).checked_div(total).unwrap_or(100);
         if percent == last_percent.get() {
             return;
         }

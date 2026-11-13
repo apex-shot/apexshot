@@ -2428,6 +2428,8 @@ public:
         m_sampleCard->moveTo(cardSlot(m_sampleCard->targetScreen(), m_sampleCard->size(), 0),
                              false);
         m_sampleCard->reveal();
+        // A Position change moves the cards already up to the new corner.
+        layoutCards(true);
     }
 
     void shortcutShowLastPreview()
