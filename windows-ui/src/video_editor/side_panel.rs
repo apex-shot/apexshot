@@ -71,9 +71,13 @@ pub(super) fn build_tools_column(
     );
     let (webcam_page, refresh_webcam) = build_webcam_panel(scale, timeline.clone());
     pages.add_named(&webcam_page, Some("webcam"));
+    let (clips_page, refresh_clips) =
+        super::clips_panel::build_clips_panel(scale, window, timeline.clone());
+    pages.add_named(&clips_page, Some("clips"));
 
     let buttons = Rc::new(RefCell::new(Vec::<ToggleButton>::new()));
     let webcam_button = Rc::new(RefCell::new(None::<ToggleButton>));
+    let clips_button = Rc::new(RefCell::new(None::<ToggleButton>));
     // Selecting a zoom pill reveals its own panel. There is no rail icon for
     // it, because the panel belongs to the selection rather than to a mode:
     // clicking a rail icon afterwards still wins, since only a change of
@@ -101,6 +105,7 @@ pub(super) fn build_tools_column(
         ),
         ("cursor", icon_names::POINTER_PRIMARY_CLICK, t("Cursor")),
         ("webcam", icon_names::custom::WEBCAM_SYMBOLIC, t("Webcam")),
+        ("clips", icon_names::VIDEO_CLIP_REGULAR, t("Clips")),
     ];
 
     for (index, (page_name, icon_name, label)) in tools.into_iter().enumerate() {
@@ -133,6 +138,9 @@ pub(super) fn build_tools_column(
         buttons.borrow_mut().push(button.clone());
         if page_name == "webcam" {
             *webcam_button.borrow_mut() = Some(button.clone());
+        }
+        if page_name == "clips" {
+            *clips_button.borrow_mut() = Some(button.clone());
         }
         rail.append(&button);
     }
@@ -171,6 +179,41 @@ pub(super) fn build_tools_column(
         })
     };
     timeline.set_webcam_listener(webcam_refresh);
+
+    let reveal_clips: Rc<dyn Fn()> = {
+        let pages = pages.clone();
+        let buttons = buttons.clone();
+        let clips_button = clips_button.clone();
+        Rc::new(move || {
+            let all: Vec<ToggleButton> = buttons.borrow().clone();
+            for button in all {
+                button.set_active(false);
+            }
+            if let Some(button) = clips_button.borrow().as_ref() {
+                button.set_active(true);
+            }
+            pages.set_visible_child_name("clips");
+        })
+    };
+    let clips_epoch = Rc::new(Cell::new(None::<u64>));
+    let clips_refresh: Rc<dyn Fn()> = {
+        let refresh = refresh_clips;
+        let timeline = timeline.clone();
+        let reveal_clips = reveal_clips;
+        Rc::new(move || {
+            refresh();
+            let state = timeline.clip_panel_state();
+            if state.segment.is_some()
+                && clips_epoch
+                    .get()
+                    .is_some_and(|previous| previous != state.selection_epoch)
+            {
+                reveal_clips();
+            }
+            clips_epoch.set(Some(state.selection_epoch));
+        })
+    };
+    timeline.set_clip_listener(clips_refresh);
 
     column.append(&rail);
     column.append(&pages);
@@ -1115,7 +1158,7 @@ fn build_cursor_effects_page(
     build_typing_suggestions(scale, cursor, timeline, typing);
 }
 
-fn switch_row(label: &str) -> (GtkBox, Switch) {
+pub(super) fn switch_row(label: &str) -> (GtkBox, Switch) {
     let row = GtkBox::new(Orientation::Horizontal, 8);
     row.add_css_class("recording-editor-zoom-classic");
     let text = Label::new(Some(label));
@@ -2409,7 +2452,7 @@ fn webcam_hint(text: &str) -> Label {
     hint
 }
 
-fn webcam_kicker(label: &str) -> Label {
+pub(super) fn webcam_kicker(label: &str) -> Label {
     let kicker = Label::new(Some(label));
     kicker.add_css_class("recording-editor-webcam-kicker");
     kicker.set_xalign(0.0);
@@ -4155,7 +4198,7 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
 }
 
 /// A labelled switch row, the shape every panel uses for an on/off setting.
-fn setting_switch_row(label: &str, tooltip: &str) -> (GtkBox, Switch) {
+pub(super) fn setting_switch_row(label: &str, tooltip: &str) -> (GtkBox, Switch) {
     let row = GtkBox::new(Orientation::Horizontal, 8);
     row.add_css_class("recording-editor-zoom-classic");
     row.set_hexpand(true);
@@ -4185,7 +4228,7 @@ fn panel_header(title: &str) -> GtkBox {
     header
 }
 
-fn panel_frame(title: &str, body: GtkBox) -> GtkBox {
+pub(super) fn panel_frame(title: &str, body: GtkBox) -> GtkBox {
     let panel = GtkBox::new(Orientation::Vertical, 0);
     panel.add_css_class("recording-editor-zoom-panel");
     panel.set_hexpand(true);
@@ -4203,7 +4246,7 @@ fn panel_frame(title: &str, body: GtkBox) -> GtkBox {
     panel
 }
 
-fn panel_body() -> GtkBox {
+pub(super) fn panel_body() -> GtkBox {
     let body = GtkBox::new(Orientation::Vertical, 8);
     body.add_css_class("recording-editor-zoom-body");
     body.set_hexpand(true);
@@ -4211,7 +4254,7 @@ fn panel_body() -> GtkBox {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn value_slider_control(
+pub(super) fn value_slider_control(
     label: &str,
     min: f64,
     max: f64,

@@ -115,8 +115,15 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     editor_body.set_vexpand(true);
     editor_body.append(&workspace);
     editor_body.append(&timeline.root);
+    let sound = Rc::new(super::sound_player::SoundSync::new());
+    let sound_sources: Rc<RefCell<Option<super::sound::SoundSources>>> =
+        Rc::new(RefCell::new(None));
+    let probe_generation = Rc::new(Cell::new(0u64));
     timeline.set_frame_sink({
         let stage = stage.clone();
+        let timeline = timeline.clone();
+        let sound = sound.clone();
+        let sound_sources = sound_sources.clone();
         Rc::new(move |frame| {
             stage.source_seconds.set(frame.source_seconds);
             stage.webcam.set_composition_time(frame.composition_time);
@@ -165,6 +172,49 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
                 .ripple_at(frame.source_seconds, stage.source_size.get());
             stage.preview.set_ripple(ripple);
             stage.cursor_layer.queue_draw();
+            if frame.playing {
+                if let Some(footage) = timeline.export_footage() {
+                    let fps = timeline.plan_fps();
+                    let duration = timeline.composition_duration();
+                    let key = format!(
+                        "{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{}|{}|{}",
+                        footage.source,
+                        footage.cuts,
+                        footage.segment_speeds,
+                        footage.effects,
+                        sound_sources.borrow().as_ref(),
+                        (footage.trim_start, footage.trim_end),
+                        footage.freeze_tail,
+                        duration,
+                        fps
+                    );
+                    sound.update(true, frame.composition_time, key, || {
+                        let spans = super::export::frame_plan(
+                            footage.trim_start,
+                            footage.trim_end,
+                            &footage.cuts,
+                            &footage.segment_speeds,
+                            fps,
+                        );
+                        let sidecar = stage.cursor.sidecar();
+                        Some(super::sound::SoundPlan::new(
+                            sound_sources.borrow().clone().unwrap_or_default(),
+                            &footage.effects,
+                            sidecar.as_ref(),
+                            &spans,
+                            fps,
+                            duration,
+                            footage.trim_start,
+                            footage.trim_end,
+                            &footage.cuts,
+                        ))
+                    });
+                } else {
+                    sound.stop();
+                }
+            } else {
+                sound.stop();
+            }
         })
     });
     stage.connect_placement({
@@ -194,6 +244,9 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
         let title_bar = title_bar.clone();
         let stage = stage.clone();
         let timeline = timeline.clone();
+        let sound = sound.clone();
+        let sound_sources = sound_sources.clone();
+        let probe_generation = probe_generation.clone();
         Rc::new(move |path| {
             let title = document_title_for_path(path);
             *document_title.borrow_mut() = title.clone();
@@ -201,6 +254,37 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
             // The timeline probes the recording, so the stage takes its
             // lengths from there for the poster and the export estimate.
             timeline.set_document(path);
+            sound.stop();
+            *sound_sources.borrow_mut() = None;
+            timeline.set_sound_sources(false, false);
+            timeline.set_sound_peaks(None);
+            let generation = probe_generation.get().wrapping_add(1);
+            probe_generation.set(generation);
+            if let Some(footage) = timeline.export_footage() {
+                let videos = sound_videos(&stage, &footage.source);
+                let (sender, receiver) = async_channel::bounded(1);
+                std::thread::spawn(move || {
+                    let sources = super::sound::SoundSources::find(&videos);
+                    let peaks = super::sound::measure_peaks(&sources).map(std::sync::Arc::new);
+                    let _ = sender.send_blocking((sources, peaks));
+                });
+                gtk4::glib::spawn_future_local({
+                    let timeline = timeline.clone();
+                    let sound_sources = sound_sources.clone();
+                    let probe_generation = probe_generation.clone();
+                    async move {
+                        if let Ok((sources, peaks)) = receiver.recv().await {
+                            if probe_generation.get() != generation {
+                                return;
+                            }
+                            timeline
+                                .set_sound_sources(sources.has_microphone(), sources.has_system());
+                            *sound_sources.borrow_mut() = Some(sources);
+                            timeline.set_sound_peaks(peaks);
+                        }
+                    }
+                });
+            }
             stage.show_document(
                 path,
                 timeline.source_duration(),
@@ -241,8 +325,10 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     // rather than a tick later.
     window.connect_close_request({
         let timeline = timeline.clone();
+        let sound = sound.clone();
         move |_| {
             timeline.flush_project();
+            sound.stop();
             gtk4::glib::Propagation::Proceed
         }
     });
@@ -2174,12 +2260,7 @@ fn export_model(
         .as_ref()
         .and_then(|sidecar| sidecar.editable_video_path(&footage.source))
         .unwrap_or(footage.source);
-    // The screen-only file a camera recording edits from may have no sound;
-    // the saved recording shares its timeline and always keeps it.
-    let mut audio = vec![source.clone()];
-    if footage_source != source {
-        audio.push(footage_source);
-    }
+    let audio = sound_videos(stage, &footage_source);
     Some(super::export::ExportModel {
         source,
         source_size,
@@ -2210,6 +2291,23 @@ fn export_model(
         crf: stage.quality.get().crf(),
         audio,
     })
+}
+
+/// The files that may carry the recording's sound, in order of preference.
+///
+/// The screen-only file a camera recording edits from may have no sound; the
+/// saved recording shares its timeline and always keeps it.
+fn sound_videos(stage: &Stage, footage_source: &Path) -> Vec<PathBuf> {
+    let source = stage
+        .cursor
+        .sidecar()
+        .and_then(|sidecar| sidecar.editable_video_path(footage_source))
+        .unwrap_or_else(|| footage_source.to_path_buf());
+    let mut videos = vec![source.clone()];
+    if footage_source != source.as_path() {
+        videos.push(footage_source.to_path_buf());
+    }
+    videos
 }
 
 /// What a Ctrl+key combination asks the document's history to do.

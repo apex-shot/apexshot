@@ -15,8 +15,8 @@
 //! the Windows model holds it as a closure and a schema for gradients is a
 //! separate design. Merging the two schemas later is then a promotion rather
 //! than a translation. What this editor does not model — crop, dimension,
-//! quality, audio, extra media — has no key here, so the file never claims a
-//! feature the editor would not honour.
+//! quality, extra media — has no key here, so the file never claims a feature
+//! the editor would not honour.
 //!
 //! The directory is its own rather than the shared `video-projects` one: the
 //! shared editor parses every file in that folder with its own loader, and a
@@ -213,6 +213,12 @@ pub(super) struct EditorProjectFile {
     /// cursor carries.
     #[serde(default)]
     pub cursor: super::presets::CursorFile,
+    /// The project's sound: volumes, the microphone mode and the background music.
+    #[serde(default)]
+    pub sound: super::sound::SoundSettings,
+    /// Each cut piece's own sound, one entry per segment.
+    #[serde(default)]
+    pub clip_sounds: Vec<super::sound::ClipSound>,
 }
 
 const DEFAULT_CLICK_SOUND_VOLUME: f64 = 0.25;
@@ -226,12 +232,16 @@ fn default_padding() -> f64 {
 }
 
 /// The effects a project carries beyond the cursor and the camera: the click
-/// sound and the keyboard captions.
+/// sound, the keyboard captions and the sound.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct EffectsSettings {
     pub click_sound: Option<String>,
     pub click_sound_volume: f64,
     pub captions: super::keystrokes::Settings,
+    /// The project's sound settings.
+    pub sound: super::sound::SoundSettings,
+    /// Each cut piece's own sound, one entry per segment, like `segment_speeds`.
+    pub clip_sounds: Vec<super::sound::ClipSound>,
 }
 
 impl Default for EffectsSettings {
@@ -240,6 +250,8 @@ impl Default for EffectsSettings {
             click_sound: None,
             click_sound_volume: DEFAULT_CLICK_SOUND_VOLUME,
             captions: super::keystrokes::Settings::default(),
+            sound: super::sound::SoundSettings::default(),
+            clip_sounds: Vec::new(),
         }
     }
 }
@@ -256,6 +268,12 @@ impl EffectsSettings {
                 DEFAULT_CLICK_SOUND_VOLUME
             },
             captions: self.captions,
+            sound: self.sound.clamped(),
+            clip_sounds: self
+                .clip_sounds
+                .into_iter()
+                .map(super::sound::ClipSound::clamped)
+                .collect(),
         }
     }
 }
@@ -270,6 +288,8 @@ impl EditorProjectFile {
                 shortcuts: self.captions_shortcuts,
                 show_single_letters: self.captions_show_single_letters,
             },
+            sound: self.sound.clone(),
+            clip_sounds: self.clip_sounds.clone(),
         }
         .clamped()
     }
@@ -659,6 +679,8 @@ mod tests {
             captions_shortcuts: false,
             captions_show_single_letters: false,
             cursor: super::super::presets::CursorFile::default(),
+            sound: Default::default(),
+            clip_sounds: Vec::new(),
         }
     }
 
@@ -1218,9 +1240,64 @@ mod tests {
                     shortcuts: true,
                     show_single_letters: true,
                 },
+                sound: Default::default(),
+                clip_sounds: Vec::new(),
             }
         );
         assert_eq!(loaded, file);
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn the_sound_round_trips_through_the_project_file() {
+        let directory = scratch("sound-round-trip");
+        let video = recording(&directory);
+        let path = directory.join("sound-round-trip.json");
+        let mut file = project(&video);
+        file.sound.volume = 0.5;
+        file.sound.microphone_preset = super::super::sound::MicPreset::Loud;
+        file.clip_sounds = vec![super::super::sound::ClipSound {
+            muted: true,
+            ..super::super::sound::ClipSound::default()
+        }];
+
+        write_at(&path, &file).unwrap();
+        let loaded = read_at(&path, &video).expect("project loads");
+        let effects = loaded.effects();
+
+        assert!((effects.sound.volume - 0.5).abs() < 1e-9);
+        assert_eq!(
+            effects.sound.microphone_preset,
+            super::super::sound::MicPreset::Loud
+        );
+        assert_eq!(effects.clip_sounds.len(), 1);
+        assert!(effects.clip_sounds[0].muted);
+        assert_eq!(loaded, file);
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn a_project_without_sound_keys_opens_on_the_defaults() {
+        let directory = scratch("sound-legacy");
+        let video = recording(&directory);
+        let path = directory.join("sound-legacy.json");
+        let mut json: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&project(&video)).unwrap()).unwrap();
+        let object = json.as_object_mut().unwrap();
+        for key in ["sound", "clip_sounds"] {
+            assert!(
+                object.remove(key).is_some(),
+                "the fixture writes the sound key {key}"
+            );
+        }
+        fs::write(&path, serde_json::to_string(&json).unwrap()).unwrap();
+
+        let loaded = read_at(&path, &video).expect("project loads");
+        assert_eq!(
+            loaded.effects().sound,
+            super::super::sound::SoundSettings::default()
+        );
+        assert!(loaded.effects().clip_sounds.is_empty());
         let _ = fs::remove_dir_all(&directory);
     }
 
@@ -1290,6 +1367,8 @@ mod tests {
                 click_sound: Some(sound.to_owned()),
                 click_sound_volume: volume,
                 captions: Default::default(),
+                sound: Default::default(),
+                clip_sounds: Vec::new(),
             }
             .clamped()
         };
