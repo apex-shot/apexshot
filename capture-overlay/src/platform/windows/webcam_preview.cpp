@@ -17,6 +17,11 @@
 
 namespace Platform {
 
+/// The bubble repaints at most this often. It sits under a 30 fps camera's
+/// frame interval so every frame shows, while a camera that floods the pipe
+/// still costs at most one decode per interval on the UI thread.
+constexpr qint64 kPreviewIntervalMs = 30;
+
 WebcamPreview::WebcamPreview(const QString& device, int fps, QObject* parent)
     : QObject(parent)
     , m_device(device)
@@ -184,7 +189,7 @@ void WebcamPreview::consumeFrames()
     if (newest.isEmpty())
         return;
     m_latestFrame = newest;
-    if (m_lastPreview.isValid() && m_lastPreview.elapsed() < 66)
+    if (m_lastPreview.isValid() && m_lastPreview.elapsed() < kPreviewIntervalMs)
         return;
     QBuffer buffer(&newest);
     buffer.open(QIODevice::ReadOnly);

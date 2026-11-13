@@ -4716,3 +4716,111 @@ msgstr "Экспортированные видео Motion появляются 
 
 msgid "Expires in {time}"
 msgstr "Истекает через {time}"
+
+msgid "Background music"
+msgstr "Фоновая музыка"
+
+msgid "Choose background music"
+msgstr "Выбрать фоновую музыку"
+
+msgid "Clip {current} of {total}"
+msgstr "Клип {current} из {total}"
+
+msgid "Clips"
+msgstr "Клипы"
+
+msgid "Length {original}"
+msgstr "Длительность {original}"
+
+msgid "Microphone"
+msgstr "Микрофон"
+
+msgid "Microphone volume"
+msgstr "Громкость микрофона"
+
+msgid "Music volume"
+msgstr "Громкость музыки"
+
+msgid "Mute clip"
+msgstr "Отключить звук клипа"
+
+msgid "Mute microphone"
+msgstr "Отключить звук микрофона"
+
+msgid "Mute music"
+msgstr "Отключить звук музыки"
+
+msgid "Mute system sound"
+msgstr "Отключить системный звук"
+
+msgid "Muted"
+msgstr "Без звука"
+
+msgid "Remove music"
+msgstr "Удалить музыку"
+
+msgid "Select a clip on the timeline to change its speed and sound."
+msgstr "Выберите клип на таймлайне, чтобы изменить его скорость и звук."
+
+msgid "Select music…"
+msgstr "Выбрать музыку…"
+
+msgid "System sound"
+msgstr "Системный звук"
+
+msgid "System sound volume"
+msgstr "Громкость системного звука"
+
+msgid "This recording has no sound. Turn on the microphone or system audio before recording."
+msgstr "В этой записи нет звука. Включите микрофон или системный звук перед записью."
+
+msgid "{original} at 1× · {now} at {speed}"
+msgstr "{original} при 1× · {now} при {speed}"
+
+msgid "Loud"
+msgstr "Громкий"
+
+msgid "Noise reduction"
+msgstr "Подавление шума"
+
+msgid "Podcast"
+msgstr "Подкаст"
+
+msgid "Warm"
+msgstr "Тёплый"
+
+msgid "Even, natural voice"
+msgstr "Ровный, естественный голос"
+
+msgid "Punchy and compressed"
+msgstr "Мощный и сжатый"
+
+msgid "Removes steady noise"
+msgstr "Убирает постоянный шум"
+
+msgid "Warm, polished voice"
+msgstr "Тёплый, чистый голос"
+
+msgid "Fuller, deeper tone"
+msgstr "Более полный и низкий тон"
+
+msgid "As recorded"
+msgstr "Как записано"
+
+msgid "Evens out your voice so it stays at one level."
+msgstr "Выравнивает голос, чтобы он оставался на одном уровне."
+
+msgid "Louder, compressed voice that cuts through music."
+msgstr "Более громкий, сжатый голос, пробивающийся сквозь музыку."
+
+msgid "Removes steady background noise, then evens out the voice."
+msgstr "Убирает постоянный фоновый шум, затем выравнивает голос."
+
+msgid "Full, warm voice with softened hiss and sibilance."
+msgstr "Полный, тёплый голос с приглушённым шипением и свистящими звуками."
+
+msgid "Adds body to thin microphones."
+msgstr "Добавляет плотность микрофонам с тонким звуком."
+
+msgid "Keeps the microphone exactly as it was recorded."
+msgstr "Оставляет микрофон точно таким, каким он был записан."

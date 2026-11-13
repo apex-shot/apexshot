@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 use std::cell::{Cell, RefCell};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStdout, Stdio};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -2983,18 +2983,19 @@ fn decode_loop(shared: Arc<Shared>) {
 fn decode_frame(path: &Path, seconds: f64, size: (u32, u32)) -> Option<(Vec<u8>, u32, u32)> {
     let (width, height) = size;
     let frame_len = width as usize * height as usize * 4;
-    let mut child = Command::new(crate::recording::editor::ffmpeg::ffmpeg_executable())
-        .args(["-hide_banner", "-loglevel", "error", "-nostdin"])
-        .args(["-ss", &format!("{seconds:.6}")])
-        .arg("-i")
-        .arg(path)
-        .args(["-frames:v", "1"])
-        .args(["-vf", &format!("scale={width}:{height},setsar=1")])
-        .args(["-f", "rawvideo", "-pix_fmt", "bgra", "pipe:1"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
+    let mut child =
+        crate::utils::hidden_command(crate::recording::editor::ffmpeg::ffmpeg_executable())
+            .args(["-hide_banner", "-loglevel", "error", "-nostdin"])
+            .args(["-ss", &format!("{seconds:.6}")])
+            .arg("-i")
+            .arg(path)
+            .args(["-frames:v", "1"])
+            .args(["-vf", &format!("scale={width}:{height},setsar=1")])
+            .args(["-f", "rawvideo", "-pix_fmt", "bgra", "pipe:1"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .ok()?;
     let mut stdout = child.stdout.take()?;
     let mut buffer = vec![0u8; frame_len];
     let read = stdout.read_exact(&mut buffer).is_ok();
@@ -3083,18 +3084,19 @@ impl TrackReader {
                 ",tpad=start_mode=clone:start_duration={lead_seconds:.6}"
             ));
         }
-        let mut child = Command::new(crate::recording::editor::ffmpeg::ffmpeg_executable())
-            .args(["-hide_banner", "-loglevel", "error", "-nostdin"])
-            .args(["-ss", &format!("{start_seconds:.6}")])
-            .arg("-i")
-            .arg(path)
-            .args(["-vf", &filter])
-            .args(["-frames:v", &frames.to_string()])
-            .args(["-f", "rawvideo", "-pix_fmt", "bgra", "pipe:1"])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .ok()?;
+        let mut child =
+            crate::utils::hidden_command(crate::recording::editor::ffmpeg::ffmpeg_executable())
+                .args(["-hide_banner", "-loglevel", "error", "-nostdin"])
+                .args(["-ss", &format!("{start_seconds:.6}")])
+                .arg("-i")
+                .arg(path)
+                .args(["-vf", &filter])
+                .args(["-frames:v", &frames.to_string()])
+                .args(["-f", "rawvideo", "-pix_fmt", "bgra", "pipe:1"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .ok()?;
         let stdout = child.stdout.take()?;
         Some(Self {
             child,
@@ -5707,18 +5709,19 @@ mod tests {
             return;
         }
         let path = dir.join("camera.mp4");
-        let status = Command::new(crate::recording::editor::ffmpeg::ffmpeg_executable())
-            .args(["-y", "-hide_banner", "-loglevel", "error"])
-            .args([
-                "-f",
-                "lavfi",
-                "-i",
-                "color=c=red:s=32x32:r=30:d=0.4",
-                "-pix_fmt",
-                "yuv420p",
-            ])
-            .arg(&path)
-            .status();
+        let status =
+            crate::utils::hidden_command(crate::recording::editor::ffmpeg::ffmpeg_executable())
+                .args(["-y", "-hide_banner", "-loglevel", "error"])
+                .args([
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=red:s=32x32:r=30:d=0.4",
+                    "-pix_fmt",
+                    "yuv420p",
+                ])
+                .arg(&path)
+                .status();
         if !matches!(status, Ok(status) if status.success()) {
             eprintln!("skipping the camera last-frame test: ffmpeg is unavailable");
             let _ = std::fs::remove_dir_all(&dir);

@@ -4726,3 +4726,111 @@ msgstr "Os vídeos de movimento que você exporta aparecem em Gravações. Proje
 
 msgid "Expires in {time}"
 msgstr "Expira em {time}"
+
+msgid "Background music"
+msgstr "Música de fundo"
+
+msgid "Choose background music"
+msgstr "Escolher música de fundo"
+
+msgid "Clip {current} of {total}"
+msgstr "Clipe {current} de {total}"
+
+msgid "Clips"
+msgstr "Clipes"
+
+msgid "Length {original}"
+msgstr "Duração {original}"
+
+msgid "Microphone"
+msgstr "Microfone"
+
+msgid "Microphone volume"
+msgstr "Volume do microfone"
+
+msgid "Music volume"
+msgstr "Volume da música"
+
+msgid "Mute clip"
+msgstr "Silenciar clipe"
+
+msgid "Mute microphone"
+msgstr "Silenciar microfone"
+
+msgid "Mute music"
+msgstr "Silenciar música"
+
+msgid "Mute system sound"
+msgstr "Silenciar o áudio do sistema"
+
+msgid "Muted"
+msgstr "Silenciado"
+
+msgid "Remove music"
+msgstr "Remover música"
+
+msgid "Select a clip on the timeline to change its speed and sound."
+msgstr "Selecione um clipe na linha do tempo para alterar a velocidade e o som."
+
+msgid "Select music…"
+msgstr "Selecionar música…"
+
+msgid "System sound"
+msgstr "Áudio do sistema"
+
+msgid "System sound volume"
+msgstr "Volume do áudio do sistema"
+
+msgid "This recording has no sound. Turn on the microphone or system audio before recording."
+msgstr "Esta gravação não tem som. Ative o microfone ou o áudio do sistema antes de gravar."
+
+msgid "{original} at 1× · {now} at {speed}"
+msgstr "{original} a 1× · {now} a {speed}"
+
+msgid "Loud"
+msgstr "Alto"
+
+msgid "Noise reduction"
+msgstr "Redução de ruído"
+
+msgid "Podcast"
+msgstr "Podcast"
+
+msgid "Warm"
+msgstr "Caloroso"
+
+msgid "Even, natural voice"
+msgstr "Voz natural e uniforme"
+
+msgid "Punchy and compressed"
+msgstr "Potente e comprimida"
+
+msgid "Removes steady noise"
+msgstr "Remove o ruído constante"
+
+msgid "Warm, polished voice"
+msgstr "Voz calorosa e polida"
+
+msgid "Fuller, deeper tone"
+msgstr "Tom mais cheio e grave"
+
+msgid "As recorded"
+msgstr "Como gravado"
+
+msgid "Evens out your voice so it stays at one level."
+msgstr "Nivela sua voz para que ela fique em um só volume."
+
+msgid "Louder, compressed voice that cuts through music."
+msgstr "Voz mais alta e comprimida que se destaca sobre a música."
+
+msgid "Removes steady background noise, then evens out the voice."
+msgstr "Remove o ruído de fundo constante e depois nivela a voz."
+
+msgid "Full, warm voice with softened hiss and sibilance."
+msgstr "Voz cheia e calorosa, com chiado e sibilância suavizados."
+
+msgid "Adds body to thin microphones."
+msgstr "Dá corpo a microfones de som fino."
+
+msgid "Keeps the microphone exactly as it was recorded."
+msgstr "Mantém o microfone exatamente como foi gravado."
