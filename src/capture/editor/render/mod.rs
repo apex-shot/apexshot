@@ -15,7 +15,8 @@ pub(crate) mod scene_shadow;
 mod text;
 
 pub use arrows::{
-    arrow_geometry, draw_arrow, draw_arrow_control_handles, draw_arrow_selection_outline,
+    arrow_geometry, arrow_line_width, arrow_min_length, draw_arrow, draw_arrow_control_handles,
+    draw_arrow_selection_outline,
 };
 pub use background_blur::{
     apply_background_blur, blur_background_surface, BACKGROUND_BLUR_MAX_RADIUS,

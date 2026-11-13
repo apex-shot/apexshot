@@ -1,4 +1,5 @@
 use super::super::pen_weight::HighlighterMode;
+use super::super::render::arrow_min_length;
 use super::super::selection::{action_bounds_with_padding, translate_action};
 use super::super::types::{AnnotationAction, ArrowStyle, Point, Rect, Tool};
 use super::{expand_rgba_image, simplify_drag_path, EditorState};
@@ -172,8 +173,9 @@ impl EditorState {
             }),
             Tool::Arrow => {
                 let (start, end) = self.arrow_points(start, end);
-                // Reject zero-length arrows (clicks without dragging).
-                if (start.x - end.x).abs() < 0.5 && (start.y - end.y).abs() < 0.5 {
+                let (start, end) = self.arrow_endpoints_on_canvas(start, end, stroke_size);
+                // A drag shorter than the minimum would leave a blob, not an arrow.
+                if (end.x - start.x).hypot(end.y - start.y) < arrow_min_length(stroke_size) {
                     None
                 } else {
                     Some(AnnotationAction::Arrow {
@@ -298,8 +300,9 @@ impl EditorState {
             }),
             Tool::Arrow => {
                 let (start, end) = self.arrow_points(start, end);
-                // Reject zero-length arrows (clicks without dragging).
-                if (start.x - end.x).abs() < 0.5 && (start.y - end.y).abs() < 0.5 {
+                let (start, end) = self.arrow_endpoints_on_canvas(start, end, stroke_size);
+                // A drag shorter than the minimum would leave a blob, not an arrow.
+                if (end.x - start.x).hypot(end.y - start.y) < arrow_min_length(stroke_size) {
                     None
                 } else {
                     Some(AnnotationAction::Arrow {

@@ -1,4 +1,5 @@
 use super::super::color::{selection_handle_hit_radius_for_scale, selection_hit_padding_for_scale};
+use super::super::render::arrow_geometry;
 use super::super::selection::{
     action_contains_point_with_padding, action_resize_handle_at_point_with_radius, resize_action,
     translate_action,
@@ -277,57 +278,35 @@ fn clamp_action_to_canvas(action: &mut AnnotationAction, bounds: (f64, f64, f64,
             end,
             control_points,
             stroke_size,
+            style,
             ..
         } => {
-            let iw = max_x;
-            let ih = max_y;
-            let margin = *stroke_size * 0.5;
-            let mut min_x = start.x.min(end.x);
-            let mut max_x = start.x.max(end.x);
-            let mut min_y = start.y.min(end.y);
-            let mut max_y = start.y.max(end.y);
-
-            if let Some(cps) = control_points.as_ref() {
-                if cps.len() >= 3 {
-                    let p0 = *start;
-                    let p1 = cps[1];
-                    let p2 = *end;
-                    let denom_x = p0.x - 2.0 * p1.x + p2.x;
-                    if denom_x.abs() > 1e-10 {
-                        let t = (p0.x - p1.x) / denom_x;
-                        if t > 0.0 && t < 1.0 {
-                            let bx = (1.0 - t).powi(2) * p0.x
-                                + 2.0 * (1.0 - t) * t * p1.x
-                                + t.powi(2) * p2.x;
-                            min_x = min_x.min(bx);
-                            max_x = max_x.max(bx);
-                        }
-                    }
-                    let denom_y = p0.y - 2.0 * p1.y + p2.y;
-                    if denom_y.abs() > 1e-10 {
-                        let t = (p0.y - p1.y) / denom_y;
-                        if t > 0.0 && t < 1.0 {
-                            let by = (1.0 - t).powi(2) * p0.y
-                                + 2.0 * (1.0 - t) * t * p1.y
-                                + t.powi(2) * p2.y;
-                            min_y = min_y.min(by);
-                            max_y = max_y.max(by);
-                        }
-                    }
-                }
+            let Some(geometry) = arrow_geometry(*start, *end, *stroke_size, *style, control_points)
+            else {
+                return;
+            };
+            // Keep the whole stroke, chevrons included, on the canvas.
+            let margin = geometry.line_width / 2.0;
+            let (mut left, mut top, mut right, mut bottom) =
+                (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+            for point in geometry.body.iter().chain(geometry.heads.iter().flatten()) {
+                left = left.min(point.x);
+                top = top.min(point.y);
+                right = right.max(point.x);
+                bottom = bottom.max(point.y);
             }
 
-            let shift_x = if min_x < bounds.0 + margin {
-                bounds.0 + margin - min_x
-            } else if max_x > iw - margin {
-                (iw - margin) - max_x
+            let shift_x = if left < min_x + margin {
+                min_x + margin - left
+            } else if right > max_x - margin {
+                max_x - margin - right
             } else {
                 0.0
             };
-            let shift_y = if min_y < bounds.1 + margin {
-                bounds.1 + margin - min_y
-            } else if max_y > ih - margin {
-                (ih - margin) - max_y
+            let shift_y = if top < min_y + margin {
+                min_y + margin - top
+            } else if bottom > max_y - margin {
+                max_y - margin - bottom
             } else {
                 0.0
             };

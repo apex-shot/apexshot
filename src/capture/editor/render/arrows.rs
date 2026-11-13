@@ -14,8 +14,18 @@ pub struct ArrowGeometry {
     pub line_width: f64,
 }
 
-fn arrow_line_width(stroke_size: f64) -> f64 {
+pub fn arrow_line_width(stroke_size: f64) -> f64 {
     stroke_size.max(0.5) * 1.5 + 1.0
+}
+
+fn full_head_length(line_width: f64) -> f64 {
+    line_width * 2.6 + 6.0
+}
+
+/// Shortest arrow, end to end, that still reads as an arrow at this stroke
+/// size: one and a half times its full head length.
+pub fn arrow_min_length(stroke_size: f64) -> f64 {
+    full_head_length(arrow_line_width(stroke_size)) * 1.5
 }
 
 fn bezier_point(p0: Point, p1: Point, p2: Point, t: f64) -> Point {
@@ -95,7 +105,7 @@ pub fn arrow_geometry(
     } else {
         0.45
     };
-    let head_length = ((line_width * 2.6 + 6.0) * length_factor).min(line_length * max_share);
+    let head_length = (full_head_length(line_width) * length_factor).min(line_length * max_share);
 
     let chord = {
         let dx = end.x - start.x;
