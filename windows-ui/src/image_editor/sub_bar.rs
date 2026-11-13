@@ -725,7 +725,7 @@ mod tests {
 
         let Some(()) = crate::test_support::with_gtk(|| {
             let host = EditorHost::new(Rc::new(|| {}), Rc::new(|_| {}), Rc::new(|| (0.0, 0.0)));
-            let mut state = EditorState::new(RgbaImage::new(32, 32));
+            let mut state = EditorState::new(RgbaImage::new(100, 100));
             state.selected_tool = Tool::Arrow.to_model();
             *host.editor.borrow_mut() = Some(state);
             let bars = build(1.0, host.clone(), Rc::new(|_| {}), None);
@@ -740,8 +740,8 @@ mod tests {
             host.read(|st| bars.sync(Some(st)));
             assert!(reverse.has_css_class("selected"));
             host.mutate(|st| {
-                st.begin_drag(Point { x: 2.0, y: 2.0 });
-                st.update_drag(Point { x: 20.0, y: 20.0 });
+                st.begin_drag(Point { x: 10.0, y: 10.0 });
+                st.update_drag(Point { x: 80.0, y: 80.0 });
                 let arrow = st.finalize_drag_action().unwrap();
                 st.push_action(arrow);
                 st.selected_action_index = Some(0);
