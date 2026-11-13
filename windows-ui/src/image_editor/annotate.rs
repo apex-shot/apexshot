@@ -402,8 +402,35 @@ impl EditorHost {
         transform_of: Rc<dyn Fn() -> ViewTransform>,
     ) {
         let im = gtk4::IMMulticontext::new();
-        im.set_client_widget(Some(area));
         im.set_use_preedit(false);
+        // The input method needs the canvas window, which exists only while
+        // the canvas is realized.
+        area.connect_realize({
+            let host = Rc::downgrade(self);
+            let im = im.downgrade();
+            move |area| {
+                let (Some(host), Some(im)) = (host.upgrade(), im.upgrade()) else {
+                    return;
+                };
+                im.set_client_widget(Some(area));
+                host.text_input_focused.set(false);
+                host.sync_text_input_method();
+            }
+        });
+        area.connect_unrealize({
+            let host = Rc::downgrade(self);
+            let im = im.downgrade();
+            move |_| {
+                let (Some(host), Some(im)) = (host.upgrade(), im.upgrade()) else {
+                    return;
+                };
+                host.text_input_focused.set(false);
+                im.set_client_widget(None::<&gtk4::Widget>);
+            }
+        });
+        if area.is_realized() {
+            im.set_client_widget(Some(area));
+        }
         im.connect_commit({
             let host = Rc::downgrade(self);
             move |_, text| {
