@@ -4486,11 +4486,11 @@ msgstr "Примерный размер файла: {size}"
 msgid "Export time ≈ {time}"
 msgstr "Время экспорта ≈ {time}"
 
-msgid "Backgrounds and style"
-msgstr "Фоны и стиль"
+msgid "Frame styles and shadows"
+msgstr "Стили рамок и тени"
 
-msgid "Wallpapers, padding, rounded corners, shadows and frames for stills."
-msgstr "Обои, отступы, скруглённые углы, тени и рамки для статичных изображений."
+msgid "Frame styles and shadows for stills."
+msgstr "Стили рамок и тени для статичных изображений."
 
 msgid "Included with Studio"
 msgstr "Входит в Studio"

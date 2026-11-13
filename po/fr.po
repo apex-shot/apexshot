@@ -4516,11 +4516,11 @@ msgstr "Taille estimée : {size}"
 msgid "Export time ≈ {time}"
 msgstr "Durée d’exportation ≈ {time}"
 
-msgid "Backgrounds and style"
-msgstr "Arrière-plans et style"
+msgid "Frame styles and shadows"
+msgstr "Styles de cadre et ombres"
 
-msgid "Wallpapers, padding, rounded corners, shadows and frames for stills."
-msgstr "Fonds d’écran, marges, coins arrondis, ombres et cadres pour les images fixes."
+msgid "Frame styles and shadows for stills."
+msgstr "Styles de cadre et ombres pour les images fixes."
 
 msgid "Included with Studio"
 msgstr "Inclus dans Studio"

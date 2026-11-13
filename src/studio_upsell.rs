@@ -619,8 +619,8 @@ fn feature_panel(capabilities: StudioCapabilities, dark: bool) -> GtkBox {
     for (feature, used) in features_for(capabilities) {
         let (title, detail, icon_name) = match feature {
             Feature::Style => (
-                t("Backgrounds and style"),
-                t("Wallpapers, padding, rounded corners, shadows and frames for stills."),
+                t("Frame styles and shadows"),
+                t("Frame styles and shadows for stills."),
                 custom::IMAGE_ALT_SYMBOLIC,
             ),
             Feature::Motion => (

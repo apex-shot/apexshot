@@ -4506,11 +4506,11 @@ msgstr "Geschätzte Dateigröße: {size}"
 msgid "Export time ≈ {time}"
 msgstr "Exportdauer ≈ {time}"
 
-msgid "Backgrounds and style"
-msgstr "Hintergründe und Stil"
+msgid "Frame styles and shadows"
+msgstr "Rahmenstile und Schatten"
 
-msgid "Wallpapers, padding, rounded corners, shadows and frames for stills."
-msgstr "Hintergrundbilder, Ränder, abgerundete Ecken, Schatten und Rahmen für Standbilder."
+msgid "Frame styles and shadows for stills."
+msgstr "Rahmenstile und Schatten für Standbilder."
 
 msgid "Included with Studio"
 msgstr "In Studio enthalten"

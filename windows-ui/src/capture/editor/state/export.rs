@@ -147,15 +147,26 @@ impl EditorState {
         ))
     }
 
-    /// Whether the appearance uses a Studio presentation control. Padding,
-    /// blur, noise and the scene shadow only render over a fill, and every
-    /// fill is already Studio, so they need no separate term. Frame ratios
-    /// stay free.
+    /// Whether the appearance uses a Studio presentation control: a frame
+    /// style, or a scene shadow the layout leaves visible around the image.
+    /// The Background panel (fill, padding, blur, radius, noise) and frame
+    /// ratios are free.
     pub(crate) fn uses_studio_style(&self) -> bool {
         let background = &self.background;
-        background.has_fill()
-            || background.radius > 0.0
-            || background.frame_style != super::super::types::FrameStyle::Default
+        if background.frame_style != super::super::types::FrameStyle::Default {
+            return true;
+        }
+        let (width, height) = self.working_image.dimensions();
+        let layout = background.layout(width, height);
+        (layout.image_x > 0.0 || layout.image_y > 0.0)
+            && super::super::shadow_render::geometry(
+                layout,
+                f64::from(width),
+                f64::from(height),
+                self.static_image_transform,
+                &self.scene_shadow,
+            )
+            .is_some()
     }
 
     pub(crate) fn studio_capabilities(&self) -> crate::studio_entitlement::StudioCapabilities {
@@ -470,7 +481,7 @@ mod tests {
         assert_eq!(state.to_motion_card_image().unwrap(), card);
         assert!(
             state.to_final_image().is_err(),
-            "a wallpaper is a Studio style"
+            "a visible scene shadow is a Studio style"
         );
         state.static_image_transform.yaw = 18.0;
         let transformed = state.to_export_image().unwrap();
@@ -576,18 +587,21 @@ mod tests {
     }
 
     #[test]
-    fn each_decorative_control_marks_the_document_studio() {
-        let mut fill = document();
-        fill.background.fill = Fill::Image(Arc::new(RgbaImage::from_pixel(
+    fn background_panel_controls_stay_free_and_frame_styles_do_not() {
+        let mut background = document();
+        background.background.fill = Fill::Image(Arc::new(RgbaImage::from_pixel(
             1,
             1,
             Rgba([0, 0, 255, 255]),
         )));
-        assert!(fill.uses_studio_style());
-
-        let mut radius = document();
-        radius.background.radius = 20.0;
-        assert!(radius.uses_studio_style());
+        background.background.set_padding(16.0);
+        background.background.blur = 0.5;
+        background.background.radius = 20.0;
+        background.background.noise = 0.5;
+        assert!(
+            !background.uses_studio_style(),
+            "the Background panel is free"
+        );
 
         let mut style = document();
         style.background.frame_style = FrameStyle::InsetLight;
@@ -609,7 +623,7 @@ mod tests {
     }
 
     #[test]
-    fn a_shadow_without_a_wallpaper_stays_free() {
+    fn a_scene_shadow_is_studio_only_once_padding_reveals_it() {
         let mut state = document();
         state.scene_shadow.preset = MotionSceneShadowPreset::Spread;
         assert!(!state.uses_studio_style());
@@ -618,18 +632,16 @@ mod tests {
             1,
             Rgba([0, 0, 255, 255]),
         )));
+        state.background.set_padding(16.0);
         assert!(state.uses_studio_style());
+        state.scene_shadow.preset = MotionSceneShadowPreset::None;
+        assert!(!state.uses_studio_style());
     }
 
     #[test]
     fn a_styled_document_is_locked_and_a_clean_one_is_not() {
         let mut styled = document();
-        styled.background.fill = Fill::Image(Arc::new(RgbaImage::from_pixel(
-            1,
-            1,
-            Rgba([0, 0, 255, 255]),
-        )));
-        styled.background.radius = 20.0;
+        styled.background.frame_style = FrameStyle::InsetLight;
         let error = styled
             .to_final_image()
             .expect_err("a styled still fails closed");
@@ -637,6 +649,18 @@ mod tests {
         assert!(
             document().to_final_image().is_ok(),
             "a clean still stays free"
+        );
+        let mut wallpapered = document();
+        wallpapered.background.fill = Fill::Image(Arc::new(RgbaImage::from_pixel(
+            1,
+            1,
+            Rgba([0, 0, 255, 255]),
+        )));
+        wallpapered.background.set_padding(16.0);
+        wallpapered.background.radius = 20.0;
+        assert!(
+            wallpapered.to_final_image().is_ok(),
+            "a wallpaper, padding and rounded corners stay free"
         );
         let _entitlement = crate::studio_entitlement::test_studio_entitlement();
         assert_eq!(
