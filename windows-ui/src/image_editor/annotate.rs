@@ -196,6 +196,12 @@ pub struct EditorHost {
     /// Current canvas pan offset, for space/middle-drag pan starts.
     view_pan: Rc<dyn Fn() -> (f64, f64)>,
     last_redraw: Rc<Cell<i64>>,
+    /// Input method for the live text box. `install` creates it because it
+    /// needs GTK, so headless hosts have none.
+    text_input_method: RefCell<Option<gtk4::IMMulticontext>>,
+    text_input_area: RefCell<Option<glib::WeakRef<DrawingArea>>>,
+    text_input_transform: RefCell<Option<Rc<dyn Fn() -> ViewTransform>>>,
+    text_input_focused: Cell<bool>,
 }
 
 impl EditorHost {
@@ -229,6 +235,10 @@ impl EditorHost {
             drag_transform: Rc::new(RefCell::new(None)),
             view_pan,
             last_redraw: Rc::new(Cell::new(0)),
+            text_input_method: RefCell::new(None),
+            text_input_area: RefCell::new(None),
+            text_input_transform: RefCell::new(None),
+            text_input_focused: Cell::new(false),
         })
     }
 
@@ -270,7 +280,168 @@ impl EditorHost {
 
     /// Redraw after a mutation and refresh bar/pill sensitivity.
     pub fn changed(&self) {
+        self.sync_text_input_method();
         (self.on_change)();
+    }
+
+    /// Keep the input method focused only while a text box is live, and park
+    /// its composition window just under that box.
+    fn sync_text_input_method(&self) {
+        let Some(im) = self.text_input_method.borrow().clone() else {
+            return;
+        };
+        let Ok(borrow) = self.editor.try_borrow() else {
+            return;
+        };
+        let active = borrow.as_ref().and_then(|st| {
+            st.active_text_input.as_ref()?;
+            Some(st.active_text_bounds.as_ref().map(|bounds| bounds.rect))
+        });
+        drop(borrow);
+        let Some(rect) = active else {
+            if self.text_input_focused.replace(false) {
+                im.focus_out();
+            }
+            return;
+        };
+        if !self.text_input_focused.replace(true) {
+            im.focus_in();
+        }
+        let transform_of = self.text_input_transform.borrow().clone();
+        if let (Some(rect), Some(transform_of)) = (rect, transform_of) {
+            let t = transform_of();
+            let top_left = t.image_to_view(Point {
+                x: f64::from(rect.x),
+                y: f64::from(rect.y),
+            });
+            let bottom_right = t.image_to_view(Point {
+                x: f64::from(rect.x + rect.width),
+                y: f64::from(rect.y + rect.height),
+            });
+            im.set_cursor_location(&gdk::Rectangle::new(
+                top_left.x.round() as i32,
+                bottom_right.y.round() as i32,
+                (bottom_right.x - top_left.x).round().max(1.0) as i32,
+                1,
+            ));
+        }
+    }
+
+    /// Offer a key event to the input method while a text box is live.
+    /// Returns true when the input method keeps the key; every key typed
+    /// during a composition belongs to it.
+    pub fn filter_text_input_key(&self, event: &gdk::Event) -> bool {
+        let Some(im) = self.text_input_method.borrow().clone() else {
+            return false;
+        };
+        if !self
+            .read(|st| st.active_text_input.is_some())
+            .unwrap_or(false)
+        {
+            return false;
+        }
+        let composing = !im.preedit_string().0.is_empty();
+        im.filter_keypress(event) || composing
+    }
+
+    /// Insert committed input-method text at the caret of the live text box.
+    fn insert_text(&self, text: &str) {
+        let inserted = self
+            .editor
+            .try_borrow_mut()
+            .ok()
+            .and_then(|mut borrow| borrow.as_mut().map(|st| insert_into_active_text(st, text)))
+            .unwrap_or(false);
+        if inserted {
+            self.changed();
+        }
+    }
+
+    /// Read clipboard text into the live text box. The read is async, so the
+    /// text lands only if a box is still live in the same document.
+    fn paste_text_from_clipboard(&self) {
+        let Some(area) = self
+            .text_input_area
+            .borrow()
+            .as_ref()
+            .and_then(|area| area.upgrade())
+        else {
+            return;
+        };
+        let editor = self.editor.clone();
+        let on_change = self.on_change.clone();
+        let generation = self.session_generation.clone();
+        let started = generation.get();
+        area.clipboard()
+            .read_text_async(gtk4::gio::Cancellable::NONE, move |result| {
+                let Ok(Some(text)) = result else {
+                    return;
+                };
+                if generation.get() != started {
+                    return;
+                }
+                let inserted = editor
+                    .try_borrow_mut()
+                    .ok()
+                    .and_then(|mut borrow| {
+                        borrow.as_mut().map(|st| insert_into_active_text(st, &text))
+                    })
+                    .unwrap_or(false);
+                if inserted {
+                    on_change();
+                }
+            });
+    }
+
+    /// Route input-method commits into the live text box. The canvas draws
+    /// no inline preedit, so the input method shows its own composition
+    /// window at the cursor location `sync_text_input_method` sets.
+    fn install_text_input_method(
+        self: &Rc<Self>,
+        area: &DrawingArea,
+        transform_of: Rc<dyn Fn() -> ViewTransform>,
+    ) {
+        let im = gtk4::IMMulticontext::new();
+        im.set_use_preedit(false);
+        // The input method needs the canvas window, which exists only while
+        // the canvas is realized.
+        area.connect_realize({
+            let host = Rc::downgrade(self);
+            let im = im.downgrade();
+            move |area| {
+                let (Some(host), Some(im)) = (host.upgrade(), im.upgrade()) else {
+                    return;
+                };
+                im.set_client_widget(Some(area));
+                host.text_input_focused.set(false);
+                host.sync_text_input_method();
+            }
+        });
+        area.connect_unrealize({
+            let host = Rc::downgrade(self);
+            let im = im.downgrade();
+            move |_| {
+                let (Some(host), Some(im)) = (host.upgrade(), im.upgrade()) else {
+                    return;
+                };
+                host.text_input_focused.set(false);
+                im.set_client_widget(None::<&gtk4::Widget>);
+            }
+        });
+        if area.is_realized() {
+            im.set_client_widget(Some(area));
+        }
+        im.connect_commit({
+            let host = Rc::downgrade(self);
+            move |_, text| {
+                if let Some(host) = host.upgrade() {
+                    host.insert_text(text);
+                }
+            }
+        });
+        *self.text_input_area.borrow_mut() = Some(area.downgrade());
+        *self.text_input_transform.borrow_mut() = Some(transform_of);
+        *self.text_input_method.borrow_mut() = Some(im);
     }
 
     fn with_state<R>(&self, f: impl FnOnce(&mut EditorState) -> R) -> Option<R> {
@@ -1519,6 +1690,7 @@ impl EditorHost {
         hover: Rc<super::canvas::Hover>,
         pan_to: Rc<dyn Fn(f64, f64)>,
     ) {
+        self.install_text_input_method(area, transform_of.clone());
         // ---- pointer motion: text hover + handle cursors ----
         let motion = gtk4::EventControllerMotion::new();
         motion.connect_motion({
@@ -2396,6 +2568,7 @@ impl EditorHost {
             let mut handled = true;
             let mut commit = false;
             let mut cancel = false;
+            let mut paste = false;
             match key {
                 gdk::Key::Escape => cancel = true,
                 gdk::Key::Return | gdk::Key::KP_Enter => {
@@ -2411,6 +2584,8 @@ impl EditorHost {
                 gdk::Key::Right => st.move_cursor_right(),
                 gdk::Key::Home => st.move_cursor_home(),
                 gdk::Key::End => st.move_cursor_end(),
+                gdk::Key::v | gdk::Key::V if ctrl => paste = true,
+                gdk::Key::Insert if shift => paste = true,
                 _ => {
                     if !ctrl {
                         if let Some(ch) = key.to_unicode() {
@@ -2435,10 +2610,13 @@ impl EditorHost {
                 st.fit_active_text_to_layout();
                 st.reset_text_cursor_blink();
             }
-            Some(handled || cancel || commit)
+            Some((handled || cancel || commit, paste))
         });
-        if let Some(Some(consumed)) = text_result {
+        if let Some(Some((consumed, paste))) = text_result {
             self.changed();
+            if paste {
+                self.paste_text_from_clipboard();
+            }
             return if consumed {
                 Propagation::Stop
             } else {
@@ -2756,6 +2934,19 @@ pub(crate) fn crop_apply_enabled(st: &EditorState) -> bool {
                 && rect.width >= st.base_image.width() as i32
                 && rect.height >= st.base_image.height() as i32)
     })
+}
+
+/// Insert text at the live caret, turning CRLF and lone CR line breaks into
+/// newlines. Returns false when no text box is live.
+fn insert_into_active_text(st: &mut EditorState, text: &str) -> bool {
+    if st.active_text_input.is_none() {
+        return false;
+    }
+    let text = text.replace("\r\n", "\n").replace('\r', "\n");
+    st.insert_text_input_str(&text);
+    st.fit_active_text_to_layout();
+    st.reset_text_cursor_blink();
+    true
 }
 
 fn text_context() -> Option<(ImageSurface, gtk4::cairo::Context)> {
@@ -4011,6 +4202,80 @@ mod tests {
         h.with_state(|st| st.add_text_input_char('x'));
         h.set_tool(Tool::Pen);
         assert_eq!(h.read(|st| st.actions.len()), Some(2));
+    }
+
+    #[test]
+    fn pasted_text_lands_at_the_caret_with_newline_breaks() {
+        let h = loaded(Tool::Text);
+        h.with_state(|st| {
+            st.begin_text_input(
+                crate::capture::editor::types::Point { x: 5.0, y: 5.0 },
+                100.0,
+                24.0,
+            );
+            st.insert_text_input_str("ab");
+            st.move_cursor_left();
+            assert!(insert_into_active_text(st, "Tiếng\r\nViệt\r"));
+            assert_eq!(
+                st.get_text_input().map(|input| input.text.clone()),
+                Some("aTiếng\nViệt\nb".to_string())
+            );
+            st.cancel_text_input();
+            assert!(!insert_into_active_text(st, "x"));
+        });
+    }
+
+    #[test]
+    fn paste_shortcuts_stay_with_the_live_text_box() {
+        let h = loaded(Tool::Text);
+        h.with_state(|st| {
+            st.begin_text_input(
+                crate::capture::editor::types::Point { x: 5.0, y: 5.0 },
+                100.0,
+                24.0,
+            )
+        });
+        assert_eq!(h.handle_key(gdk::Key::v, ctrl()), Propagation::Stop);
+        assert_eq!(
+            h.handle_key(gdk::Key::Insert, gdk::ModifierType::SHIFT_MASK),
+            Propagation::Stop
+        );
+        assert_eq!(
+            h.read(|st| st.get_text_input().map(|input| input.text.is_empty())),
+            Some(Some(true))
+        );
+    }
+
+    #[test]
+    fn input_method_commits_into_the_live_text_box_only() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let h = loaded(Tool::Text);
+            let area = DrawingArea::new();
+            h.install_text_input_method(&area, Rc::new(|| ViewTransform::for_image(64.0, 64.0)));
+            let im = h.text_input_method.borrow().clone().expect("input method");
+            im.emit_by_name::<()>("commit", &[&"dropped"]);
+            assert_eq!(h.read(|st| st.active_text_input.is_none()), Some(true));
+            h.with_state(|st| {
+                st.begin_text_input(
+                    crate::capture::editor::types::Point { x: 5.0, y: 5.0 },
+                    100.0,
+                    24.0,
+                )
+            });
+            h.changed();
+            assert!(h.text_input_focused.get());
+            im.emit_by_name::<()>("commit", &[&"Tiếng Việt"]);
+            assert_eq!(
+                h.read(|st| st.get_text_input().map(|input| input.text.clone())),
+                Some(Some("Tiếng Việt".to_string()))
+            );
+            h.with_state(|st| st.cancel_text_input());
+            h.changed();
+            assert!(!h.text_input_focused.get());
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
     }
 
     #[test]
