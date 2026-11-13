@@ -1656,6 +1656,9 @@ public:
         show();
         raise();
         Platform::setTopmost(static_cast<quintptr>(winId()), m_pinned || m_sample);
+        // Never part of a screenshot or recording, even if one starts while
+        // the card is still on screen.
+        Platform::excludeFromCapture(static_cast<quintptr>(winId()));
         if (slideIn) {
             m_motion.setStartValue(pos());
             m_motion.setEndValue(m_target);
@@ -1684,6 +1687,32 @@ public:
 
     /// The stack ran out of room: leave the way auto-close would.
     void dismissForSpace() { dismiss(); }
+
+    /// A capture is starting: step out of the way without leaving the stack.
+    void suspend()
+    {
+        if (!isVisible() || m_shelved)
+            return;
+        m_suspended = true;
+        m_tick.stop();
+        m_motion.stop();
+        hide();
+    }
+
+    /// The capture is over: come back where the card was.
+    void resume()
+    {
+        if (!m_suspended)
+            return;
+        m_suspended = false;
+        show();
+        raise();
+        Platform::setTopmost(static_cast<quintptr>(winId()), m_pinned);
+        m_autoCloseClock.restart();
+        m_tick.start();
+    }
+
+    bool isSuspended() const { return m_suspended; }
 
     void setOnShelved(std::function<void()> callback) { m_onShelved = std::move(callback); }
     void setSequence(quint64 sequence) { m_sequence = sequence; }
@@ -2049,6 +2078,7 @@ private:
     QPoint m_target;
     quint64 m_sequence = 0;
     bool m_shelved = false;
+    bool m_suspended = false;
     std::function<void()> m_onShelved;
     QList<CardButton*> m_controls;
     CardButton* m_cancelUpload = nullptr;
@@ -2081,6 +2111,11 @@ public:
     {
         m_telemetry = new Platform::UsageTelemetry(this);
         m_telemetry->start();
+        m_cardResumeTimer.setInterval(200);
+        connect(&m_cardResumeTimer, &QTimer::timeout, this, [this] {
+            if (!captureFlowActive())
+                resumeCards();
+        });
         m_lastScreenshotPath = QSettings().value(QStringLiteral("shortcuts/last_screenshot")).toString();
         if (!m_lastScreenshotPath.isEmpty())
             m_lastScreenshot.load(m_lastScreenshotPath);
@@ -2121,6 +2156,7 @@ public:
     {
         if (m_menuOpen)
             return;
+        suspendCards();
         m_menuOpen = true;
 
         QString recordingError;
@@ -2273,10 +2309,44 @@ public:
         });
     }
 
+    /// Any capture surface or session that a card on screen would end up in.
+    bool captureFlowActive() const
+    {
+        return m_menuOpen || m_screenshotCountdown || m_areaSelector || m_windowPicker
+            || m_setupOverlay || m_countdownPill || hasActiveRecording()
+            || (m_scrollSession && m_scrollSession->isActive());
+    }
+
+    /// Hide every card while a capture runs; a timer brings them back once
+    /// the capture flow has finished or been cancelled.
+    void suspendCards()
+    {
+        if (m_sampleCard)
+            m_sampleCard->close();
+        for (const QPointer<ResultCard>& card : m_cards) {
+            if (card)
+                card->suspend();
+        }
+        if (!m_cardResumeTimer.isActive())
+            m_cardResumeTimer.start();
+    }
+
+    void resumeCards()
+    {
+        m_cardResumeTimer.stop();
+        for (const QPointer<ResultCard>& card : m_cards) {
+            if (card && card->isSuspended())
+                card->resume();
+        }
+        layoutCards(false);
+    }
+
     /// A new card joins the stack in its screen's corner. The oldest cards on
     /// that screen leave first until it fits.
     void showResultCard(const QImage& image, const QString& path, bool video)
     {
+        // The capture this card belongs to is done, so the others return too.
+        resumeCards();
         auto* card = new ResultCard(image, path, video);
         card->setSequence(++m_cardSequence);
         card->setOnShelved([this] { scheduleCardLayout(); });
@@ -3069,6 +3139,7 @@ private:
     void chooseWindowRecording(const CaptureOptions& options,
                                CaptureModeToolbar* toolbar = nullptr)
     {
+        suspendCards();
         QPointer<CaptureModeToolbar> bar(toolbar);
         if (m_activeSession && m_activeSession->isActive()) {
             stopWebcamPreview(true);
@@ -3220,6 +3291,7 @@ private:
 
     void withCountdown(const CaptureOptions& options, std::function<void()> action)
     {
+        suspendCards();
         if (options.timerSeconds <= 0) {
             action();
             return;
@@ -3233,6 +3305,7 @@ private:
 
     void captureDisplay(const CaptureOptions& options)
     {
+        suspendCards();
         const Platform::ShellSettings settings = Platform::loadShellSettings();
         Platform::MonitorInfo target = Platform::monitorAt(QCursor::pos());
         const QVector<Platform::MonitorInfo> all = Platform::monitors();
@@ -3275,6 +3348,7 @@ private:
 
     void captureArea(const CaptureOptions& options)
     {
+        suspendCards();
         Platform::CaptureResult frozen;
         QString error;
         const bool includeCursor = !options.recording && !options.scroll
@@ -3288,6 +3362,7 @@ private:
 
     void captureCrosshair(const CaptureOptions& options)
     {
+        suspendCards();
         Platform::CaptureResult frozen;
         QString error;
         const bool includeCursor = !options.recording && !options.scroll
@@ -3376,6 +3451,7 @@ private:
     /// one way to choose one.
     void chooseWindowCapture(const CaptureOptions& options)
     {
+        suspendCards();
         if (!m_windowPicker.isNull() || !m_setupOverlay.isNull()) {
             debugLog(QStringLiteral("window picker ignored: another picker is up"));
             return;
@@ -4030,6 +4106,7 @@ private:
     QVector<QPointer<ResultCard>> m_cards;
     quint64 m_cardSequence = 0;
     QPointer<ResultCard> m_sampleCard;
+    QTimer m_cardResumeTimer;
     Platform::RecordingSession* m_activeSession = nullptr;
     /// Throws the running take away and starts the same recording again; set
     /// while a recording runs, for the restart button and shortcut.
