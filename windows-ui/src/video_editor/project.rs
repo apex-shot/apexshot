@@ -1153,9 +1153,15 @@ mod tests {
         let file = project(&video);
 
         save_project(&video, &file).unwrap();
+        // The store is the machine's real one, shared with the user's own
+        // projects and with tests running in parallel whose recordings can
+        // vanish mid-listing, so only this test's own entry is checked.
         let listed = list_projects();
-        assert!(listed.iter().any(|saved| saved.source_path == video));
-        assert!(listed.iter().all(|saved| saved.source_is_current()));
+        let ours = listed
+            .iter()
+            .find(|saved| saved.source_path == video)
+            .expect("the saved project is listed");
+        assert!(ours.source_is_current());
 
         delete_project(&video);
         assert!(!list_projects()
