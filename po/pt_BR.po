@@ -3126,11 +3126,23 @@ msgstr "Licença salva. Esta versão não está coberta pelas atualizações inc
 msgid "I have a license"
 msgstr "Tenho uma licença"
 
-msgid "In this export"
-msgstr "Nesta exportação"
+msgid "$39 once"
+msgstr "US$ 39 em pagamento único"
 
-msgid "Includes 12 months of updates. Versions you get keep working forever."
-msgstr "Inclui 12 meses de atualizações. As versões que você obtém continuam funcionando para sempre."
+msgid "12 months of updates"
+msgstr "12 meses de atualizações"
+
+msgid "14-day refund"
+msgstr "Reembolso em 14 dias"
+
+msgid "Versions you get keep working forever."
+msgstr "As versões que você obtém continuam funcionando para sempre."
+
+msgid "Uses {feature}"
+msgstr "Usa {feature}"
+
+msgid "This export uses {features}"
+msgstr "Esta exportação usa {features}"
 
 msgid "Instant zooms, speed, smoothness and motion blur for recordings."
 msgstr "Zooms instantâneos, velocidade, suavidade e desfoque de movimento para gravações."

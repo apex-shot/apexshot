@@ -3077,11 +3077,23 @@ msgstr "ライセンスを保存しました。このビルドは含まれるア
 msgid "I have a license"
 msgstr "ライセンスを持っています"
 
-msgid "In this export"
-msgstr "この書き出しで使用"
+msgid "$39 once"
+msgstr "買い切り $39"
 
-msgid "Includes 12 months of updates. Versions you get keep working forever."
-msgstr "12か月分のアップデートを含みます。入手したバージョンはずっと使い続けられます。"
+msgid "12 months of updates"
+msgstr "12か月分のアップデート"
+
+msgid "14-day refund"
+msgstr "14日間返金"
+
+msgid "Versions you get keep working forever."
+msgstr "入手したバージョンはずっと使い続けられます。"
+
+msgid "Uses {feature}"
+msgstr "{feature}を使用"
+
+msgid "This export uses {features}"
+msgstr "この書き出しでは{features}を使用しています"
 
 msgid "Instant zooms, speed, smoothness and motion blur for recordings."
 msgstr "録画向けのインスタントズーム、速度、なめらかさ、モーションブラー。"

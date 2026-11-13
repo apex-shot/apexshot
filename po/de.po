@@ -3134,11 +3134,23 @@ msgstr "Lizenz gespeichert. Dieser Build ist nicht von den enthaltenen Updates a
 msgid "I have a license"
 msgstr "Ich habe eine Lizenz"
 
-msgid "In this export"
-msgstr "In diesem Export"
+msgid "$39 once"
+msgstr "Einmalig 39 $"
 
-msgid "Includes 12 months of updates. Versions you get keep working forever."
-msgstr "Enthält 12 Monate Updates. Versionen, die du erhältst, funktionieren für immer weiter."
+msgid "12 months of updates"
+msgstr "12 Monate Updates"
+
+msgid "14-day refund"
+msgstr "14 Tage Rückerstattung"
+
+msgid "Versions you get keep working forever."
+msgstr "Versionen, die du erhältst, funktionieren für immer weiter."
+
+msgid "Uses {feature}"
+msgstr "Nutzt {feature}"
+
+msgid "This export uses {features}"
+msgstr "Dieser Export nutzt {features}"
 
 msgid "Instant zooms, speed, smoothness and motion blur for recordings."
 msgstr "Sofortige Zooms, Geschwindigkeit, Weichheit und Bewegungsunschärfe für Aufzeichnungen."
