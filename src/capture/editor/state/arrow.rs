@@ -150,21 +150,24 @@ impl EditorState {
                         let clamped = clamp_point(new_pos);
                         *start = clamped;
                         handles[0] = clamped;
-                        handles[1] = clamp_point(handles[1]);
+                        handles[1] =
+                            clamp_curve_control(handles[0], handles[1], handles[2], bounds);
                     }
                     1 => {
                         // new_pos is the desired on-curve midpoint B(0.5).
                         // Invert: P1 = 2*B(0.5) - 0.5*P0 - 0.5*P2
-                        handles[1] = clamp_point(Point {
+                        let desired = Point {
                             x: 2.0 * new_pos.x - 0.5 * handles[0].x - 0.5 * handles[2].x,
                             y: 2.0 * new_pos.y - 0.5 * handles[0].y - 0.5 * handles[2].y,
-                        });
+                        };
+                        handles[1] = clamp_curve_control(handles[0], desired, handles[2], bounds);
                     }
                     2 => {
                         let clamped = clamp_point(new_pos);
                         *end = clamped;
                         handles[2] = clamped;
-                        handles[1] = clamp_point(handles[1]);
+                        handles[1] =
+                            clamp_curve_control(handles[0], handles[1], handles[2], bounds);
                     }
                     _ => {}
                 }
@@ -203,6 +206,22 @@ impl EditorState {
             .selected_action_index
             .and_then(|index| self.actions.get(index))
             .is_some_and(|action| matches!(action, AnnotationAction::Arrow { .. }));
+    }
+}
+
+/// Clamps a quadratic Bézier control point so the curve itself, not the
+/// off-curve control point, stays inside `bounds`. On each axis the curve's
+/// extreme only reaches an edge `hi` when the control point sits at
+/// `hi + sqrt((hi - a) * (hi - b))`, so the control point may lie past the edge.
+fn clamp_curve_control(p0: Point, p1: Point, p2: Point, bounds: (f64, f64, f64, f64)) -> Point {
+    let axis = |a: f64, c: f64, b: f64, lo: f64, hi: f64| {
+        let min = lo - ((a - lo).max(0.0) * (b - lo).max(0.0)).sqrt();
+        let max = hi + ((hi - a).max(0.0) * (hi - b).max(0.0)).sqrt();
+        c.max(min).min(max)
+    };
+    Point {
+        x: axis(p0.x, p1.x, p2.x, bounds.0, bounds.2),
+        y: axis(p0.y, p1.y, p2.y, bounds.1, bounds.3),
     }
 }
 
@@ -274,5 +293,63 @@ mod tests {
             }
             other => panic!("expected selected arrow after reverse, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn curved_arrow_midpoint_can_bend_to_the_canvas_edge() {
+        let mut state = EditorState::new(RgbaImage::new(100, 100));
+        state.actions.push(AnnotationAction::Arrow {
+            start: Point { x: 40.0, y: 20.0 },
+            end: Point { x: 40.0, y: 80.0 },
+            color: DrawColor::new(1.0, 0.0, 0.0, 1.0),
+            stroke_size: 4.0,
+            style: ArrowStyle::Curved,
+            control_points: Some(vec![
+                Point { x: 40.0, y: 20.0 },
+                Point { x: 40.0, y: 50.0 },
+                Point { x: 40.0, y: 80.0 },
+            ]),
+            shadow: false,
+            reversed: false,
+        });
+        state.selected_action_index = Some(0);
+        let bounds = state.canvas_bounds_for_dimensions(100, 100);
+
+        state.move_arrow_control_handle(
+            1,
+            Point {
+                x: bounds.2 + 50.0,
+                y: 50.0,
+            },
+        );
+
+        let AnnotationAction::Arrow {
+            control_points: Some(points),
+            ..
+        } = &state.actions[0]
+        else {
+            panic!("expected a curved arrow");
+        };
+        let (p0, p1, p2) = (points[0], points[1], points[2]);
+        let curve: Vec<Point> = (0..=400)
+            .map(|i| {
+                let t = i as f64 / 400.0;
+                let u = 1.0 - t;
+                Point {
+                    x: u * u * p0.x + 2.0 * u * t * p1.x + t * t * p2.x,
+                    y: u * u * p0.y + 2.0 * u * t * p1.y + t * t * p2.y,
+                }
+            })
+            .collect();
+        for point in &curve {
+            assert!(point.x >= bounds.0 - 1e-6 && point.x <= bounds.2 + 1e-6);
+            assert!(point.y >= bounds.1 - 1e-6 && point.y <= bounds.3 + 1e-6);
+        }
+        let rightmost = curve.iter().map(|point| point.x).fold(f64::MIN, f64::max);
+        assert!(
+            (rightmost - bounds.2).abs() < 0.5,
+            "curve should bend all the way to the edge, reached {rightmost} of {}",
+            bounds.2
+        );
     }
 }

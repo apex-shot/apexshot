@@ -185,7 +185,7 @@ fn curved_arrow_control_handle_movement() {
 }
 
 #[test]
-fn curved_arrow_endpoint_move_keeps_middle_control_point_inside_image() {
+fn curved_arrow_endpoint_move_keeps_curve_inside_image() {
     let mut state = EditorState::new(RgbaImage::new(100, 100));
     state.push_action(AnnotationAction::Arrow {
         start: Point { x: 10.0, y: 60.0 },
@@ -214,8 +214,14 @@ fn curved_arrow_endpoint_move_keeps_middle_control_point_inside_image() {
             assert_eq!(*end, Point { x: 95.0, y: 60.0 });
             let pts = control_points.as_ref().unwrap();
             assert_eq!(pts[2], Point { x: 95.0, y: 60.0 });
-            assert!((0.0..=100.0).contains(&pts[1].x));
-            assert!((0.0..=100.0).contains(&pts[1].y));
+            for i in 0..=200 {
+                let t = i as f64 / 200.0;
+                let u = 1.0 - t;
+                let x = u * u * pts[0].x + 2.0 * u * t * pts[1].x + t * t * pts[2].x;
+                let y = u * u * pts[0].y + 2.0 * u * t * pts[1].y + t * t * pts[2].y;
+                assert!((0.0..=100.0).contains(&x));
+                assert!((0.0..=100.0).contains(&y));
+            }
         }
         other => panic!("unexpected action: {:?}", other),
     }
@@ -275,9 +281,10 @@ fn double_arrow_control_handle_movement() {
             // P1 = 2*B(0.5) - 0.5*P0 - 0.5*P2
             //    = 2*(50,25) - 0.5*(5,15) - 0.5*(90,90)
             //    = (100,50) - (2.5,7.5) - (45,45)
-            //    = (52.5, -2.5) → clamped to (52.5, 0.0)
+            //    = (52.5, -2.5); the curve itself stays inside the image, so
+            //    the control point is kept as-is.
             assert!((pts[1].x - 52.5).abs() < 0.01);
-            assert!((pts[1].y - 0.0).abs() < 0.01);
+            assert!((pts[1].y + 2.5).abs() < 0.01);
         }
         other => panic!("unexpected action: {:?}", other),
     }
