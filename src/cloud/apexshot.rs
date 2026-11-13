@@ -59,7 +59,11 @@ pub(crate) fn not_configured_notification(_config: &AppConfig) -> (String, Strin
     )
 }
 
-pub(crate) fn upload(config: &AppConfig, path: &Path) -> Result<UploadResult, UploadError> {
+pub(crate) fn upload(
+    config: &AppConfig,
+    path: &Path,
+    progress: super::upload::UploadProgress<'_>,
+) -> Result<UploadResult, UploadError> {
     if !is_configured(config) {
         return Err(UploadError::NotConfigured(
             "Cloud upload not configured. Run `apexshot login` to connect.".to_string(),
@@ -67,7 +71,7 @@ pub(crate) fn upload(config: &AppConfig, path: &Path) -> Result<UploadResult, Up
     }
 
     let mut config = config.clone();
-    let result = upload_file_with_token(&config, path);
+    let result = upload_file_with_token(&config, path, progress);
     if is_auth_error(&result) {
         if config.cloud_refresh_token.is_empty() {
             return Err(UploadError::AuthExpired(
@@ -75,7 +79,7 @@ pub(crate) fn upload(config: &AppConfig, path: &Path) -> Result<UploadResult, Up
             ));
         }
         let _ = refresh_access_token(&mut config);
-        return upload_file_with_token(&config, path);
+        return upload_file_with_token(&config, path, progress);
     }
     result
 }
@@ -84,7 +88,11 @@ fn is_auth_error(result: &Result<UploadResult, UploadError>) -> bool {
     matches!(result, Err(UploadError::HttpRequest(msg)) if msg.contains("401") || msg.contains("403"))
 }
 
-fn upload_file_with_token(config: &AppConfig, path: &Path) -> Result<UploadResult, UploadError> {
+fn upload_file_with_token(
+    config: &AppConfig,
+    path: &Path,
+    progress: super::upload::UploadProgress<'_>,
+) -> Result<UploadResult, UploadError> {
     let backend_url = resolve_cloud_backend_url(config);
     let token = &config.cloud_api_token;
 
@@ -128,7 +136,10 @@ fn upload_file_with_token(config: &AppConfig, path: &Path) -> Result<UploadResul
             .set("If-Match", &headers.if_match)
             .set("x-amz-meta-apexshot-upload-token", &headers.upload_token);
     }
-    match put_request.send_bytes(&file_bytes) {
+    let put_result = put_request
+        .set("Content-Length", &file_bytes.len().to_string())
+        .send(super::upload::ProgressReader::new(&file_bytes, progress));
+    match put_result {
         Ok(_) => match complete_upload_session(&backend_url, token, &session.id) {
             Ok(true) => {}
             Ok(false) => {

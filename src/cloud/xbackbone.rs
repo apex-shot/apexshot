@@ -41,7 +41,11 @@ pub(crate) fn not_configured_notification(_config: &AppConfig) -> (String, Strin
     )
 }
 
-pub(crate) fn upload(config: &AppConfig, path: &Path) -> Result<UploadResult, UploadError> {
+pub(crate) fn upload(
+    config: &AppConfig,
+    path: &Path,
+    progress: super::upload::UploadProgress<'_>,
+) -> Result<UploadResult, UploadError> {
     if !is_configured(config) {
         return Err(UploadError::NotConfigured(
             "XBackBone upload not configured. Set the instance URL and API token in Settings."
@@ -53,9 +57,11 @@ pub(crate) fn upload(config: &AppConfig, path: &Path) -> Result<UploadResult, Up
     // doesn't exist), fall back to the 3.x API (token form field, /upload).
     // This makes ApexShot work with both the current stable 3.x and the
     // upcoming 4.x without requiring the user to pick a version.
-    match upload_v4(config, path) {
+    match upload_v4(config, path, progress) {
         Ok(result) => Ok(result),
-        Err(UploadError::HttpRequest(msg)) if is_not_found(&msg) => upload_v3(config, path),
+        Err(UploadError::HttpRequest(msg)) if is_not_found(&msg) => {
+            upload_v3(config, path, progress)
+        }
         Err(e) => Err(e),
     }
 }
@@ -76,7 +82,11 @@ pub fn test_connection(config: &AppConfig) -> Result<(), String> {
 
 // --- 4.x implementation ---
 
-fn upload_v4(config: &AppConfig, path: &Path) -> Result<UploadResult, UploadError> {
+fn upload_v4(
+    config: &AppConfig,
+    path: &Path,
+    progress: super::upload::UploadProgress<'_>,
+) -> Result<UploadResult, UploadError> {
     let url = config.xbackbone_url.trim_end_matches('/');
     let token = &config.xbackbone_api_token;
 
@@ -98,7 +108,8 @@ fn upload_v4(config: &AppConfig, path: &Path) -> Result<UploadResult, UploadErro
             "Content-Type",
             &format!("multipart/form-data; boundary={boundary}"),
         )
-        .send_bytes(&body);
+        .set("Content-Length", &body.len().to_string())
+        .send(super::upload::ProgressReader::new(&body, progress));
 
     // A 404 on the 4.x route means the instance is 3.x (the route does not
     // exist). Surface it as a marker the dispatcher recognises so it can fall
@@ -208,7 +219,11 @@ fn map_http_error_v4(e: ureq::Error) -> UploadError {
 
 // --- 3.x implementation ---
 
-fn upload_v3(config: &AppConfig, path: &Path) -> Result<UploadResult, UploadError> {
+fn upload_v3(
+    config: &AppConfig,
+    path: &Path,
+    progress: super::upload::UploadProgress<'_>,
+) -> Result<UploadResult, UploadError> {
     let url = config.xbackbone_url.trim_end_matches('/');
     let token = &config.xbackbone_api_token;
 
@@ -236,7 +251,8 @@ fn upload_v3(config: &AppConfig, path: &Path) -> Result<UploadResult, UploadErro
             "Content-Type",
             &format!("multipart/form-data; boundary={boundary}"),
         )
-        .send_bytes(&body)
+        .set("Content-Length", &body.len().to_string())
+        .send(super::upload::ProgressReader::new(&body, progress))
         .map_err(map_http_error_v3)?;
 
     let parsed: XbV3Response = resp

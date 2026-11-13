@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::config::AppConfig;
 
-use super::upload::{UploadError, UploadResult};
+use super::upload::{UploadError, UploadProgress, UploadResult};
 use super::{apexshot, xbackbone};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,10 +26,15 @@ impl Destination {
         }
     }
 
-    pub fn upload(self, config: &AppConfig, path: &Path) -> Result<UploadResult, UploadError> {
+    pub fn upload(
+        self,
+        config: &AppConfig,
+        path: &Path,
+        progress: UploadProgress<'_>,
+    ) -> Result<UploadResult, UploadError> {
         match self {
-            Destination::ApexShot => apexshot::upload(config, path),
-            Destination::XBackbone => xbackbone::upload(config, path),
+            Destination::ApexShot => apexshot::upload(config, path, progress),
+            Destination::XBackbone => xbackbone::upload(config, path, progress),
         }
     }
 
