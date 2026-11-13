@@ -31,8 +31,7 @@ pub struct StudioCapabilities {
     pub static_presentation: bool,
     pub advanced_zoom: bool,
     pub image_upscale: bool,
-    /// Decorative still-image presentation: wallpaper, padding, radius,
-    /// blur, noise, shadow, frame style.
+    /// Decorative still-image presentation: frame styles and scene shadows.
     pub studio_style: bool,
 }
 

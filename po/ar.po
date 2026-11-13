@@ -4430,11 +4430,11 @@ msgstr "الحجم المتوقع للملف: {size}"
 msgid "Export time ≈ {time}"
 msgstr "مدة التصدير ≈ {time}"
 
-msgid "Backgrounds and style"
-msgstr "الخلفيات والنمط"
+msgid "Frame styles and shadows"
+msgstr "أنماط الإطار والظلال"
 
-msgid "Wallpapers, padding, rounded corners, shadows and frames for stills."
-msgstr "خلفيات وهوامش وزوايا مستديرة وظلال وإطارات للصور الثابتة."
+msgid "Frame styles and shadows for stills."
+msgstr "أنماط الإطار والظلال للصور الثابتة."
 
 msgid "Included with Studio"
 msgstr "مضمّن في Studio"
