@@ -56,6 +56,9 @@ const MAX_ZOOM_SCALE: f64 = 5.0;
 const HANDLE_INSET: f64 = 6.0;
 const HANDLE_WIDTH: f64 = 4.0;
 const HANDLE_HIT: f64 = 6.0;
+/// Space kept between an effect pill's edge and its label, on both sides, so
+/// the label clears the edge handles a selected pill draws.
+const EFFECT_LABEL_PADDING: f64 = 14.0;
 const PLAYHEAD_HIT: f64 = 6.0;
 /// How far the extend band's white mover line sits inside the panel's edge.
 const EXTEND_MOVER_INSET: f64 = 10.0;
@@ -7036,25 +7039,19 @@ fn draw_effect_clips(
             let _ = context.stroke();
         }
 
-        if pill_w > 40.0 * scale {
+        let labels = match track {
+            EffectTrack::Zoom => {
+                zoom_clip_labels(data.zoom_clips[index].mode, data.zoom_scale_at(index))
+            }
+            EffectTrack::Hide => vec![t("Hide")],
+        };
+        context.select_font_face("DM Sans", FontSlant::Normal, FontWeight::Normal);
+        context.set_font_size((11.0 * scale).round());
+        let padding = EFFECT_LABEL_PADDING * scale;
+        if let Some(label) = first_fitting_label(context, &labels, pill_w - padding * 2.0) {
             context.set_source_rgba(1.0, 1.0, 1.0, 0.92);
-            context.select_font_face("DM Sans", FontSlant::Normal, FontWeight::Normal);
-            context.set_font_size((11.0 * scale).round());
-            let label = match track {
-                EffectTrack::Zoom if pill_w > 92.0 * scale => format!(
-                    "{}  {}",
-                    if data.zoom_clips[index].mode == ZoomMode::Auto {
-                        t("Auto")
-                    } else {
-                        t("Manual")
-                    },
-                    format_zoom_scale(data.zoom_scale_at(index))
-                ),
-                EffectTrack::Zoom => t("Zoom"),
-                EffectTrack::Hide => t("Hide"),
-            };
-            context.move_to(x0 + 14.0 * scale, y + pill_h * 0.62);
-            let _ = context.show_text(&label);
+            context.move_to(x0 + padding, y + pill_h * 0.62);
+            let _ = context.show_text(label);
         }
     }
 
@@ -7194,13 +7191,14 @@ fn draw_effect_ghost(
     let _ = context.stroke();
     context.set_dash(&[], 0.0);
 
-    if pill_w > 40.0 * scale {
+    context.select_font_face("DM Sans", FontSlant::Normal, FontWeight::Normal);
+    context.set_font_size((11.0 * scale).round());
+    let labels = [if free { t("Paste") } else { t("Occupied") }];
+    let padding = EFFECT_LABEL_PADDING * scale;
+    if let Some(label) = first_fitting_label(context, &labels, pill_w - padding * 2.0) {
         context.set_source_rgba(1.0, 1.0, 1.0, if free { 0.92 } else { 0.55 });
-        context.select_font_face("DM Sans", FontSlant::Normal, FontWeight::Normal);
-        context.set_font_size((11.0 * scale).round());
-        context.move_to(x0 + 14.0 * scale, y + pill_h * 0.62);
-        let label = if free { t("Paste") } else { t("Occupied") };
-        let _ = context.show_text(&label);
+        context.move_to(x0 + padding, y + pill_h * 0.62);
+        let _ = context.show_text(label);
     }
 }
 
@@ -7381,6 +7379,50 @@ fn layout_chip_label_color(selected: bool, prefers_dark: bool) -> (f64, f64, f64
         (false, true) => (0.90, 0.98, 0.96, 0.92),
         (false, false) => (0.07, 0.22, 0.20, 0.88),
     }
+}
+
+/// The labels a zoom pill can show, most detailed first. The scale is the
+/// detail worth keeping on a short pill, but only once it differs from the
+/// default; an untouched clip falls back to its name.
+fn zoom_clip_labels(mode: ZoomMode, scale: f64) -> Vec<String> {
+    let scale_label = format_zoom_scale(scale);
+    let mode_label = if mode == ZoomMode::Auto {
+        t("Auto")
+    } else {
+        t("Manual")
+    };
+    let short = if (scale - DEFAULT_ZOOM_SCALE).abs() > 1e-6 {
+        scale_label.clone()
+    } else {
+        t("Zoom")
+    };
+    vec![format!("{mode_label}  {scale_label}"), short]
+}
+
+/// The first of `labels` whose whole text fits in `max_width`, or `None` when
+/// none does. Effect pills never cut a label or let it run past their edge.
+fn first_fitting_label<'a>(
+    context: &Context,
+    labels: &'a [String],
+    max_width: f64,
+) -> Option<&'a str> {
+    if !max_width.is_finite() || max_width <= 0.0 {
+        return None;
+    }
+    labels
+        .iter()
+        .find(|label| {
+            context
+                .text_extents(label)
+                .map(|extents| {
+                    extents
+                        .x_advance()
+                        .max(extents.x_bearing() + extents.width())
+                        <= max_width
+                })
+                .unwrap_or(false)
+        })
+        .map(String::as_str)
 }
 
 /// Truncate `text` to `max_width` with an ellipsis. `None` means not even the
@@ -9246,6 +9288,41 @@ mod tests {
         assert_eq!(speed_label(3.0), "3×");
         assert_eq!(speed_label(1.5), "1.5×");
         assert_eq!(speed_label(1.0), "1×");
+    }
+
+    #[test]
+    fn a_short_zoom_pill_keeps_only_a_changed_scale() {
+        assert_eq!(
+            super::zoom_clip_labels(ZoomMode::Auto, 2.0),
+            vec![format!("{}  2×", t("Auto")), t("Zoom")]
+        );
+        assert_eq!(
+            super::zoom_clip_labels(ZoomMode::Manual, 1.5),
+            vec![format!("{}  1.5×", t("Manual")), "1.5×".to_string()]
+        );
+    }
+
+    #[test]
+    fn an_effect_label_that_does_not_fit_is_left_off() {
+        let surface = ImageSurface::create(Format::ARgb32, 200, 40).unwrap();
+        let context = Context::new(&surface).unwrap();
+        context.set_font_size(11.0);
+        let labels = vec!["Manual  1.5×".to_string(), "1.5×".to_string()];
+        let short = context.text_extents("1.5×").unwrap().x_advance();
+        let long = context.text_extents("Manual  1.5×").unwrap().x_advance();
+        assert_eq!(
+            super::first_fitting_label(&context, &labels, long + 1.0),
+            Some("Manual  1.5×")
+        );
+        assert_eq!(
+            super::first_fitting_label(&context, &labels, short + 1.0),
+            Some("1.5×")
+        );
+        assert_eq!(
+            super::first_fitting_label(&context, &labels, short - 1.0),
+            None
+        );
+        assert_eq!(super::first_fitting_label(&context, &labels, 0.0), None);
     }
 
     #[test]
