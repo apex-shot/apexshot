@@ -23,6 +23,7 @@ pub const DEFAULT_AFTER_CAPTURE_SAVE: bool = true;
 pub const DEFAULT_AFTER_CAPTURE_OPEN_ANNOTATE: bool = false;
 pub const DEFAULT_REC_AFTER_CAPTURE_COPY_TO_CLIPBOARD: bool = false;
 pub const DEFAULT_REC_AFTER_CAPTURE_SAVE: bool = true;
+pub const DEFAULT_REC_AFTER_CAPTURE_SHOW_QUICK_ACCESS: bool = true;
 const VIDEO_PRESET_ID_MAX_BYTES: usize = 80;
 pub const QUICK_ACCESS_OVERLAY_SCALE_MIN: f64 = 0.5;
 pub const QUICK_ACCESS_OVERLAY_SCALE_BASELINE: f64 = 1.0;
@@ -52,6 +53,8 @@ pub struct AppConfig {
     pub after_capture_open_annotate: bool,
     pub rec_after_capture_copy_to_clipboard: bool,
     pub rec_after_capture_save: bool,
+    /// Windows only: show the Quick Access card after a recording.
+    pub rec_after_capture_show_quick_access: bool,
     // Recording General tab settings
     pub rec_controls: bool,
     pub rec_display_time: bool,
@@ -237,6 +240,7 @@ impl Default for AppConfig {
             after_capture_open_annotate: DEFAULT_AFTER_CAPTURE_OPEN_ANNOTATE,
             rec_after_capture_copy_to_clipboard: DEFAULT_REC_AFTER_CAPTURE_COPY_TO_CLIPBOARD,
             rec_after_capture_save: DEFAULT_REC_AFTER_CAPTURE_SAVE,
+            rec_after_capture_show_quick_access: DEFAULT_REC_AFTER_CAPTURE_SHOW_QUICK_ACCESS,
             rec_controls: true,
             rec_display_time: false,
             rec_hidpi: true,

@@ -668,6 +668,7 @@ fn build_settings_window(app: &Application) {
         screenshot_open_annotate: after_capture.screenshot_after_capture_checks[3].clone(),
         rec_copy_to_clipboard: after_capture.rec_copy_to_clipboard.clone(),
         rec_save: after_capture.rec_save.clone(),
+        rec_show_quick_access: after_capture.rec_show_quick_access.clone(),
         rec_open_video_editor: after_capture.rec_open_video_editor.clone(),
         rec_auto_zoom_on_import: after_capture.rec_auto_zoom_on_import.clone(),
         rec_capture_keystrokes,
@@ -969,6 +970,7 @@ fn install_save_dirty_tracking(inputs: &Rc<SaveInputs>, mark_dirty: Rc<dyn Fn()>
     wire_check(&inputs.screenshot_open_annotate);
     wire_check(&inputs.rec_copy_to_clipboard);
     wire_check(&inputs.rec_save);
+    wire_check(&inputs.rec_show_quick_access);
     wire_check(&inputs.rec_open_video_editor);
     wire_check(&inputs.rec_auto_zoom_on_import);
     wire_check(&inputs.rec_capture_keystrokes);

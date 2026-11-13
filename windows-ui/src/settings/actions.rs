@@ -41,6 +41,7 @@ pub struct SaveInputs {
     pub screenshot_open_annotate: CheckButton,
     pub rec_copy_to_clipboard: CheckButton,
     pub rec_save: CheckButton,
+    pub rec_show_quick_access: CheckButton,
     pub rec_open_video_editor: CheckButton,
     pub rec_auto_zoom_on_import: CheckButton,
     pub rec_capture_keystrokes: CheckButton,
@@ -260,6 +261,7 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<SaveOutcome> {
     config.after_capture_open_annotate = inputs.screenshot_open_annotate.is_active();
     config.rec_after_capture_copy_to_clipboard = inputs.rec_copy_to_clipboard.is_active();
     config.rec_after_capture_save = inputs.rec_save.is_active();
+    config.rec_after_capture_show_quick_access = inputs.rec_show_quick_access.is_active();
     config.rec_video_open_editor = inputs.rec_open_video_editor.is_active();
     config.rec_video_auto_zoom_on_import = inputs.rec_auto_zoom_on_import.is_active();
     config.rec_capture_keystrokes = inputs.rec_capture_keystrokes.is_active();
@@ -481,7 +483,7 @@ fn write_shell_settings_to(path: &Path, config: &AppConfig) -> anyhow::Result<()
             "capture_keystrokes": config.rec_capture_keystrokes,
             "include_microphone": config.rec_mic,
             "include_speaker": config.rec_speaker,
-            "after_show_result": true,
+            "after_show_result": config.rec_after_capture_show_quick_access,
             "after_copy_to_clipboard": config.rec_after_capture_copy_to_clipboard,
             "after_save": config.rec_after_capture_save,
             "after_open_editor": config.rec_video_open_editor,
@@ -657,6 +659,7 @@ mod tests {
             rec_cursor: false,
             rec_after_capture_copy_to_clipboard: true,
             rec_after_capture_save: false,
+            rec_after_capture_show_quick_access: false,
             rec_video_open_editor: true,
             rec_webcam_enabled: true,
             rec_webcam_device: "Integrated Camera".into(),
@@ -724,6 +727,7 @@ mod tests {
         assert!(value["recording"].get("show_cursor").is_none());
         assert_eq!(value["recording"]["after_copy_to_clipboard"], true);
         assert_eq!(value["recording"]["after_save"], false);
+        assert_eq!(value["recording"]["after_show_result"], false);
         assert_eq!(value["recording"]["after_open_editor"], true);
         assert_eq!(value["recording"]["webcam"]["enabled"], true);
         assert_eq!(value["recording"]["webcam"]["device"], "Integrated Camera");
@@ -768,6 +772,7 @@ mod tests {
         let updated: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!(updated["recording"]["after_save"], true);
+        assert_eq!(updated["recording"]["after_show_result"], true);
         assert_eq!(updated["general"]["shutter_sound"], "Camera");
         assert_eq!(updated["screenshots"]["high_dpi_suffix"], true);
         assert_eq!(updated["screenshots"]["after_open_editor"], false);

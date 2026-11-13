@@ -8,6 +8,7 @@ pub struct AfterCaptureWidgets {
     pub screenshot_after_capture_checks: Vec<CheckButton>,
     pub rec_copy_to_clipboard: CheckButton,
     pub rec_save: CheckButton,
+    pub rec_show_quick_access: CheckButton,
     pub rec_open_video_editor: CheckButton,
     pub rec_auto_zoom_on_import: CheckButton,
 }
@@ -91,6 +92,7 @@ pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
     let mut screenshot_after_capture_checks = Vec::new();
     let mut rec_copy_to_clipboard = CheckButton::new();
     let mut rec_save = CheckButton::new();
+    let mut rec_show_quick_access = CheckButton::new();
     let mut rec_open_video_editor = CheckButton::new();
     let mut rec_auto_zoom_on_import = CheckButton::new();
     rec_auto_zoom_on_import.set_active(config.rec_video_auto_zoom_on_import);
@@ -121,9 +123,19 @@ pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
         let recording_cell = GtkBox::new(Orientation::Horizontal, 0);
         recording_cell.set_size_request(80, -1);
         recording_cell.set_halign(Align::Center);
-        if action != "Show Quick Access overlay" && action != "Open Annotate tool" {
+        // Only the Windows shell shows the Quick Access card after a recording.
+        let recording_supported = match action {
+            "Open Annotate tool" => false,
+            "Show Quick Access overlay" => cfg!(target_os = "windows"),
+            _ => true,
+        };
+        if recording_supported {
             let recording_check = CheckButton::new();
             match action {
+                "Show Quick Access overlay" => {
+                    recording_check.set_active(config.rec_after_capture_show_quick_access);
+                    rec_show_quick_access = recording_check.clone();
+                }
                 "Copy to clipboard" => {
                     recording_check.set_active(config.rec_after_capture_copy_to_clipboard);
                     rec_copy_to_clipboard = recording_check.clone();
@@ -174,6 +186,7 @@ pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
         screenshot_after_capture_checks,
         rec_copy_to_clipboard,
         rec_save,
+        rec_show_quick_access,
         rec_open_video_editor,
         rec_auto_zoom_on_import,
     }
