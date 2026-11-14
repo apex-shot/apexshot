@@ -16,6 +16,9 @@ RTen 0.24's `Model::load_static_slice`, so enhancement needs no network access,
 no separate inference installation, and no downloaded code. Captures are never
 uploaded.
 
+The Windows build embeds the same two files and runs them with tract-onnx 0.23,
+processing tiles in parallel across CPU cores.
+
 Images are processed in 128-pixel tiles with an 8-pixel halo on each side, and
 each tile contributes only its central 112-pixel core to the output. The
 network has seven 3×3 convolutions, so its receptive field reaches 7 pixels
@@ -103,3 +106,4 @@ recipes install it, together with this README, at these paths:
 | Fedora and openSUSE RPM | `%{_licensedir}/apexshot/upscaling.LICENSE` | `%{_docdir}/apexshot/upscaling.md` |
 | Arch | `/usr/share/licenses/apexshot/upscaling.LICENSE` | `/usr/share/doc/apexshot/upscaling.md` |
 | Nix | `$out/share/licenses/apexshot/upscaling.LICENSE` | `$out/share/doc/apexshot/upscaling.md` |
+| Windows installer | `share\licenses\apexshot\upscaling.LICENSE` under the install folder | `share\licenses\apexshot\upscaling.md` under the install folder |

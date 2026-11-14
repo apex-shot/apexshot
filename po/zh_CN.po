@@ -4758,3 +4758,24 @@ msgstr "导出时间"
 
 msgid "Resolution"
 msgstr "分辨率"
+
+msgid "Compare enhancement"
+msgstr "对比增强效果"
+
+msgid "Drag the divider across the image."
+msgstr "在图像上拖动分隔线。"
+
+msgid "Enhancing the image…"
+msgstr "正在增强图像…"
+
+msgid "Free preview. Exporting with enhancement needs Studio."
+msgstr "免费预览。导出增强效果需要 Studio。"
+
+msgid "Sharpens small screenshots on this device, up to 1 megapixel. Missing detail cannot always be recovered."
+msgstr "在本设备上锐化小截图，最高 1 百万像素。缺失的细节不一定能恢复。"
+
+msgid "Source"
+msgstr "源图像"
+
+msgid "Use Neural 2×"
+msgstr "使用 Neural 2×"

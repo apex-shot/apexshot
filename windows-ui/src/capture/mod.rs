@@ -37,8 +37,7 @@ pub mod editor {
     #[rustfmt::skip]
     pub mod render;
 
-    /// Source upscaling options. The Windows editor ships the enum so the
-    /// shared types compile; the neural path itself is not offered yet.
+    /// Offline neural enlargement for still-image exports.
     pub mod upscale;
 
     /// Composition layout types. Only the rectangle the renderer's frame
