@@ -296,6 +296,9 @@ struct Data {
     /// The look the last undo or redo put back, for the timeline to apply to
     /// the stage and the cursor it does not own.
     restored_look: Option<Look>,
+    /// The look a cursor-look slider drag is about to change, held until the
+    /// drag ends so the whole sweep is one undo step.
+    pending_look_edit: Option<EditSnapshot>,
     /// The layout change the Webcam panel is editing, when one is selected.
     selected_layout: Option<usize>,
     /// Bumped every time a layout change is selected, including a repeated
@@ -361,6 +364,7 @@ impl Default for Data {
             background: None,
             cursor: None,
             restored_look: None,
+            pending_look_edit: None,
             selected_layout: None,
             layout_selection_epoch: 0,
             layout_burst: None,
@@ -984,6 +988,7 @@ impl Data {
         self.selected_layout = None;
         self.layout_selection_epoch = 0;
         self.layout_burst = None;
+        self.pending_look_edit = None;
         self.expanded_lane = TimelineLane::Zoom;
         self.lane_progress = [1.0, 0.0, 0.0];
     }
@@ -1038,6 +1043,35 @@ impl Data {
     fn record_edit(&mut self, before: EditSnapshot) {
         self.layout_burst = None;
         self.history.record_command(before);
+    }
+
+    /// Record a cursor-look edit as one step, carrying the look so one undo
+    /// puts the whole panel back instead of an earlier timeline edit.
+    fn record_cursor_look_edit(&mut self) {
+        let mut before = self.snapshot();
+        before.look = self.live_look();
+        self.record_edit(before);
+    }
+
+    /// Take the step a cursor-look slider drag is about to change. The look is
+    /// held until the drag ends, so a sweep reports many values but lands as
+    /// one undo step.
+    fn begin_cursor_look_edit(&mut self) {
+        if self.pending_look_edit.is_some() {
+            return;
+        }
+        self.layout_burst = None;
+        let mut before = self.snapshot();
+        before.look = self.live_look();
+        self.pending_look_edit = Some(before);
+    }
+
+    /// Finish a cursor-look slider drag by recording the step taken at its
+    /// start.
+    fn end_cursor_look_edit(&mut self) {
+        if let Some(before) = self.pending_look_edit.take() {
+            self.record_edit(before);
+        }
     }
 
     /// Take the step a layout edit is about to change.
@@ -1148,6 +1182,7 @@ impl Data {
         self.clipboard = snapshot.clipboard;
         self.restored_look = snapshot.look;
         self.layout_burst = None;
+        self.pending_look_edit = None;
         self.playing = false;
         // A restored selection is a new one for the panel, which reveals
         // itself when the epoch changes.
@@ -3814,7 +3849,8 @@ impl Timeline {
 
     /// The typing pauses the recording's key stream suggests, in source
     /// seconds. Ranges the user applied or removed, and ranges that no longer
-    /// touch the kept footage, are left out.
+    /// touch the kept footage, are left out. The Cursor panel prints them at
+    /// their composition times, which is what the timeline shows.
     pub fn typing_suggestions(&self) -> Vec<(f64, f64)> {
         let ranges = self.typing_ranges();
         let data = self.data.borrow();
@@ -3825,6 +3861,12 @@ impl Timeline {
             })
             .map(|(clipped_start, clipped_end, _)| (clipped_start, clipped_end))
             .collect()
+    }
+
+    /// The composition time a source time lands on, or `None` when the edit
+    /// cut that footage away.
+    pub fn composition_time_for_source(&self, source_time: f64) -> Option<f64> {
+        self.data.borrow().composition_time_for_source(source_time)
     }
 
     /// Ask to be told whenever the typing suggestions or the resolved ranges
@@ -4223,11 +4265,11 @@ impl Timeline {
 
     /// Follow the pointer, or hold the focus point the clip carries.
     ///
-    /// Switching to Manual keeps what the preview currently shows: the camera
-    /// may be chasing a pointer position that is nowhere near the clip's
-    /// stored centre, and the user expects the framing they can see to stay.
+    /// Switching to Manual keeps what the preview currently shows only while
+    /// the playhead is inside the selected clip. Outside it the camera belongs
+    /// to another clip or to the full frame, so the stored centre stays.
     pub fn set_zoom_mode(&self, mode: ZoomMode) {
-        let visible_center = if mode == ZoomMode::Manual {
+        let visible_center = if mode == ZoomMode::Manual && self.playhead_in_selected_zoom() {
             self.camera_at_playhead().map(|camera| camera.1)
         } else {
             None
@@ -4239,6 +4281,15 @@ impl Timeline {
         }
         (self.repaint)();
         self.publish_frame();
+    }
+
+    /// Whether the playhead sits inside the selected zoom clip, where the
+    /// preview's camera is that clip's framing.
+    fn playhead_in_selected_zoom(&self) -> bool {
+        let data = self.data.borrow();
+        data.selected_zoom
+            .and_then(|index| data.zoom_clips.get(index))
+            .is_some_and(|clip| data.playhead >= clip.start && data.playhead <= clip.end)
     }
 
     pub fn set_zoom_scale(&self, scale: f64) {
@@ -4363,6 +4414,23 @@ impl Timeline {
     /// the rest of the edit list instead of waiting for another edit.
     pub fn mark_cursor_changed(&self) {
         self.project.mark_changed();
+    }
+
+    /// Put a cursor-look edit on the undo history as one step, so Ctrl+Z takes
+    /// back the theme, size, motion or visibility change the panel just made.
+    pub fn record_cursor_look_edit(&self) {
+        self.data.borrow_mut().record_cursor_look_edit();
+    }
+
+    /// Take the step a cursor-look slider drag is about to change; pair it
+    /// with [`Timeline::end_cursor_look_edit`] so the whole drag is one step.
+    pub fn begin_cursor_look_edit(&self) {
+        self.data.borrow_mut().begin_cursor_look_edit();
+    }
+
+    /// Record the step taken when the cursor-look slider drag started.
+    pub fn end_cursor_look_edit(&self) {
+        self.data.borrow_mut().end_cursor_look_edit();
     }
 
     /// Save this project's look as a preset the preset store keeps.

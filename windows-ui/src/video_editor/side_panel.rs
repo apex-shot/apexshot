@@ -667,6 +667,37 @@ fn update_cursor_settings(
     repaint();
 }
 
+/// Apply a cursor-look edit as one undo step, so Ctrl+Z takes it back instead
+/// of an earlier timeline edit.
+fn update_cursor_look(
+    timeline: &super::timeline::Timeline,
+    cursor: &super::cursor::CursorModel,
+    repaint: &Rc<dyn Fn()>,
+    update: impl FnOnce(&mut CursorSettings),
+) {
+    timeline.record_cursor_look_edit();
+    update_cursor_settings(cursor, repaint, update);
+}
+
+/// Make a cursor slider's whole drag one undo step: the step is taken when the
+/// drag starts and recorded when it ends.
+fn cursor_look_slider(
+    timeline: &super::timeline::Timeline,
+    slider: FilledSlider,
+) -> FilledSlider {
+    slider.on_interaction(
+        {
+            let timeline = timeline.clone();
+            Rc::new(move || timeline.begin_cursor_look_edit())
+        },
+        {
+            let timeline = timeline.clone();
+            Rc::new(move || timeline.end_cursor_look_edit())
+        },
+    );
+    slider
+}
+
 fn build_cursor_panel(
     scale: f64,
     cursor: super::cursor::CursorModel,
@@ -760,10 +791,28 @@ fn build_cursor_panel(
             effects_page.append(&clicks.root);
             effects_page.append(&keyboard.root);
             effects_page.append(&typing.root);
+            let settings = cursor.settings();
+            let focused = preset_card(&t("Focused"), &t("Tighter, faster"), scale);
+            let smooth = preset_card(&t("Smooth"), &t("Softer follow"), scale);
+            smooth.set_group(Some(&focused));
+            let active_preset = settings.matching_motion_preset();
+            focused.set_active(active_preset == Some(CursorMotionStyle::Focused));
+            smooth.set_active(active_preset == Some(CursorMotionStyle::Smooth));
+            let sync_presets: Rc<dyn Fn(&CursorSettings)> = {
+                let focused = focused.clone();
+                let smooth = smooth.clone();
+                Rc::new(move |settings| {
+                    let active = settings.matching_motion_preset();
+                    focused.set_active(active == Some(CursorMotionStyle::Focused));
+                    smooth.set_active(active == Some(CursorMotionStyle::Smooth));
+                })
+            };
             let size_slider = build_cursor_style_page(
                 scale,
                 cursor.clone(),
                 repaint.clone(),
+                &timeline,
+                &sync_presets,
                 &picker,
                 &style.body,
             );
@@ -771,7 +820,11 @@ fn build_cursor_panel(
                 scale,
                 cursor.clone(),
                 repaint.clone(),
+                &timeline,
                 size_slider,
+                focused,
+                smooth,
+                &sync_presets,
                 &style.body,
                 &movement.body,
                 &rotation.body,
@@ -805,6 +858,8 @@ fn build_cursor_style_page(
     scale: f64,
     cursor: super::cursor::CursorModel,
     repaint: Rc<dyn Fn()>,
+    timeline: &super::timeline::Timeline,
+    sync_presets: &Rc<dyn Fn(&CursorSettings)>,
     picker: &GtkBox,
     style: &GtkBox,
 ) -> FilledSlider {
@@ -827,9 +882,12 @@ fn build_cursor_style_page(
         card.connect_clicked({
             let cursor = cursor.clone();
             let repaint = repaint.clone();
+            let timeline = timeline.clone();
             move |card| {
-                if card.is_active() {
-                    update_cursor_settings(&cursor, &repaint, |settings| settings.theme = theme);
+                if card.is_active() && cursor.settings().theme != theme {
+                    update_cursor_look(&timeline, &cursor, &repaint, |settings| {
+                        settings.theme = theme
+                    });
                 }
             }
         });
@@ -839,31 +897,41 @@ fn build_cursor_style_page(
     // The sprite art is 48 pixels across, so anything past 2x is a magnified
     // picture; the shared model still clamps to 3.0 for platforms with finer
     // art.
-    let size_slider = cursor_slider(
-        &t("Size"),
-        0.5,
-        2.0,
-        settings.size,
-        0.05,
-        1,
-        scale,
-        cursor.clone(),
-        repaint.clone(),
-        |settings, value| settings.size = value,
-    );
-    style.append(&size_slider.widget());
-    style.append(
-        &cursor_slider(
-            &t("Shadow"),
-            0.0,
-            1.0,
-            settings.shadow,
+    let size_sync = sync_presets.clone();
+    let size_slider = cursor_look_slider(
+        timeline,
+        cursor_slider(
+            &t("Size"),
+            0.5,
+            2.0,
+            settings.size,
             0.05,
             1,
             scale,
-            cursor,
-            repaint,
-            |settings, value| settings.shadow = value,
+            cursor.clone(),
+            repaint.clone(),
+            move |settings, value| {
+                settings.size = value;
+                size_sync(settings);
+            },
+        ),
+    );
+    style.append(&size_slider.widget());
+    style.append(
+        &cursor_look_slider(
+            timeline,
+            cursor_slider(
+                &t("Shadow"),
+                0.0,
+                1.0,
+                settings.shadow,
+                0.05,
+                1,
+                scale,
+                cursor,
+                repaint,
+                |settings, value| settings.shadow = value,
+            ),
         )
         .widget(),
     );
@@ -875,7 +943,11 @@ fn build_cursor_follow_page(
     scale: f64,
     cursor: super::cursor::CursorModel,
     repaint: Rc<dyn Fn()>,
+    timeline: &super::timeline::Timeline,
     size_slider: FilledSlider,
+    focused: ToggleButton,
+    smooth: ToggleButton,
+    sync_presets: &Rc<dyn Fn(&CursorSettings)>,
     style: &GtkBox,
     movement: &GtkBox,
     rotation: &GtkBox,
@@ -885,39 +957,47 @@ fn build_cursor_follow_page(
 
     let presets = GtkBox::new(Orientation::Horizontal, 8);
     presets.set_homogeneous(true);
-    let focused = preset_card(&t("Focused"), &t("Tighter, faster"), scale);
-    let smooth = preset_card(&t("Smooth"), &t("Softer follow"), scale);
-    smooth.set_group(Some(&focused));
-    let active_preset = settings.matching_motion_preset();
-    focused.set_active(active_preset == Some(CursorMotionStyle::Focused));
-    smooth.set_active(active_preset == Some(CursorMotionStyle::Smooth));
     presets.append(&focused);
     presets.append(&smooth);
     movement.append(&presets);
-    let smoothing_slider = cursor_slider(
-        &t("Smoothing"),
-        0.0,
-        1.0,
-        settings.smooth,
-        0.05,
-        1,
-        scale,
-        cursor.clone(),
-        repaint.clone(),
-        |settings, value| settings.smooth = value,
+    let smoothing_sync = sync_presets.clone();
+    let smoothing_slider = cursor_look_slider(
+        timeline,
+        cursor_slider(
+            &t("Smoothing"),
+            0.0,
+            1.0,
+            settings.smooth,
+            0.05,
+            1,
+            scale,
+            cursor.clone(),
+            repaint.clone(),
+            move |settings, value| {
+                settings.smooth = value;
+                smoothing_sync(settings);
+            },
+        ),
     );
     movement.append(&smoothing_slider.widget());
-    let speed_slider = cursor_slider(
-        &t("Speed"),
-        0.25,
-        3.0,
-        settings.speed,
-        0.05,
-        1,
-        scale,
-        cursor.clone(),
-        repaint.clone(),
-        |settings, value| settings.speed = value,
+    let speed_sync = sync_presets.clone();
+    let speed_slider = cursor_look_slider(
+        timeline,
+        cursor_slider(
+            &t("Speed"),
+            0.25,
+            3.0,
+            settings.speed,
+            0.05,
+            1,
+            scale,
+            cursor.clone(),
+            repaint.clone(),
+            move |settings, value| {
+                settings.speed = value;
+                speed_sync(settings);
+            },
+        ),
     );
     movement.append(&speed_slider.widget());
 
@@ -930,17 +1010,20 @@ fn build_cursor_follow_page(
     );
     rotation_modes.widget().set_hexpand(true);
     rotation.append(rotation_modes.widget());
-    let tilt_slider = cursor_slider(
-        &t("Tilt amount"),
-        0.0,
-        1.0,
-        settings.rotate_on_x_movement_ratio,
-        0.05,
-        2,
-        scale,
-        cursor.clone(),
-        repaint.clone(),
-        |settings, value| settings.rotate_on_x_movement_ratio = value,
+    let tilt_slider = cursor_look_slider(
+        timeline,
+        cursor_slider(
+            &t("Tilt amount"),
+            0.0,
+            1.0,
+            settings.rotate_on_x_movement_ratio,
+            0.05,
+            2,
+            scale,
+            cursor.clone(),
+            repaint.clone(),
+            |settings, value| settings.rotate_on_x_movement_ratio = value,
+        ),
     );
     rotation.append(&tilt_slider.widget());
     let tilt_widget = tilt_slider.widget().clone();
@@ -949,28 +1032,34 @@ fn build_cursor_follow_page(
         let rotation_modes = rotation_modes.clone();
         let cursor = cursor.clone();
         let repaint = repaint.clone();
+        let timeline = timeline.clone();
         let tilt_widget = tilt_widget.clone();
         move || {
             let mode = rotation_modes
                 .active_id()
                 .map(|id| CursorRotationMode::parse(&id))
                 .unwrap_or_default();
-            update_cursor_settings(&cursor, &repaint, |settings| settings.rotation_mode = mode);
+            update_cursor_look(&timeline, &cursor, &repaint, |settings| {
+                settings.rotation_mode = mode
+            });
             tilt_widget.set_sensitive(mode == CursorRotationMode::Velocity);
         }
     });
     rotation.append(
-        &cursor_slider(
-            &t("Base angle"),
-            -180.0,
-            180.0,
-            settings.base_rotation_deg,
-            5.0,
-            0,
-            scale,
-            cursor.clone(),
-            repaint.clone(),
-            |settings, value| settings.base_rotation_deg = value,
+        &cursor_look_slider(
+            timeline,
+            cursor_slider(
+                &t("Base angle"),
+                -180.0,
+                180.0,
+                settings.base_rotation_deg,
+                5.0,
+                0,
+                scale,
+                cursor.clone(),
+                repaint.clone(),
+                |settings, value| settings.base_rotation_deg = value,
+            ),
         )
         .widget(),
     );
@@ -982,19 +1071,26 @@ fn build_cursor_follow_page(
         button.connect_clicked({
             let cursor = cursor.clone();
             let repaint = repaint.clone();
+            let timeline = timeline.clone();
             let size_slider = size_slider.clone();
             let smoothing_slider = smoothing_slider.clone();
             let speed_slider = speed_slider.clone();
+            let sync_presets = sync_presets.clone();
             move |button| {
                 if !button.is_active() {
                     return;
                 }
                 let mut settings = cursor.settings();
                 settings.apply_motion_preset(style);
+                if settings == cursor.settings() {
+                    return;
+                }
+                timeline.record_cursor_look_edit();
                 cursor.set_settings(settings);
                 size_slider.set_value(settings.size);
                 smoothing_slider.set_value(settings.smooth);
                 speed_slider.set_value(settings.speed);
+                sync_presets(&settings);
                 repaint();
             }
         });
@@ -1013,8 +1109,9 @@ fn build_cursor_follow_page(
     always_default.connect_state_set({
         let cursor = cursor.clone();
         let repaint = repaint.clone();
+        let timeline = timeline.clone();
         move |_, use_default| {
-            update_cursor_settings(&cursor, &repaint, |settings| {
+            update_cursor_look(&timeline, &cursor, &repaint, |settings| {
                 settings.always_use_default = use_default
             });
             gtk4::glib::Propagation::Proceed
@@ -1037,10 +1134,11 @@ fn build_cursor_follow_page(
     remove_shake.connect_state_set({
         let cursor = cursor.clone();
         let repaint = repaint.clone();
+        let timeline = timeline.clone();
         move |_, active| {
             // The studied panel turns the filter off by writing zero and back
             // on at its default threshold.
-            update_cursor_settings(&cursor, &repaint, |settings| {
+            update_cursor_look(&timeline, &cursor, &repaint, |settings| {
                 settings.remove_shake_threshold = if active {
                     crate::recording::editor::cursor_shake::DEFAULT_REMOVE_SHAKE_THRESHOLD
                 } else {
@@ -1067,8 +1165,11 @@ fn build_cursor_follow_page(
     idle.connect_state_set({
         let cursor = cursor.clone();
         let repaint = repaint.clone();
+        let timeline = timeline.clone();
         move |_, hide_idle| {
-            update_cursor_settings(&cursor, &repaint, |settings| settings.hide_idle = hide_idle);
+            update_cursor_look(&timeline, &cursor, &repaint, |settings| {
+                settings.hide_idle = hide_idle
+            });
             gtk4::glib::Propagation::Proceed
         }
     });
@@ -1076,47 +1177,27 @@ fn build_cursor_follow_page(
     idle_row.append(&idle);
     visibility.append(&idle_row);
     visibility.append(
-        &cursor_slider(
-            &t("Idle delay"),
-            120.0,
-            5000.0,
-            settings.idle_ms,
-            40.0,
-            0,
-            scale,
-            cursor.clone(),
-            repaint.clone(),
-            |settings, value| settings.idle_ms = value,
+        &cursor_look_slider(
+            timeline,
+            cursor_slider(
+                &t("Idle delay"),
+                120.0,
+                5000.0,
+                settings.idle_ms,
+                40.0,
+                0,
+                scale,
+                cursor.clone(),
+                repaint.clone(),
+                |settings, value| settings.idle_ms = value,
+            ),
         )
         .widget(),
     );
 
-    let loop_row = GtkBox::new(Orientation::Horizontal, 8);
-    loop_row.add_css_class("recording-editor-zoom-classic");
-    let loop_label = Label::new(Some(&t("Loop cursor position")));
-    loop_label.add_css_class("recording-editor-zoom-classic-label");
-    loop_label.set_hexpand(true);
-    loop_label.set_xalign(0.0);
-    let loop_switch = Switch::new();
-    loop_switch.add_css_class("recording-editor-zoom-switch");
-    loop_switch.set_active(settings.loop_position_before_end_ms.is_some());
-    loop_switch.set_halign(Align::End);
-    loop_switch.connect_state_set({
-        let cursor = cursor.clone();
-        let repaint = repaint.clone();
-        move |_, active| {
-            // The studied panel turns the loop on one second before the end.
-            update_cursor_settings(&cursor, &repaint, |settings| {
-                settings.loop_position_before_end_ms = if active { Some(1000.0) } else { None };
-            });
-            gtk4::glib::Propagation::Proceed
-        }
-    });
-    loop_row.append(&loop_label);
-    loop_row.append(&loop_switch);
-    visibility.append(&loop_row);
-    visibility.append(
-        &cursor_slider(
+    let loop_slider = cursor_look_slider(
+        timeline,
+        cursor_slider(
             &t("Loop before end"),
             1000.0,
             4000.0,
@@ -1131,21 +1212,65 @@ fn build_cursor_follow_page(
                     settings.loop_position_before_end_ms = Some(value);
                 }
             },
-        )
-        .widget(),
+        ),
     );
+    // The loop distance only applies while the loop is on, so it is dead
+    // while the switch is off rather than silently doing nothing.
+    loop_slider
+        .widget()
+        .set_sensitive(settings.loop_position_before_end_ms.is_some());
+
+    let loop_row = GtkBox::new(Orientation::Horizontal, 8);
+    loop_row.add_css_class("recording-editor-zoom-classic");
+    let loop_label = Label::new(Some(&t("Loop cursor position")));
+    loop_label.add_css_class("recording-editor-zoom-classic-label");
+    loop_label.set_hexpand(true);
+    loop_label.set_xalign(0.0);
+    let loop_switch = Switch::new();
+    loop_switch.add_css_class("recording-editor-zoom-switch");
+    loop_switch.set_active(settings.loop_position_before_end_ms.is_some());
+    loop_switch.set_halign(Align::End);
+    loop_switch.connect_state_set({
+        let cursor = cursor.clone();
+        let repaint = repaint.clone();
+        let timeline = timeline.clone();
+        let loop_slider = loop_slider.clone();
+        move |_, active| {
+            // The studied panel turns the loop on one second before the end.
+            update_cursor_look(&timeline, &cursor, &repaint, |settings| {
+                settings.loop_position_before_end_ms = if active { Some(1000.0) } else { None };
+            });
+            // The slider follows the value the switch just wrote, so the two
+            // controls never disagree.
+            loop_slider.set_value(
+                cursor
+                    .settings()
+                    .loop_position_before_end_ms
+                    .unwrap_or(1000.0),
+            );
+            loop_slider.widget().set_sensitive(active);
+            gtk4::glib::Propagation::Proceed
+        }
+    });
+    loop_row.append(&loop_label);
+    loop_row.append(&loop_switch);
+    visibility.append(&loop_row);
+    visibility.append(&loop_slider.widget());
     visibility.append(
-        &cursor_slider(
-            &t("Stop at the end"),
-            0.0,
-            5000.0,
-            settings.stop_movement_in_last_part_ms,
-            50.0,
-            0,
-            scale,
-            cursor,
-            repaint,
-            |settings, value| settings.stop_movement_in_last_part_ms = value,
+        &cursor_look_slider(
+            timeline,
+            cursor_slider(
+                &t("Stop at the end"),
+                0.0,
+                5000.0,
+                settings.stop_movement_in_last_part_ms,
+                50.0,
+                0,
+                scale,
+                cursor,
+                repaint,
+                |settings, value| settings.stop_movement_in_last_part_ms = value,
+            ),
         )
         .widget(),
     );
@@ -1475,7 +1600,16 @@ fn build_typing_suggestions(
             for &(start, end) in &suggestions {
                 let card = GtkBox::new(Orientation::Vertical, (6.0 * scale).round() as i32);
                 card.add_css_class("recording-editor-zoom-classic");
-                let range = Label::new(Some(&format!("{} · {start:.1}s – {end:.1}s", t("Typing"))));
+                let shown_start = timeline
+                    .composition_time_for_source(start)
+                    .unwrap_or(start);
+                let shown_end = timeline
+                    .composition_time_for_source(end)
+                    .unwrap_or(end);
+                let range = Label::new(Some(&format!(
+                    "{} · {shown_start:.1}s – {shown_end:.1}s",
+                    t("Typing")
+                )));
                 range.add_css_class("recording-editor-zoom-classic-label");
                 range.set_xalign(0.0);
                 card.append(&range);
