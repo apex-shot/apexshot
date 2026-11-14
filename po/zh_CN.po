@@ -4743,3 +4743,18 @@ msgstr "为单薄的麦克风增加厚度。"
 
 msgid "Keeps the microphone exactly as it was recorded."
 msgstr "完全保留麦克风的原始录音。"
+
+msgid "Output"
+msgstr "输出"
+
+msgid "Format"
+msgstr "格式"
+
+msgid "Estimated size"
+msgstr "预计大小"
+
+msgid "Export time"
+msgstr "导出时间"
+
+msgid "Resolution"
+msgstr "分辨率"

@@ -4780,3 +4780,18 @@ msgstr "يضيف عمقًا للميكروفونات الرقيقة."
 
 msgid "Keeps the microphone exactly as it was recorded."
 msgstr "يُبقي الميكروفون كما سُجّل تمامًا."
+
+msgid "Output"
+msgstr "الإخراج"
+
+msgid "Format"
+msgstr "التنسيق"
+
+msgid "Estimated size"
+msgstr "الحجم المقدّر"
+
+msgid "Export time"
+msgstr "وقت التصدير"
+
+msgid "Resolution"
+msgstr "الدقة"

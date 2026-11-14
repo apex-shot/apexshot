@@ -4846,3 +4846,18 @@ msgstr "Dá corpo a microfones de som fino."
 
 msgid "Keeps the microphone exactly as it was recorded."
 msgstr "Mantém o microfone exatamente como foi gravado."
+
+msgid "Output"
+msgstr "Saída"
+
+msgid "Format"
+msgstr "Formato"
+
+msgid "Estimated size"
+msgstr "Tamanho estimado"
+
+msgid "Export time"
+msgstr "Tempo de exportação"
+
+msgid "Resolution"
+msgstr "Resolução"

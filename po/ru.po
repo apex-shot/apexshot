@@ -4836,3 +4836,18 @@ msgstr "Добавляет плотность микрофонам с тонки
 
 msgid "Keeps the microphone exactly as it was recorded."
 msgstr "Оставляет микрофон точно таким, каким он был записан."
+
+msgid "Output"
+msgstr "Вывод"
+
+msgid "Format"
+msgstr "Формат"
+
+msgid "Estimated size"
+msgstr "Примерный размер"
+
+msgid "Export time"
+msgstr "Время экспорта"
+
+msgid "Resolution"
+msgstr "Разрешение"

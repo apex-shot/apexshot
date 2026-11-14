@@ -4866,3 +4866,18 @@ msgstr "Donne du corps aux microphones au son fin."
 
 msgid "Keeps the microphone exactly as it was recorded."
 msgstr "Conserve le microphone exactement tel qu’il a été enregistré."
+
+msgid "Output"
+msgstr "Sortie"
+
+msgid "Format"
+msgstr "Format"
+
+msgid "Estimated size"
+msgstr "Taille estimée"
+
+msgid "Export time"
+msgstr "Durée d'exportation"
+
+msgid "Resolution"
+msgstr "Résolution"

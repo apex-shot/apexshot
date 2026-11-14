@@ -4856,3 +4856,18 @@ msgstr "Verleiht dünnen Mikrofonen mehr Fülle."
 
 msgid "Keeps the microphone exactly as it was recorded."
 msgstr "Lässt das Mikrofon genau so, wie es aufgenommen wurde."
+
+msgid "Output"
+msgstr "Ausgabe"
+
+msgid "Format"
+msgstr "Format"
+
+msgid "Estimated size"
+msgstr "Geschätzte Größe"
+
+msgid "Export time"
+msgstr "Exportdauer"
+
+msgid "Resolution"
+msgstr "Auflösung"

@@ -4754,3 +4754,18 @@ msgstr "薄い音のマイクに厚みを加えます。"
 
 msgid "Keeps the microphone exactly as it was recorded."
 msgstr "マイクの音を録音したままに保ちます。"
+
+msgid "Output"
+msgstr "出力"
+
+msgid "Format"
+msgstr "形式"
+
+msgid "Estimated size"
+msgstr "推定サイズ"
+
+msgid "Export time"
+msgstr "書き出し時間"
+
+msgid "Resolution"
+msgstr "解像度"
