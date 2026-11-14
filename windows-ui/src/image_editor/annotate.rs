@@ -72,6 +72,8 @@ const ARROW_CLICK_NOOP_DISTANCE: f64 = 3.0;
 /// A new box or circle needs a deliberate drag on screen; anything shorter is
 /// a click that jittered, and committing it would leave a dot behind.
 const MIN_SHAPE_DRAG_DISTANCE: f64 = 16.0;
+/// Longest edge of the background raster painted during a live appearance drag.
+const LIVE_BACKGROUND_EDGE: u32 = 768;
 const PREVIEW_CARD_MAX_EDGE: u32 = 1600;
 static BACKGROUND_DECODE_LOCK: Mutex<()> = Mutex::new(());
 
@@ -1496,6 +1498,15 @@ impl EditorHost {
         // small zoom changes reuse the cache; never above 4096.
         let edge = ((layout.width.max(layout.height) * t.canvas_scale / 256.0).ceil() * 256.0)
             .clamp(256.0, 4096.0) as u32;
+        // An appearance slider changes the fill on every pointer event, and
+        // re-blurring a full-size raster each time made the drag lag. While
+        // live, a small raster stands in (the blur hides its resolution); the
+        // release misses the cache on size and repaints at full quality.
+        let edge = if live {
+            edge.min(LIVE_BACKGROUND_EDGE)
+        } else {
+            edge
+        };
         let key = (
             st.background.revision,
             st.working_image.width(),
