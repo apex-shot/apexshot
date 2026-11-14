@@ -1156,8 +1156,10 @@ impl Data {
     ) -> Option<super::project::EditorProjectFile> {
         let path = self.path.as_ref()?;
         let (stage_selection, background_padding, background_radius) = background.snapshot();
+        let stage_fill = background.fill_spec();
         let stage_aspect = background.aspect();
         let stage_edited = stage_selection.is_some()
+            || stage_fill.is_some()
             || stage_aspect.is_some()
             || (background_padding - super::background::DEFAULT_PADDING).abs() > f64::EPSILON
             || background_radius.abs() > f64::EPSILON;
@@ -1225,6 +1227,7 @@ impl Data {
             background: super::project::StageFile {
                 selection: stage_selection,
                 aspect: stage_aspect,
+                fill: stage_fill,
             },
             background_padding,
             background_radius,
@@ -4386,8 +4389,11 @@ impl Timeline {
     /// and the cursor's change is marked here.
     fn apply_look(&self, look: &Look) {
         let (selection, padding, radius) = &look.stage;
+        // A look carries the stage, not the panel's fill; keeping the fill the
+        // model already holds means a preset or an undo cannot erase it.
+        let fill = self.background.fill_spec();
         self.background
-            .apply(selection.as_deref(), *padding, *radius);
+            .apply(selection.as_deref(), *padding, *radius, fill.as_ref());
         self.background.set_aspect(look.stage_aspect.clone());
         self.cursor.set_settings(look.cursor.settings());
         if let Some(listener) = self.cursor_listener.borrow().as_ref() {
@@ -4539,6 +4545,7 @@ impl Timeline {
                     file.background.selection.as_deref(),
                     file.background_padding,
                     file.background_radius,
+                    file.background.fill.as_ref(),
                 );
                 self.background.set_aspect(file.background.aspect.clone());
             }
@@ -4547,6 +4554,7 @@ impl Timeline {
                     None,
                     super::background::DEFAULT_PADDING,
                     super::background::DEFAULT_RADIUS,
+                    None,
                 );
                 self.background.set_aspect(None);
             }
@@ -9045,7 +9053,7 @@ mod tests {
             "an untouched flat stage is still a freshly opened recording"
         );
 
-        background.apply(Some("wallpaper-004.jpg"), 48.0, 6.0);
+        background.apply(Some("wallpaper-004.jpg"), 48.0, 6.0, None);
         let file = data
             .project_file(&background)
             .expect("a staged session is saved");
@@ -9065,7 +9073,7 @@ mod tests {
         data.path = Some(video);
         let background = Background::default();
 
-        background.apply(None, 48.0, DEFAULT_RADIUS);
+        background.apply(None, 48.0, DEFAULT_RADIUS, None);
         let file = data
             .project_file(&background)
             .expect("a padded stage is saved");
@@ -9073,7 +9081,7 @@ mod tests {
         assert!((file.background_padding - 48.0).abs() < 1e-9);
         assert!((file.background_radius - DEFAULT_RADIUS).abs() < 1e-9);
 
-        background.apply(None, DEFAULT_PADDING, DEFAULT_RADIUS);
+        background.apply(None, DEFAULT_PADDING, DEFAULT_RADIUS, None);
         assert!(data.project_file(&background).is_none());
     }
 
@@ -9084,7 +9092,7 @@ mod tests {
         data.path = Some(video);
         let background = Background::default();
 
-        background.apply(None, DEFAULT_PADDING, 6.0);
+        background.apply(None, DEFAULT_PADDING, 6.0, None);
         let file = data
             .project_file(&background)
             .expect("a rounded stage is saved");
@@ -9092,7 +9100,7 @@ mod tests {
         assert!((file.background_padding - DEFAULT_PADDING).abs() < 1e-9);
         assert!((file.background_radius - 6.0).abs() < 1e-9);
 
-        background.apply(None, DEFAULT_PADDING, DEFAULT_RADIUS);
+        background.apply(None, DEFAULT_PADDING, DEFAULT_RADIUS, None);
         assert!(data.project_file(&background).is_none());
     }
 
@@ -9104,10 +9112,10 @@ mod tests {
         data.has_project = true;
         let background = Background::default();
 
-        background.apply(Some("wallpaper-004.jpg"), 40.0, 0.0);
+        background.apply(Some("wallpaper-004.jpg"), 40.0, 0.0, None);
         assert!(data.project_file(&background).is_some());
 
-        background.apply(None, DEFAULT_PADDING, DEFAULT_RADIUS);
+        background.apply(None, DEFAULT_PADDING, DEFAULT_RADIUS, None);
         let file = data
             .project_file(&background)
             .expect("a reset stage keeps its project");
@@ -11455,7 +11463,7 @@ mod tests {
         timeline: &Timeline,
         background: &Background,
     ) -> super::super::presets::Preset {
-        background.apply(Some("wallpaper-019.jpg"), 66.0, 9.0);
+        background.apply(Some("wallpaper-019.jpg"), 66.0, 9.0, None);
         let file = timeline
             .data
             .borrow()
@@ -11470,7 +11478,7 @@ mod tests {
         let Some(()) = crate::test_support::with_gtk(|| {
             let (timeline, background, paths) = timeline_with_camera_cues("preset-cues");
             let look = captured_stage_look(&timeline, &background);
-            background.apply(Some("wallpaper-004.jpg"), 40.0, 5.0);
+            background.apply(Some("wallpaper-004.jpg"), 40.0, 5.0, None);
 
             timeline.apply_preset(&look);
 
@@ -11498,7 +11506,7 @@ mod tests {
         let Some(()) = crate::test_support::with_gtk(|| {
             let (timeline, background, paths) = timeline_with_camera_cues("preset-undo");
             let look = captured_stage_look(&timeline, &background);
-            background.apply(Some("wallpaper-004.jpg"), 40.0, 5.0);
+            background.apply(Some("wallpaper-004.jpg"), 40.0, 5.0, None);
             timeline.apply_preset(&look);
 
             assert!(timeline.undo());
@@ -11525,7 +11533,7 @@ mod tests {
         let Some(()) = crate::test_support::with_gtk(|| {
             let (timeline, background, paths) = timeline_with_camera_cues("preset-edit");
             let look = captured_stage_look(&timeline, &background);
-            background.apply(Some("wallpaper-004.jpg"), 40.0, 5.0);
+            background.apply(Some("wallpaper-004.jpg"), 40.0, 5.0, None);
             timeline.apply_preset(&look);
             timeline
                 .data
