@@ -24,7 +24,7 @@ use crate::capture::editor::state::background::Layout;
 use crate::capture::editor::types::ViewTransform;
 use crate::capture::editor::window::icon_names::{custom, shipped};
 use crate::i18n::t;
-use crate::recording::editor::model::{MotionState, MOTION_EXPORT_FPS};
+use crate::recording::editor::model::{MotionBlurBudgetMode, MotionState, MOTION_EXPORT_FPS};
 
 type VideoDone = Rc<RefCell<Option<Box<dyn FnOnce(Result<PathBuf, String>)>>>>;
 type VideoSetup = (
@@ -60,23 +60,35 @@ impl MotionMode {
     /// Render the whole composition to an MP4 on the main loop, one frame per
     /// tick, so the window stays responsive. The still card, titles and mark
     /// are painted through the same preview path used on screen; the backdrop
-    /// is painted once and copied under each pose.
+    /// is painted once and copied under each pose. `on_progress` reports the
+    /// frames rendered so far; the returned flag cancels the render.
     pub(super) fn export_video(
         &self,
         destination: PathBuf,
+        on_progress: impl Fn(usize, usize) + 'static,
         on_done: impl FnOnce(Result<PathBuf, String>) + 'static,
-    ) -> Result<(), String> {
+    ) -> Result<Rc<Cell<bool>>, String> {
         let (job, watermark_surface) = self.prepare_video_job(destination)?;
+        let cancel = Rc::new(Cell::new(false));
+        let cancel_tick = cancel.clone();
         let done: VideoDone = Rc::new(RefCell::new(Some(Box::new(on_done))));
         let host = self.host.clone();
         gtk4::glib::timeout_add_local(Duration::from_millis(1), move || {
             let mut job = job.borrow_mut();
-            let result = if job.frame >= job.frame_count {
+            let result = if cancel_tick.get() {
+                job.abort(t("Export cancelled"))
+            } else if job.frame >= job.frame_count {
                 job.finish()
             } else {
                 match job.render_frame(&host, &watermark_surface) {
-                    Ok(()) if job.frame >= job.frame_count => job.finish(),
-                    Ok(()) => return gtk4::glib::ControlFlow::Continue,
+                    Ok(()) => {
+                        on_progress(job.frame, job.frame_count);
+                        if job.frame >= job.frame_count {
+                            job.finish()
+                        } else {
+                            return gtk4::glib::ControlFlow::Continue;
+                        }
+                    }
                     Err(error) => job.abort(error),
                 }
             };
@@ -86,7 +98,7 @@ impl MotionMode {
             }
             gtk4::glib::ControlFlow::Break
         });
-        Ok(())
+        Ok(cancel)
     }
 
     #[cfg(test)]
@@ -520,56 +532,78 @@ fn paint_frames(
         host.paint_motion_preview(context, transform, pose, anchor, live);
     } else if !frames.is_empty() {
         host.paint_motion_background(context, transform, live);
+        paint_foreground_exposures(host, context, transform, frames, live, false);
+    }
+}
+
+/// Composite the card's exposure samples over whatever is already on the
+/// context. The preview paints its background first; the encoder copies its
+/// captured backdrop. One sample paints the foreground directly, so a still
+/// frame is identical to the single-pose path.
+fn paint_foreground_exposures(
+    host: &super::annotate::EditorHost,
+    context: &gtk4::cairo::Context,
+    transform: ViewTransform,
+    frames: &[(crate::recording::editor::model::MotionTransform, (f64, f64))],
+    live: bool,
+    export: bool,
+) {
+    let Some(first) = frames.first() else {
+        return;
+    };
+    if frames.len() == 1 {
+        host.paint_motion_foreground(context, transform, first.0, first.1, live, export);
+        return;
+    }
+    let _ = context.save();
+    context.rectangle(
+        transform.canvas_offset_x,
+        transform.canvas_offset_y,
+        transform.canvas_width * transform.canvas_scale,
+        transform.canvas_height * transform.canvas_scale,
+    );
+    context.clip();
+    let reference = projected_points(host, transform, frames[0]);
+    // Rasterize the expensive card, annotations and shadow once. The
+    // short exposure's other poses use an affine approximation of its
+    // projected corners instead of rebuilding the entire scene.
+    context.push_group();
+    host.paint_motion_foreground(context, transform, frames[0].0, frames[0].1, live, export);
+    let foreground = context.pop_group();
+    let Ok(foreground) = foreground else {
+        let _ = context.restore();
+        return;
+    };
+    // Every subframe resamples this group through its own affine matrix.
+    // Good filtering convolves the whole surface per sample, which is
+    // what makes live motion blur miss the frame budget; the parked frame
+    // is composited again with the default filter.
+    if live {
+        foreground.set_filter(gtk4::cairo::Filter::Fast);
+    }
+    context.push_group();
+    for frame in frames {
         let _ = context.save();
-        context.rectangle(
-            transform.canvas_offset_x,
-            transform.canvas_offset_y,
-            transform.canvas_width * transform.canvas_scale,
-            transform.canvas_height * transform.canvas_scale,
-        );
-        context.clip();
-        let reference = projected_points(host, transform, frames[0]);
-        // Rasterize the expensive card, annotations and shadow once. The
-        // short exposure's other poses use an affine approximation of its
-        // projected corners instead of rebuilding the entire scene.
-        context.push_group();
-        host.paint_motion_foreground(context, transform, frames[0].0, frames[0].1, live);
-        let foreground = context.pop_group();
-        let Ok(foreground) = foreground else {
-            let _ = context.restore();
-            return;
-        };
-        // Every subframe resamples this group through its own affine matrix.
-        // Good filtering convolves the whole surface per sample, which is
-        // what makes live motion blur miss the frame budget; the parked frame
-        // is composited again with the default filter.
-        if live {
-            foreground.set_filter(gtk4::cairo::Filter::Fast);
-        }
-        context.push_group();
-        for frame in frames {
-            let _ = context.save();
-            if let (Some(reference), Some(points)) =
-                (reference, projected_points(host, transform, *frame))
+        if let (Some(reference), Some(points)) =
+            (reference, projected_points(host, transform, *frame))
+        {
+            if let Some(matrix) =
+                crate::capture::editor::transform_render::triangle_transform(reference, points)
             {
-                if let Some(matrix) =
-                    crate::capture::editor::transform_render::triangle_transform(reference, points)
-                {
-                    context.transform(matrix);
-                }
+                context.transform(matrix);
             }
-            context.set_operator(gtk4::cairo::Operator::Add);
-            context.set_source(&foreground).ok();
-            context.paint_with_alpha(1.0 / frames.len() as f64).ok();
-            let _ = context.restore();
         }
-        if let Ok(composite) = context.pop_group() {
-            context.set_operator(gtk4::cairo::Operator::Over);
-            context.set_source(&composite).ok();
-            context.paint().ok();
-        }
+        context.set_operator(gtk4::cairo::Operator::Add);
+        context.set_source(&foreground).ok();
+        context.paint_with_alpha(1.0 / frames.len() as f64).ok();
         let _ = context.restore();
     }
+    if let Ok(composite) = context.pop_group() {
+        context.set_operator(gtk4::cairo::Operator::Over);
+        context.set_source(&composite).ok();
+        context.paint().ok();
+    }
+    let _ = context.restore();
 }
 
 fn projected_points(
@@ -829,8 +863,16 @@ impl MotionVideoJob {
         watermark_surface: &Rc<RefCell<Option<ImageSurface>>>,
     ) -> Result<(), String> {
         let time = self.frame as f64 / f64::from(MOTION_EXPORT_FPS);
-        let pose = self.motion.sample(time);
-        let anchor = self.motion.zoom_anchor_at(time);
+        // The encoder spends the full-quality budget on the same exposure
+        // window the preview shows, capped so a frame stays bounded.
+        let frames = timeline::motion_blur_frames(
+            &self.motion,
+            time,
+            self.layout.width,
+            self.layout.height,
+            MotionBlurBudgetMode::FullQuality,
+            16,
+        );
         {
             let context = CairoContext::new(&self.surface).map_err(|error| error.to_string())?;
             context.set_operator(Operator::Source);
@@ -839,27 +881,30 @@ impl MotionVideoJob {
                 .map_err(|error| error.to_string())?;
             context.paint().map_err(|error| error.to_string())?;
             context.set_operator(Operator::Over);
-            host.paint_motion_foreground(&context, self.transform, pose, anchor, false);
-            let card = motion_text::card_layout(
-                self.layout,
-                self.image_width,
-                self.image_height,
-                pose,
-                anchor,
-            );
-            let _ = context.save();
-            context.rectangle(
-                self.transform.canvas_offset_x,
-                self.transform.canvas_offset_y,
-                self.layout.width,
-                self.layout.height,
-            );
-            context.clip();
-            motion_text::paint_motion_text(&context, card, &self.motion, time);
-            if let Some(mark) = watermark_surface.borrow().clone() {
-                watermark::paint(&context, card, &self.motion, &mark);
+            paint_foreground_exposures(host, &context, self.transform, &frames, false, true);
+            if let Some((pose, anchor)) = frames.first() {
+                let (pose, anchor) = (*pose, *anchor);
+                let card = motion_text::card_layout(
+                    self.layout,
+                    self.image_width,
+                    self.image_height,
+                    pose,
+                    anchor,
+                );
+                let _ = context.save();
+                context.rectangle(
+                    self.transform.canvas_offset_x,
+                    self.transform.canvas_offset_y,
+                    self.layout.width,
+                    self.layout.height,
+                );
+                context.clip();
+                motion_text::paint_motion_text(&context, card, &self.motion, time);
+                if let Some(mark) = watermark_surface.borrow().clone() {
+                    watermark::paint(&context, card, &self.motion, &mark);
+                }
+                let _ = context.restore();
             }
-            let _ = context.restore();
         }
         self.surface.flush();
         let stride = self.surface.stride() as usize;
