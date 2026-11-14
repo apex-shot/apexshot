@@ -4851,3 +4851,6 @@ msgstr "Время экспорта"
 
 msgid "Resolution"
 msgstr "Разрешение"
+
+msgid "Remove recording"
+msgstr "Удалить запись"

@@ -4758,3 +4758,6 @@ msgstr "导出时间"
 
 msgid "Resolution"
 msgstr "分辨率"
+
+msgid "Remove recording"
+msgstr "移除录制"

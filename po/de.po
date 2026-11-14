@@ -4871,3 +4871,6 @@ msgstr "Exportdauer"
 
 msgid "Resolution"
 msgstr "Auflösung"
+
+msgid "Remove recording"
+msgstr "Aufnahme entfernen"

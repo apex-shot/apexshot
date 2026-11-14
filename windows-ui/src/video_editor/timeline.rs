@@ -626,7 +626,7 @@ impl Data {
         if index >= self.segment_count() {
             return;
         }
-        self.record_continuous_edit();
+        self.record_continuous_edit("segment-start");
         let start = if self.segment_count() <= 1 || !start.is_finite() {
             0.0
         } else {
@@ -804,7 +804,7 @@ impl Data {
             return false;
         }
         let before = if continuous {
-            self.record_continuous_edit();
+            self.record_continuous_edit("segment-speed");
             None
         } else {
             Some(self.snapshot())
@@ -870,8 +870,21 @@ impl Data {
     /// Move the in-point. Every piece after it slides earlier in composition
     /// time, so anchored zooms follow their footage instead of drifting off it.
     fn set_trim_start(&mut self, start: f64) {
-        self.record_continuous_edit();
+        self.record_continuous_edit("trim-start");
+        let old_trim = self.trim_start;
         self.trim_start = start.clamp(0.0, (self.trim_end - MIN_CLIP_SECONDS).max(0.0));
+        // The first piece rides with the in-point: moving it by the trim in
+        // composition time keeps the handle under the pointer and the footage
+        // it exposes together. A lone piece stays pinned at zero, where it is
+        // the whole composition; when the trim crosses the first cut that
+        // piece is gone and `clamp_cuts` keeps the survivors' own starts.
+        if !self.cuts.is_empty() {
+            let shift = (self.trim_start - old_trim) / self.segment_speed(0);
+            if self.segment_starts.is_empty() {
+                self.segment_starts.push(0.0);
+            }
+            self.segment_starts[0] = (self.segment_starts[0] + shift).max(0.0);
+        }
         self.clamp_playhead();
         self.clamp_cuts();
         self.reproject_anchored_zooms();
@@ -886,7 +899,7 @@ impl Data {
         if !self.has_media() {
             return;
         }
-        self.record_continuous_edit();
+        self.record_continuous_edit("trim-end");
         let duration = self.duration.max(0.0);
         let final_cut = self.cuts.last().copied().unwrap_or(self.trim_start);
         let floor = (self.trim_start + MIN_CLIP_SECONDS)
@@ -993,12 +1006,14 @@ impl Data {
     ///
     /// One trim drag or one slider sweep arrives as a stream of updates, so
     /// the step is taken on the first of the burst and the rest leave it
-    /// alone. It also closes any layout sweep, because a different control
+    /// alone. `key` names the reporting control: a different control opens a
+    /// burst of its own, so two sliders moved in quick succession stay two
+    /// steps. It also closes any layout sweep, because a different control
     /// reporting means that sweep is over and the next one is its own step.
-    fn record_continuous_edit(&mut self) {
+    fn record_continuous_edit(&mut self, key: &'static str) {
         self.layout_burst = None;
         let before = self.snapshot();
-        self.history.record_continuous(before);
+        self.history.record_continuous(before, key);
     }
 
     /// Record a step for a command that has already been applied, so an edit
@@ -2257,7 +2272,7 @@ impl Data {
         if clip.center == center {
             return false;
         }
-        self.record_continuous_edit();
+        self.record_continuous_edit("zoom-center");
         self.zoom_clips[index].center = center;
         true
     }
@@ -2287,7 +2302,7 @@ impl Data {
         if self.zoom_clips.get(index).is_none() {
             return;
         }
-        self.record_continuous_edit();
+        self.record_continuous_edit("zoom-scale");
         self.zoom_clips[index].scale = scale.clamp(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE);
         let clip = self.zoom_clips[index];
         self.last_zoom_style = Some((clip.scale, clip.instant));
@@ -2329,7 +2344,7 @@ impl Data {
         if settings == self.zoom_camera {
             return;
         }
-        self.record_continuous_edit();
+        self.record_continuous_edit("zoom-camera");
         self.zoom_camera = settings;
     }
 
@@ -2340,8 +2355,69 @@ impl Data {
         if effects == self.effects {
             return;
         }
-        self.record_continuous_edit();
+        match self.effects_sweep_key(&effects) {
+            Some(key) => self.record_continuous_edit(key),
+            None => {
+                let before = self.snapshot();
+                self.record_edit(before);
+            }
+        }
         self.effects = effects;
+    }
+
+    /// The burst key for a settings change, or `None` when the change flips a
+    /// switch, picks a preset or picks a file. A switch is one step of its
+    /// own; a volume slider reports continuously, and each one names its own
+    /// burst so two different sliders moved in quick succession stay two
+    /// steps.
+    fn effects_sweep_key(
+        &self,
+        after: &super::project::EffectsSettings,
+    ) -> Option<&'static str> {
+        let before = &self.effects;
+        if before.click_sound != after.click_sound
+            || before.captions != after.captions
+            || before.sound.mute_microphone != after.sound.mute_microphone
+            || before.sound.microphone_preset != after.sound.microphone_preset
+            || before.sound.mute_system != after.sound.mute_system
+            || before.sound.background_file != after.sound.background_file
+            || before.sound.mute_background != after.sound.mute_background
+            || before.clip_sounds.len() != after.clip_sounds.len()
+            || before
+                .clip_sounds
+                .iter()
+                .zip(&after.clip_sounds)
+                .any(|(old, new)| old.muted != new.muted)
+        {
+            return None;
+        }
+        if before.click_sound_volume != after.click_sound_volume {
+            return Some("click-sound-volume");
+        }
+        if before.sound.volume != after.sound.volume {
+            return Some("master-volume");
+        }
+        if before.sound.background_volume != after.sound.background_volume {
+            return Some("background-volume");
+        }
+        if before
+            .clip_sounds
+            .iter()
+            .zip(&after.clip_sounds)
+            .any(|(old, new)| old.mic_volume != new.mic_volume)
+        {
+            return Some("clip-mic-volume");
+        }
+        if before
+            .clip_sounds
+            .iter()
+            .zip(&after.clip_sounds)
+            .any(|(old, new)| old.system_volume != new.system_volume)
+        {
+            return Some("clip-system-volume");
+        }
+        // A change the checks above did not name is a command, not a sweep.
+        None
     }
 
     /// Delete on the video clip empties the composition. The window still has
@@ -2354,6 +2430,69 @@ impl Data {
         let before = self.snapshot();
         self.reset_media();
         self.clamp_layout_cues();
+        self.record_edit(before);
+    }
+
+    /// Delete one piece of a split clip. The recording stays: only the piece
+    /// under the pointer leaves the composition, and the pieces after it close
+    /// the gap. The piece's own start, speed and sound go with it.
+    ///
+    /// Pieces are named by the cuts between them, so an edge piece is removed
+    /// by trimming the composition past it, while an interior piece joins the
+    /// piece before it: the model keeps no kept flag, and a source range cannot
+    /// be dropped from the middle without one.
+    fn remove_selected_piece(&mut self) {
+        let Some(index) = self.clip_segment() else {
+            return;
+        };
+        let boundaries = self.segment_boundaries();
+        let last = boundaries.len().saturating_sub(1);
+        if boundaries.len() <= 1 || index > last {
+            return;
+        }
+        let (source_start, source_end) = boundaries[index];
+        let footage = (source_end - source_start).max(0.0);
+        let length = footage / self.segment_speed(index);
+        let before = self.snapshot();
+        if index == 0 {
+            self.trim_start = source_end.clamp(0.0, (self.trim_end - MIN_CLIP_SECONDS).max(0.0));
+            self.cuts.remove(0);
+            // Every later piece moves up by the length the removed one took,
+            // so the gap that followed it stays where the user put it.
+            for start in &mut self.segment_starts {
+                *start = (*start - length).max(0.0);
+            }
+        } else if index == last {
+            self.trim_end = source_start.clamp(
+                (self.trim_start + MIN_CLIP_SECONDS).min(self.duration),
+                self.duration,
+            );
+            self.cuts.remove(index - 1);
+        } else {
+            // The previous piece takes the removed footage at its own speed,
+            // so the pieces after it move by however much that changes the
+            // merged piece's end.
+            let merged = footage / self.segment_speed(index - 1);
+            let shift = merged - length;
+            self.cuts.remove(index - 1);
+            for start in self.segment_starts.iter_mut().skip(index + 1) {
+                *start = (*start + shift).max(0.0);
+            }
+        }
+        if index < self.segment_starts.len() {
+            self.segment_starts.remove(index);
+        }
+        if index < self.segment_speeds.len() {
+            self.segment_speeds.remove(index);
+        }
+        if index < self.effects.clip_sounds.len() {
+            self.effects.clip_sounds.remove(index);
+        }
+        self.clamp_playhead();
+        self.clamp_cuts();
+        self.reproject_anchored_zooms();
+        self.clamp_effects();
+        self.clamp_scroll();
         self.record_edit(before);
     }
 
@@ -2539,7 +2678,7 @@ impl Data {
         if self.effect_span(track, index).is_none() {
             return;
         }
-        self.record_continuous_edit();
+        self.record_continuous_edit("effect-range");
         let limit = self.total_duration();
         let lower = if index > 0 {
             self.effect_span(track, index - 1)
@@ -3744,7 +3883,7 @@ impl Timeline {
             return;
         };
         update(&mut settings);
-        self.data.borrow_mut().record_continuous_edit();
+        self.data.borrow_mut().record_continuous_edit("webcam");
         webcam.set_settings(settings);
         (self.repaint)();
     }
@@ -3761,7 +3900,7 @@ impl Timeline {
         let layouts = webcam.layouts();
         {
             let mut data = self.data.borrow_mut();
-            data.record_continuous_edit();
+            data.record_continuous_edit("webcam-reset");
         }
         webcam.reset();
         webcam.set_layouts(layouts);
@@ -6882,18 +7021,35 @@ fn show_clip_menu(
     let mut items = Vec::new();
     let mut offer_paste = false;
     match target {
-        MenuTarget::Video => items.push(MenuItem {
-            icon: icon_names::custom::USER_TRASH_SYMBOLIC,
-            label: t("Delete"),
-            action: {
-                let data = data.clone();
-                let repaint = repaint.clone();
-                Rc::new(move || {
-                    data.borrow_mut().remove_video_clip();
-                    repaint();
-                })
-            },
-        }),
+        MenuTarget::Video => {
+            // A split clip offers Delete for the piece under the pointer; a
+            // recording that was never cut has no piece to remove, so the row
+            // names what it really does.
+            let split = data.borrow().segment_count() > 1;
+            items.push(MenuItem {
+                icon: icon_names::custom::USER_TRASH_SYMBOLIC,
+                label: if split {
+                    t("Delete")
+                } else {
+                    t("Remove recording")
+                },
+                action: {
+                    let data = data.clone();
+                    let repaint = repaint.clone();
+                    Rc::new(move || {
+                        {
+                            let mut data = data.borrow_mut();
+                            if split {
+                                data.remove_selected_piece();
+                            } else {
+                                data.remove_video_clip();
+                            }
+                        }
+                        repaint();
+                    })
+                },
+            });
+        }
         MenuTarget::Zoom(index) => {
             offer_paste = effect_menu_items(EffectTrack::Zoom, index, &data, &repaint, &mut items);
         }
@@ -8590,21 +8746,27 @@ fn draw_video_clip(
         }
 
         if show_handles {
-            // Every segment carries its own pair of edge handles, so after a
-            // split each chip reads as a clip you can trim on both sides.
+            // Only the composition's outer edges are the clip's own trim
+            // handles. An edge between two pieces belongs to the cut, and
+            // `clip_edge_at` does not grab it, so drawing one there would
+            // promise a trim the pointer cannot take.
             let inset = (HANDLE_INSET * scale).min(body_width / 4.0);
             let handle_w = (HANDLE_WIDTH * scale).min(body_width / 3.0).max(1.0);
             let handle_h = (clip_height - inset * 2.0).max(10.0);
             let handle_y = y + (clip_height - handle_h) / 2.0;
-            draw_edge_handle(context, left + inset, handle_y, handle_w, handle_h, tone);
-            draw_edge_handle(
-                context,
-                left + body_width - handle_w - inset,
-                handle_y,
-                handle_w,
-                handle_h,
-                tone,
-            );
+            if index == 0 {
+                draw_edge_handle(context, left + inset, handle_y, handle_w, handle_h, tone);
+            }
+            if index == last_index {
+                draw_edge_handle(
+                    context,
+                    left + body_width - handle_w - inset,
+                    handle_y,
+                    handle_w,
+                    handle_h,
+                    tone,
+                );
+            }
         }
     }
 }
@@ -9633,6 +9795,32 @@ mod tests {
     }
 
     #[test]
+    fn deleting_one_piece_keeps_the_recording_and_closes_the_gap() {
+        let mut data = loaded();
+        assert!(data.add_cut(3.0));
+        assert!(data.add_cut(6.0));
+        assert_eq!(data.segment_count(), 3);
+        data.selected = true;
+        data.selected_segment = Some(1);
+
+        data.remove_selected_piece();
+
+        // Only the middle piece left the composition; the recording is still
+        // there and the two survivors meet without a frozen gap.
+        assert_eq!(data.segment_count(), 2);
+        assert!(data.has_media());
+        assert_eq!(data.cuts, vec![6.0]);
+        assert!((data.segment_start(0) - 0.0).abs() < 1e-9);
+        assert!((data.segment_start(1) - 6.0).abs() < 1e-9);
+        assert!((data.total_duration() - 10.0).abs() < 1e-9);
+
+        // The removal is one step, like every other command.
+        assert!(data.undo_edit());
+        assert_eq!(data.segment_count(), 3);
+        assert_eq!(data.cuts, vec![3.0, 6.0]);
+    }
+
+    #[test]
     fn split_adds_one_cut_and_refuses_edges_and_duplicates() {
         let mut data = loaded();
         assert_eq!(data.segment_boundaries(), vec![(0.0, 10.0)]);
@@ -9741,8 +9929,25 @@ mod tests {
 
         assert_eq!(data.segment_boundaries(), vec![(5.0, 8.0), (8.0, 10.0)]);
         assert_eq!(data.segment_speeds, vec![4.0, 1.0]);
+        // The trim crossed the first cut, so that piece and the start it moved
+        // with are gone; the survivors keep their own starts.
         assert!((data.segment_start(0) - 4.0).abs() < 1e-9);
         assert!((data.segment_start(1) - 8.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn trimming_the_in_point_slides_the_first_piece_with_the_handle() {
+        let mut data = loaded();
+        assert!(data.add_cut(4.0));
+        assert_eq!(data.segment_starts, vec![0.0, 4.0]);
+
+        data.set_trim_start(2.0);
+
+        // The first piece moves with the in-point by the trim in composition
+        // time, so the handle stays under the pointer instead of snapping back
+        // to zero and leaving the next piece stranded behind a frozen gap.
+        assert!((data.segment_start(0) - 2.0).abs() < 1e-9);
+        assert!((data.segment_start(1) - 4.0).abs() < 1e-9);
     }
 
     #[test]
@@ -10893,7 +11098,7 @@ mod tests {
     #[test]
     fn a_layout_sweep_is_its_own_step_after_a_geometry_sweep() {
         let (mut data, scratch) = webcam_loaded("sweep");
-        data.record_continuous_edit();
+        data.record_continuous_edit("trim-start");
         data.trim_start = 1.0;
         assert!(data.update_layouts(|layouts| layouts.transition_seconds = 0.8, true));
         assert!(data.update_layouts(|layouts| layouts.transition_seconds = 1.0, true));

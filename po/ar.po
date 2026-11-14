@@ -4795,3 +4795,6 @@ msgstr "وقت التصدير"
 
 msgid "Resolution"
 msgstr "الدقة"
+
+msgid "Remove recording"
+msgstr "إزالة التسجيل"

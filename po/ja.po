@@ -4769,3 +4769,6 @@ msgstr "書き出し時間"
 
 msgid "Resolution"
 msgstr "解像度"
+
+msgid "Remove recording"
+msgstr "録画を削除"
