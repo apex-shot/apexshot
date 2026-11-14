@@ -4758,3 +4758,10 @@ msgstr "导出时间"
 
 msgid "Resolution"
 msgstr "分辨率"
+
+msgid "Exporting {percent}%"
+msgstr "正在导出 {percent}%"
+
+msgid "Export cancelled"
+msgstr "导出已取消"
+

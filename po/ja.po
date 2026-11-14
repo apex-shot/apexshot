@@ -4769,3 +4769,10 @@ msgstr "書き出し時間"
 
 msgid "Resolution"
 msgstr "解像度"
+
+msgid "Exporting {percent}%"
+msgstr "エクスポート中 {percent}%"
+
+msgid "Export cancelled"
+msgstr "エクスポートをキャンセルしました"
+

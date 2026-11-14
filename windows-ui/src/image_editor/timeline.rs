@@ -264,35 +264,14 @@ impl Timeline {
     ) -> Vec<(MotionTransform, (f64, f64))> {
         let time = self.shared.preview_time();
         let model = self.shared.model.borrow();
-        let settings = model.motion_blur_settings;
-        let current = model.sample(time);
-        let previous = model.sample((time - settings.exposure_seconds(30.0)).max(0.0));
-        let travel = width.hypot(height)
-            * ((current.scale - previous.scale).abs() * 0.5
-                + (current.pos_x - previous.pos_x).abs() * 0.5
-                + (current.pos_y - previous.pos_y).abs() * 0.5
-                + (current.rotation_x - previous.rotation_x)
-                    .abs()
-                    .to_radians()
-                + (current.rotation_y - previous.rotation_y)
-                    .abs()
-                    .to_radians()
-                + (current.rotation_z - previous.rotation_z)
-                    .abs()
-                    .to_radians());
-        let offsets =
-            settings.temporal_offsets(30.0, travel, MotionBlurBudgetMode::LivePreviewPlayback);
-        if offsets.is_empty() {
-            return vec![(current, model.zoom_anchor_at(time))];
-        }
-        let count = offsets.len().min(5);
-        let last = *offsets.last().unwrap_or(&0.0);
-        (0..count)
-            .map(|index| {
-                let sample_time = (time + last * index as f64 / (count - 1) as f64).max(0.0);
-                (model.sample(sample_time), model.zoom_anchor_at(sample_time))
-            })
-            .collect()
+        motion_blur_frames(
+            &model,
+            time,
+            width,
+            height,
+            MotionBlurBudgetMode::LivePreviewPlayback,
+            5,
+        )
     }
 
     pub(super) fn motion_state(&self) -> MotionState {
@@ -1196,6 +1175,47 @@ fn rows_drawing_area(scale: f64, height: f64, class: &str) -> DrawingArea {
 fn pointer_in_lane(lane: &DrawingArea, board: &Overlay, y: f64) -> bool {
     lane.translate_coordinates(board, 0.0, 0.0)
         .is_some_and(|(_, top)| y >= top && y <= top + f64::from(lane.allocated_height()))
+}
+
+/// The poses across the exposure window that ends at `time`, one per
+/// temporal sample, capped at `max_samples`. No blur or no travel yields the
+/// single current pose, which callers paint without compositing.
+pub(super) fn motion_blur_frames(
+    model: &MotionState,
+    time: f64,
+    width: f64,
+    height: f64,
+    budget: MotionBlurBudgetMode,
+    max_samples: usize,
+) -> Vec<(MotionTransform, (f64, f64))> {
+    let settings = model.motion_blur_settings;
+    let current = model.sample(time);
+    let previous = model.sample((time - settings.exposure_seconds(30.0)).max(0.0));
+    let travel = width.hypot(height)
+        * ((current.scale - previous.scale).abs() * 0.5
+            + (current.pos_x - previous.pos_x).abs() * 0.5
+            + (current.pos_y - previous.pos_y).abs() * 0.5
+            + (current.rotation_x - previous.rotation_x)
+                .abs()
+                .to_radians()
+            + (current.rotation_y - previous.rotation_y)
+                .abs()
+                .to_radians()
+            + (current.rotation_z - previous.rotation_z)
+                .abs()
+                .to_radians());
+    let offsets = settings.temporal_offsets(30.0, travel, budget);
+    if offsets.is_empty() {
+        return vec![(current, model.zoom_anchor_at(time))];
+    }
+    let count = offsets.len().min(max_samples);
+    let last = *offsets.last().unwrap_or(&0.0);
+    (0..count)
+        .map(|index| {
+            let sample_time = (time + last * index as f64 / (count - 1) as f64).max(0.0);
+            (model.sample(sample_time), model.zoom_anchor_at(sample_time))
+        })
+        .collect()
 }
 
 fn motion_preview_range(segment: &crate::recording::editor::model::MotionSegment) -> (f64, f64) {
@@ -2136,6 +2156,43 @@ mod tests {
             eprintln!("skipping: GTK unavailable");
             return;
         };
+    }
+
+    #[test]
+    fn motion_blur_frames_honours_each_budget_and_sample_cap() {
+        let mut model = Model::default();
+        model.add_segment_at(0.0);
+        model.playhead = 0.3;
+        model.set_motion_blur(1.0);
+        let preview = motion_blur_frames(
+            &model,
+            0.3,
+            2000.0,
+            1000.0,
+            MotionBlurBudgetMode::LivePreviewPlayback,
+            5,
+        );
+        let export = motion_blur_frames(
+            &model,
+            0.3,
+            2000.0,
+            1000.0,
+            MotionBlurBudgetMode::FullQuality,
+            16,
+        );
+        assert!(preview.len() > 1 && preview.len() <= 5);
+        assert!(export.len() >= preview.len() && export.len() <= 16);
+        assert!(export[0].0.scale > export.last().unwrap().0.scale);
+        // The cap is applied after the budget picks its density.
+        let capped = motion_blur_frames(
+            &model,
+            0.3,
+            2000.0,
+            1000.0,
+            MotionBlurBudgetMode::FullQuality,
+            2,
+        );
+        assert_eq!(capped.len(), 2);
     }
 
     #[test]

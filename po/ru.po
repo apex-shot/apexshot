@@ -4851,3 +4851,10 @@ msgstr "Время экспорта"
 
 msgid "Resolution"
 msgstr "Разрешение"
+
+msgid "Exporting {percent}%"
+msgstr "Экспорт {percent} %"
+
+msgid "Export cancelled"
+msgstr "Экспорт отменён"
+
