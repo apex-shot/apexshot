@@ -292,6 +292,11 @@ impl EditorHost {
     /// kicks off OCR for the text-aware highlighter.
     pub fn load_document(self: &Rc<Self>, image: RgbaImage, area: &DrawingArea) {
         self.load_document_headless(image);
+        // Settings > Annotate shapes what new marks look like.
+        let config = crate::config::load_config().sanitized();
+        if let Some(state) = self.editor.borrow_mut().as_mut() {
+            apply_annotate_preferences(state, &config);
+        }
         let _ = area;
     }
 
@@ -3017,8 +3022,13 @@ impl EditorHost {
     }
 
     /// Save the flattened document with the platform file dialog handling
-    /// overwrite confirmation; never touches the loaded source path.
-    pub fn save_as(&self, parent: &impl IsA<gtk4::Window>, path: &std::path::Path) {
+    /// overwrite confirmation; `on_saved` runs once the file is written.
+    pub fn save_as(
+        &self,
+        parent: &impl IsA<gtk4::Window>,
+        path: &std::path::Path,
+        on_saved: Box<dyn Fn()>,
+    ) {
         if self.background_loading() {
             self.report_error(crate::i18n::t(
                 "Wait for the background image to finish loading.",
@@ -3035,11 +3045,16 @@ impl EditorHost {
             );
             return;
         };
-        self.save_snapshot(path, snapshot);
+        self.save_snapshot(path, snapshot, on_saved);
         let _ = parent;
     }
 
-    fn save_snapshot(&self, path: &std::path::Path, snapshot: image::RgbaImage) {
+    fn save_snapshot(
+        &self,
+        path: &std::path::Path,
+        snapshot: image::RgbaImage,
+        on_saved: Box<dyn Fn()>,
+    ) {
         let path = path.to_path_buf();
         let report = self.on_error.clone();
         let reported_path = path.clone();
@@ -3057,6 +3072,7 @@ impl EditorHost {
                         &crate::i18n::t("Export complete"),
                         &reported_path.display().to_string(),
                     );
+                    on_saved();
                     glib::ControlFlow::Break
                 }
                 Ok(Err(error)) => {
@@ -3072,6 +3088,14 @@ impl EditorHost {
             }
         });
     }
+}
+
+/// Copy the Settings window's Annotate drawing preferences onto a document.
+pub(crate) fn apply_annotate_preferences(st: &mut EditorState, config: &crate::config::AppConfig) {
+    st.inverse_arrow_direction = config.annotate_inverse_arrow;
+    st.smooth_drawing_enabled = config.annotate_smooth_drawing;
+    st.draw_object_shadow = config.annotate_draw_shadow;
+    st.auto_expand_canvas = config.annotate_auto_expand;
 }
 
 /// Report a failed copy or export on both surfaces: the canvas toast for the
@@ -3379,6 +3403,23 @@ mod tests {
 
     fn host() -> Rc<EditorHost> {
         EditorHost::new(Rc::new(|| {}), Rc::new(|_| {}), Rc::new(|| (0.0, 0.0)))
+    }
+
+    #[test]
+    fn annotate_preferences_reach_the_document() {
+        let mut state = EditorState::new(test_image(8, 8));
+        let config = crate::config::AppConfig {
+            annotate_inverse_arrow: true,
+            annotate_smooth_drawing: true,
+            annotate_draw_shadow: true,
+            annotate_auto_expand: true,
+            ..Default::default()
+        };
+        apply_annotate_preferences(&mut state, &config);
+        assert!(state.inverse_arrow_direction);
+        assert!(state.smooth_drawing_enabled);
+        assert!(state.draw_object_shadow);
+        assert!(state.auto_expand_canvas);
     }
 
     #[test]

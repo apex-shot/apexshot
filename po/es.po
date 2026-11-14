@@ -4445,8 +4445,8 @@ msgstr "Enlace para compartir copiado al portapapeles: {url}"
 msgid "The Motion encoder is not running."
 msgstr "El codificador de Motion no está en ejecución."
 
-msgid "These annotate preferences are not applied by the Windows image editor yet."
-msgstr "El editor de imágenes de Windows aún no aplica estas preferencias de anotación."
+msgid "The Windows image editor names each color when you point at its swatch."
+msgstr "El editor de imágenes de Windows nombra cada color al señalar su muestra."
 
 msgid "Upload"
 msgstr "Subir"

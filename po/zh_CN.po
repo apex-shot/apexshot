@@ -4334,8 +4334,8 @@ msgstr "分享链接已复制到剪贴板：{url}"
 msgid "The Motion encoder is not running."
 msgstr "Motion 编码器未在运行。"
 
-msgid "These annotate preferences are not applied by the Windows image editor yet."
-msgstr "Windows 图像编辑器尚未应用这些注释偏好。"
+msgid "The Windows image editor names each color when you point at its swatch."
+msgstr "将指针悬停在色块上时，Windows 图像编辑器会显示该颜色的名称。"
 
 msgid "Upload"
 msgstr "上传"

@@ -4437,8 +4437,8 @@ msgstr "Link de compartilhamento copiado para a área de transferência: {url}"
 msgid "The Motion encoder is not running."
 msgstr "O codificador do Motion não está em execução."
 
-msgid "These annotate preferences are not applied by the Windows image editor yet."
-msgstr "O editor de imagens do Windows ainda não aplica estas preferências de anotação."
+msgid "The Windows image editor names each color when you point at its swatch."
+msgstr "O editor de imagens do Windows mostra o nome de cada cor ao apontar para a amostra."
 
 msgid "Upload"
 msgstr "Enviar"

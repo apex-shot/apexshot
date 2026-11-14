@@ -215,6 +215,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     inspector.export_button.connect_clicked({
         let host = canvas.host.clone();
         let window = window.clone();
+        let canvas = canvas.clone();
         let motion = motion.clone();
         let in_motion = in_motion.clone();
         let exporting = exporting.clone();
@@ -224,7 +225,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
                 let sync_all: Rc<dyn Fn()> = sync_all.clone();
                 save_motion_video_dialog(&window, &host, &motion, &exporting, &name, sync_all);
             } else {
-                save_as_dialog(&window, &host);
+                save_as_dialog(&window, &host, canvas.source_path());
             }
         }
     });
@@ -386,6 +387,10 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
 
     window.present();
 
+    if crate::config::load_config().annotate_always_on_top {
+        keep_above(&window);
+    }
+
     if let Some(path) = initial {
         canvas.load(path);
     }
@@ -444,24 +449,62 @@ fn build_utility_strip(window: &ApplicationWindow, scale: f64) -> GtkBox {
     strip
 }
 
-/// Save As through the platform dialog; the filter set is the formats the
-/// encoder writes (PNG, JPEG, WebP). The dialog handles overwrite prompts.
-fn save_as_dialog(window: &ApplicationWindow, host: &Rc<super::annotate::EditorHost>) {
+/// Export the annotated image. Settings > Annotate decides whether a file the
+/// editor opened is overwritten in place and whether the editor closes after a
+/// successful export; otherwise the platform dialog asks where to save.
+fn save_as_dialog(
+    window: &ApplicationWindow,
+    host: &Rc<super::annotate::EditorHost>,
+    source: Option<std::path::PathBuf>,
+) {
     if !host.has_document() || host.background_loading() {
         return;
     }
     let retry_window = window.downgrade();
     let retry_host = Rc::downgrade(host);
+    let retry_source = source.clone();
     if !gate_image_output(window, host, move || {
         if let (Some(window), Some(host)) = (retry_window.upgrade(), retry_host.upgrade()) {
-            save_as_dialog(&window, &host);
+            save_as_dialog(&window, &host, retry_source.clone());
         }
     }) {
         return;
     }
+    let config = crate::config::load_config().sanitized();
+    let close_after_export = config.annotate_close_after_export;
+    let on_saved = {
+        let window = window.downgrade();
+        move || -> Box<dyn Fn()> {
+            let window = window.clone();
+            Box::new(move || {
+                if close_after_export {
+                    if let Some(window) = window.upgrade() {
+                        window.close();
+                    }
+                }
+            })
+        }
+    };
+    let kept_source = source.filter(|path| path.is_file() && !is_temporary_capture(path));
+    if config.annotate_overwrite_original_image {
+        if let Some(path) = kept_source.as_deref() {
+            host.save_as(window, path, on_saved());
+            return;
+        }
+    }
+
     let dialog = gtk4::FileDialog::new();
     dialog.set_title(&t("Save annotated image"));
-    dialog.set_initial_name(Some("annotated.png"));
+    let folder = kept_source
+        .as_deref()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| screenshot_folder(&config));
+    dialog.set_initial_folder(Some(&gtk4::gio::File::for_path(folder)));
+    dialog.set_initial_name(Some(&export_name(
+        kept_source.as_deref(),
+        &config.screenshot_format,
+    )));
     let filters = gtk4::gio::ListStore::new::<gtk4::FileFilter>();
     let images = gtk4::FileFilter::new();
     images.set_name(Some(&t("Images")));
@@ -476,10 +519,57 @@ fn save_as_dialog(window: &ApplicationWindow, host: &Rc<super::annotate::EditorH
     dialog.save(Some(window), gtk4::gio::Cancellable::NONE, move |result| {
         if let Ok(file) = result {
             if let Some(path) = file.path() {
-                host.save_as(&parent, &path);
+                host.save_as(&parent, &path, on_saved());
             }
         }
     });
+}
+
+/// The screenshot folder Settings names, or Pictures when it names none.
+fn screenshot_folder(config: &crate::config::AppConfig) -> std::path::PathBuf {
+    let configured = config.screenshot_export_location.trim();
+    if !configured.is_empty() {
+        return std::path::PathBuf::from(configured);
+    }
+    dirs::picture_dir()
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(std::env::temp_dir)
+}
+
+/// `<name>-annotated.<ext>` for an opened file, else `annotated.<ext>`, with the
+/// extension from Settings > Screenshots > Format.
+fn export_name(source: Option<&Path>, format: &str) -> String {
+    let extension = match format.trim().to_ascii_uppercase().as_str() {
+        "JPEG" | "JPG" => "jpg",
+        "WEBP" => "webp",
+        _ => "png",
+    };
+    let stem = source
+        .and_then(Path::file_stem)
+        .and_then(|stem| stem.to_str())
+        .filter(|stem| !stem.trim().is_empty());
+    match stem {
+        Some(stem) => format!("{stem}-annotated.{extension}"),
+        None => format!("annotated.{extension}"),
+    }
+}
+
+/// A capture the shell wrote to `%TEMP%\ApexShot` because Settings does not keep
+/// screenshots; overwriting it would not keep anything either.
+fn is_temporary_capture(path: &Path) -> bool {
+    // The shell names this folder in its long, forward-slash form while
+    // `temp_dir` can return the 8.3 short form, so compare resolved paths.
+    let Some(parent) = path.parent() else {
+        return false;
+    };
+    let temporary = std::env::temp_dir().join("ApexShot");
+    match (
+        std::fs::canonicalize(parent),
+        std::fs::canonicalize(temporary),
+    ) {
+        (Ok(parent), Ok(temporary)) => parent == temporary,
+        _ => false,
+    }
 }
 
 /// Export the whole Motion composition as an MP4. The gate matches Motion's
@@ -1008,7 +1098,7 @@ fn install_keys(
                     Propagation::Stop
                 }
                 gdk::Key::s | gdk::Key::S if ctrl => {
-                    save_as_dialog(&window, &canvas.host);
+                    save_as_dialog(&window, &canvas.host, canvas.source_path());
                     Propagation::Stop
                 }
                 gdk::Key::c | gdk::Key::C if ctrl => {
@@ -1054,4 +1144,103 @@ fn install_keys(
         }
     });
     window.add_controller(keys);
+}
+
+/// Settings > Annotate > Always on top. GTK 4 has no keep-above request, so mark
+/// the editor's own top-level window topmost once Windows has created it.
+fn keep_above(window: &ApplicationWindow) {
+    let window = window.downgrade();
+    gtk4::glib::idle_add_local_once(move || {
+        let Some(window) = window.upgrade() else {
+            return;
+        };
+        let title = window
+            .title()
+            .map(|title| title.to_string())
+            .unwrap_or_default();
+        set_topmost_by_title(&title);
+    });
+}
+
+#[cfg(windows)]
+fn set_topmost_by_title(title: &str) {
+    use windows_sys::Win32::Foundation::{HWND, LPARAM};
+    use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumThreadWindows, GetWindowTextW, IsWindowVisible, SetWindowPos, HWND_TOPMOST,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    };
+
+    struct Search {
+        title: Vec<u16>,
+        found: Vec<HWND>,
+    }
+
+    unsafe extern "system" fn visit(hwnd: HWND, data: LPARAM) -> i32 {
+        let search = unsafe { &mut *(data as *mut Search) };
+        if unsafe { IsWindowVisible(hwnd) } == 0 {
+            return 1;
+        }
+        let mut buffer = [0u16; 512];
+        let length = unsafe { GetWindowTextW(hwnd, buffer.as_mut_ptr(), buffer.len() as i32) };
+        if length > 0 && buffer[..length as usize] == search.title[..] {
+            search.found.push(hwnd);
+        }
+        1
+    }
+
+    let mut search = Search {
+        title: title.encode_utf16().collect(),
+        found: Vec::new(),
+    };
+    unsafe {
+        EnumThreadWindows(
+            GetCurrentThreadId(),
+            Some(visit),
+            &mut search as *mut Search as LPARAM,
+        );
+        for hwnd in search.found {
+            SetWindowPos(
+                hwnd,
+                HWND_TOPMOST,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            );
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn set_topmost_by_title(_title: &str) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn temporary_capture_matches_the_shells_path_form() {
+        let folder = std::env::temp_dir().join("ApexShot");
+        std::fs::create_dir_all(&folder).unwrap();
+        let file = folder.join(format!(
+            "apexshot-temporary-capture-test-{}.png",
+            std::process::id()
+        ));
+        std::fs::write(&file, b"capture").unwrap();
+        // The capture shell passes the expanded long path with forward slashes,
+        // while `temp_dir` can return the short 8.3 form of the same folder.
+        let resolved = std::fs::canonicalize(&file).unwrap();
+        let shell_form = resolved
+            .to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .replace('\\', "/");
+        let matched = is_temporary_capture(Path::new(&shell_form));
+        let kept = is_temporary_capture(Path::new(r"C:\Users\Public\Pictures\shot.png"));
+        let _ = std::fs::remove_file(&file);
+        let _ = std::fs::remove_dir(&folder);
+        assert!(matched, "{shell_form} is a temporary capture");
+        assert!(!kept);
+    }
 }
