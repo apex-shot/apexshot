@@ -272,6 +272,11 @@ pub(super) fn install(row: &DrawingArea, text: bool, scale: f64, hooks: Hooks) {
         let hooks = hooks.clone();
         move |_, _, x, y| {
             let Some(row) = row.upgrade() else { return };
+            // A resting lane is a thin strip: it opens on a click and has no
+            // clip actions until then.
+            if !hooks.shared.lane_open(text) {
+                return;
+            }
             let index = {
                 let mut model = hooks.shared.model.borrow_mut();
                 let index = clip_at(
@@ -305,6 +310,10 @@ pub(super) fn install(row: &DrawingArea, text: bool, scale: f64, hooks: Hooks) {
         let hooks = hooks.clone();
         move |_, x, y| {
             let Some(row) = row.upgrade() else { return };
+            if !hooks.shared.lane_open(text) {
+                active.set(None);
+                return;
+            }
             let grabbed = grab_at(
                 &hooks.shared.model.borrow(),
                 text,
@@ -405,6 +414,10 @@ pub(super) fn install(row: &DrawingArea, text: bool, scale: f64, hooks: Hooks) {
                 return;
             };
             if shared.dragging_clip.get() {
+                return;
+            }
+            if !shared.lane_open(text) {
+                widget.set_cursor_from_name(Some("pointer"));
                 return;
             }
             let grabbed = grab_at(
@@ -720,6 +733,65 @@ mod tests {
     }
 
     #[test]
+    fn a_resting_lane_opens_on_click_without_editing_its_clips() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let timeline = super::super::build(1.0, true);
+            {
+                let mut model = timeline.shared.model.borrow_mut();
+                add(&mut model, true, 1.0);
+                model.selected_text = None;
+            }
+            assert!(timeline.shared.lane_open(false), "Motion starts open");
+            assert!(!timeline.shared.lane_open(true));
+            timeline.dock.measure(Orientation::Horizontal, -1);
+            let height = timeline.dock.measure(Orientation::Vertical, 600).0.max(320);
+            timeline.dock.allocate(600, height, -1, None);
+            let card = timeline.dock.first_child().unwrap();
+            let board = card.last_child().unwrap().downcast::<Overlay>().unwrap();
+            let tracks = board.child().unwrap();
+            let row = tracks
+                .first_child()
+                .and_then(|ruler| ruler.next_sibling())
+                .and_then(|source| source.next_sibling())
+                .and_then(|motion| motion.next_sibling())
+                .unwrap();
+            let width = f64::from(row.width());
+            let y = f64::from(row.height()) / 2.0;
+            // The middle of the 1s..2s clip on the default six-second board.
+            let x = width * 1.5 / timeline.shared.model.borrow().duration;
+            let controllers = row.observe_controllers();
+            let drag = (0..controllers.n_items())
+                .filter_map(|index| controllers.item(index))
+                .find_map(|item| item.downcast::<gtk4::GestureDrag>().ok())
+                .unwrap();
+            drag.emit_by_name::<()>("drag-begin", &[&x, &y]);
+            assert!(
+                !timeline.shared.dragging_clip.get(),
+                "no drag while resting"
+            );
+            drag.emit_by_name::<()>("drag-end", &[&0.0_f64, &0.0_f64]);
+            let click = (0..controllers.n_items())
+                .filter_map(|index| controllers.item(index))
+                .filter_map(|item| item.downcast::<gtk4::GestureClick>().ok())
+                .find(|click| click.button() == 1)
+                .unwrap();
+            click.emit_by_name::<()>("released", &[&1_i32, &x, &y]);
+            let model = timeline.shared.model.borrow();
+            assert!(timeline.shared.lane_open(true), "the click opens Text");
+            assert!(!timeline.shared.lane_open(false));
+            assert_eq!(count(&model, true), 1, "the click adds nothing");
+            assert_eq!(
+                model.selected_text,
+                Some(0),
+                "the clip under it is selected"
+            );
+            assert!(timeline.shared.undo.borrow().is_empty());
+        }) else {
+            return;
+        };
+    }
+
+    #[test]
     fn drag_and_menu_widgets_update_history_for_both_lanes() {
         let Some(()) = crate::test_support::with_gtk(|| {
             for text in [false, true] {
@@ -728,6 +800,8 @@ mod tests {
                     let mut model = timeline.shared.model.borrow_mut();
                     add(&mut model, text, 1.0);
                 }
+                // Clips are edited in the open lane; a resting one only opens.
+                timeline.shared.open(text);
                 timeline.dock.measure(Orientation::Horizontal, -1);
                 let height = timeline.dock.measure(Orientation::Vertical, 600).0.max(320);
                 timeline.dock.allocate(600, height, -1, None);

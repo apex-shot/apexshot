@@ -39,7 +39,8 @@ use crate::capture::editor::state::{
 use crate::capture::editor::text_detect::spawn_text_detection;
 use crate::capture::editor::types::{
     cursor_name_for_select_handle, tool_shortcut_target, AnnotationAction, ArrowStyle, CropHandle,
-    FontSettings, FontStyle, MoveHandle, Point, TextAlignment, TextDecoration, Tool, ViewTransform,
+    DrawColor, FontSettings, FontStyle, MoveHandle, Point, TextAlignment, TextDecoration, Tool,
+    ViewTransform,
 };
 
 fn crop_cursor(st: &EditorState, point: Point, scale: f64) -> &'static str {
@@ -300,9 +301,36 @@ impl EditorHost {
         let _ = area;
     }
 
+    /// Bring back the annotation objects an exported image was saved with,
+    /// over the pre-annotation image `load_document` just opened.
+    pub fn restore_session(&self, session: &crate::annotations::AnnotationFile) {
+        self.mutate_effects(|st| {
+            st.actions = session
+                .annotations
+                .iter()
+                .map(crate::annotations::serializable_to_action)
+                .collect();
+            st.next_number = st
+                .actions
+                .iter()
+                .filter_map(|action| match action {
+                    AnnotationAction::Number { number, .. } => Some(*number),
+                    _ => None,
+                })
+                .max()
+                .unwrap_or(0)
+                + 1;
+            st.static_image_transform = session.static_image_transform.sanitized();
+            true
+        });
+    }
+
     /// Document swap without widget coupling (tests use this directly).
     fn load_document_headless(&self, image: RgbaImage) {
         let mut state = EditorState::new(image);
+        // Tests never read the user's saved colours.
+        #[cfg(not(test))]
+        state.load_tool_colors(&crate::config::load_config().annotate_tool_colors);
         self.start_detection(&mut state);
         *self.editor.borrow_mut() = Some(state);
         *self.surface_cache.borrow_mut() = None;
@@ -740,6 +768,22 @@ impl EditorHost {
         self.with_state(|st| {
             st.commit_active_text_input();
         });
+    }
+
+    /// Remember `color` for the armed tool and save it so the next editor
+    /// session opens that tool with it. Saving waits for the pick to settle,
+    /// so dragging the custom picker writes the config once.
+    pub fn remember_tool_color(&self, color: DrawColor) {
+        let Some((key, hex)) = self
+            .with_state(|st| st.remember_tool_color(color))
+            .flatten()
+        else {
+            return;
+        };
+        #[cfg(not(test))]
+        save_tool_color_later(key, hex);
+        #[cfg(test)]
+        let _ = (key, hex);
     }
 
     /// Arm a tool. Valid in-flight text commits first so switching never
@@ -3045,7 +3089,8 @@ impl EditorHost {
             );
             return;
         };
-        self.save_snapshot(path, snapshot, on_saved);
+        let session = self.read(EditableSession::capture);
+        self.save_snapshot(path, snapshot, session, on_saved);
         let _ = parent;
     }
 
@@ -3053,6 +3098,7 @@ impl EditorHost {
         &self,
         path: &std::path::Path,
         snapshot: image::RgbaImage,
+        session: Option<EditableSession>,
         on_saved: Box<dyn Fn()>,
     ) {
         let path = path.to_path_buf();
@@ -3061,9 +3107,14 @@ impl EditorHost {
         let (sender, receiver) =
             mpsc::channel::<Result<(), crate::capture::editor::types::EditorError>>();
         std::thread::spawn(move || {
-            let _ = sender.send(crate::capture::editor::io_ops::save_image_snapshot(
-                &path, snapshot,
-            ));
+            let saved = crate::capture::editor::io_ops::save_image_snapshot(&path, snapshot);
+            // The sidecar hashes the written file, so it follows the save.
+            if let (Ok(()), Some(session)) = (&saved, session) {
+                if let Err(error) = session.persist(&path) {
+                    eprintln!("[image-editor] Could not save the editable annotations: {error}");
+                }
+            }
+            let _ = sender.send(saved);
         });
         glib::timeout_add_local(Duration::from_millis(50), move || {
             match receiver.try_recv() {
@@ -3087,6 +3138,100 @@ impl EditorHost {
                 Err(_) => glib::ControlFlow::Break,
             }
         });
+    }
+}
+
+#[cfg(not(test))]
+thread_local! {
+    static PENDING_TOOL_COLORS: RefCell<(std::collections::BTreeMap<String, String>, Option<glib::SourceId>)> =
+        const { RefCell::new((std::collections::BTreeMap::new(), None)) };
+}
+
+/// Queue one tool colour for the config and write every queued colour once
+/// no new pick has arrived for a moment.
+#[cfg(not(test))]
+fn save_tool_color_later(key: &'static str, hex: String) {
+    PENDING_TOOL_COLORS.with(|pending| {
+        let mut pending = pending.borrow_mut();
+        pending.0.insert(key.to_string(), hex);
+        if let Some(source) = pending.1.take() {
+            source.remove();
+        }
+        pending.1 = Some(glib::timeout_add_local_once(
+            Duration::from_millis(300),
+            || {
+                let colors = PENDING_TOOL_COLORS.with(|pending| {
+                    let mut pending = pending.borrow_mut();
+                    pending.1 = None;
+                    std::mem::take(&mut pending.0)
+                });
+                let mut config = crate::config::load_config();
+                let before = config.annotate_tool_colors.clone();
+                config.annotate_tool_colors.extend(colors);
+                if config.annotate_tool_colors != before {
+                    if let Err(error) = crate::config::save_config(&config) {
+                        eprintln!("[image-editor] Could not save the tool colour: {error}");
+                    }
+                }
+            },
+        ));
+    });
+}
+
+/// The path a re-edit sidecar is keyed by: the canonical form, so the Save
+/// dialog's path and the one the file is reopened from name the same file.
+pub(crate) fn session_key(path: &std::path::Path) -> std::path::PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// What an exported image needs to reopen with editable annotations: the
+/// pre-annotation image and the annotation objects drawn over it.
+struct EditableSession {
+    actions: Vec<AnnotationAction>,
+    base_image: Arc<RgbaImage>,
+    static_image_transform: crate::capture::editor::image_transform::StaticImageTransform,
+    source_upscale: crate::capture::editor::upscale::SourceUpscale,
+}
+
+impl EditableSession {
+    fn capture(st: &EditorState) -> Self {
+        Self {
+            actions: st.actions.clone(),
+            base_image: Arc::clone(&st.base_image),
+            static_image_transform: st.static_image_transform,
+            source_upscale: st.source_upscale,
+        }
+    }
+
+    /// Write the sidecar for the exported file, or drop a stale one when
+    /// nothing is left to re-edit. The background composition is not part of
+    /// the Windows record yet, so the file carries the default background.
+    fn persist(
+        &self,
+        exported: &std::path::Path,
+    ) -> Result<(), crate::annotations::AnnotationError> {
+        let key = session_key(exported);
+        if self.actions.is_empty() && self.static_image_transform.is_identity() {
+            return crate::annotations::delete_annotations(&key);
+        }
+        crate::annotations::save_annotations(
+            &key,
+            self.base_image.width(),
+            self.base_image.height(),
+            &self.actions,
+            &self.base_image,
+            &crate::capture::editor::types::BackgroundStyle::None,
+            0.0,
+            crate::annotations::ShadowProfileSettings::default(),
+            None,
+            0.0,
+            false,
+            crate::capture::editor::types::BackgroundAlignment::Center,
+            18.0,
+            crate::capture::editor::types::CropAspectRatio::Original,
+            self.static_image_transform,
+            self.source_upscale,
+        )
     }
 }
 
@@ -3403,6 +3548,58 @@ mod tests {
 
     fn host() -> Rc<EditorHost> {
         EditorHost::new(Rc::new(|| {}), Rc::new(|_| {}), Rc::new(|| (0.0, 0.0)))
+    }
+
+    #[test]
+    fn an_exported_image_reopens_with_its_annotations_as_objects() {
+        let dir = std::env::temp_dir().join(format!("apexshot-reedit-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let exported = dir.join("annotated.png");
+        let base = test_image(40, 30);
+        let boxed = AnnotationAction::Box {
+            rect: crate::capture::editor::types::Rect {
+                x: 4,
+                y: 5,
+                width: 20,
+                height: 10,
+            },
+            color: crate::capture::editor::types::DrawColor::new(0.0, 0.2, 1.0, 1.0),
+            stroke_size: 3.0,
+            shadow: false,
+        };
+        let mut state = EditorState::new(base.clone());
+        state.actions.push(boxed.clone());
+        let session = EditableSession::capture(&state);
+        let flat = RgbaImage::from_pixel(60, 50, image::Rgba([9, 9, 9, 255]));
+        crate::capture::editor::io_ops::save_image_snapshot(&exported, flat).unwrap();
+        session.persist(&exported).unwrap();
+
+        let key = session_key(&exported);
+        let file = crate::annotations::load_annotations(&key).unwrap().unwrap();
+        let original = crate::annotations::load_original_image(&key)
+            .unwrap()
+            .unwrap();
+        assert_eq!(original, base);
+
+        let restored = crate::test_support::with_gtk(move || {
+            let h = host();
+            h.load_document_headless(original);
+            h.restore_session(&file);
+            h.read(|st| (st.actions.clone(), st.next_number)).unwrap()
+        });
+        if let Some((actions, next_number)) = restored {
+            assert_eq!(actions, vec![boxed.clone()]);
+            assert_eq!(next_number, 1);
+        }
+
+        // A flat re-export drops the sidecar instead of leaving it stale.
+        EditableSession::capture(&EditorState::new(base))
+            .persist(&exported)
+            .unwrap();
+        assert!(crate::annotations::load_annotations(&key)
+            .unwrap()
+            .is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -135,6 +135,10 @@ pub struct AppConfig {
     pub annotate_close_after_export: bool,
     /// Replace the opened image when the image editor exports a still image.
     pub annotate_overwrite_original_image: bool,
+    /// The colour each annotate tool last used, keyed by tool ("pen",
+    /// "arrow", ...) as `#rrggbbaa`, so a new editor session opens every tool
+    /// with the colour picked for it last.
+    pub annotate_tool_colors: std::collections::BTreeMap<String, String>,
     /// Skip the Static → Motion confirm that annotations will be snapshotted.
     pub skip_static_to_motion_confirm: bool,
     /// Skip the Motion → Static confirm that motion segments will be cleared.
@@ -298,6 +302,7 @@ impl Default for AppConfig {
             annotate_always_on_top: false,
             annotate_close_after_export: false,
             annotate_overwrite_original_image: false,
+            annotate_tool_colors: std::collections::BTreeMap::new(),
             skip_static_to_motion_confirm: false,
             skip_motion_to_static_confirm: false,
             wallpaper_mode: "Desktop".to_string(),

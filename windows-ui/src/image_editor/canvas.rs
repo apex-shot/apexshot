@@ -88,6 +88,9 @@ struct DecodedImage {
     bytes: Vec<u8>,
     width: i32,
     height: i32,
+    /// The annotations an ApexShot export was saved with, when the image
+    /// reopens from its pre-annotation original.
+    session: Option<crate::annotations::AnnotationFile>,
 }
 
 /// Where the pointer last was over the canvas, so a tool, brush or detection
@@ -551,6 +554,9 @@ impl Canvas {
         );
         if let Some(image) = image {
             self.host.load_document(image, &self.area);
+            if let Some(session) = decoded.session.as_ref() {
+                self.host.restore_session(session);
+            }
         }
 
         self.empty.set_visible(false);
@@ -1269,15 +1275,36 @@ pub(super) fn draw_canvas_checkerboard(
 }
 
 fn decode_image(path: &Path) -> Result<DecodedImage, String> {
-    let decoded = image::open(path)
-        .map_err(|error| error.to_string())?
-        .to_rgba8();
+    let (decoded, session) = match restorable_session(path) {
+        Some((original, session)) => (original, Some(session)),
+        None => (
+            image::open(path)
+                .map_err(|error| error.to_string())?
+                .to_rgba8(),
+            None,
+        ),
+    };
     let (width, height) = decoded.dimensions();
     Ok(DecodedImage {
         bytes: decoded.into_raw(),
         width: width as i32,
         height: height as i32,
+        session,
     })
+}
+
+/// An image this editor exported keeps its annotations in a sidecar; reopen
+/// it from the pre-annotation original so they come back as objects. A
+/// sidecar whose image changed since the export is ignored.
+fn restorable_session(
+    path: &Path,
+) -> Option<(image::RgbaImage, crate::annotations::AnnotationFile)> {
+    let key = super::annotate::session_key(path);
+    let session = crate::annotations::load_annotations(&key).ok().flatten()?;
+    let original = crate::annotations::load_original_image(&key)
+        .ok()
+        .flatten()?;
+    Some((original, session))
 }
 
 #[cfg(test)]

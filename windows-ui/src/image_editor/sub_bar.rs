@@ -145,16 +145,6 @@ fn pill(scale: f64, options: &[&str], on_pick: Rc<dyn Fn(usize)>) -> Pill {
     }
 }
 
-/// Wrapper kept for the shell's motion sections, which only need the
-/// self-contained pill (selection stays local to the pill).
-pub(super) fn option_pill(scale: f64, initial: &str, options: &[&str]) -> Button {
-    let pill = pill(scale, options, Rc::new(|_| {}));
-    if let Some(index) = options.iter().position(|o| *o == initial) {
-        (pill.set_selected)(index);
-    }
-    pill.button
-}
-
 fn bar() -> GtkBox {
     let root = GtkBox::new(Orientation::Horizontal, 6);
     root.add_css_class("image-editor-sub-bar");

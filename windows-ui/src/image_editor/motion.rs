@@ -108,7 +108,7 @@ impl MotionMode {
         .map_err(|error| error.to_string())?;
         crate::recording::editor::ffmpeg::ensure_tools_available()?;
 
-        let (layout, image_width, image_height) = self
+        let (layout, image_width, image_height, frame_size) = self
             .host
             .read(|st| {
                 let (image_width, image_height) = st.working_image.dimensions();
@@ -116,13 +116,31 @@ impl MotionMode {
                     st.background.layout(image_width, image_height),
                     f64::from(image_width),
                     f64::from(image_height),
+                    preset_size(st),
                 )
             })
             .ok_or_else(|| t("Motion has no still to export."))?;
-        let width = even_output_size(layout.width);
-        let height = even_output_size(layout.height);
-        let extra_x = (f64::from(width) - layout.width) / 2.0;
-        let extra_y = (f64::from(height) - layout.height) / 2.0;
+        // A platform preset renders straight at its pixels: the composition
+        // already has the preset's aspect, so it scales to fill exactly and
+        // the vectors stay sharp. Otherwise the video is the canvas itself.
+        let (width, height, zoom) = match frame_size {
+            Some((width, height)) => {
+                let width = even_output_size(f64::from(width));
+                let height = even_output_size(f64::from(height));
+                let zoom = (
+                    f64::from(width) / layout.width.max(1.0),
+                    f64::from(height) / layout.height.max(1.0),
+                );
+                (width, height, zoom)
+            }
+            None => (
+                even_output_size(layout.width),
+                even_output_size(layout.height),
+                (1.0, 1.0),
+            ),
+        };
+        let extra_x = (f64::from(width) / zoom.0 - layout.width) / 2.0;
+        let extra_y = (f64::from(height) / zoom.1 - layout.height) / 2.0;
         let transform = ViewTransform {
             offset_x: extra_x + layout.image_x,
             offset_y: extra_y + layout.image_y,
@@ -139,6 +157,7 @@ impl MotionMode {
             .map_err(|error| error.to_string())?;
         {
             let context = CairoContext::new(&backdrop).map_err(|error| error.to_string())?;
+            context.scale(zoom.0, zoom.1);
             self.host
                 .paint_motion_background(&context, transform, false);
         }
@@ -198,6 +217,7 @@ impl MotionMode {
             image_height,
             width,
             height,
+            zoom,
             motion,
             frame: 0,
             frame_count,
@@ -703,6 +723,12 @@ impl TextDragContext {
     }
 }
 
+/// Preview margins at 100% scale: beside the tool notch, under the mode
+/// pill, and above the timeline.
+const PREVIEW_SIDE_INSET: f64 = 72.0;
+const PREVIEW_TOP_INSET: f64 = 60.0;
+const PREVIEW_BOTTOM_INSET: f64 = 20.0;
+
 fn preview_transform(
     width: f64,
     height: f64,
@@ -711,14 +737,19 @@ fn preview_transform(
     image_height: u32,
     layout: crate::capture::editor::state::background::Layout,
 ) -> ViewTransform {
-    let inset = (24.0 * ui_scale).min(width.min(height).max(0.0) * 0.25);
-    let available_width = (width - inset * 2.0).max(1.0);
-    let available_height = (height - inset * 2.0).max(1.0);
-    let zoom = (available_width / layout.width.max(1.0))
-        .min(available_height / layout.height.max(1.0))
-        .min(1.0);
+    // The composition fills the stage, the way the video editor's preview
+    // does, enlarging a small image past 1:1. The sides keep clear of the
+    // tool notch (both sides, so the picture stays centred), the top clears
+    // the mode pill, and the bottom keeps a small gap above the timeline.
+    let side = (PREVIEW_SIDE_INSET * ui_scale).min(width.max(0.0) * 0.15);
+    let top = (PREVIEW_TOP_INSET * ui_scale).min(height.max(0.0) * 0.2);
+    let bottom = (PREVIEW_BOTTOM_INSET * ui_scale).min(height.max(0.0) * 0.1);
+    let available_width = (width - side * 2.0).max(1.0);
+    let available_height = (height - top - bottom).max(1.0);
+    let zoom =
+        (available_width / layout.width.max(1.0)).min(available_height / layout.height.max(1.0));
     let x = (width - layout.width * zoom) / 2.0;
-    let y = (height - layout.height * zoom) / 2.0;
+    let y = top + (available_height - layout.height * zoom) / 2.0;
     ViewTransform {
         scale: zoom,
         offset_x: x + layout.image_x * zoom,
@@ -742,19 +773,30 @@ fn frame_image(
     timeline: &timeline::Timeline,
     watermark_surface: &Rc<RefCell<Option<ImageSurface>>>,
 ) -> Option<image::RgbaImage> {
-    let (layout, image_width, image_height) = host.read(|st| {
+    let (layout, image_width, image_height, frame_size) = host.read(|st| {
         let (image_width, image_height) = st.working_image.dimensions();
         (
             st.background.layout(image_width, image_height),
             f64::from(image_width),
             f64::from(image_height),
+            preset_size(st),
         )
     })?;
-    let width = layout.width.round().max(1.0) as i32;
-    let height = layout.height.round().max(1.0) as i32;
+    // A platform preset's frame comes out at its exact pixels.
+    let (width, height) = match frame_size {
+        Some((width, height)) => (width as i32, height as i32),
+        None => (
+            layout.width.round().max(1.0) as i32,
+            layout.height.round().max(1.0) as i32,
+        ),
+    };
     let mut surface = ImageSurface::create(Format::ARgb32, width, height).ok()?;
     {
         let context = CairoContext::new(&surface).ok()?;
+        context.scale(
+            f64::from(width) / layout.width.max(1.0),
+            f64::from(height) / layout.height.max(1.0),
+        );
         let transform = ViewTransform {
             offset_x: layout.image_x,
             offset_y: layout.image_y,
@@ -791,6 +833,15 @@ fn frame_image(
     ))
 }
 
+/// The pixels a platform frame preset exports at, if one is selected.
+fn preset_size(state: &crate::capture::editor::state::EditorState) -> Option<(u32, u32)> {
+    state
+        .background
+        .frame_size
+        .filter(|_| state.background.frame_aspect.is_some())
+        .filter(|&(width, height)| width > 0 && height > 0)
+}
+
 /// H.264 with yuv420p needs even dimensions. A composition can end on an odd
 /// pixel after padding or a fractional card scale, so round up.
 fn even_output_size(value: f64) -> i32 {
@@ -816,6 +867,9 @@ struct MotionVideoJob {
     image_height: f64,
     width: i32,
     height: i32,
+    /// Composition units to output pixels; `(1, 1)` unless a platform
+    /// preset fixes the size.
+    zoom: (f64, f64),
     motion: MotionState,
     frame: usize,
     frame_count: usize,
@@ -839,6 +893,7 @@ impl MotionVideoJob {
                 .map_err(|error| error.to_string())?;
             context.paint().map_err(|error| error.to_string())?;
             context.set_operator(Operator::Over);
+            context.scale(self.zoom.0, self.zoom.1);
             host.paint_motion_foreground(&context, self.transform, pose, anchor, false);
             let card = motion_text::card_layout(
                 self.layout,
@@ -914,14 +969,20 @@ mod tests {
         appearance.fill = Fill::Image(Arc::new(RgbaImage::from_pixel(1, 1, Rgba([0; 4]))));
         appearance.padding = 40.0;
         let layout = appearance.layout(400, 200);
+        // A small stage clamps the margins: 45 a side, 40 on top, 20 below,
+        // leaving 210 × 140 for the 480 × 280 canvas.
         let fit = preview_transform(300.0, 200.0, 1.0, 400, 200, layout);
-        assert!((fit.canvas_width * fit.canvas_scale - 252.0).abs() < 0.001);
-        assert!((fit.canvas_offset_x - 24.0).abs() < 0.001);
+        assert!((fit.canvas_width * fit.canvas_scale - 210.0).abs() < 0.001);
+        assert!((fit.canvas_offset_x - 45.0).abs() < 0.001);
         assert!((fit.offset_x - fit.canvas_offset_x - layout.image_x * fit.scale).abs() < 0.001);
-        let native = preview_transform(1200.0, 800.0, 1.0, 400, 200, layout);
-        assert_eq!(native.scale, 1.0);
-        assert_eq!(native.canvas_offset_x, (1200.0 - layout.width) / 2.0);
-        assert_eq!(native.canvas_offset_y, (800.0 - layout.height) / 2.0);
+        // A large stage fills past 1:1, centred between the pill and the
+        // timeline: 1056 × 720 available, so the width decides at 2.2×.
+        let large = preview_transform(1200.0, 800.0, 1.0, 400, 200, layout);
+        assert!((large.scale - 1056.0 / layout.width).abs() < 1e-9);
+        assert!(large.scale > 1.0);
+        assert!((large.canvas_offset_x - 72.0).abs() < 0.001);
+        let drawn_height = layout.height * large.scale;
+        assert!((large.canvas_offset_y - (60.0 + (720.0 - drawn_height) / 2.0)).abs() < 0.001);
     }
 
     #[test]
@@ -1130,6 +1191,52 @@ mod tests {
                 (layout.image_y + 40.0) as u32,
             );
             assert!(center[0] > 200 && center[1] < 40 && center[2] < 40);
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
+    }
+
+    #[test]
+    fn motion_frame_fills_a_platform_preset_at_its_exact_size() {
+        use crate::capture::editor::state::background::FrameRatio;
+        use crate::capture::editor::state::EditorState;
+
+        let Some(()) = crate::test_support::with_gtk(|| {
+            for size in [(1280, 720), (2560, 1440)] {
+                let host = super::super::annotate::EditorHost::new(
+                    Rc::new(|| {}),
+                    Rc::new(|_| {}),
+                    Rc::new(|| (0.0, 0.0)),
+                );
+                let mut state =
+                    EditorState::new(RgbaImage::from_pixel(100, 80, Rgba([240, 0, 0, 255])));
+                state.background.fill = Fill::Image(Arc::new(RgbaImage::from_pixel(
+                    1,
+                    1,
+                    Rgba([0, 0, 255, 255]),
+                )));
+                state.background.padding = 40.0;
+                state.background.frame_aspect = Some(FrameRatio::new(16, 9));
+                state.background.frame_size = Some(size);
+                let layout = state.background.layout(100, 80);
+                *host.editor.borrow_mut() = Some(state);
+                let timeline = timeline::build(1.0, true);
+                let mark = Rc::new(RefCell::new(None));
+
+                let frame = frame_image(&host, &timeline, &mark).expect("motion frame");
+
+                assert_eq!(frame.dimensions(), size);
+                // The composition scales to fill: the backdrop reaches the
+                // corners and the still sits at the scaled centre.
+                assert_eq!(*frame.get_pixel(0, 0), Rgba([0, 0, 255, 255]));
+                let zoom = f64::from(size.0) / layout.width;
+                let center = frame.get_pixel(
+                    ((layout.image_x + 50.0) * zoom) as u32,
+                    ((layout.image_y + 40.0) * zoom) as u32,
+                );
+                assert!(center[0] > 200 && center[1] < 40 && center[2] < 40);
+            }
         }) else {
             eprintln!("skipping: GTK unavailable");
             return;
