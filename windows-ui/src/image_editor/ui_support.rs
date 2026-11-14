@@ -154,6 +154,25 @@ const IMAGE_EDITOR_TYPE_CSS: &str = r#"
         button.image-editor-confirm-continue {
             font-size: 13px;
         }
+
+        /* Export quality and its comparison sheet */
+        .image-editor-upscale-size,
+        .image-editor-upscale-arrow,
+        .image-editor-upscale-output,
+        .image-editor-upscale-notice {
+            font-size: 12px;
+        }
+        .image-editor-upscale-title {
+            font-size: 16px;
+        }
+        .image-editor-upscale-subtitle,
+        .image-editor-upscale-dims,
+        .image-editor-upscale-message {
+            font-size: 13px;
+        }
+        .image-editor-upscale-badge {
+            font-size: 11px;
+        }
         "#;
 
 pub(super) fn install_css() {

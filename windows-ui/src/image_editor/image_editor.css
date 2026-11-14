@@ -2124,3 +2124,182 @@ button.image-editor-confirm-continue:active {
     background: #e85b06;
     color: #ffffff;
 }
+
+/* ── Export quality ────────────────────────────────────────────────── */
+
+.image-editor-upscale-segmented {
+    margin: 0;
+}
+
+.image-editor-upscale-meta {
+    padding: 0 2px;
+}
+
+.image-editor-upscale-size,
+.image-editor-upscale-arrow,
+.image-editor-upscale-output {
+    color: rgba(255, 255, 255, 0.56);
+    font-size: 11px;
+    font-feature-settings: "tnum";
+}
+
+.image-editor-upscale-arrow {
+    color: #ff8a3d;
+}
+
+.image-editor-upscale-output {
+    color: rgba(255, 255, 255, 0.92);
+    font-weight: 600;
+}
+
+.image-editor-upscale-notice {
+    padding: 8px 10px;
+    border-left: 2px solid #ff670d;
+    border-radius: 6px;
+    background: rgba(255, 103, 13, 0.08);
+    color: rgba(255, 255, 255, 0.78);
+    font-size: 11px;
+}
+
+.editor-theme-light .image-editor-upscale-size {
+    color: rgba(17, 24, 39, 0.58);
+}
+
+.editor-theme-light .image-editor-upscale-arrow {
+    color: #d15b12;
+}
+
+.editor-theme-light .image-editor-upscale-output {
+    color: rgba(17, 24, 39, 0.92);
+}
+
+.editor-theme-light .image-editor-upscale-notice {
+    background: rgba(255, 103, 13, 0.08);
+    color: rgba(17, 24, 39, 0.78);
+}
+
+/* ── Enhancement comparison sheet ──────────────────────────────────── */
+
+.image-editor-upscale-card {
+    padding: 18px 18px 16px;
+    background: #1c1c1e;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 14px;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+}
+
+.image-editor-upscale-card.editor-theme-light {
+    background: #ffffff;
+    border-color: rgba(17, 24, 39, 0.10);
+    box-shadow: 0 24px 64px rgba(17, 24, 39, 0.18);
+}
+
+.image-editor-upscale-title {
+    color: rgba(255, 255, 255, 0.94);
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.image-editor-upscale-subtitle,
+.image-editor-upscale-dims {
+    color: rgba(255, 255, 255, 0.56);
+    font-size: 12px;
+}
+
+button.image-editor-upscale-close {
+    min-width: 28px;
+    min-height: 28px;
+    padding: 0;
+    border: none;
+    border-radius: 999px;
+    background: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: rgba(255, 255, 255, 0.62);
+}
+
+button.image-editor-upscale-close:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+}
+
+.image-editor-upscale-card togglebutton.image-editor-bg-tab {
+    min-width: 52px;
+}
+
+.image-editor-upscale-stage {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    background: #0f0f10;
+}
+
+.image-editor-upscale-scroll {
+    background: transparent;
+}
+
+.image-editor-upscale-message {
+    color: rgba(255, 255, 255, 0.70);
+    font-size: 13px;
+}
+
+.image-editor-upscale-badge {
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.62);
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+}
+
+.image-editor-upscale-badge-accent {
+    background: #ff670d;
+    color: #ffffff;
+}
+
+.image-editor-upscale-card spinner {
+    color: #ff670d;
+}
+
+.image-editor-upscale-card button.image-editor-confirm-continue:disabled {
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.35);
+}
+
+.image-editor-upscale-card.editor-theme-light .image-editor-upscale-title {
+    color: #1d2129;
+}
+
+.image-editor-upscale-card.editor-theme-light .image-editor-upscale-subtitle,
+.image-editor-upscale-card.editor-theme-light .image-editor-upscale-dims,
+.image-editor-upscale-card.editor-theme-light .image-editor-upscale-message {
+    color: rgba(17, 24, 39, 0.62);
+}
+
+.image-editor-upscale-card.editor-theme-light button.image-editor-upscale-close {
+    color: rgba(17, 24, 39, 0.55);
+}
+
+.image-editor-upscale-card.editor-theme-light button.image-editor-upscale-close:hover {
+    background: rgba(17, 24, 39, 0.06);
+    color: #1d2129;
+}
+
+.image-editor-upscale-card.editor-theme-light .image-editor-upscale-stage {
+    border-color: rgba(17, 24, 39, 0.10);
+    background: #eef0f5;
+}
+
+.image-editor-upscale-card.editor-theme-light button.image-editor-confirm-cancel {
+    color: rgba(17, 24, 39, 0.78);
+}
+
+.image-editor-upscale-card.editor-theme-light button.image-editor-confirm-cancel:hover {
+    background: rgba(17, 24, 39, 0.06);
+    color: #1d2129;
+}
+
+.image-editor-upscale-card.editor-theme-light button.image-editor-confirm-continue:disabled {
+    background: rgba(17, 24, 39, 0.06);
+    color: rgba(17, 24, 39, 0.35);
+}
