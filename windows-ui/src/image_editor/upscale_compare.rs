@@ -75,14 +75,10 @@ pub(super) fn show(
     card.add_css_class(theme);
     card.set_halign(Align::Center);
     card.set_can_target(true);
-    let width = (f64::from(window.width()) * 0.84).clamp(
-        f64::from(px(560.0, scale)),
-        f64::from(px(980.0, scale)),
-    );
-    let height = (f64::from(window.height()) * 0.84).clamp(
-        f64::from(px(420.0, scale)),
-        f64::from(px(720.0, scale)),
-    );
+    let width = (f64::from(window.width()) * 0.84)
+        .clamp(f64::from(px(560.0, scale)), f64::from(px(980.0, scale)));
+    let height = (f64::from(window.height()) * 0.84)
+        .clamp(f64::from(px(420.0, scale)), f64::from(px(720.0, scale)));
     card.set_size_request(width as i32, height as i32);
 
     let header = GtkBox::new(Orientation::Horizontal, px(12.0, scale));
@@ -473,7 +469,11 @@ pub(super) fn show(
             } else {
                 0
             };
-            after_badge.set_text(&t(if index == 1 { "Neural 4×" } else { "Neural 2×" }));
+            after_badge.set_text(&t(if index == 1 {
+                "Neural 4×"
+            } else {
+                "Neural 2×"
+            }));
             apply.set_label(&t(if index == 1 {
                 "Use Neural 4×"
             } else {
@@ -514,7 +514,8 @@ pub(super) fn show(
             std::thread::spawn(move || {
                 let source = EditorState::flatten_effects(&base, &actions);
                 let before = upscale::standard_enlarge(&source, selected);
-                let result = upscale::enhance_cached(&source, selected).map(|after| (before, after));
+                let result =
+                    upscale::enhance_cached(&source, selected).map(|after| (before, after));
                 let _ = sender.send(result);
             });
             let spinner = spinner.clone();

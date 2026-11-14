@@ -19,8 +19,8 @@ use gtk4::{
 
 use super::annotate::EditorHost;
 use super::ui_support::px;
-use crate::capture::editor::state::EditorState;
 use crate::capture::editor::state::background::{Fill, FrameRatio, Layout};
+use crate::capture::editor::state::EditorState;
 use crate::capture::editor::style_render::needs_backdrop;
 use crate::capture::editor::types::FrameStyle;
 use crate::capture::editor::upscale::SourceUpscale;

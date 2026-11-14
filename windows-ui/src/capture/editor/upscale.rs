@@ -75,9 +75,7 @@ fn load_model(bytes: &[u8]) -> Result<Model, String> {
     let model = tract_onnx::onnx()
         .model_for_read(&mut reader)
         .map_err(|error| error.to_string())?;
-    let model = model
-        .into_optimized()
-        .map_err(|error| error.to_string())?;
+    let model = model.into_optimized().map_err(|error| error.to_string())?;
     model.into_runnable().map_err(|error| error.to_string())
 }
 
@@ -416,7 +414,11 @@ mod tests {
         for mode in [SourceUpscale::Neural2x, SourceUpscale::Neural4x] {
             let start = std::time::Instant::now();
             let output = enhance(&image, mode).unwrap();
-            eprintln!("{mode:?}: {:?} for {:?}", start.elapsed(), output.dimensions());
+            eprintln!(
+                "{mode:?}: {:?} for {:?}",
+                start.elapsed(),
+                output.dimensions()
+            );
         }
     }
 }

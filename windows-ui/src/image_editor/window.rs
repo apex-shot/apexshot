@@ -640,9 +640,8 @@ fn upscale_ready(host: &Rc<super::annotate::EditorHost>, retry: Rc<dyn Fn()>) ->
     host.report_error(t("Enhancing the image…"));
     let (sender, receiver) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let _ = sender.send(
-            crate::capture::editor::upscale::enhance_cached(&base, mode).map(|_| ()),
-        );
+        let _ =
+            sender.send(crate::capture::editor::upscale::enhance_cached(&base, mode).map(|_| ()));
     });
     let host = Rc::downgrade(host);
     gtk4::glib::timeout_add_local(std::time::Duration::from_millis(16), move || {

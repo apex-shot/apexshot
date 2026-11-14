@@ -934,7 +934,9 @@ mod tests {
         assert!(state
             .upscale_unavailable_reason(SourceUpscale::Neural2x)
             .is_none());
-        assert!(state.upscale_unavailable_reason(SourceUpscale::Off).is_none());
+        assert!(state
+            .upscale_unavailable_reason(SourceUpscale::Off)
+            .is_none());
         assert!(!state.studio_capabilities().image_upscale);
 
         state.source_upscale = SourceUpscale::Neural2x;
@@ -946,7 +948,9 @@ mod tests {
         let mut state = EditorState::new(RgbaImage::from_pixel(24, 18, Rgba([12, 140, 200, 255])));
         assert!(state.pending_upscale().is_none());
         state.source_upscale = SourceUpscale::Neural2x;
-        let (mode, base) = state.pending_upscale().expect("enhancement has not run yet");
+        let (mode, base) = state
+            .pending_upscale()
+            .expect("enhancement has not run yet");
         crate::capture::editor::upscale::enhance_cached(&base, mode).unwrap();
         assert!(state.pending_upscale().is_none());
     }
