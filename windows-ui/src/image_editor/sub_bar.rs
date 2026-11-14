@@ -38,6 +38,8 @@ const HIGHLIGHTER_MODES: [(HighlighterMode, &str); 2] = [
     (HighlighterMode::TextAware, "Detect text"),
     (HighlighterMode::Freehand, "Freehand"),
 ];
+/// Matches the render path's numbering ceiling.
+const MAX_NUMBER: u32 = 9999;
 
 type BarContext = (Tool, Option<&'static str>, Option<usize>);
 type Refresher = Rc<dyn Fn(&EditorState)>;
@@ -183,18 +185,16 @@ pub(super) fn build(
     // ----- crop: ratio pill, dimensions, Cancel/Apply -----
     let (crop, crop_refresh) = {
         let root = bar();
-        let ratio = pill(
-            scale,
-            &CROP_RATIOS.iter().map(|(_, l)| *l).collect::<Vec<_>>(),
-            {
-                let host = host.clone();
-                Rc::new(move |index| {
-                    if let Some((ratio, _)) = CROP_RATIOS.get(index) {
-                        host.mutate(|st| st.set_crop_ratio(*ratio));
-                    }
-                })
-            },
-        );
+        let ratio_options: Vec<String> = CROP_RATIOS.iter().map(|(_, label)| t(label)).collect();
+        let ratio_labels: Vec<&str> = ratio_options.iter().map(String::as_str).collect();
+        let ratio = pill(scale, &ratio_labels, {
+            let host = host.clone();
+            Rc::new(move |index| {
+                if let Some((ratio, _)) = CROP_RATIOS.get(index) {
+                    host.mutate(|st| st.set_crop_ratio(*ratio));
+                }
+            })
+        });
         root.append(&ratio.button);
         let dimensions = Label::new(Some("—"));
         dimensions.add_css_class("image-editor-subbar-dimensions");
@@ -346,23 +346,21 @@ pub(super) fn build(
     // ----- highlighter: mode + weight + colour -----
     let (highlighter, highlighter_refresh) = {
         let root = bar();
-        let mode = pill(
-            scale,
-            &HIGHLIGHTER_MODES
-                .iter()
-                .map(|(_, l)| *l)
-                .collect::<Vec<_>>(),
-            {
-                let host = host.clone();
-                Rc::new(move |index| {
-                    if let Some((mode, _)) = HIGHLIGHTER_MODES.get(index) {
-                        host.mutate(|st| {
-                            st.set_highlighter_mode_and_check(*mode);
-                        });
-                    }
-                })
-            },
-        );
+        let mode_options: Vec<String> = HIGHLIGHTER_MODES
+            .iter()
+            .map(|(_, label)| t(label))
+            .collect();
+        let mode_labels: Vec<&str> = mode_options.iter().map(String::as_str).collect();
+        let mode = pill(scale, &mode_labels, {
+            let host = host.clone();
+            Rc::new(move |index| {
+                if let Some((mode, _)) = HIGHLIGHTER_MODES.get(index) {
+                    host.mutate(|st| {
+                        st.set_highlighter_mode_and_check(*mode);
+                    });
+                }
+            })
+        });
         root.append(&mode.button);
         let weight = StrokeControl::new(scale, &host);
         root.append(&weight.button);
@@ -482,12 +480,9 @@ pub(super) fn build(
                 let host = host.clone();
                 move |_| {
                     host.mutate(|st| {
-                        let next = if delta < 0 {
-                            st.active_number_start().saturating_sub(1).max(1)
-                        } else {
-                            st.active_number_start().saturating_add(1)
-                        };
-                        st.set_active_number_start(next);
+                        let next = (i64::from(st.active_number_start()) + delta)
+                            .clamp(1, i64::from(MAX_NUMBER));
+                        st.set_active_number_start(next as u32);
                     });
                 }
             });
@@ -506,11 +501,9 @@ pub(super) fn build(
                     return;
                 }
                 if let Ok(value) = entry.text().parse::<u32>() {
-                    if value >= 1 {
-                        host.mutate(|st| {
-                            st.set_active_number_start(value);
-                        });
-                    }
+                    host.mutate(|st| {
+                        st.set_active_number_start(value.clamp(1, MAX_NUMBER));
+                    });
                 }
             }
         });
@@ -540,7 +533,7 @@ pub(super) fn build(
                 colour.sync(st);
                 style.sync(st);
                 size.sync(st);
-                let display = st.active_number_start().to_string();
+                let display = st.active_number_start_display();
                 if entry.text().as_str() != display {
                     entry.set_text(&display);
                 }

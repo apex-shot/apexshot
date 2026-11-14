@@ -72,6 +72,8 @@ const ARROW_CLICK_NOOP_DISTANCE: f64 = 3.0;
 /// A new box or circle needs a deliberate drag on screen; anything shorter is
 /// a click that jittered, and committing it would leave a dot behind.
 const MIN_SHAPE_DRAG_DISTANCE: f64 = 16.0;
+/// Longest edge of the background raster painted during a live appearance drag.
+const LIVE_BACKGROUND_EDGE: u32 = 768;
 const PREVIEW_CARD_MAX_EDGE: u32 = 1600;
 static BACKGROUND_DECODE_LOCK: Mutex<()> = Mutex::new(());
 
@@ -201,6 +203,10 @@ pub struct EditorHost {
     /// Prepared Cairo surface for the working image, keyed by its revision.
     surface_cache: RefCell<Option<(u64, ImageSurface)>>,
     card_cache: RefCell<Option<CachedCard>>,
+    /// The card at the working image's own resolution, for the video encoder.
+    /// Kept apart from `card_cache` so a preview-sized card is never painted
+    /// into an export frame.
+    export_card_cache: RefCell<Option<CachedCard>>,
     /// Built on the first paint of a pen/highlighter drag; dropped when the
     /// drag ends. Only used while no card transform is active.
     annotation_cache: RefCell<Option<CachedAnnotations>>,
@@ -254,6 +260,7 @@ impl EditorHost {
             on_error,
             surface_cache: RefCell::new(None),
             card_cache: RefCell::new(None),
+            export_card_cache: RefCell::new(None),
             annotation_cache: RefCell::new(None),
             shadow_cache: RefCell::new(None),
             background_cache: RefCell::new(None),
@@ -302,6 +309,7 @@ impl EditorHost {
         *self.editor.borrow_mut() = Some(state);
         *self.surface_cache.borrow_mut() = None;
         *self.card_cache.borrow_mut() = None;
+        *self.export_card_cache.borrow_mut() = None;
         *self.annotation_cache.borrow_mut() = None;
         *self.shadow_cache.borrow_mut() = None;
         *self.background_cache.borrow_mut() = None;
@@ -634,6 +642,9 @@ impl EditorHost {
                             st.background.changed();
                         });
                     }
+                    // A failed load is not an edit: closing the interaction
+                    // drops its snapshot without recording a step.
+                    host.with_state(|st| st.finish_history_interaction());
                     if let Some(failure) = on_failure.take() {
                         failure();
                     }
@@ -680,11 +691,18 @@ impl EditorHost {
             self.background_previous.borrow_mut().take();
         }
         self.mutate(|st| {
+            // The first frame of a load opens the step and the final image
+            // closes it, so a preview followed by the sharp image undoes as
+            // one edit.
+            st.begin_history_interaction();
             st.background
                 .set_fill(crate::capture::editor::state::background::Fill::Image(
                     image,
                 ));
             st.background.changed();
+            if !preview {
+                st.finish_history_interaction();
+            }
         });
         if preview {
             glib::ControlFlow::Continue
@@ -748,6 +766,15 @@ impl EditorHost {
     }
 
     pub fn activate_tool(&self, tool: Tool) {
+        let leaving_crop = self
+            .read(|st| st.selected_tool == Tool::Crop && tool == Tool::Crop)
+            .unwrap_or(false);
+        if leaving_crop {
+            // Re-clicking Crop leaves crop mode and discards the uncommitted
+            // rect the same way Escape does.
+            self.cancel_crop();
+            return;
+        }
         let tool = self
             .read(|st| {
                 if st.selected_tool == tool && matches!(tool, Tool::Number | Tool::Highlighter) {
@@ -790,7 +817,7 @@ impl EditorHost {
     /// Paint the document inside the already-transformed image rect. `t` is
     /// the view transform the canvas computed for this frame.
     pub fn paint_document(&self, context: &gtk4::cairo::Context, t: ViewTransform) {
-        self.paint_document_inner(context, t, None, MotionPaintPart::Complete, false);
+        self.paint_document_inner(context, t, None, MotionPaintPart::Complete, false, false);
     }
 
     pub(super) fn motion_thumbnail(&self) -> Option<ImageSurface> {
@@ -845,6 +872,7 @@ impl EditorHost {
             Some((motion, anchor)),
             MotionPaintPart::Complete,
             live,
+            false,
         );
     }
 
@@ -854,9 +882,12 @@ impl EditorHost {
         t: ViewTransform,
         live: bool,
     ) {
-        self.paint_document_inner(context, t, None, MotionPaintPart::Background, live);
+        self.paint_document_inner(context, t, None, MotionPaintPart::Background, live, false);
     }
 
+    /// `export` paints the video encoder's frame: the card comes from the
+    /// working image at its own resolution and with the export resampling,
+    /// and the shadow uses the parked mask instead of the interactive one.
     pub(super) fn paint_motion_foreground(
         &self,
         context: &gtk4::cairo::Context,
@@ -864,6 +895,7 @@ impl EditorHost {
         motion: crate::recording::editor::model::MotionTransform,
         anchor: (f64, f64),
         live: bool,
+        export: bool,
     ) {
         self.paint_document_inner(
             context,
@@ -871,6 +903,7 @@ impl EditorHost {
             Some((motion, anchor)),
             MotionPaintPart::Foreground,
             live,
+            export,
         );
     }
 
@@ -881,6 +914,7 @@ impl EditorHost {
         motion_pose: Option<(crate::recording::editor::model::MotionTransform, (f64, f64))>,
         part: MotionPaintPart,
         live: bool,
+        export: bool,
     ) {
         #[cfg(test)]
         if part != MotionPaintPart::Base {
@@ -1029,8 +1063,9 @@ impl EditorHost {
                 pose,
                 &st.scene_shadow,
             ) {
-                let interactive =
-                    appearance_drag || part == MotionPaintPart::Foreground || (motion && live);
+                let interactive = appearance_drag
+                    || (part == MotionPaintPart::Foreground && !export)
+                    || (motion && live);
                 // During a light/opacity drag, move a cached unoffset silhouette
                 // instead of blurring the same card again for every pointer event.
                 let mut mask_geometry = shadow;
@@ -1117,7 +1152,15 @@ impl EditorHost {
             style.paint_underlay(context);
             let _ = context.restore();
             if !pose.is_identity() {
-                let cached = self.card_cache.borrow();
+                // The encoder's card is built from the full working image once
+                // and then reused for every frame; the preview keeps its
+                // capped-size card so playback stays cheap.
+                let cache = if export {
+                    &self.export_card_cache
+                } else {
+                    &self.card_cache
+                };
+                let cached = cache.borrow();
                 let card = cached
                     .as_ref()
                     .filter(|(revision, actions, radius, _)| {
@@ -1128,12 +1171,15 @@ impl EditorHost {
                     .map(|(_, _, _, surface)| surface.clone());
                 drop(cached);
                 let card = card.or_else(|| {
-                    let (width, height) =
-                        preview_card_size(st.working_image.width(), st.working_image.height());
+                    let (width, height) = if export {
+                        (st.working_image.width(), st.working_image.height())
+                    } else {
+                        preview_card_size(st.working_image.width(), st.working_image.height())
+                    };
                     let surface = st
                         .card_surface_from_source(&surface, layout.radius, width, height)
                         .ok()?;
-                    *self.card_cache.borrow_mut() = Some((
+                    *cache.borrow_mut() = Some((
                         st.working_image_revision,
                         st.actions.clone(),
                         layout.radius,
@@ -1152,7 +1198,9 @@ impl EditorHost {
                         f64::from(st.working_image.width()),
                         f64::from(st.working_image.height()),
                         pose,
-                        if live {
+                        if export {
+                            crate::capture::editor::transform_render::Quality::Export
+                        } else if live {
                             crate::capture::editor::transform_render::Quality::Live
                         } else {
                             crate::capture::editor::transform_render::Quality::Preview
@@ -1344,7 +1392,14 @@ impl EditorHost {
                         canvas_offset_y: 0.0,
                         ..t
                     };
-                    self.paint_document_inner(&base, local, None, MotionPaintPart::Base, false);
+                    self.paint_document_inner(
+                        &base,
+                        local,
+                        None,
+                        MotionPaintPart::Base,
+                        false,
+                        false,
+                    );
                 }
                 surface.flush();
                 #[cfg(test)]
@@ -1443,6 +1498,15 @@ impl EditorHost {
         // small zoom changes reuse the cache; never above 4096.
         let edge = ((layout.width.max(layout.height) * t.canvas_scale / 256.0).ceil() * 256.0)
             .clamp(256.0, 4096.0) as u32;
+        // An appearance slider changes the fill on every pointer event, and
+        // re-blurring a full-size raster each time made the drag lag. While
+        // live, a small raster stands in (the blur hides its resolution); the
+        // release misses the cache on size and repaints at full quality.
+        let edge = if live {
+            edge.min(LIVE_BACKGROUND_EDGE)
+        } else {
+            edge
+        };
         let key = (
             st.background.revision,
             st.working_image.width(),
@@ -1997,7 +2061,15 @@ impl EditorHost {
                 let Some(host) = host.upgrade() else {
                     return;
                 };
-                let refocus = host.with_state(finish_text_drag);
+                let refocus = host.with_state(|st| {
+                    // A click that never became a drag arms an arrow handle on
+                    // press but emits no drag end, so clear the stale handle
+                    // drag here.
+                    if st.drag_start_view.is_none() {
+                        st.arrow_control_dragging = None;
+                    }
+                    finish_text_drag(st)
+                });
                 if let Some(area) = area.upgrade() {
                     if refocus == Some(true) {
                         area.grab_focus();
@@ -2068,18 +2140,19 @@ impl EditorHost {
                 let now = glib::monotonic_time();
                 if now - host.last_redraw.get() >= DRAG_REDRAW_INTERVAL_US {
                     host.last_redraw.set(now);
-                    let effect_selected = host
+                    let live_bars = host
                         .read(|st| {
-                            matches!(
-                                st.selected_action(),
-                                Some(
-                                    AnnotationAction::Obfuscate { .. }
-                                        | AnnotationAction::Focus { .. }
+                            st.selected_tool == Tool::Crop
+                                || matches!(
+                                    st.selected_action(),
+                                    Some(
+                                        AnnotationAction::Obfuscate { .. }
+                                            | AnnotationAction::Focus { .. }
+                                    )
                                 )
-                            )
                         })
                         .unwrap_or(false);
-                    if effect_selected {
+                    if live_bars {
                         host.changed();
                     } else {
                         area.queue_draw();
@@ -3004,16 +3077,19 @@ impl EditorHost {
 
     /// The flattened document for a Cloud upload. Commits inline text first
     /// and refuses while the background image is still loading, exactly like
-    /// Copy and Save As.
-    pub fn upload_snapshot(&self) -> Option<image::RgbaImage> {
+    /// Copy and Save As. A failed flatten carries its render error text so
+    /// the caller can report it instead of silently doing nothing.
+    pub fn upload_snapshot(&self) -> Result<image::RgbaImage, String> {
         if self.background_loading() {
-            self.report_error(crate::i18n::t(
+            return Err(crate::i18n::t(
                 "Wait for the background image to finish loading.",
             ));
-            return None;
         }
         self.commit_text_if_active();
-        self.with_state(|st| st.to_final_image().ok()).flatten()
+        match self.with_state(|st| st.to_final_image().map_err(|error| error.to_string())) {
+            Some(result) => result,
+            None => Err(crate::i18n::t("Could not render the image.")),
+        }
     }
 
     /// Save the flattened document with the platform file dialog handling
@@ -3382,6 +3458,25 @@ mod tests {
     }
 
     #[test]
+    fn re_arming_crop_leaves_crop_mode_and_discards_the_rect() {
+        let h = host();
+        let mut state = EditorState::new(RgbaImage::new(200, 100));
+        state.set_tool_without_rebuild(Tool::Crop);
+        state.crop_rect = Some(crate::capture::editor::types::Rect {
+            x: 10,
+            y: 10,
+            width: 50,
+            height: 40,
+        });
+        *h.editor.borrow_mut() = Some(state);
+
+        h.activate_tool(Tool::Crop);
+
+        assert_eq!(h.read(|st| st.selected_tool), Some(Tool::Select));
+        assert_eq!(h.read(|st| st.crop_rect), Some(None));
+    }
+
+    #[test]
     fn drag_annotation_cache_matches_direct_paint() {
         let host = host();
         let mut state = EditorState::new(RgbaImage::from_pixel(
@@ -3457,7 +3552,7 @@ mod tests {
         let render = |part: MotionPaintPart| {
             let mut surface = ImageSurface::create(gtk4::cairo::Format::ARgb32, 260, 200).unwrap();
             let context = gtk4::cairo::Context::new(&surface).unwrap();
-            host.paint_document_inner(&context, t, None, part, false);
+            host.paint_document_inner(&context, t, None, part, false, false);
             drop(context);
             surface.flush();
             let data = surface.data().unwrap().to_vec();
@@ -3534,7 +3629,7 @@ mod tests {
             });
             let mut surface = ImageSurface::create(gtk4::cairo::Format::ARgb32, 160, 120).unwrap();
             let context = gtk4::cairo::Context::new(&surface).unwrap();
-            host.paint_document_inner(&context, t, None, MotionPaintPart::Complete, false);
+            host.paint_document_inner(&context, t, None, MotionPaintPart::Complete, false, false);
             drop(context);
             surface.flush();
             let data = surface.data().unwrap().to_vec();

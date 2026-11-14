@@ -4758,3 +4758,13 @@ msgstr "导出时间"
 
 msgid "Resolution"
 msgstr "分辨率"
+
+msgid "Exporting {percent}%"
+msgstr "正在导出 {percent}%"
+
+msgid "Export cancelled"
+msgstr "导出已取消"
+
+
+msgid "Could not render the image."
+msgstr "无法渲染图像。"

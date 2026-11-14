@@ -239,11 +239,15 @@ impl EditorState {
             }
 
             if let Some(b) = bounds {
+                // Clamp against the canvas (background padding included), the
+                // same bounds a new box is placed in, so text typed on the
+                // padding stays there instead of jumping into the screenshot.
+                let (min_x, min_y, max_x, max_y) = self.annotation_canvas_bounds();
                 let position = Point {
                     x: b.rect.x as f64,
                     y: (b.rect.y as f64 + self.text_size + 8.0).clamp(
-                        self.text_size + 8.0,
-                        (self.base_image.height() as f64 - 8.0).max(self.text_size + 8.0),
+                        min_y + self.text_size + 8.0,
+                        (max_y - 8.0).max(min_y + self.text_size + 8.0),
                     ),
                 };
                 let font = FontSettings {
@@ -254,18 +258,16 @@ impl EditorState {
                     alignment: TextAlignment::Left,
                 };
                 let clamped_position = Point {
-                    x: position.x.clamp(
-                        0.0,
-                        (self.base_image.width() as f64 - font.size * 1.8).max(0.0),
-                    ),
+                    x: position
+                        .x
+                        .clamp(min_x, (max_x - font.size * 1.8).max(min_x)),
                     y: position.y.clamp(
-                        font.size,
-                        (self.base_image.height() as f64 - font.size * 0.5).max(font.size),
+                        min_y + font.size + 8.0,
+                        (max_y - 8.0).max(min_y + font.size + 8.0),
                     ),
                 };
-                let clamped_width = (b.rect.width as f64).min(
-                    (self.base_image.width() as f64 - clamped_position.x).max(font.size * 1.8),
-                );
+                let clamped_width =
+                    (b.rect.width as f64).min((max_x - clamped_position.x).max(font.size * 1.8));
                 return Some(AnnotationAction::Text {
                     position: clamped_position,
                     text: trimmed_text,
