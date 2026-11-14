@@ -60,6 +60,7 @@ fn apply_color(host: &EditorHost, color: DrawColor) {
         st.selected_color = color;
         st.set_selected_action_color(color);
     });
+    host.remember_tool_color(color);
 }
 
 fn sync_selection(
