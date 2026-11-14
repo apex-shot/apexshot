@@ -1423,8 +1423,10 @@ fn wire_frame_tile(
         tile.connect_clicked(move |_| {
             let aspect = selection.selected.get().map(|_| aspect);
             host.mutate(|st| {
+                st.begin_history_interaction();
                 st.background.frame_aspect = aspect;
                 st.background.changed();
+                st.finish_history_interaction();
             });
         });
     }
@@ -2002,8 +2004,18 @@ fn build_source_pages(
             if let Some(painter) = state.custom_fill() {
                 host.cancel_background_load();
                 host.mutate(|st| {
+                    // A fresh painter arrives on every tweak and every reopen
+                    // of the page, so only the switch into the custom fill is
+                    // its own history step.
+                    let first_custom = !matches!(st.background.fill, Fill::Custom(_));
+                    if first_custom {
+                        st.begin_history_interaction();
+                    }
                     st.background.set_fill(Fill::Custom(painter));
                     st.background.changed();
+                    if first_custom {
+                        st.finish_history_interaction();
+                    }
                 });
             }
         }));
@@ -2100,8 +2112,10 @@ fn background_card(
             if let Some(host) = &host {
                 host.cancel_background_load();
                 host.mutate(|st| {
+                    st.begin_history_interaction();
                     st.background.fill = Fill::None;
                     st.background.changed();
+                    st.finish_history_interaction();
                 });
             }
         }
