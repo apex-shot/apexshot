@@ -424,11 +424,65 @@ pub(super) fn install_css() {
             box-shadow: 0 {shadow_y}px {shadow_blur}px alpha(black, 0.3);
         }}
         .video-export-screen {{ background: #0f0f0f; border-radius: 11px; }}
-        .video-export-heading {{ font-weight: 500; }}
         .video-export-dialog-title {{ font-size: {dialog_title}px; font-weight: 600; }}
         .video-export-muted {{ color: #858585; font-size: {small}px; }}
+        .video-export-eyebrow {{ color: #8a8a8a; font-size: {eyebrow}px; font-weight: 600; letter-spacing: {eyebrow_spacing}px; }}
+        .video-export-segments {{ background: alpha(white, 0.05); border-radius: {seg_radius}px; padding: {seg_pad}px; }}
+        .video-export-options button.video-export-segment {{
+            background: transparent;
+            background-image: none;
+            color: #a3a3a3;
+            border: none;
+            border-radius: {seg_inner_radius}px;
+            box-shadow: none;
+            text-shadow: none;
+            min-height: {seg_height}px;
+            padding: 0 {seg_button_pad}px;
+            font-size: {font}px;
+            font-weight: 500;
+        }}
+        .video-export-options button.video-export-segment.video-export-segment-tall {{ min-height: {seg_tall_height}px; padding: {seg_tall_pad}px {seg_button_pad}px; }}
+        .video-export-options button.video-export-segment:hover {{ color: #e8e8e8; background: alpha(white, 0.04); }}
+        .video-export-options button.video-export-segment:checked {{ color: #ffffff; background: #3d3d3d; box-shadow: 0 1px 2px alpha(black, 0.35); }}
+        .video-export-segment-title {{ font-weight: 600; }}
+        .video-export-segment-sub {{ font-size: {tiny}px; font-weight: 500; opacity: 0.6; }}
+        .video-export-toggle-card {{
+            background: alpha(white, 0.04);
+            border: 1px solid alpha(white, 0.06);
+            border-radius: {panel_radius}px;
+            padding: {panel_pad_y}px {panel_pad_x}px;
+        }}
+        .video-export-toggle-title {{ font-weight: 500; }}
+        .video-export-options switch.video-export-switch {{
+            min-width: {switch_width}px;
+            min-height: {switch_height}px;
+            padding: 0;
+            background: alpha(white, 0.14);
+            background-image: none;
+            border: none;
+            border-radius: 999px;
+            box-shadow: none;
+        }}
+        .video-export-options switch.video-export-switch slider {{
+            min-width: {knob}px;
+            min-height: {knob}px;
+            margin: {knob_margin}px;
+            background: #ffffff;
+            background-image: none;
+            border: none;
+            border-radius: 999px;
+            box-shadow: 0 1px 2px alpha(black, 0.3);
+        }}
+        .video-export-options switch.video-export-switch:checked {{ background: #ff670d; }}
+        .video-export-options switch.video-export-switch:focus-visible {{ outline: 2px solid #ff7c2f; outline-offset: 2px; }}
+        .video-export-summary {{
+            border: 1px solid alpha(white, 0.08);
+            border-radius: {panel_radius}px;
+            padding: {panel_pad_y}px {panel_pad_x}px;
+        }}
+        .video-export-summary-label {{ color: #8a8a8a; font-size: {small}px; }}
+        .video-export-summary-value {{ color: #e8e8e8; font-size: {small}px; font-weight: 500; font-feature-settings: "tnum"; }}
         .video-export-options button.video-export-action,
-        .video-export-options button.video-export-preset,
         .video-export-options button.video-export-close,
         .video-export-screen button {{
             background: #202020;
@@ -448,9 +502,6 @@ pub(super) fn install_css() {
         .video-export-screen button:hover {{ background: #292929; }}
         .video-export-options button:focus-visible, .video-export-screen button:focus-visible {{ outline: 2px solid #ff7c2f; outline-offset: 2px; }}
         .video-export-options button.video-export-action {{ min-height: {action_height}px; }}
-        .video-export-options button.video-export-preset {{ background: alpha(white, 0.04); }}
-        .video-export-options button.video-export-preset:hover {{ background: alpha(white, 0.08); }}
-        .video-export-options button.video-export-preset:checked {{ color: #ff995c; background: alpha(#ff670d, 0.16); }}
         .video-export-options button.video-export-close {{
             background: transparent;
             min-width: {close_size}px;
@@ -458,18 +509,6 @@ pub(super) fn install_css() {
             padding: 0;
             color: #999999;
         }}
-        .video-export-options button.settings-select {{
-            background: alpha(white, 0.06);
-            color: #f1f1f3;
-            border: none;
-            border-radius: {button_radius}px;
-            box-shadow: none;
-            min-height: {select_height}px;
-            padding: {select_pad}px 10px;
-        }}
-        .video-export-options button.settings-select label {{ font-size: {font}px; }}
-        .video-export-options button.settings-select:hover {{ background: alpha(white, 0.10); }}
-        .video-export-options button.settings-select:active {{ background: alpha(white, 0.12); }}
         .video-export-options button.video-export-primary,
         .video-export-screen button.video-export-primary {{ background: #ff670d; color: #ffffff; }}
         .video-export-options button.video-export-primary:hover,
@@ -504,18 +543,23 @@ pub(super) fn install_css() {
         .editor-theme-light .video-export-options {{ background: #ffffff; color: #202020; }}
         .editor-theme-light .video-export-screen {{ background: #f6f6f6; color: #202020; }}
         .editor-theme-light .video-export-muted {{ color: #737373; }}
+        .editor-theme-light .video-export-eyebrow {{ color: #737373; }}
+        .editor-theme-light .video-export-segments {{ background: alpha(#111827, 0.06); }}
+        .editor-theme-light .video-export-options button.video-export-segment {{ color: #5c5c5c; }}
+        .editor-theme-light .video-export-options button.video-export-segment:hover {{ color: #202020; background: alpha(#111827, 0.04); }}
+        .editor-theme-light .video-export-options button.video-export-segment:checked {{ color: #17202a; background: #ffffff; box-shadow: 0 1px 3px alpha(black, 0.12); }}
+        .editor-theme-light .video-export-toggle-card {{ background: alpha(#111827, 0.03); border-color: alpha(#111827, 0.08); }}
+        .editor-theme-light .video-export-options switch.video-export-switch {{ background: alpha(#111827, 0.16); }}
+        .editor-theme-light .video-export-options switch.video-export-switch:checked {{ background: #ff670d; }}
+        .editor-theme-light .video-export-summary {{ border-color: alpha(#111827, 0.10); }}
+        .editor-theme-light .video-export-summary-label {{ color: #737373; }}
+        .editor-theme-light .video-export-summary-value {{ color: #202020; }}
         .editor-theme-light .video-export-options button.video-export-action,
         .editor-theme-light .video-export-screen button {{ background: #eeeeee; color: #454545; }}
         .editor-theme-light .video-export-options button.video-export-action:hover,
         .editor-theme-light .video-export-screen button:hover {{ background: #e5e5e5; }}
-        .editor-theme-light .video-export-options button.video-export-preset {{ background: alpha(#111827, 0.04); color: #454545; }}
-        .editor-theme-light .video-export-options button.video-export-preset:hover {{ background: alpha(#111827, 0.08); }}
-        .editor-theme-light .video-export-options button.video-export-preset:checked {{ color: #b74809; background: alpha(#ff670d, 0.12); }}
         .editor-theme-light .video-export-options button.video-export-close {{ background: transparent; color: #737373; }}
         .editor-theme-light .video-export-options button.video-export-close:hover {{ background: alpha(#111827, 0.06); }}
-        .editor-theme-light .video-export-options button.settings-select {{ background: #ffffff; color: #17202a; }}
-        .editor-theme-light .video-export-options button.settings-select:hover {{ background: #f8fafc; }}
-        .editor-theme-light .video-export-options button.settings-select:active {{ background: #f1f5f9; }}
         .editor-theme-light .video-export-options button.video-export-primary,
         .editor-theme-light .video-export-screen button.video-export-primary {{ background: #ff670d; color: white; }}
         .editor-theme-light .video-export-destination {{ background: #eeeeee; color: #666666; border-color: alpha(black, 0.08); }}
@@ -529,12 +573,27 @@ pub(super) fn install_css() {
         small = 13.0 * scale,
         title = 15.0 * scale,
         dialog_title = 18.0 * scale,
+        tiny = 11.0 * scale,
+        eyebrow = 11.0 * scale,
+        eyebrow_spacing = 0.8 * scale,
+        seg_radius = px(9.0),
+        seg_pad = px(3.0),
+        seg_inner_radius = px(7.0),
+        seg_height = px(32.0),
+        seg_tall_height = px(46.0),
+        seg_tall_pad = px(5.0),
+        seg_button_pad = px(8.0),
+        panel_radius = px(10.0),
+        panel_pad_y = px(12.0),
+        panel_pad_x = px(14.0),
+        switch_width = px(36.0),
+        switch_height = px(20.0),
+        knob = px(16.0),
+        knob_margin = px(2.0),
         radius = px(14.0),
         pad = px(26.0),
         close_size = px(30.0),
         action_height = px(36.0),
-        select_height = px(26.0),
-        select_pad = px(1.0),
         shadow_y = px(12.0),
         shadow_blur = px(36.0),
         button_radius = px(5.0),

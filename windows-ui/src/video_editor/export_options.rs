@@ -3,13 +3,11 @@
 use super::export::rate;
 use super::export::{Codec, ExportModel, ExportSettings};
 use crate::capture::editor::window::icon_names::custom;
-use crate::i18n::{t, tfmt};
-use crate::settings::select::SettingsSelect;
+use crate::i18n::t;
 use crate::settings::ui_support::{window_control_button, WindowControl};
 use gtk4::prelude::*;
 use gtk4::{
-    gdk, Align, Box as GtkBox, Button, CheckButton, Grid, Image, Label, Orientation, Overlay,
-    ToggleButton,
+    gdk, Align, Box as GtkBox, Button, Image, Label, Orientation, Overlay, Switch, ToggleButton,
 };
 use std::cell::Cell;
 use std::rc::Rc;
@@ -17,25 +15,35 @@ use std::rc::Rc;
 const QUALITIES: [(u32, &str, &str); 4] = [
     (
         14,
-        "Studio",
-        "Highest quality, best for further editing. Produces larger files.",
+        "Maximum",
+        "Near-lossless. Best for archiving or editing further, with the largest files.",
     ),
     (
         24,
-        "Social Media",
-        "High quality with a smaller file, ready to share.",
+        "High",
+        "Sharp detail at a moderate size. A good default for sharing.",
     ),
     (
         30,
-        "Web",
-        "A balanced file size for websites and everyday sharing.",
+        "Balanced",
+        "Smaller files for websites, docs, and chat, with little visible loss.",
     ),
     (
         42,
-        "Web (Low)",
-        "The smallest file, with more visible compression.",
+        "Compact",
+        "The smallest files. Fine detail and small text may soften.",
     ),
 ];
+
+/// Short-edge targets; `None` keeps the frame's own size.
+const RESOLUTIONS: [(Option<u32>, &str, &str); 4] = [
+    (None, "Original", ""),
+    (Some(720), "HD", "720p"),
+    (Some(1080), "FHD", "1080p"),
+    (Some(2160), "4K", "2160p"),
+];
+
+const FRAME_RATES: [Option<u32>; 4] = [None, Some(60), Some(30), Some(24)];
 
 pub(super) fn show(
     shell: &Overlay,
@@ -56,200 +64,189 @@ pub(super) fn show(
     scrim.add_css_class("video-export-scrim");
     scrim.set_hexpand(true);
     scrim.set_vexpand(true);
-    let card = GtkBox::new(Orientation::Vertical, px(24.0));
+    let card = GtkBox::new(Orientation::Vertical, px(20.0));
     card.add_css_class("video-export-options");
     card.set_halign(Align::Center);
     card.set_valign(Align::Center);
-    card.set_width_request(px(560.0));
+    card.set_width_request(px(580.0));
 
     let header = GtkBox::new(Orientation::Horizontal, px(12.0));
     let icon = Image::from_icon_name(themed_icon(custom::VIDEO, custom::VIDEO_LIGHT));
     icon.set_pixel_size(px(24.0));
     icon.set_valign(Align::Center);
-    let heading = GtkBox::new(Orientation::Vertical, px(4.0));
-    heading.set_hexpand(true);
     let title = Label::new(Some(&t("Export video")));
     title.add_css_class("video-export-dialog-title");
     title.set_xalign(0.0);
-    let format = Label::new(Some("MP4 · H.264"));
-    format.add_css_class("video-export-muted");
-    format.set_xalign(0.0);
-    heading.append(&title);
-    heading.append(&format);
+    title.set_hexpand(true);
+    title.set_valign(Align::Center);
     let close = window_control_button(WindowControl::Close, &t("Close export options"), scale);
     close.remove_css_class("caption-btn");
     close.remove_css_class("caption-btn-close");
     close.add_css_class("video-export-close");
     close.set_focusable(true);
     close.set_size_request(px(30.0), px(30.0));
-    close.set_valign(Align::Start);
+    close.set_valign(Align::Center);
     header.append(&icon);
-    header.append(&heading);
+    header.append(&title);
     header.append(&close);
 
-    let fields = Grid::new();
-    fields.set_column_homogeneous(true);
-    fields.set_column_spacing(px(24.0) as u32);
-    let size_group = group(
-        "Output size",
-        themed_icon(custom::PANELS_TOP_LEFT, custom::PANELS_TOP_LEFT_LIGHT),
-        scale,
-    );
-    let sizes = SettingsSelect::new(
-        [
-            ("original", t("Original")),
-            ("720", "720p".into()),
-            ("1080", "1080p".into()),
-            ("2160", "4K".into()),
-        ],
-        "original",
-    );
-    sizes.widget().set_hexpand(true);
-    sizes.connect_changed({
-        let sizes = sizes.clone();
-        let settings = settings.clone();
-        move || {
-            let resolution = sizes.active_id().and_then(|id| id.parse().ok());
-            settings.set(ExportSettings {
-                resolution,
-                ..settings.get()
-            });
-        }
-    });
-    let dimensions = Label::new(None);
-    dimensions.add_css_class("video-export-muted");
-    dimensions.set_xalign(0.0);
-    size_group.append(sizes.widget());
-    size_group.append(&dimensions);
+    let base = model
+        .stage
+        .filter(|_| model.webcam.is_some())
+        .unwrap_or(model.source_size);
+    let frame_size = model.canvas.as_ref().map_or(base, |canvas| canvas.size);
 
-    let fps_group = group(
-        "Frame rate",
-        themed_icon(custom::CLAPPERBOARD, custom::CLAPPERBOARD_LIGHT),
-        scale,
-    );
+    let original_edge = frame_size.0.min(frame_size.1);
+    let resolution_options: Vec<(String, String)> = RESOLUTIONS
+        .iter()
+        .map(|(edge, title, detail)| match edge {
+            None => (t(title), format!("{original_edge}p")),
+            Some(_) => ((*title).to_string(), (*detail).to_string()),
+        })
+        .collect();
+    let (resolution_track, resolution_buttons) = segmented(&resolution_options, 0, scale);
+    for (button, (edge, _, _)) in resolution_buttons.iter().zip(RESOLUTIONS) {
+        let settings = settings.clone();
+        button.connect_toggled(move |button| {
+            if button.is_active() {
+                settings.set(ExportSettings {
+                    resolution: edge,
+                    ..settings.get()
+                });
+            }
+        });
+    }
+    let resolution_section = section("Resolution", scale);
+    resolution_section.append(&resolution_track);
+
     let source_fps = crate::recording::editor::ffmpeg::probe_frame_rate(&model.source)
         .filter(|fps| fps.is_finite() && *fps > 0.0)
         .unwrap_or(30.0);
-    let source_label = format!("{} ({source_fps:.2} FPS)", t("Original"));
-    let fps = SettingsSelect::new(
-        [
-            ("original", source_label.as_str()),
-            ("60", "60 FPS"),
-            ("50", "50 FPS"),
-            ("30", "30 FPS"),
-            ("25", "25 FPS"),
-            ("24", "24 FPS"),
-            ("20", "20 FPS"),
-            ("10", "10 FPS"),
-        ],
-        "original",
-    );
-    fps.widget().set_hexpand(true);
-    fps.connect_changed({
-        let fps = fps.clone();
+    let fps_options: Vec<(String, String)> = FRAME_RATES
+        .iter()
+        .map(|rate| {
+            (
+                rate.map_or_else(|| t("Original"), |fps| fps.to_string()),
+                String::new(),
+            )
+        })
+        .collect();
+    let (fps_track, fps_buttons) = segmented(&fps_options, 0, scale);
+    fps_buttons[0].set_tooltip_text(Some(&fps_text(source_fps)));
+    for (button, rate) in fps_buttons.iter().zip(FRAME_RATES) {
         let settings = settings.clone();
-        move || {
-            let value = fps.active_id().and_then(|id| id.parse().ok());
-            settings.set(ExportSettings {
-                fps: value,
-                ..settings.get()
-            });
-        }
-    });
-    fps_group.append(fps.widget());
-    fields.attach(&size_group, 0, 0, 1, 1);
-    fields.attach(&fps_group, 1, 0, 1, 1);
+        button.connect_toggled(move |button| {
+            if button.is_active() {
+                settings.set(ExportSettings {
+                    fps: rate,
+                    ..settings.get()
+                });
+            }
+        });
+    }
+    let fps_section = section("Frame rate", scale);
+    fps_section.set_hexpand(true);
+    fps_section.append(&fps_track);
 
-    let codec_group = group(
-        "Codec",
-        themed_icon(custom::VIDEO, custom::VIDEO_LIGHT),
-        scale,
-    );
-    let codecs = SettingsSelect::new(
-        [("h264", "H.264".to_string()), ("hevc", "HEVC".to_string())],
-        "h264",
-    );
-    codecs.widget().set_hexpand(true);
-    let codec_note = Label::new(None);
+    let codec_options = [
+        ("H.264".to_string(), String::new()),
+        ("HEVC".to_string(), String::new()),
+    ];
+    let (codec_track, codec_buttons) = segmented(&codec_options, 0, scale);
+    for (button, codec) in codec_buttons.iter().zip([Codec::H264, Codec::Hevc]) {
+        let settings = settings.clone();
+        button.connect_toggled(move |button| {
+            if button.is_active() {
+                settings.set(ExportSettings {
+                    codec,
+                    ..settings.get()
+                });
+            }
+        });
+    }
+    let codec_section = section("Codec", scale);
+    codec_section.append(&codec_track);
+    let pickers_row = GtkBox::new(Orientation::Horizontal, px(16.0));
+    pickers_row.append(&fps_section);
+    pickers_row.append(&codec_section);
+    let codec_note = Label::new(Some(&t(
+        "Smaller files at the same quality, but not every app or browser plays HEVC.",
+    )));
     codec_note.add_css_class("video-export-muted");
     codec_note.set_xalign(0.0);
     codec_note.set_wrap(true);
-    codec_group.append(codecs.widget());
-    codec_group.append(&codec_note);
-    fields.attach(&codec_group, 0, 1, 1, 1);
+    codec_note.set_visible(false);
+    let pickers = GtkBox::new(Orientation::Vertical, px(8.0));
+    pickers.append(&pickers_row);
+    pickers.append(&codec_note);
 
-    let quality_group = group(
-        "Quality",
-        themed_icon(custom::SLIDERS_HORIZONTAL, custom::SLIDERS_HORIZONTAL_LIGHT),
-        scale,
-    );
-    let presets = GtkBox::new(Orientation::Horizontal, px(6.0));
-    presets.add_css_class("video-export-presets");
-    presets.set_homogeneous(true);
+    let quality_options: Vec<(String, String)> = QUALITIES
+        .iter()
+        .map(|(_, name, _)| (t(name), String::new()))
+        .collect();
+    let (quality_track, quality_buttons) = segmented(&quality_options, quality.get(), scale);
+    for (index, button) in quality_buttons.iter().enumerate() {
+        let quality = quality.clone();
+        button.connect_toggled(move |button| {
+            if button.is_active() {
+                quality.set(index);
+            }
+        });
+    }
     let description = Label::new(None);
     description.add_css_class("video-export-muted");
     description.set_xalign(0.0);
-    description.set_yalign(0.0);
     description.set_wrap(true);
-    description.set_height_request(px(28.0));
     description.set_max_width_chars(70);
-    let mut first_quality = None;
-    for (index, (_, name, _)) in QUALITIES.iter().enumerate() {
-        let button = ToggleButton::with_label(&t(name));
-        button.add_css_class("video-export-preset");
-        if let Some(first) = &first_quality {
-            button.set_group(Some(first));
-        } else {
-            first_quality = Some(button.clone());
-        }
-        button.set_active(index == quality.get());
-        button.connect_toggled({
-            let quality = quality.clone();
-            move |button| {
-                if button.is_active() {
-                    quality.set(index);
-                }
-            }
-        });
-        presets.append(&button);
-    }
-    quality_group.append(&presets);
-    quality_group.append(&description);
+    let quality_section = section("Quality", scale);
+    quality_section.append(&quality_track);
+    quality_section.append(&description);
 
-    let hardware = CheckButton::with_label(&t("Hardware acceleration"));
-    hardware.set_active(settings.get().hardware);
-    hardware.set_tooltip_text(Some(&t(
-        "Use the GPU encoder when one is available. Falls back to the CPU automatically.",
-    )));
-    hardware.connect_toggled({
-        let settings = settings.clone();
-        move |button| {
-            settings.set(ExportSettings {
-                hardware: button.is_active(),
-                ..settings.get()
-            });
-        }
-    });
-    quality_group.append(&hardware);
-    let hardware_note = Label::new(Some(&t(
+    let hardware_card = GtkBox::new(Orientation::Horizontal, px(14.0));
+    hardware_card.add_css_class("video-export-toggle-card");
+    hardware_card.set_tooltip_text(Some(&t(
         "Hardware encoding uses a bitrate, so file sizes follow the estimate; the software encoder uses a constant quality.",
+    )));
+    let hardware_text = GtkBox::new(Orientation::Vertical, px(3.0));
+    hardware_text.set_hexpand(true);
+    hardware_text.set_valign(Align::Center);
+    let hardware_title = Label::new(Some(&t("Hardware acceleration")));
+    hardware_title.add_css_class("video-export-toggle-title");
+    hardware_title.set_xalign(0.0);
+    let hardware_note = Label::new(Some(&t(
+        "Use the GPU encoder when one is available. Falls back to the CPU automatically.",
     )));
     hardware_note.add_css_class("video-export-muted");
     hardware_note.set_xalign(0.0);
     hardware_note.set_wrap(true);
-    quality_group.append(&hardware_note);
+    hardware_text.append(&hardware_title);
+    hardware_text.append(&hardware_note);
+    let hardware = Switch::new();
+    hardware.add_css_class("video-export-switch");
+    hardware.set_valign(Align::Center);
+    hardware.set_active(settings.get().hardware);
+    hardware.update_property(&[gtk4::accessible::Property::Label(&t(
+        "Hardware acceleration",
+    ))]);
+    hardware.connect_active_notify({
+        let settings = settings.clone();
+        move |switch| {
+            settings.set(ExportSettings {
+                hardware: switch.is_active(),
+                ..settings.get()
+            });
+        }
+    });
+    hardware_card.append(&hardware_text);
+    hardware_card.append(&hardware);
 
-    let footer = GtkBox::new(Orientation::Vertical, px(16.0));
-    let summary = GtkBox::new(Orientation::Vertical, px(4.0));
-    let estimate = Label::new(None);
-    estimate.add_css_class("video-export-muted");
-    estimate.set_xalign(0.0);
-    let timing = Label::new(None);
-    timing.add_css_class("video-export-muted");
-    timing.set_xalign(0.0);
-    timing.set_wrap(true);
-    summary.append(&estimate);
-    summary.append(&timing);
+    let summary = GtkBox::new(Orientation::Vertical, px(8.0));
+    summary.add_css_class("video-export-summary");
+    let output_value = summary_row(&summary, &t("Output"), scale);
+    let format_value = summary_row(&summary, &t("Format"), scale);
+    let size_value = summary_row(&summary, &t("Estimated size"), scale);
+    let time_value = summary_row(&summary, &t("Export time"), scale);
+
     let actions = GtkBox::new(Orientation::Horizontal, px(16.0));
     let save = Button::with_label(&t("Export to file"));
     save.add_css_class("video-export-action");
@@ -266,29 +263,29 @@ pub(super) fn show(
     actions.append(&copy);
     actions.append(&spacer);
     actions.append(&save);
-    footer.append(&summary);
-    footer.append(&actions);
     card.append(&header);
-    card.append(&fields);
-    card.append(&quality_group);
-    card.append(&footer);
+    card.append(&resolution_section);
+    card.append(&pickers);
+    card.append(&quality_section);
+    card.append(&hardware_card);
+    card.append(&summary);
+    card.append(&actions);
 
-    let source_size = model.source_size;
-    let frame_size = model
-        .canvas
-        .as_ref()
-        .map_or(model.source_size, |canvas| canvas.size);
     let seconds = (model.trim_end - model.trim_start).max(0.0);
     let update: Rc<dyn Fn()> = Rc::new({
         let settings = settings.clone();
         let quality = quality.clone();
         move || {
             let selected = settings.get();
-            let (width, height) = selected.dimensions(source_size);
-            dimensions.set_text(&format!("{width} × {height} px"));
-            description.set_text(&t(QUALITIES[quality.get()].2));
             let output = selected.dimensions(frame_size);
             let fps = selected.fps.map_or(source_fps, f64::from);
+            output_value.set_text(&format!("{} × {} · {}", output.0, output.1, fps_text(fps)));
+            format_value.set_text(match selected.codec {
+                Codec::H264 => "MP4 · H.264",
+                Codec::Hevc => "MP4 · HEVC",
+            });
+            codec_note.set_visible(selected.codec == Codec::Hevc);
+            description.set_text(&t(QUALITIES[quality.get()].2));
             let crf = QUALITIES[quality.get()].0;
             let (bps, spread) = match selected.codec {
                 Codec::H264 => (
@@ -306,52 +303,23 @@ pub(super) fn show(
             } else {
                 format!("{} – {}", rate::format_bytes(low), rate::format_bytes(high))
             };
-            estimate.set_text(&tfmt("Estimated output size: {size}", &[("size", &size)]));
-            timing.set_text(&tfmt(
-                "Export time ≈ {time}",
-                &[(
-                    "time",
-                    &rate::format_duration(rate::export_seconds(output, fps, seconds)),
-                )],
+            size_value.set_text(&size);
+            time_value.set_text(&format!(
+                "≈ {}",
+                rate::format_duration(rate::export_seconds(output, fps, seconds))
             ));
         }
     });
     update();
-    let mut child = presets.first_child();
-    while let Some(widget) = child {
-        if let Some(button) = widget.downcast_ref::<ToggleButton>() {
-            let update = update.clone();
-            button.connect_toggled(move |_| update());
-        }
-        child = widget.next_sibling();
+    for button in resolution_buttons
+        .iter()
+        .chain(&fps_buttons)
+        .chain(&codec_buttons)
+        .chain(&quality_buttons)
+    {
+        let update = update.clone();
+        button.connect_toggled(move |_| update());
     }
-    sizes.connect_changed({
-        let update = update.clone();
-        move || update()
-    });
-    codecs.connect_changed({
-        let codecs = codecs.clone();
-        let settings = settings.clone();
-        let format = format.clone();
-        let codec_note = codec_note.clone();
-        let update = update.clone();
-        move || {
-            let hevc = codecs.active_id().as_deref() == Some("hevc");
-            settings.set(ExportSettings {
-                codec: if hevc { Codec::Hevc } else { Codec::H264 },
-                ..settings.get()
-            });
-            format.set_text(if hevc { "MP4 · HEVC" } else { "MP4 · H.264" });
-            let note = if hevc {
-                t("Smaller files at the same quality, but not every app or browser plays HEVC.")
-            } else {
-                String::new()
-            };
-            codec_note.set_text(&note);
-            update();
-        }
-    });
-    fps.connect_changed(move || update());
 
     if let Some(editor) = shell.child() {
         editor.set_sensitive(false);
@@ -403,18 +371,79 @@ pub(super) fn show(
     save.grab_focus();
 }
 
-fn group(title: &str, icon: &str, scale: f64) -> GtkBox {
-    let group = GtkBox::new(Orientation::Vertical, (8.0 * scale).round() as i32);
-    group.set_valign(Align::Start);
-    let heading = GtkBox::new(Orientation::Horizontal, (7.0 * scale).round() as i32);
-    let image = Image::from_icon_name(icon);
-    image.set_pixel_size((16.0 * scale).round() as i32);
-    let label = Label::new(Some(&t(title)));
-    label.add_css_class("video-export-heading");
-    heading.append(&image);
-    heading.append(&label);
-    group.append(&heading);
-    group
+fn section(title: &str, scale: f64) -> GtkBox {
+    let section = GtkBox::new(Orientation::Vertical, (8.0 * scale).round() as i32);
+    section.set_valign(Align::Start);
+    let label = Label::new(Some(&t(title).to_uppercase()));
+    label.add_css_class("video-export-eyebrow");
+    label.set_xalign(0.0);
+    section.append(&label);
+    section
+}
+
+/// One row of mutually exclusive choices; a non-empty detail adds a second,
+/// smaller line under the title.
+fn segmented(
+    options: &[(String, String)],
+    active: usize,
+    scale: f64,
+) -> (GtkBox, Vec<ToggleButton>) {
+    let track = GtkBox::new(Orientation::Horizontal, (4.0 * scale).round() as i32);
+    track.add_css_class("video-export-segments");
+    track.set_homogeneous(true);
+    let mut buttons: Vec<ToggleButton> = Vec::with_capacity(options.len());
+    for (index, (title, detail)) in options.iter().enumerate() {
+        let button = ToggleButton::new();
+        button.add_css_class("video-export-segment");
+        if detail.is_empty() {
+            button.set_label(title);
+        } else {
+            button.add_css_class("video-export-segment-tall");
+            let lines = GtkBox::new(Orientation::Vertical, (1.0 * scale).round() as i32);
+            lines.set_halign(Align::Center);
+            lines.set_valign(Align::Center);
+            let heading = Label::new(Some(title));
+            heading.add_css_class("video-export-segment-title");
+            let sub = Label::new(Some(detail));
+            sub.add_css_class("video-export-segment-sub");
+            lines.append(&heading);
+            lines.append(&sub);
+            button.set_child(Some(&lines));
+            button.update_property(&[gtk4::accessible::Property::Label(&format!(
+                "{title} {detail}"
+            ))]);
+        }
+        if let Some(first) = buttons.first() {
+            button.set_group(Some(first));
+        }
+        button.set_active(index == active);
+        track.append(&button);
+        buttons.push(button);
+    }
+    (track, buttons)
+}
+
+fn summary_row(summary: &GtkBox, label: &str, scale: f64) -> Label {
+    let row = GtkBox::new(Orientation::Horizontal, (12.0 * scale).round() as i32);
+    let name = Label::new(Some(label));
+    name.add_css_class("video-export-summary-label");
+    name.set_xalign(0.0);
+    name.set_hexpand(true);
+    let value = Label::new(None);
+    value.add_css_class("video-export-summary-value");
+    value.set_xalign(1.0);
+    row.append(&name);
+    row.append(&value);
+    summary.append(&row);
+    value
+}
+
+fn fps_text(fps: f64) -> String {
+    if (fps - fps.round()).abs() < 0.01 {
+        format!("{} FPS", fps.round() as u32)
+    } else {
+        format!("{fps:.2} FPS")
+    }
 }
 
 #[cfg(test)]
@@ -435,7 +464,7 @@ mod tests {
     }
 
     #[test]
-    fn settings_pickers_forward_the_choices_to_both_export_actions() {
+    fn segmented_choices_forward_the_settings_to_both_export_actions() {
         let Some(()) = crate::test_support::with_gtk(|| {
             for clipboard in [false, true] {
                 let shell = Overlay::new();
@@ -470,17 +499,44 @@ mod tests {
                     }),
                 );
                 assert!(!editor.is_sensitive());
-                let pickers = widgets_with_class(shell.upcast_ref(), "settings-select");
-                assert_eq!(pickers.len(), 3);
-                for (picker, expected) in pickers.iter().zip([4, 8, 2]) {
-                    let options = widgets_with_class(picker, "history-action-btn");
-                    assert_eq!(options.len(), expected);
-                    options[1]
+                let tracks = widgets_with_class(shell.upcast_ref(), "video-export-segments");
+                assert_eq!(tracks.len(), 4);
+                for (track, expected) in tracks.iter().zip([4, 4, 2, 4]) {
+                    let segments = widgets_with_class(track, "video-export-segment");
+                    assert_eq!(segments.len(), expected);
+                    segments[1]
                         .clone()
-                        .downcast::<Button>()
+                        .downcast::<ToggleButton>()
                         .unwrap()
-                        .emit_clicked();
+                        .set_active(true);
                 }
+                let names: Vec<String> = widgets_with_class(&tracks[3], "video-export-segment")
+                    .into_iter()
+                    .map(|segment| {
+                        segment
+                            .downcast::<ToggleButton>()
+                            .unwrap()
+                            .label()
+                            .unwrap_or_default()
+                            .to_string()
+                    })
+                    .collect();
+                assert_eq!(names, QUALITIES.map(|(_, name, _)| t(name)));
+                let values: Vec<String> =
+                    widgets_with_class(shell.upcast_ref(), "video-export-summary-value")
+                        .into_iter()
+                        .map(|value| value.downcast::<Label>().unwrap().text().to_string())
+                        .collect();
+                assert_eq!(values.len(), 4);
+                assert_eq!(values[0], "1280 × 720 · 60 FPS");
+                assert_eq!(values[1], "MP4 · HEVC");
+                let hardware = widgets_with_class(shell.upcast_ref(), "video-export-switch")
+                    .pop()
+                    .unwrap()
+                    .downcast::<Switch>()
+                    .unwrap();
+                assert!(hardware.is_active());
+                hardware.set_active(false);
                 let actions = widgets_with_class(shell.upcast_ref(), "video-export-action");
                 assert_eq!(actions.len(), 2);
                 assert!(!actions[0].has_css_class("video-export-primary"));
@@ -497,6 +553,7 @@ mod tests {
                 assert_eq!(settings.resolution, Some(720));
                 assert_eq!(settings.fps, Some(60));
                 assert_eq!(settings.codec, Codec::Hevc);
+                assert!(!settings.hardware);
                 assert_eq!(crf, 24);
                 assert_eq!(copied, clipboard);
                 assert!(editor.is_sensitive());

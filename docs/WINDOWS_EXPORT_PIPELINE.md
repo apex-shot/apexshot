@@ -156,7 +156,7 @@ encoder gets a bitrate from the tier's bits per pixel (0.3, 0.05, 0.0175,
 
 ## Policy
 
-- The export dialog has a **Hardware acceleration** checkbox, on by default.
+- The export dialog has a **Hardware acceleration** switch, on by default.
   Turning it off forces `libx264`.
 - `APEXSHOT_EXPORT_HARDWARE=0` forces software encoding without changing the
   dialog. This is the recovery switch for a driver whose encoder passes the
@@ -173,7 +173,7 @@ encoder gets a bitrate from the tier's bits per pixel (0.3, 0.05, 0.0175,
 
 Unlike the Linux editor, Windows selects hardware automatically. The quality
 caveat is the same: a CRF tier is passed to hardware encoders as a quantizer,
-and that mapping is not validated across vendors and drivers. The checkbox is
+and that mapping is not validated across vendors and drivers. The switch is
 the escape hatch for a user who compares outputs.
 
 ## Machines without a strong GPU

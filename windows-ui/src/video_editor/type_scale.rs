@@ -136,12 +136,12 @@ const VIDEO_EDITOR_TYPE_CSS: &str = r#"
             font-size: 13px;
         }
         .video-editor-root .video-export-options button.video-export-action,
-        .video-editor-root .video-export-options button.video-export-preset,
         .video-editor-root .video-export-options button.video-export-close,
         .video-editor-root .video-export-screen button,
         .video-editor-root .video-export-screen button.video-export-stop,
-        .video-editor-root .video-export-options button.settings-select,
-        .video-editor-root .video-export-options button.settings-select label {
+        .video-editor-root .video-export-options button.video-export-segment,
+        .video-editor-root .video-export-segment-title,
+        .video-editor-root .video-export-toggle-title {
             font-size: 14px;
         }
         .video-editor-root .video-export-destination {
@@ -149,6 +149,14 @@ const VIDEO_EDITOR_TYPE_CSS: &str = r#"
         }
         .video-editor-root .video-export-progress-title {
             font-size: 15px;
+        }
+        .video-editor-root .video-export-eyebrow,
+        .video-editor-root .video-export-segment-sub {
+            font-size: 11px;
+        }
+        .video-editor-root .video-export-summary-label,
+        .video-editor-root .video-export-summary-value {
+            font-size: 13px;
         }
 
         /* Popovers and menus */
