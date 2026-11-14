@@ -563,7 +563,10 @@ fn is_temporary_capture(path: &Path) -> bool {
         return false;
     };
     let temporary = std::env::temp_dir().join("ApexShot");
-    match (std::fs::canonicalize(parent), std::fs::canonicalize(temporary)) {
+    match (
+        std::fs::canonicalize(parent),
+        std::fs::canonicalize(temporary),
+    ) {
         (Ok(parent), Ok(temporary)) => parent == temporary,
         _ => false,
     }
