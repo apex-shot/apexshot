@@ -22,6 +22,24 @@ impl EditorState {
         let mut base = (*self.base_image).clone();
         super::effects::apply_effect_actions(&mut base, &self.actions);
         self.render_from_working(&base, &self.background, true)
+            .map(|image| self.fit_frame_size(image))
+    }
+
+    /// A platform frame preset exports at its exact pixels. The composed
+    /// canvas already has the preset's aspect, so this is one uniform scale.
+    fn fit_frame_size(&self, image: RgbaImage) -> RgbaImage {
+        let background = &self.background;
+        let Some((width, height)) = background
+            .frame_size
+            .filter(|_| background.frame_aspect.is_some())
+            .filter(|&(width, height)| width > 0 && height > 0)
+        else {
+            return image;
+        };
+        if image.dimensions() == (width, height) {
+            return image;
+        }
+        image::imageops::resize(&image, width, height, image::imageops::FilterType::Lanczos3)
     }
 
     fn render_from_working(
@@ -174,6 +192,19 @@ impl EditorState {
             self.static_image_transform,
             self.uses_studio_style(),
         )
+    }
+
+    /// The pixels the export file will have: a platform frame preset's
+    /// fixed size, else the composed canvas.
+    pub(crate) fn export_dimensions(&self) -> (u32, u32) {
+        match self.background.frame_size {
+            Some(size) if self.background.frame_aspect.is_some() => size,
+            _ => {
+                let (width, height) = self.working_image.dimensions();
+                let layout = self.background.layout(width, height);
+                (layout.width.ceil() as u32, layout.height.ceil() as u32)
+            }
+        }
     }
 
     /// The final export image. Always flattens `base + actions` so a pending

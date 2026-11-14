@@ -1073,40 +1073,45 @@ const FRAME_RATIOS: [(&str, FrameRatio, &str); 9] = [
     ("9:16", FrameRatio::new(9, 16), "Vertical 9:16 output"),
 ];
 
-/// The tiles of one social section: name, drawn aspect, ratio sublabel.
-type SocialTiles = &'static [(&'static str, FrameRatio, &'static str)];
+/// One platform preset: name, aspect, ratio label, and the exact pixels the
+/// platform asks for. Presets sharing an aspect (YouTube's three are all
+/// 16:9) draw the same shape; their export size is what tells them apart.
+type SocialTile = (&'static str, FrameRatio, &'static str, (u32, u32));
 
-/// One social preset row: name, drawn aspect, and the ratio sublabel.
+/// The tiles of one social section.
+type SocialTiles = &'static [SocialTile];
+
+/// The platform preset rows, sized the way the Linux editor's presets are.
 const SOCIAL_SECTIONS: [(&str, SocialTiles); 4] = [
     (
         "Instagram",
         &[
-            ("Post", FrameRatio::new(1, 1), "1:1"),
-            ("Portrait", FrameRatio::new(4, 5), "4:5"),
-            ("Story", FrameRatio::new(9, 16), "9:16"),
+            ("Post", FrameRatio::new(1, 1), "1:1", (1080, 1080)),
+            ("Portrait", FrameRatio::new(4, 5), "4:5", (1080, 1350)),
+            ("Story", FrameRatio::new(9, 16), "9:16", (1080, 1920)),
         ],
     ),
     (
         "Twitter",
         &[
-            ("Tweet", FrameRatio::new(16, 9), "16:9"),
-            ("Cover", FrameRatio::new(3, 1), "3:1"),
+            ("Tweet", FrameRatio::new(16, 9), "16:9", (1200, 675)),
+            ("Cover", FrameRatio::new(3, 1), "3:1", (1500, 500)),
         ],
     ),
     (
         "YouTube",
         &[
-            ("Banner", FrameRatio::new(16, 9), "16:9"),
-            ("Thumbnail", FrameRatio::new(16, 9), "16:9"),
-            ("Video", FrameRatio::new(16, 9), "16:9"),
+            ("Banner", FrameRatio::new(16, 9), "16:9", (2560, 1440)),
+            ("Thumbnail", FrameRatio::new(16, 9), "16:9", (1280, 720)),
+            ("Video", FrameRatio::new(16, 9), "16:9", (1920, 1080)),
         ],
     ),
     (
         "Pinterest",
         &[
-            ("Long", FrameRatio::new(10, 21), "10:21"),
-            ("Optimal", FrameRatio::new(2, 3), "2:3"),
-            ("Square", FrameRatio::new(1, 1), "1:1"),
+            ("Long", FrameRatio::new(10, 21), "10:21", (1000, 2100)),
+            ("Optimal", FrameRatio::new(2, 3), "2:3", (1000, 1500)),
+            ("Square", FrameRatio::new(1, 1), "1:1", (1000, 1000)),
         ],
     ),
 ];
@@ -1223,7 +1228,7 @@ fn frame_disclosure(scale: f64, host: Option<&Rc<EditorHost>>) -> (GtkBox, Rc<dy
     let body = GtkBox::new(Orientation::Vertical, px(8.0, scale));
 
     body.append(&hint(
-        "Image presets change the aspect ratio, not a fixed pixel size. W/H shows the export size. Click the selected preset again to reset.",
+        "Ratio presets change the aspect ratio; platform presets also export at the size that platform asks for. W/H shows the export size. Click the selected preset again to reset.",
     ));
 
     let dim_row = GtkBox::new(Orientation::Horizontal, px(6.0, scale));
@@ -1321,7 +1326,7 @@ fn frame_disclosure(scale: f64, host: Option<&Rc<EditorHost>>) -> (GtkBox, Rc<dy
             next_index(),
             scale,
         );
-        wire_frame_tile(&tile, aspect, &selection, host);
+        wire_frame_tile(&tile, aspect, None, &selection, host);
         grid.attach(&tile, (row % 3) as i32, (row / 3) as i32, 1, 1);
     }
     expanded.append(&grid);
@@ -1334,15 +1339,23 @@ fn frame_disclosure(scale: f64, host: Option<&Rc<EditorHost>>) -> (GtkBox, Rc<dy
         grid.set_column_homogeneous(true);
         grid.set_column_spacing(px(6.0, scale).max(0) as u32);
         grid.set_row_spacing(px(8.0, scale).max(0) as u32);
-        for (column, (name, aspect, ratio)) in tiles.iter().enumerate() {
-            let tooltip = match (platform, *name) {
+        for (column, (name, aspect, ratio, (width, height))) in tiles.iter().enumerate() {
+            let exports = tfmt(
+                "Exports at {width} × {height} px.",
+                &[
+                    ("width", &width.to_string()),
+                    ("height", &height.to_string()),
+                ],
+            );
+            let note = match (platform, *name) {
                 ("Pinterest", "Long") => t("10:21 image aspect ratio; long pins may be cropped in feeds. 2:3 is recommended."),
-                ("YouTube", "Banner") => t("16:9 image aspect ratio; banners need at least 2048 x 1152 pixels and may be cropped on some devices."),
+                ("YouTube", "Banner") => t("16:9 image aspect ratio; banners may be cropped on some devices."),
                 _ => tfmt(
                     "{name}: {ratio} image aspect ratio",
                     &[("name", *name), ("ratio", *ratio)],
                 ),
             };
+            let tooltip = format!("{note} {exports}");
             let tile = frame_tile(
                 aspect.aspect(),
                 name,
@@ -1352,7 +1365,7 @@ fn frame_disclosure(scale: f64, host: Option<&Rc<EditorHost>>) -> (GtkBox, Rc<dy
                 next_index(),
                 scale,
             );
-            wire_frame_tile(&tile, *aspect, &selection, host);
+            wire_frame_tile(&tile, *aspect, Some((*width, *height)), &selection, host);
             grid.attach(&tile, column as i32, 0, 1, 1);
         }
         expanded.append(&grid);
@@ -1375,12 +1388,7 @@ fn frame_disclosure(scale: f64, host: Option<&Rc<EditorHost>>) -> (GtkBox, Rc<dy
             if generation.replace(host.session_generation.get()) != host.session_generation.get() {
                 selection.clear();
             }
-            if let Some((width, height)) = host.read(|st| {
-                let layout = st
-                    .background
-                    .layout(st.working_image.width(), st.working_image.height());
-                (layout.width.ceil() as u32, layout.height.ceil() as u32)
-            }) {
+            if let Some((width, height)) = host.read(|st| st.export_dimensions()) {
                 dimensions[0].set_text(&width.to_string());
                 dimensions[1].set_text(&height.to_string());
             } else {
@@ -1392,9 +1400,12 @@ fn frame_disclosure(scale: f64, host: Option<&Rc<EditorHost>>) -> (GtkBox, Rc<dy
     (section, sync)
 }
 
+/// A tile sets the frame's aspect and, for a platform preset, the exact
+/// pixels it exports at. Clicking the selected tile clears both.
 fn wire_frame_tile(
     tile: &Button,
     aspect: FrameRatio,
+    size: Option<(u32, u32)>,
     selection: &TileSelection,
     host: Option<&Rc<EditorHost>>,
 ) {
@@ -1402,9 +1413,10 @@ fn wire_frame_tile(
         let host = host.clone();
         let selection = selection.clone();
         tile.connect_clicked(move |_| {
-            let aspect = selection.selected.get().map(|_| aspect);
+            let selected = selection.selected.get().is_some();
             host.mutate(|st| {
-                st.background.frame_aspect = aspect;
+                st.background.frame_aspect = selected.then_some(aspect);
+                st.background.frame_size = size.filter(|_| selected);
                 st.background.changed();
             });
         });
@@ -2499,14 +2511,13 @@ mod tests {
             collect_class(section.upcast_ref(), "image-editor-dim-entry", &mut entries);
             let width = entries[0].clone().downcast::<Entry>().unwrap();
             let height = entries[1].clone().downcast::<Entry>().unwrap();
-            let presets: Vec<_> =
-                FRAME_RATIOS
-                    .iter()
-                    .map(|(label, ratio, _)| (*label, *ratio))
-                    .chain(SOCIAL_SECTIONS.iter().flat_map(|(_, items)| {
-                        items.iter().map(|(_, ratio, label)| (*label, *ratio))
-                    }))
-                    .collect();
+            let presets: Vec<_> = FRAME_RATIOS
+                .iter()
+                .map(|(label, ratio, _)| (*label, *ratio))
+                .chain(SOCIAL_SECTIONS.iter().flat_map(|(_, items)| {
+                    items.iter().map(|(_, ratio, label, _)| (*label, *ratio))
+                }))
+                .collect();
             assert_eq!(tiles.len(), presets.len());
             for fill in [false, true] {
                 host.mutate(|st| {
@@ -2539,6 +2550,11 @@ mod tests {
                         );
                         assert_eq!(width.text().as_str(), image.width().to_string());
                         assert_eq!(height.text().as_str(), image.height().to_string());
+                        // A platform preset exports at its own pixels.
+                        if let Some(size) = st.background.frame_size {
+                            assert_eq!(image.dimensions(), size, "{label}");
+                            return;
+                        }
                         let layout = st.background.layout(101, 61);
                         assert_eq!(
                             *image
@@ -2561,7 +2577,7 @@ mod tests {
             .flat_map(|(group, tiles)| {
                 tiles
                     .iter()
-                    .map(move |(name, ratio, _)| (*group, *name, *ratio))
+                    .map(move |(name, ratio, _, _)| (*group, *name, *ratio))
             })
             .collect();
         assert_eq!(
