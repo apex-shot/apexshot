@@ -4795,3 +4795,24 @@ msgstr "وقت التصدير"
 
 msgid "Resolution"
 msgstr "الدقة"
+
+msgid "Compare enhancement"
+msgstr "مقارنة التحسين"
+
+msgid "Drag the divider across the image."
+msgstr "اسحب الفاصل عبر الصورة."
+
+msgid "Enhancing the image…"
+msgstr "جارٍ تحسين الصورة…"
+
+msgid "Free preview. Exporting with enhancement needs Studio."
+msgstr "معاينة مجانية. يتطلب التصدير مع التحسين Studio."
+
+msgid "Sharpens small screenshots on this device, up to 1 megapixel. Missing detail cannot always be recovered."
+msgstr "يزيد حدة لقطات الشاشة الصغيرة على هذا الجهاز، حتى 1 ميغابكسل. لا يمكن دائمًا استعادة التفاصيل المفقودة."
+
+msgid "Source"
+msgstr "المصدر"
+
+msgid "Use Neural 2×"
+msgstr "استخدام Neural 2×"
