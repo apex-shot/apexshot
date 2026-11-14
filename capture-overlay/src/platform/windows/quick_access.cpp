@@ -68,6 +68,7 @@
 #include <QWidget>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <functional>
 #include <utility>
@@ -86,9 +87,14 @@ const QColor kDim(0, 0, 0, 140);
 constexpr double kHandleLength = 20.0;
 constexpr double kHandleThickness = 2.5;
 constexpr double kTopBarY = 16.0;
-constexpr double kTopBarH = 46.0;
-constexpr double kTopBarAspectH = 28.0;
-constexpr double kTopBarBtnSize = 32.0;
+// The bar shares the capture toolbar's metrics and, like it, is laid out in
+// device pixels: a 55px panel whose pills and buttons are the toolbar's 38px
+// highlights, so the two bars read as one size at any display scale.
+constexpr double kTopBarH = 55.0;
+constexpr double kTopBarAspectH = 38.0;
+constexpr double kTopBarBtnSize = 38.0;
+constexpr double kTopBarPanelRadius = 13.0;
+constexpr double kTopBarItemRadius = 10.0;
 constexpr double kFeaturePanelMargin = 16.0;
 constexpr double kTopBarRadius = 10.0;
 
@@ -658,7 +664,6 @@ TopBarLayout topBarLayout(double screenW)
     constexpr double sepW = 1.0;
     constexpr double pillGap = 6.0;
     constexpr double btnGap = 6.0;
-    constexpr double pillW[4] = {52.0, 52.0, 48.0, 44.0};
 
     static const QFont labelFont = [] {
         QFont font(uiFamily());
@@ -670,6 +675,26 @@ TopBarLayout topBarLayout(double screenW)
     }();
     static const double labelW = std::max(
         minLabelW, QFontMetrics(labelFont).horizontalAdvance(QStringLiteral("Draw an area")) + 10.0);
+    static const QFont pillFont = [] {
+        QFont font(uiFamily());
+        font.setPixelSize(14);
+        font.setWeight(QFont::Medium);
+        font.setHintingPreference(QFont::PreferNoHinting);
+        font.setLetterSpacing(QFont::PercentageSpacing, 98.0);
+        return font;
+    }();
+    // Measured at the bold weight a hovered or active pill uses, so the label
+    // never outgrows its pill.
+    static const std::array<double, 4> pillW = [] {
+        std::array<double, 4> widths{};
+        const QFontMetricsF metrics(pillFont);
+        for (int i = 0; i < 4; ++i)
+            widths[i] = std::max(48.0,
+                                 std::ceil(metrics.horizontalAdvance(
+                                     QString::fromLatin1(kPillLabels[i])))
+                                     + 28.0);
+        return widths;
+    }();
 
     const double pillsW = pillW[0] + pillW[1] + pillW[2] + pillW[3] + pillGap * 3;
     const double btnsW = kTopBarBtnSize * 2 + btnGap;
@@ -811,11 +836,7 @@ protected:
             painter.fillRect(rect(), QColor(0, 0, 0, 60));
         }
 
-        const double scale = chromeScale();
-        painter.save();
-        painter.scale(scale, scale);
         drawTopBar(painter);
-        painter.restore();
     }
 
     void mousePressEvent(QMouseEvent* event) override
@@ -835,7 +856,7 @@ protected:
         }
 
         if (m_cropMenuOpen) {
-            const int row = cropItemAt((QPointF(event->pos()) / chromeScale()).toPoint());
+            const int row = cropItemAt(event->pos());
             if (row >= 0) {
                 applyCropRow(row);
                 return;
@@ -846,8 +867,8 @@ protected:
             return;
         }
 
-        const QPointF pointer = QPointF(event->pos()) / chromeScale();
-        const TopBarLayout layout = topBarLayout(width() / chromeScale());
+        const QPointF pointer = event->pos();
+        const TopBarLayout layout = topBarLayout(width());
         if (layout.valid) {
             for (int i = 0; i < 4; ++i) {
                 if (layout.pills[i].contains(pointer)) {
@@ -879,6 +900,7 @@ protected:
     void mouseMoveEvent(QMouseEvent* event) override
     {
         m_pointer = (QPointF(event->pos()) / chromeScale()).toPoint();
+        m_barPointer = event->pos();
 
         if (m_mode == Mode::Crosshair) {
             if (m_dragging) {
@@ -890,7 +912,7 @@ protected:
         }
 
         if (m_cropMenuOpen) {
-            const int row = cropItemAt((QPointF(event->pos()) / chromeScale()).toPoint());
+            const int row = cropItemAt(event->pos());
             if (row != m_hoveredCropItem) {
                 m_hoveredCropItem = row;
                 update();
@@ -1023,7 +1045,7 @@ private:
 
     void drawTopBar(QPainter& painter)
     {
-        const TopBarLayout layout = topBarLayout(width() / chromeScale());
+        const TopBarLayout layout = topBarLayout(width());
         if (!layout.valid)
             return;
 
@@ -1031,13 +1053,13 @@ private:
         painter.setRenderHint(QPainter::Antialiasing);
 
         QPainterPath shadow;
-        shadow.addRoundedRect(layout.bar.translated(0, 3), kTopBarRadius, kTopBarRadius);
-        painter.fillPath(shadow, QColor(0, 0, 0, 105));
+        shadow.addRoundedRect(layout.bar.translated(0, 3), kTopBarPanelRadius, kTopBarPanelRadius);
+        painter.fillPath(shadow, QColor(0, 0, 0, 110));
 
         QPainterPath body;
-        body.addRoundedRect(layout.bar, kTopBarRadius, kTopBarRadius);
+        body.addRoundedRect(layout.bar, kTopBarPanelRadius, kTopBarPanelRadius);
         painter.fillPath(body, kPanel);
-        painter.setPen(QPen(kRim, 1.0));
+        painter.setPen(QPen(QColor(255, 255, 255, 42), 1.0));
         painter.setBrush(Qt::NoBrush);
         painter.drawPath(body);
 
@@ -1062,19 +1084,19 @@ private:
         for (int i = 0; i < 4; ++i) {
             const QRectF pill = layout.pills[i];
             const bool active = std::abs(m_ratio - kAspectRatios[i]) < 0.001;
-            const bool hovered = pill.contains(m_pointer);
+            const bool hovered = pill.contains(m_barPointer);
 
             QPainterPath path;
-            path.addRoundedRect(pill, 8, 8);
+            path.addRoundedRect(pill, kTopBarItemRadius, kTopBarItemRadius);
             if (active)
-                painter.fillPath(path, QColor(255, 102, 0, 205));
+                painter.fillPath(path, QColor(255, 102, 0, 224));
             else if (hovered)
                 painter.fillPath(path, QColor(255, 255, 255, 20));
             else
                 painter.fillPath(path, QColor(255, 255, 255, 12));
 
             QFont font(uiFamily());
-            font.setPixelSize(13);
+            font.setPixelSize(14);
             font.setWeight(active || hovered ? QFont::Medium : QFont::Normal);
             font.setHintingPreference(QFont::PreferNoHinting);
             font.setLetterSpacing(QFont::PercentageSpacing, 98.0);
@@ -1086,10 +1108,10 @@ private:
         // Crop and cancel, the shared 18px Lucide set.
         for (int i = 0; i < 2; ++i) {
             const QRectF button = layout.buttons[i];
-            const bool hovered = button.contains(m_pointer);
+            const bool hovered = button.contains(m_barPointer);
             const bool cropMenu = (i == 0 && m_cropMenuOpen);
             QPainterPath path;
-            path.addRoundedRect(button, 8, 8);
+            path.addRoundedRect(button, kTopBarItemRadius, kTopBarItemRadius);
             if (cropMenu || hovered)
                 painter.fillPath(path, QColor(255, 255, 255, 20));
 
@@ -1107,7 +1129,7 @@ private:
         if (!m_cropMenuOpen)
             return;
 
-        const TopBarLayout layout = topBarLayout(width() / chromeScale());
+        const TopBarLayout layout = topBarLayout(width());
         if (!layout.valid)
             return;
 
@@ -1182,7 +1204,7 @@ private:
     {
         const QRectF anchor = layout.buttons[0];
         const double menuH = CropRowCount * kCropItemH + kCropMenuPadding * 2;
-        const double screenW = width() / chromeScale();
+        const double screenW = width();
         const double menuX = std::max(
             10.0, std::min(anchor.center().x() - kCropMenuW / 2.0, screenW - kCropMenuW - 10.0));
         const double menuY = std::max(layout.bar.bottom() + 4.0, anchor.bottom() + 8.0);
@@ -1293,6 +1315,8 @@ private:
     Done m_done;
     QPoint m_origin;
     QPoint m_pointer;
+    /// The pointer in device pixels, for the top bar, which is not scaled.
+    QPoint m_barPointer;
     QRect m_selection;
     bool m_hasSelection = false;
     bool m_dragging = false;
