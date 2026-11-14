@@ -39,7 +39,8 @@ use crate::capture::editor::state::{
 use crate::capture::editor::text_detect::spawn_text_detection;
 use crate::capture::editor::types::{
     cursor_name_for_select_handle, tool_shortcut_target, AnnotationAction, ArrowStyle, CropHandle,
-    FontSettings, FontStyle, MoveHandle, Point, TextAlignment, TextDecoration, Tool, ViewTransform,
+    DrawColor, FontSettings, FontStyle, MoveHandle, Point, TextAlignment, TextDecoration, Tool,
+    ViewTransform,
 };
 
 fn crop_cursor(st: &EditorState, point: Point, scale: f64) -> &'static str {
@@ -298,6 +299,9 @@ impl EditorHost {
     /// Document swap without widget coupling (tests use this directly).
     fn load_document_headless(&self, image: RgbaImage) {
         let mut state = EditorState::new(image);
+        // Tests never read the user's saved colours.
+        #[cfg(not(test))]
+        state.load_tool_colors(&crate::config::load_config().annotate_tool_colors);
         self.start_detection(&mut state);
         *self.editor.borrow_mut() = Some(state);
         *self.surface_cache.borrow_mut() = None;
@@ -735,6 +739,22 @@ impl EditorHost {
         self.with_state(|st| {
             st.commit_active_text_input();
         });
+    }
+
+    /// Remember `color` for the armed tool and save it so the next editor
+    /// session opens that tool with it. Saving waits for the pick to settle,
+    /// so dragging the custom picker writes the config once.
+    pub fn remember_tool_color(&self, color: DrawColor) {
+        let Some((key, hex)) = self
+            .with_state(|st| st.remember_tool_color(color))
+            .flatten()
+        else {
+            return;
+        };
+        #[cfg(not(test))]
+        save_tool_color_later(key, hex);
+        #[cfg(test)]
+        let _ = (key, hex);
     }
 
     /// Arm a tool. Valid in-flight text commits first so switching never
@@ -3072,6 +3092,43 @@ impl EditorHost {
             }
         });
     }
+}
+
+#[cfg(not(test))]
+thread_local! {
+    static PENDING_TOOL_COLORS: RefCell<(std::collections::BTreeMap<String, String>, Option<glib::SourceId>)> =
+        const { RefCell::new((std::collections::BTreeMap::new(), None)) };
+}
+
+/// Queue one tool colour for the config and write every queued colour once
+/// no new pick has arrived for a moment.
+#[cfg(not(test))]
+fn save_tool_color_later(key: &'static str, hex: String) {
+    PENDING_TOOL_COLORS.with(|pending| {
+        let mut pending = pending.borrow_mut();
+        pending.0.insert(key.to_string(), hex);
+        if let Some(source) = pending.1.take() {
+            source.remove();
+        }
+        pending.1 = Some(glib::timeout_add_local_once(
+            Duration::from_millis(300),
+            || {
+                let colors = PENDING_TOOL_COLORS.with(|pending| {
+                    let mut pending = pending.borrow_mut();
+                    pending.1 = None;
+                    std::mem::take(&mut pending.0)
+                });
+                let mut config = crate::config::load_config();
+                let before = config.annotate_tool_colors.clone();
+                config.annotate_tool_colors.extend(colors);
+                if config.annotate_tool_colors != before {
+                    if let Err(error) = crate::config::save_config(&config) {
+                        eprintln!("[image-editor] Could not save the tool colour: {error}");
+                    }
+                }
+            },
+        ));
+    });
 }
 
 /// Report a failed copy or export on both surfaces: the canvas toast for the
