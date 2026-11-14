@@ -746,6 +746,8 @@ fn build_settings_window(app: &Application) {
         &after_capture.screenshot_after_capture_checks[1],
         &after_capture.screenshot_after_capture_checks[2],
         &after_capture.screenshot_after_capture_checks[3],
+        &after_capture.rec_show_quick_access,
+        &after_capture.rec_open_video_editor,
         &quick_access.auto_close_enabled_check,
         &quick_access.auto_close_action_input,
         &quick_access.auto_close_interval_input,

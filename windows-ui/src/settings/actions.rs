@@ -102,6 +102,8 @@ pub fn install_checkbox_behaviors(
     screenshot_copy_to_clipboard_check: &CheckButton,
     screenshot_save_check: &CheckButton,
     screenshot_open_annotate_check: &CheckButton,
+    rec_show_quick_access_check: &CheckButton,
+    rec_open_video_editor_check: &CheckButton,
     quick_access_auto_close_enabled_check: &CheckButton,
     quick_access_auto_close_action_input: &SettingsSelect,
     quick_access_auto_close_interval_input: &SettingsSelect,
@@ -123,6 +125,20 @@ pub fn install_checkbox_behaviors(
     screenshot_open_annotate_check.connect_toggled(move |check| {
         if check.is_active() {
             screenshot_quick_access_toggle.set_active(false);
+        }
+    });
+
+    let rec_open_video_editor_toggle = rec_open_video_editor_check.clone();
+    rec_show_quick_access_check.connect_toggled(move |check| {
+        if check.is_active() {
+            rec_open_video_editor_toggle.set_active(false);
+        }
+    });
+
+    let rec_show_quick_access_toggle = rec_show_quick_access_check.clone();
+    rec_open_video_editor_check.connect_toggled(move |check| {
+        if check.is_active() {
+            rec_show_quick_access_toggle.set_active(false);
         }
     });
 

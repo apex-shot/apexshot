@@ -398,6 +398,9 @@ impl AppConfig {
         if self.after_capture_open_annotate {
             self.after_capture_show_quick_access = false;
         }
+        if self.rec_video_open_editor {
+            self.rec_after_capture_show_quick_access = false;
+        }
         if !self.after_capture_show_quick_access
             && !self.after_capture_copy_file_to_clipboard
             && !self.after_capture_save
@@ -1308,6 +1311,19 @@ mod tests {
 
         assert!(cfg.after_capture_open_annotate);
         assert!(!cfg.after_capture_show_quick_access);
+    }
+
+    #[test]
+    fn sanitize_makes_open_video_editor_disable_recording_quick_access() {
+        let cfg = AppConfig {
+            rec_after_capture_show_quick_access: true,
+            rec_video_open_editor: true,
+            ..AppConfig::default()
+        }
+        .sanitized();
+
+        assert!(cfg.rec_video_open_editor);
+        assert!(!cfg.rec_after_capture_show_quick_access);
     }
 
     #[test]
