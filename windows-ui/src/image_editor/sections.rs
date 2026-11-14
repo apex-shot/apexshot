@@ -2,8 +2,7 @@
 //!
 //! After the fill-source card, the Linux static builder stacks five more
 //! groups in a fixed order: Export quality, then Transform, Shadow, Style
-//! and Frame. These groups drive the static document, except for the
-//! unavailable neural export-quality controls.
+//! and Frame. These groups drive the static document.
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -21,8 +20,10 @@ use gtk4::{
 use super::annotate::EditorHost;
 use super::ui_support::px;
 use crate::capture::editor::state::background::{Fill, FrameRatio, Layout};
+use crate::capture::editor::state::EditorState;
 use crate::capture::editor::style_render::needs_backdrop;
 use crate::capture::editor::types::FrameStyle;
+use crate::capture::editor::upscale::SourceUpscale;
 use crate::capture::editor::window::icon_names;
 use crate::i18n::{t, tfmt};
 use crate::recording::editor::model::{MotionSceneShadow, MotionSceneShadowPreset};
@@ -128,17 +129,6 @@ fn disclosure_row_with_badge(title: &str, body: &GtkBox, scale: f64, studio: boo
     card
 }
 
-/// A flat control row with a subtle fill and no frame.
-fn inline_button(label: &str, scale: f64) -> Button {
-    let button = Button::with_label(label);
-    button.add_css_class("image-editor-inline-button");
-    button.set_has_frame(false);
-    button.set_halign(Align::Fill);
-    button.set_hexpand(true);
-    button.set_size_request(-1, px(30.0, scale));
-    button
-}
-
 /// One tile registered in a selection namespace: its ring flag and the shape
 /// that paints it.
 type TileEntry = (Rc<Cell<bool>>, DrawingArea);
@@ -193,36 +183,290 @@ impl TileSelection {
 
 // ── Export quality ──────────────────────────────────────────────────
 
-/// The select-style source row: a dropdown trigger with check-marked option
-/// rows, built from the docked bars' picker so the panel reads as one
-/// control vocabulary. The Linux panel's MotionSelect looks the same.
-fn export_select(scale: f64) -> Button {
-    let labels: Vec<String> = ["Off", "Neural 2×", "Neural 4×"]
-        .iter()
-        .map(|s| t(s))
-        .collect();
-    let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
-    super::sub_bar::option_pill(scale, labels[0], &labels)
+const MODE_TIPS: [&str; 3] = ["Export at the original size", "Neural 2×", "Neural 4×"];
+
+fn upscale_mode(index: usize) -> SourceUpscale {
+    match index {
+        0 => SourceUpscale::Off,
+        1 => SourceUpscale::Neural2x,
+        _ => SourceUpscale::Neural4x,
+    }
 }
 
-/// The Export quality card: an upscale source plus the compare action, the
-/// Linux panel's layout with both controls unavailable here.
-pub(super) fn export_quality(scale: f64) -> GtkBox {
-    let card = section_card("Export quality", scale);
-    let unavailable = t("Neural upscaling is not available in the Windows image editor yet");
+fn upscale_index(mode: SourceUpscale) -> usize {
+    match mode {
+        SourceUpscale::Off => 0,
+        SourceUpscale::Neural2x => 1,
+        SourceUpscale::Neural4x => 2,
+    }
+}
 
-    let source = export_select(scale);
-    source.set_sensitive(false);
-    source.set_tooltip_text(Some(&unavailable));
-    card.append(&source);
+/// Enhance the export pixels in the background so the export that follows
+/// a mode pick reuses the result instead of running the network then.
+fn prewarm_upscale(host: &EditorHost, mode: SourceUpscale) {
+    if mode == SourceUpscale::Off {
+        return;
+    }
+    if let Some((base, actions)) = host.read(|st| st.export_source()) {
+        std::thread::spawn(move || {
+            let source = EditorState::flatten_effects(&base, &actions);
+            let _ = crate::capture::editor::upscale::enhance_cached(&source, mode);
+        });
+    }
+}
 
-    let compare = inline_button(&t("Compare before / after"), scale);
+/// The Export quality card: Off / 2× / 4× neural enlargement for image
+/// exports, the export size it produces, and the free before / after sheet.
+pub(super) fn export_quality(
+    scale: f64,
+    host: Option<&Rc<EditorHost>>,
+    window: &gtk4::ApplicationWindow,
+) -> (GtkBox, Rc<dyn Fn()>) {
+    let card = GtkBox::new(Orientation::Vertical, px(10.0, scale));
+    card.add_css_class("image-editor-section");
+    card.add_css_class("image-editor-upscale-section");
+
+    let header = GtkBox::new(Orientation::Horizontal, px(8.0, scale));
+    let title = Label::new(Some(&t("Export quality")));
+    title.add_css_class("image-editor-section-title");
+    title.set_xalign(0.0);
+    title.set_hexpand(true);
+    header.append(&title);
+    header.append(&studio_badge());
+    card.append(&header);
+
+    let tray = GtkBox::new(Orientation::Horizontal, 0);
+    tray.add_css_class("image-editor-bg-tabs");
+    tray.add_css_class("image-editor-upscale-segmented");
+    tray.set_hexpand(true);
+    tray.set_homogeneous(true);
+    let tabs: Rc<Vec<ToggleButton>> = Rc::new(
+        ["Off", "2×", "4×"]
+            .iter()
+            .map(|label| source_tab(label))
+            .collect(),
+    );
+    for (index, tab) in tabs.iter().enumerate() {
+        if index > 0 {
+            tab.set_group(Some(&tabs[0]));
+        }
+        tab.set_tooltip_text(Some(&t(MODE_TIPS[index])));
+        tray.append(tab);
+    }
+    tabs[0].set_active(true);
+    card.append(&tray);
+
+    let meta = GtkBox::new(Orientation::Horizontal, px(6.0, scale));
+    meta.add_css_class("image-editor-upscale-meta");
+    let source_size = Label::new(None);
+    source_size.add_css_class("image-editor-upscale-size");
+    source_size.set_xalign(0.0);
+    let arrow = Label::new(Some("→"));
+    arrow.add_css_class("image-editor-upscale-arrow");
+    arrow.set_xalign(0.0);
+    let output_size = Label::new(None);
+    output_size.add_css_class("image-editor-upscale-output");
+    output_size.set_xalign(0.0);
+    meta.append(&source_size);
+    meta.append(&arrow);
+    meta.append(&output_size);
+    card.append(&meta);
+
+    let notice = Label::new(None);
+    notice.add_css_class("image-editor-upscale-notice");
+    notice.set_wrap(true);
+    notice.set_xalign(0.0);
+    notice.set_visible(false);
+    card.append(&notice);
+
+    // An action row: what it shows, then a chevron for the sheet it opens.
+    let compare = Button::new();
+    compare.add_css_class("image-editor-upscale-compare");
+    compare.set_has_frame(false);
+    compare.set_hexpand(true);
+    let compare_row = GtkBox::new(Orientation::Horizontal, px(10.0, scale));
+    let compare_icon = Image::from_icon_name(icon_names::custom::SQUARE_SPLIT_HORIZONTAL_SYMBOLIC);
+    compare_icon.set_pixel_size(px(16.0, scale));
+    compare_icon.add_css_class("image-editor-upscale-compare-icon");
+    let compare_label = Label::new(Some(&t("Compare before / after")));
+    compare_label.add_css_class("image-editor-upscale-compare-label");
+    compare_label.set_xalign(0.0);
+    compare_label.set_hexpand(true);
+    let compare_chevron = Image::from_icon_name(icon_names::shipped::CHEVRON_RIGHT_REGULAR);
+    compare_chevron.set_pixel_size(px(12.0, scale));
+    compare_chevron.add_css_class("image-editor-upscale-compare-chevron");
+    compare_row.append(&compare_icon);
+    compare_row.append(&compare_label);
+    compare_row.append(&compare_chevron);
+    compare.set_child(Some(&compare_row));
+    compare.set_tooltip_text(Some(&t(
+        "Preview neural enhancement without a Studio license",
+    )));
     compare.set_sensitive(false);
-    compare.set_tooltip_text(Some(&unavailable));
     card.append(&compare);
 
-    card.append(&hint("Offline neural enhancement for small images. Image exports grow by 2× or 4×; Motion keeps its Frame size. Compare the export for free before enabling Studio enhancement. Supports up to 1 megapixel. Missing detail cannot always be recovered."));
-    card
+    card.append(&hint("Sharpens small screenshots on this device, up to 1 megapixel. Missing detail cannot always be recovered."));
+
+    let syncing = Rc::new(Cell::new(false));
+    for (index, tab) in tabs.iter().enumerate() {
+        tab.connect_toggled({
+            let syncing = syncing.clone();
+            let host = host.cloned();
+            move |button| {
+                if !button.is_active() || syncing.get() {
+                    return;
+                }
+                let mode = upscale_mode(index);
+                if let Some(host) = &host {
+                    host.mutate(|st| {
+                        if st.source_upscale != mode {
+                            st.source_upscale = mode;
+                        }
+                    });
+                    prewarm_upscale(host, mode);
+                }
+            }
+        });
+    }
+
+    compare.connect_clicked({
+        let host = host.cloned();
+        let window = window.downgrade();
+        let tabs = tabs.clone();
+        move |_| {
+            let Some(host) = &host else {
+                return;
+            };
+            let Some(window) = window.upgrade() else {
+                return;
+            };
+            let current = host.read(|st| st.source_upscale).unwrap_or_default();
+            let initial = if current == SourceUpscale::Off {
+                SourceUpscale::Neural2x
+            } else {
+                current
+            };
+            let on_apply: Rc<dyn Fn(SourceUpscale)> = {
+                let tabs = tabs.clone();
+                Rc::new(move |mode| {
+                    if let Some(tab) = tabs.get(upscale_index(mode)) {
+                        tab.set_active(true);
+                    }
+                })
+            };
+            super::upscale_compare::show(&window, host, scale, initial, on_apply);
+        }
+    });
+
+    let sync: Rc<dyn Fn()> = {
+        let tray = tray.clone();
+        let compare = compare.clone();
+        let meta = meta.clone();
+        let notice = notice.clone();
+        let source_size = source_size.clone();
+        let arrow = arrow.clone();
+        let output_size = output_size.clone();
+        let tabs = tabs.clone();
+        let syncing = syncing.clone();
+        let host = host.cloned();
+        Rc::new(move || {
+            let info = host.as_ref().and_then(|host| {
+                host.read(|st| {
+                    (
+                        st.source_upscale,
+                        st.working_image.dimensions(),
+                        st.upscale_output_dimensions(SourceUpscale::Off),
+                        [
+                            st.upscale_output_dimensions(SourceUpscale::Neural2x),
+                            st.upscale_output_dimensions(SourceUpscale::Neural4x),
+                        ],
+                        [
+                            st.upscale_unavailable_reason(SourceUpscale::Neural2x),
+                            st.upscale_unavailable_reason(SourceUpscale::Neural4x),
+                        ],
+                    )
+                })
+            });
+            let Some((mode, (width, height), off, outputs, reasons)) = info else {
+                tray.set_sensitive(false);
+                compare.set_sensitive(false);
+                meta.set_visible(false);
+                notice.set_visible(false);
+                syncing.set(true);
+                tabs[0].set_active(true);
+                syncing.set(false);
+                return;
+            };
+            tray.set_sensitive(true);
+            for k in 0..2 {
+                let reason = &reasons[k];
+                tabs[k + 1].set_sensitive(reason.is_none());
+                let tip = match reason {
+                    Some(reason) => t(reason),
+                    None => t(MODE_TIPS[k + 1]),
+                };
+                tabs[k + 1].set_tooltip_text(Some(&tip));
+            }
+            compare.set_sensitive(reasons[0].is_none());
+            let compare_tip = match &reasons[0] {
+                Some(reason) => t(reason),
+                None => t("Preview neural enhancement without a Studio license"),
+            };
+            compare.set_tooltip_text(Some(&compare_tip));
+
+            let mut effective = mode;
+            if effective != SourceUpscale::Off && reasons[upscale_index(effective) - 1].is_some() {
+                effective = SourceUpscale::Off;
+                if let Some(host) = &host {
+                    let weak = Rc::downgrade(host);
+                    gtk4::glib::idle_add_local_once(move || {
+                        if let Some(host) = weak.upgrade() {
+                            host.mutate(|st| st.source_upscale = SourceUpscale::Off);
+                        }
+                    });
+                }
+            }
+            let index = upscale_index(effective);
+            if !tabs[index].is_active() {
+                syncing.set(true);
+                tabs[index].set_active(true);
+                syncing.set(false);
+            }
+
+            match &reasons[0] {
+                Some(reason) => {
+                    notice.set_text(&tfmt(
+                        "{reason} This image is {width} × {height} pixels. Crop it or choose a smaller image to enable enhancement.",
+                        &[
+                            ("reason", &t(reason)),
+                            ("width", &width.to_string()),
+                            ("height", &height.to_string()),
+                        ],
+                    ));
+                    notice.set_visible(true);
+                    meta.set_visible(false);
+                }
+                None => {
+                    notice.set_visible(false);
+                    meta.set_visible(true);
+                }
+            }
+
+            if effective == SourceUpscale::Off {
+                source_size.set_text(&format!("{} × {} px", off.0, off.1));
+                arrow.set_visible(false);
+                output_size.set_visible(false);
+            } else {
+                let output = outputs[index - 1];
+                source_size.set_text(&format!("{} × {}", off.0, off.1));
+                arrow.set_visible(true);
+                output_size.set_visible(true);
+                output_size.set_text(&format!("{} × {} px", output.0, output.1));
+            }
+        })
+    };
+    sync();
+    (card, sync)
 }
 
 // ── Transform ───────────────────────────────────────────────────────
@@ -2010,7 +2254,7 @@ pub(super) fn appearance_panel(
     host: Option<&Rc<EditorHost>>,
     column: &GtkBox,
     window: &gtk4::ApplicationWindow,
-) -> (GtkBox, GtkBox, Rc<dyn Fn()>) {
+) -> (GtkBox, GtkBox, GtkBox, Rc<dyn Fn()>) {
     let body = GtkBox::new(Orientation::Vertical, px(12.0, scale));
     body.add_css_class("image-editor-inspector-body");
 
@@ -2021,7 +2265,8 @@ pub(super) fn appearance_panel(
 
     let (background, sync, apply_first_wallpaper) = background_card(scale, host, column, window);
     body.append(&background);
-    body.append(&export_quality(scale));
+    let (export_quality, export_sync) = export_quality(scale, host, window);
+    body.append(&export_quality);
     let (transform, transform_sync) = transform_disclosure(scale, host);
     body.append(&transform);
     let (shadow, shadow_sync) = shadow_disclosure(scale, host);
@@ -2036,8 +2281,9 @@ pub(super) fn appearance_panel(
         style_sync();
         frame_sync();
         transform_sync();
+        export_sync();
     });
-    (body, transform, sync)
+    (body, transform, export_quality, sync)
 }
 
 /// The Background card: the fill-source tray and the shared sliders, the

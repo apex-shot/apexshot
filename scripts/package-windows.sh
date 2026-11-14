@@ -289,6 +289,9 @@ cp capture-overlay/assets/fonts/*LICENSE*.txt capture-overlay/assets/fonts/OFL.t
 cp assets/sounds/* "$stage/share/apexshot/sounds/"
 cp src/capture/editor/background-images/*.jpg "$stage/share/apexshot/background-images/"
 cp LICENSE "$stage/LICENSE"
+mkdir -p "$stage/share/licenses/apexshot"
+cp assets/upscaling/LICENSE "$stage/share/licenses/apexshot/upscaling.LICENSE"
+cp assets/upscaling/README.md "$stage/share/licenses/apexshot/upscaling.md"
 
 # --- checks -------------------------------------------------------------
 

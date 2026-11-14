@@ -4769,3 +4769,24 @@ msgstr "書き出し時間"
 
 msgid "Resolution"
 msgstr "解像度"
+
+msgid "Compare enhancement"
+msgstr "補正を比較"
+
+msgid "Drag the divider across the image."
+msgstr "仕切りを画像の上でドラッグします。"
+
+msgid "Enhancing the image…"
+msgstr "画像を補正しています…"
+
+msgid "Free preview. Exporting with enhancement needs Studio."
+msgstr "無料プレビューです。補正付きの書き出しには Studio が必要です。"
+
+msgid "Sharpens small screenshots on this device, up to 1 megapixel. Missing detail cannot always be recovered."
+msgstr "このデバイス上で小さなスクリーンショットを最大 1 メガピクセルまで鮮明にします。失われた細部は必ずしも復元できません。"
+
+msgid "Source"
+msgstr "元画像"
+
+msgid "Use Neural 2×"
+msgstr "ニューラル 2× を使用"

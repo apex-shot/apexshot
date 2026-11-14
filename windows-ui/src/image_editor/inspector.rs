@@ -27,6 +27,7 @@ pub(super) struct Inspector {
     text_controls: TextControls,
     pub watermark: WatermarkControls,
     transform: GtkBox,
+    export_quality: GtkBox,
     background_sync: Rc<dyn Fn()>,
     /// Clipboard copy, the flattened export and the Cloud upload the window
     /// wires to the document.
@@ -40,12 +41,14 @@ impl Inspector {
         (self.background_sync)();
     }
     /// Swap the dock's content for Motion or back: the Motion pages hide the
-    /// static Transform but keep the bottom actions, the way the Linux
-    /// sidebar keeps Copy, Upload and Export in both modes. Entry always
-    /// lands on the Composition page, like the Linux editor applies its mode.
+    /// static Transform and Export quality but keep the bottom actions, the
+    /// way the Linux sidebar keeps Copy, Upload and Export in both modes.
+    /// Entry always lands on the Composition page, like the Linux editor
+    /// applies its mode.
     pub(super) fn set_mode(&self, motion: bool) {
         self.actions.set_visible(true);
         self.transform.set_visible(!motion);
+        self.export_quality.set_visible(!motion);
         self.motion_stack.set_visible_child_name(if motion {
             "motion"
         } else {
@@ -128,7 +131,7 @@ pub(super) fn build(
     scroller.set_hexpand(false);
 
     // Both modes use the same panel; only Static exposes its Transform.
-    let (appearance_page, transform, background_sync) =
+    let (appearance_page, transform, export_quality, background_sync) =
         sections::appearance_panel(scale, Some(host), &root, window);
     // The Motion dock: the notch's four pages, in the Linux tab order.
     let motion_stack = Stack::new();
@@ -194,6 +197,7 @@ pub(super) fn build(
         text_controls,
         watermark,
         transform,
+        export_quality,
         background_sync,
         copy_button,
         upload_button,
@@ -279,12 +283,14 @@ mod tests {
             );
             assert!(style.has_css_class("selected-style"));
             assert!(inspector.transform.is_visible());
+            assert!(inspector.export_quality.is_visible());
 
             inspector.set_mode(true);
             inspector.show_motion_page("motion-appearance");
             assert_eq!(inspector.motion_stack.visible_child(), Some(page.clone()));
             assert!(inspector.scroller.is_visible());
             assert!(!inspector.transform.is_visible());
+            assert!(!inspector.export_quality.is_visible());
             assert!(inspector.actions.is_visible());
             styles[0]
                 .clone()
