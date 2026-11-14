@@ -254,11 +254,18 @@ pub mod editor {
             width: u32,
             height: u32,
             realtime: bool,
+            rate: f64,
         ) -> Command {
             let mut command = crate::utils::hidden_command(ffmpeg_executable());
             command.args(["-hide_banner", "-loglevel", "error", "-nostdin"]);
             if realtime {
-                command.arg("-re");
+                // A sped-up piece reads its source faster than the wall clock,
+                // so the stream keeps pace instead of being restarted.
+                if (rate - 1.0).abs() < 1e-3 {
+                    command.arg("-re");
+                } else {
+                    command.args(["-readrate", &format!("{:.3}", rate.clamp(0.1, 16.0))]);
+                }
             }
             command
                 .args(["-ss", &format!("{:.3}", seconds.max(0.0))])

@@ -4801,3 +4801,6 @@ msgstr "إزالة التسجيل"
 
 msgid "This recording has no audio."
 msgstr "لا يحتوي هذا التسجيل على صوت."
+
+msgid "Hide cursor here"
+msgstr "إخفاء المؤشر هنا"

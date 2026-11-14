@@ -4775,3 +4775,6 @@ msgstr "録画を削除"
 
 msgid "This recording has no audio."
 msgstr "この録画には音声がありません。"
+
+msgid "Hide cursor here"
+msgstr "ここでカーソルを隠す"

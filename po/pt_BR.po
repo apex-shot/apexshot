@@ -4867,3 +4867,6 @@ msgstr "Remover gravação"
 
 msgid "This recording has no audio."
 msgstr "Esta gravação não tem áudio."
+
+msgid "Hide cursor here"
+msgstr "Ocultar o cursor aqui"

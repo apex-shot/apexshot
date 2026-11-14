@@ -52,6 +52,8 @@ struct Job {
     height: u32,
     generation: u64,
     realtime: bool,
+    /// Source seconds per wall second for a realtime stream.
+    rate: f64,
 }
 
 /// The decode thread owns one ffmpeg at a time. The UI thread keeps the child
@@ -85,6 +87,9 @@ struct State {
     /// The composition is holding one source frame, so a still shows instead
     /// of the running stream.
     holding: bool,
+    /// Source seconds per composition second the running stream decodes at:
+    /// 1 for a normal piece, the piece's speed for a sped-up one.
+    stream_rate: f64,
 }
 
 /// The latest decoded frame, retained so effect changes can repaint without decoding.
@@ -240,6 +245,7 @@ impl Preview {
         state.last_requested = None;
         state.last_composition = None;
         state.holding = false;
+        state.stream_rate = 1.0;
         drop(state);
 
         // Anything already decoded belongs to the previous recording.
@@ -318,10 +324,19 @@ impl Preview {
                 state.stream_start = Some(seconds);
                 state.stream_started = None;
                 state.holding = false;
+                state.stream_rate = 1.0;
                 drop(state);
                 self.request(source, seconds, true);
                 return;
             }
+            let observed_rate = match (state.last_requested, state.last_composition) {
+                (Some(last_source), Some(last_composition))
+                    if composition - last_composition > HELD_STEP =>
+                {
+                    Some((seconds - last_source) / (composition - last_composition))
+                }
+                _ => None,
+            };
 
             let same_frame = state
                 .last_requested
@@ -356,10 +371,23 @@ impl Preview {
                 return;
             }
             let expected = match (state.stream_start, state.stream_started) {
-                (Some(start), Some(started)) => Some(start + started.elapsed().as_secs_f64()),
+                (Some(start), Some(started)) => {
+                    Some(start + started.elapsed().as_secs_f64() * state.stream_rate)
+                }
                 _ => None,
             };
             if expected.is_some_and(|expected| stream_drifted(expected, seconds)) {
+                state.stream_start = Some(seconds);
+                state.stream_started = None;
+                drop(state);
+                self.request(source, seconds, true);
+                return;
+            }
+            // Within one piece the source advances at the piece's speed. When
+            // that differs from the stream's, decode at the new rate instead
+            // of letting the stream fall behind and restart every few ticks.
+            if let Some(rate) = observed_rate.and_then(playback_rate_change(state.stream_rate)) {
+                state.stream_rate = rate;
                 state.stream_start = Some(seconds);
                 state.stream_started = None;
                 drop(state);
@@ -390,9 +418,9 @@ impl Preview {
 
     fn request(&self, source: PathBuf, seconds: f64, realtime: bool) {
         self.generation.set(self.generation.get() + 1);
-        let (width, height) = {
+        let (width, height, rate) = {
             let state = self.state.borrow();
-            (state.width, state.height)
+            (state.width, state.height, state.stream_rate)
         };
         self.cancel();
         *self.shared.slot.lock().unwrap() = Some(Job {
@@ -402,6 +430,7 @@ impl Preview {
             height,
             generation: self.generation.get(),
             realtime,
+            rate,
         });
     }
 
@@ -544,6 +573,20 @@ fn stream_drifted(expected: f64, requested: f64) -> bool {
     (expected - requested).abs() > STREAM_DRIFT_SECONDS
 }
 
+/// The rate a stream should switch to, given the rate the source was observed
+/// to advance at over the last tick, or `None` to keep the current one. Small
+/// differences are timer jitter; a jump across a cut or a backwards step is
+/// not a playback rate.
+fn playback_rate_change(current: f64) -> impl Fn(f64) -> Option<f64> {
+    move |observed| {
+        if !(0.1..=16.0).contains(&observed) {
+            return None;
+        }
+        let rounded = (observed * 100.0).round() / 100.0;
+        ((rounded - current).abs() / current.max(0.1) > 0.05).then_some(rounded)
+    }
+}
+
 impl Drop for Preview {
     fn drop(&mut self) {
         let _slot = self.effects.job.lock().unwrap();
@@ -680,6 +723,7 @@ fn decode(shared: &Shared, sender: &mpsc::SyncSender<Frame>, job: Job) {
         job.width,
         job.height,
         job.realtime,
+        job.rate,
     );
     let Ok(mut child) = command.stdout(Stdio::piped()).stderr(Stdio::null()).spawn() else {
         return;
@@ -760,6 +804,16 @@ mod tests {
     use crate::recording::editor::click_effect::{ripple_pull_px, RIPPLE_PULL_SIZE_01};
     use crate::recording::editor::ripple_preview::{PreviewRipple, PreviewRippleClick};
     use crate::video_editor::zoom;
+
+    #[test]
+    fn the_stream_follows_a_piece_speed_but_not_jitter_or_cuts() {
+        let from_normal = super::playback_rate_change(1.0);
+        assert_eq!(from_normal(2.0), Some(2.0));
+        assert_eq!(from_normal(1.02), None, "jitter keeps the stream");
+        assert_eq!(from_normal(40.0), None, "a jump over a cut is not a rate");
+        assert_eq!(from_normal(-1.0), None);
+        assert_eq!(super::playback_rate_change(2.0)(1.0), Some(1.0));
+    }
 
     #[test]
     fn the_stream_restarts_only_after_it_has_drifted_a_quarter_second() {

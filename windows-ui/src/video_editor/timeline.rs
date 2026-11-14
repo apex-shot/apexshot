@@ -110,15 +110,17 @@ enum TimelineLane {
     Zoom,
     Sound,
     Layout,
+    /// The cursor's Hide clips. The row shows once the recording has one.
+    Cursor,
 }
 
 impl TimelineLane {
-    const ALL: [Self; 3] = [Self::Zoom, Self::Sound, Self::Layout];
+    const ALL: [Self; 4] = [Self::Zoom, Self::Sound, Self::Layout, Self::Cursor];
 
     fn of_effect(track: EffectTrack) -> Self {
         match track {
             EffectTrack::Zoom => Self::Zoom,
-            EffectTrack::Hide => Self::Sound,
+            EffectTrack::Hide => Self::Cursor,
         }
     }
 
@@ -127,6 +129,7 @@ impl TimelineLane {
             Self::Zoom => 0,
             Self::Sound => 1,
             Self::Layout => 2,
+            Self::Cursor => 3,
         }
     }
 }
@@ -138,6 +141,7 @@ struct LaneState {
     camera: bool,
     zoom: bool,
     sound: bool,
+    cursor: bool,
     expanded: TimelineLane,
 }
 
@@ -312,7 +316,7 @@ struct Data {
     /// The secondary lane drawn at full height; the others rest thin.
     expanded_lane: TimelineLane,
     /// How expanded each lane is drawn right now, 0 thin .. 1 full.
-    lane_progress: [f64; 3],
+    lane_progress: [f64; 4],
 }
 
 impl Default for Data {
@@ -370,7 +374,7 @@ impl Default for Data {
             layout_selection_epoch: 0,
             layout_burst: None,
             expanded_lane: TimelineLane::Zoom,
-            lane_progress: [1.0, 0.0, 0.0],
+            lane_progress: [1.0, 0.0, 0.0, 0.0],
         }
     }
 }
@@ -427,6 +431,10 @@ pub(crate) struct Look {
     stage: (Option<String>, f64, f64),
     stage_aspect: Option<String>,
     cursor: super::presets::CursorFile,
+    /// The custom fill, when the look was taken from the open stage. A preset
+    /// carries no fill (`None`), so applying one keeps the fill on screen; an
+    /// undo step carries the fill it saw (`Some`), so it can put that back.
+    fill: Option<Option<super::background::FillSpec>>,
 }
 
 /// What the background listener saw last, so a frame change made straight
@@ -991,7 +999,7 @@ impl Data {
         self.layout_burst = None;
         self.pending_look_edit = None;
         self.expanded_lane = TimelineLane::Zoom;
-        self.lane_progress = [1.0, 0.0, 0.0];
+        self.lane_progress = [1.0, 0.0, 0.0, 0.0];
     }
 
     /// The editable state, as one undo step keeps it.
@@ -1142,6 +1150,7 @@ impl Data {
             stage: background.snapshot(),
             stage_aspect: background.aspect(),
             cursor: super::presets::CursorFile::from_settings(cursor.settings()),
+            fill: Some(background.fill_spec()),
         })
     }
 
@@ -2105,6 +2114,7 @@ impl Data {
                 .is_some_and(|webcam| webcam.has_track()),
             zoom: true,
             sound: self.has_microphone || self.has_system || self.effects.sound.background_active(),
+            cursor: !self.hide_clips.is_empty(),
             expanded: self.expanded_lane,
         }
     }
@@ -2132,7 +2142,7 @@ impl Data {
         // About 180 ms to settle: an exponential ease with a 45 ms constant.
         let amount = 1.0 - (-dt.max(0.0) / 0.045).exp();
         let mut next = self.lane_progress;
-        let mut targets = [0.0; 3];
+        let mut targets = [0.0; 4];
         for lane in TimelineLane::ALL {
             let index = lane.index();
             targets[index] = if self.expanded_lane == lane { 1.0 } else { 0.0 };
@@ -2140,7 +2150,7 @@ impl Data {
         }
         // Snap only once every lane has arrived: snapping one early would
         // break their sum, which is what keeps the timeline's height fixed.
-        let arrived = (0..3).all(|index| (targets[index] - next[index]).abs() < 0.002);
+        let arrived = (0..4).all(|index| (targets[index] - next[index]).abs() < 0.002);
         self.lane_progress = if arrived { targets } else { next };
         !arrived
     }
@@ -4537,6 +4547,7 @@ impl Timeline {
                 ),
                 stage_aspect: file.background.aspect.clone(),
                 cursor: file.cursor,
+                fill: None,
             }
         };
         self.apply_look(&look);
@@ -4572,9 +4583,12 @@ impl Timeline {
     /// and the cursor's change is marked here.
     fn apply_look(&self, look: &Look) {
         let (selection, padding, radius) = &look.stage;
-        // A look carries the stage, not the panel's fill; keeping the fill the
-        // model already holds means a preset or an undo cannot erase it.
-        let fill = self.background.fill_spec();
+        // An undo step puts back the fill it saw; a preset carries none, so the
+        // fill the model already holds stays.
+        let fill = match &look.fill {
+            Some(fill) => fill.clone(),
+            None => self.background.fill_spec(),
+        };
         // A look being put back is not an edit: the listener must not record
         // the restore as a new step of its own.
         self.look_watch.borrow_mut().restoring = true;
@@ -4812,13 +4826,22 @@ fn record_frame_change(data: &Rc<RefCell<Data>>, watch: &Rc<RefCell<LookWatch>>)
     let before = watch.borrow().last.clone();
     let frame_changed = before.as_ref().map(|look| &look.stage_aspect)
         != next.as_ref().map(|look| &look.stage_aspect);
+    let fill_changed =
+        before.as_ref().map(|look| &look.fill) != next.as_ref().map(|look| &look.fill);
     let restoring = watch.borrow().restoring;
-    if frame_changed && !restoring {
+    if (frame_changed || fill_changed) && !restoring {
         if let Some(before) = before {
             let mut data = data.borrow_mut();
             let mut snapshot = data.snapshot();
             snapshot.look = Some(before);
-            data.record_edit(snapshot);
+            if frame_changed {
+                data.record_edit(snapshot);
+            } else {
+                // A colour or gradient drag publishes a fill per pointer
+                // event; one burst keeps the whole drag a single step.
+                data.layout_burst = None;
+                data.history.record_continuous(snapshot, "custom-fill");
+            }
         }
     }
     watch.borrow_mut().last = next;
@@ -5051,6 +5074,70 @@ pub(super) fn build(
         }
     });
 
+    // The cursor's Hide clips, drawn and edited like zoom clips.
+    let hide_track_lane = DrawingArea::new();
+    hide_track_lane.set_visible(false);
+    hide_track_lane.add_css_class("recording-editor-card-zoom-track");
+    hide_track_lane.set_hexpand(true);
+    hide_track_lane.set_size_request(-1, (THIN_LANE_HEIGHT * scale).round() as i32);
+    hide_track_lane.set_draw_func({
+        let data = data.clone();
+        move |_, context, width, height| {
+            let data = data.borrow();
+            let lane = TimelineLane::of_effect(EffectTrack::Hide);
+            let progress = data.lane_progress(lane);
+            let thin = |context: &Context| {
+                let bars: Vec<_> = data
+                    .effect_spans(EffectTrack::Hide)
+                    .into_iter()
+                    .map(|(index, start, end)| {
+                        let tone = effect_tone(
+                            EffectTrack::Hide,
+                            prefers_dark,
+                            data.effect_hidden(EffectTrack::Hide, index),
+                        );
+                        (start, end, tone.fill)
+                    })
+                    .collect();
+                draw_thin_lane(
+                    context,
+                    width,
+                    height,
+                    &data,
+                    &t("Cursor"),
+                    &bars,
+                    prefers_dark,
+                    scale,
+                );
+            };
+            let full = |context: &Context| {
+                draw_effect_clips(
+                    context,
+                    width,
+                    height,
+                    &data,
+                    EffectTrack::Hide,
+                    prefers_dark,
+                    scale,
+                );
+            };
+            if progress >= 0.999 {
+                full(context);
+            } else if progress <= 0.001 {
+                thin(context);
+            } else {
+                context.push_group();
+                thin(context);
+                let _ = context.pop_group_to_source();
+                let _ = context.paint_with_alpha(1.0 - progress);
+                context.push_group();
+                full(context);
+                let _ = context.pop_group_to_source();
+                let _ = context.paint_with_alpha(progress);
+            }
+        }
+    });
+
     let sound_track = DrawingArea::new();
     sound_track.add_css_class("recording-editor-card-sound-track");
     sound_track.set_hexpand(true);
@@ -5169,17 +5256,19 @@ pub(super) fn build(
     lanes.append(&zoom_track_lane);
     lanes.append(&sound_track);
     lanes.append(&layout_track);
+    lanes.append(&hide_track_lane);
 
     lanes.add_tick_callback({
         let data = data.clone();
         let zoom = zoom_track_lane.clone();
         let sound = sound_track.clone();
         let layout = layout_track.clone();
+        let hide = hide_track_lane.clone();
         let last = Rc::new(Cell::new(None::<i64>));
         // The heights on screen. Every tick derives them from the progress
         // and which lanes show, and applies them only when they change, so a
         // lane appearing or the first switch never jumps the total a pixel.
-        let applied = Rc::new(Cell::new([0i32; 3]));
+        let applied = Rc::new(Cell::new([0i32; 4]));
         move |_, clock| {
             let now = clock.frame_time();
             let dt = last
@@ -5195,7 +5284,12 @@ pub(super) fn build(
             };
             let heights = lane_heights(
                 progress,
-                [zoom.is_visible(), sound.is_visible(), layout.is_visible()],
+                [
+                    zoom.is_visible(),
+                    sound.is_visible(),
+                    layout.is_visible(),
+                    hide.is_visible(),
+                ],
                 scale,
             );
             if heights != applied.get() {
@@ -5203,11 +5297,13 @@ pub(super) fn build(
                 zoom.set_size_request(-1, heights[0]);
                 sound.set_size_request(-1, heights[1]);
                 layout.set_size_request(-1, heights[2]);
+                hide.set_size_request(-1, heights[3]);
             }
             if moving {
                 zoom.queue_draw();
                 sound.queue_draw();
                 layout.queue_draw();
+                hide.queue_draw();
             }
             gtk4::glib::ControlFlow::Continue
         }
@@ -5310,6 +5406,7 @@ pub(super) fn build(
         let zoom_track_lane = zoom_track_lane.clone();
         let sound_track = sound_track.clone();
         let layout_track = layout_track.clone();
+        let hide_track_lane = hide_track_lane.clone();
         let playhead = playhead.clone();
         let extend = extend.clone();
         let playhead_clock = playhead_clock.clone();
@@ -5340,6 +5437,7 @@ pub(super) fn build(
             zoom_track_lane.queue_draw();
             sound_track.queue_draw();
             layout_track.queue_draw();
+            hide_track_lane.queue_draw();
             extend.queue_draw();
             playhead.queue_draw();
             // The camera and sound rows follow the track; the zoom row never
@@ -5347,7 +5445,13 @@ pub(super) fn build(
             // lane heights.
             if lane_state.get() != Some(state) {
                 lane_state.set(Some(state));
-                apply_lane_state(state, &layout_track, &zoom_track_lane, &sound_track);
+                apply_lane_state(
+                    state,
+                    &layout_track,
+                    &zoom_track_lane,
+                    &sound_track,
+                    &hide_track_lane,
+                );
             }
             if let Some(listener) = zoom_listener.borrow().as_ref() {
                 listener();
@@ -5428,6 +5532,16 @@ pub(super) fn build(
     bind_effect_lane(
         &zoom_track_lane,
         EffectTrack::Zoom,
+        data.clone(),
+        cursor.clone(),
+        source_size.clone(),
+        repaint.clone(),
+        sync_play_icon.clone(),
+        scale,
+    );
+    bind_effect_lane(
+        &hide_track_lane,
+        EffectTrack::Hide,
         data.clone(),
         cursor.clone(),
         source_size.clone(),
@@ -5869,9 +5983,9 @@ fn lane_height(progress: f64, scale: f64) -> i32 {
 /// running totals, so a pixel one lane loses to rounding the next one gains.
 /// Rounding each lane alone made the total wobble by a pixel a frame, and
 /// the preview above resized with it.
-fn lane_heights(progress: [f64; 3], visible: [bool; 3], scale: f64) -> [i32; 3] {
-    let mut heights = [0; 3];
-    let shown: Vec<usize> = (0..3).filter(|&index| visible[index]).collect();
+fn lane_heights(progress: [f64; 4], visible: [bool; 4], scale: f64) -> [i32; 4] {
+    let mut heights = [0; 4];
+    let shown: Vec<usize> = (0..4).filter(|&index| visible[index]).collect();
     // The resting total: one lane full and the rest thin, in whole pixels.
     // Pinning the sum to it keeps a total that lands on half a pixel from
     // flipping between frames on floating-point noise.
@@ -5890,7 +6004,7 @@ fn lane_heights(progress: [f64; 3], visible: [bool; 3], scale: f64) -> [i32; 3] 
         heights[index] = rounded - placed;
         placed = rounded;
     }
-    for index in 0..3 {
+    for index in 0..4 {
         if !visible[index] {
             heights[index] = lane_height(progress[index], scale);
         }
@@ -5905,12 +6019,14 @@ fn apply_lane_state(
     layout_track: &DrawingArea,
     zoom_track: &DrawingArea,
     sound_track: &DrawingArea,
+    hide_track: &DrawingArea,
 ) {
     layout_track.set_visible(state.camera);
     // The zoom lane is a permanent drop target, so its row never collapses,
     // even while empty.
     zoom_track.set_visible(state.zoom);
     sound_track.set_visible(state.sound);
+    hide_track.set_visible(state.cursor);
 }
 
 /// The one stylesheet this card adds on top of the shared editor sheet.
@@ -7311,6 +7427,26 @@ fn show_clip_menu(
                                 data.remove_selected_piece();
                             } else {
                                 data.remove_video_clip();
+                            }
+                        }
+                        repaint();
+                    })
+                },
+            });
+            // The cursor's Hide track has no tool button: a clip starts here,
+            // at the playhead, and its row appears with it.
+            items.push(MenuItem {
+                icon: icon_names::shipped::EYE_OFF_REGULAR,
+                label: t("Hide cursor here"),
+                action: {
+                    let data = data.clone();
+                    let repaint = repaint.clone();
+                    Rc::new(move || {
+                        {
+                            let mut data = data.borrow_mut();
+                            let at = data.playhead;
+                            if data.add_effect(EffectTrack::Hide, at).is_some() {
+                                data.expand_lane(TimelineLane::Cursor);
                             }
                         }
                         repaint();
@@ -12368,7 +12504,7 @@ mod tests {
     #[test]
     fn the_lanes_keep_one_total_height_while_they_trade() {
         let mut data = Data::default();
-        let resting: i32 = lane_heights(data.lane_progress, [true; 3], 1.25)
+        let resting: i32 = lane_heights(data.lane_progress, [true; 4], 1.25)
             .iter()
             .sum();
         data.expand_lane(TimelineLane::Sound);
@@ -12378,7 +12514,7 @@ mod tests {
                 data.expand_lane(TimelineLane::Layout);
             }
             data.step_lane_progress(0.016);
-            let total: i32 = lane_heights(data.lane_progress, [true; 3], 1.25)
+            let total: i32 = lane_heights(data.lane_progress, [true; 4], 1.25)
                 .iter()
                 .sum();
             assert_eq!(total, resting, "frame {frame}: {:?}", data.lane_progress);
@@ -12388,7 +12524,7 @@ mod tests {
     #[test]
     fn a_lane_eases_to_its_new_height_and_settles() {
         let mut data = Data::default();
-        assert_eq!(data.lane_progress, [1.0, 0.0, 0.0]);
+        assert_eq!(data.lane_progress, [1.0, 0.0, 0.0, 0.0]);
         data.expand_lane(TimelineLane::Sound);
         assert!(data.step_lane_progress(0.016), "a change starts moving");
         let zoom = data.lane_progress(TimelineLane::Zoom);
@@ -12400,7 +12536,7 @@ mod tests {
             steps += 1;
             assert!(steps < 100, "it settles");
         }
-        assert_eq!(data.lane_progress, [0.0, 1.0, 0.0]);
+        assert_eq!(data.lane_progress, [0.0, 1.0, 0.0, 0.0]);
         assert!(steps > 5, "it takes several frames, not a jump: {steps}");
         assert_eq!(lane_height(0.0, 1.0), THIN_LANE_HEIGHT as i32);
         assert_eq!(lane_height(1.0, 1.0), EFFECT_LANE_HEIGHT as i32);
