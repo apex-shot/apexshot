@@ -4414,6 +4414,10 @@ impl FilledSlider {
             }
         });
         area.add_controller(motion);
+        // The draw fades a switched-off slider, but a parent turning
+        // sensitive again (an image loading) does not repaint a drawing
+        // area, so the faded frame stayed until the pointer crossed it.
+        area.connect_state_flags_changed(|area, _| area.queue_draw());
         area.set_cursor(gdk::Cursor::from_name("ew-resize", None).as_ref());
         slider
     }
