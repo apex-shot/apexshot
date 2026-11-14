@@ -3606,6 +3606,13 @@ private:
         const qreal displayDpr = Platform::monitorAt(region.center()).dpr;
         request.displayScale = !settings.recording.highDpi && displayDpr > 1.0
             ? 1.0 / displayDpr : 1.0;
+        // Baking the camera re-encodes the whole recording, so it only happens
+        // when something hands the saved file on. A recording that only opens
+        // the editor keeps the camera as the editor's own layer instead.
+        request.bakeWebcam = !(settings.recording.afterOpenEditor
+                               && !settings.recording.afterShowResult
+                               && !settings.recording.afterCopyToClipboard
+                               && !settings.cloud.autoUploadAfterCapture);
 
         // The camera records to its own track and the editor composites it, so
         // what this window shows is a preview of that layer: it is excluded

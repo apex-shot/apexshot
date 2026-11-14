@@ -93,6 +93,10 @@ struct RecordingRequest {
     QString webcamStreamUrl;
     /// Where the bubble sat in `region`, for the editor's layer.
     WebcamLayout webcamLayout;
+    /// Composite the camera into the saved video after stopping. Off keeps the
+    /// screen footage as recorded and the camera only as its own track, for a
+    /// recording that goes straight to the editor, which draws that layer.
+    bool bakeWebcam = true;
 };
 
 /// The ffmpeg this build records with, resolved from APEXSHOT_FFMPEG, the

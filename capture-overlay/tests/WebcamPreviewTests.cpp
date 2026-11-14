@@ -168,7 +168,7 @@ bool checkPlacementPersistence()
     return ok;
 }
 
-bool checkRecording(const QString& fakeCamera)
+bool checkRecording(const QString& fakeCamera, bool bake)
 {
     const QByteArray previousFfmpeg = qgetenv("APEXSHOT_FFMPEG");
     const QString realFfmpeg = previousFfmpeg.isEmpty()
@@ -236,6 +236,7 @@ bool checkRecording(const QString& fakeCamera)
     request.webcamStreamUrl = preview.streamUrl();
     request.webcamLayout = Platform::webcamLayoutForRect(
         request.region, QRect(160, 80, 120, 120), 1, true);
+    request.bakeWebcam = bake;
     Platform::RecordingSession session;
     bool finished = false;
     bool kept = false;
@@ -277,6 +278,28 @@ bool checkRecording(const QString& fakeCamera)
     const QJsonObject camera = metadata.value(QStringLiteral("webcam")).toObject();
     const QString cleanName = metadata.value(QStringLiteral("screen_file")).toString();
     const QString cameraName = camera.value(QStringLiteral("file")).toString();
+    if (!bake) {
+        // Without the bake the saved video is the screen footage itself: the
+        // camera exists only as its own timed track, and no clean copy is kept.
+        const QStringList parked = QDir(output.path())
+                                       .entryList({QStringLiteral(".apexshot-screen-*")},
+                                                  QDir::Files | QDir::Hidden);
+        if (!cleanName.isEmpty() || !parked.isEmpty() || cameraName.isEmpty()
+            || !QFileInfo::exists(Platform::webcamTrackPathFor(request.outputPath))
+            || camera.value(QStringLiteral("duration")).toDouble() <= 0.0
+            || camera.value(QStringLiteral("start")).toDouble() < 0.0) {
+            std::fprintf(stderr, "unbaked recording lost its camera track or kept a clean copy\n");
+            return false;
+        }
+        std::printf("unbaked camera track start=%.3fs duration=%.3fs\n",
+                    camera.value(QStringLiteral("start")).toDouble(),
+                    camera.value(QStringLiteral("duration")).toDouble());
+        if (previousFfmpeg.isEmpty())
+            qunsetenv("APEXSHOT_FFMPEG");
+        else
+            qputenv("APEXSHOT_FFMPEG", previousFfmpeg);
+        return true;
+    }
     if (cleanName.isEmpty() || cameraName.isEmpty()
         || !QFileInfo::exists(output.filePath(cleanName))
         || !QFileInfo::exists(Platform::webcamTrackPathFor(request.outputPath))
@@ -347,7 +370,7 @@ int main(int argc, char** argv)
     }
     const QString fake = QCoreApplication::applicationDirPath()
                          + QStringLiteral("/apexshot-fake-webcam.exe");
-    if (!checkRecording(fake))
+    if (!checkRecording(fake, true) || !checkRecording(fake, false))
         return 1;
     std::puts("webcam setup and continuous recording passed");
     return 0;

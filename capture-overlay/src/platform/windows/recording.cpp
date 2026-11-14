@@ -1781,6 +1781,11 @@ void RecordingSession::Private::completeWebcamTrack(const QString& videoPath)
             finish(false, QStringLiteral("the camera track had no readable frames"));
             return;
         }
+        if (!request.bakeWebcam) {
+            recordingLog(QStringLiteral("webcam composite skipped: the editor draws the camera"));
+            finish(true, QString());
+            return;
+        }
         compositeWebcam(
             videoPath,
             trackPath,
