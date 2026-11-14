@@ -217,6 +217,9 @@ struct Data {
     zoom_camera: super::zoom::ZoomCameraSettings,
     /// The click sound and the keyboard captions the edit list carries.
     effects: super::project::EffectsSettings,
+    /// The export tier the stage's chip shows. Shared with the stage, so a
+    /// pick reaches the project file and a load reaches the chip.
+    quality: Option<Rc<Cell<super::window::QualityTier>>>,
     hide_clips: Vec<HideClip>,
     selected_zoom: Option<usize>,
     /// Bumped every time a zoom clip is selected. The panel reveals itself on
@@ -329,6 +332,7 @@ impl Default for Data {
             zoom_clips: Vec::new(),
             zoom_camera: super::zoom::ZoomCameraSettings::default(),
             effects: super::project::EffectsSettings::default(),
+            quality: None,
             hide_clips: Vec::new(),
             selected_zoom: None,
             zoom_selection_epoch: 0,
@@ -968,6 +972,9 @@ impl Data {
         self.dragging_effect = false;
         self.zoom_camera = super::zoom::ZoomCameraSettings::default();
         self.effects = super::project::EffectsSettings::default();
+        if let Some(quality) = &self.quality {
+            quality.set(super::window::QualityTier::default());
+        }
         self.cuts.clear();
         self.segment_starts.clear();
         self.segment_speeds.clear();
@@ -1200,7 +1207,11 @@ impl Data {
             && self.trim_start.abs() <= 0.001
             && (self.duration - self.trim_end).abs() <= 0.001
             && self.zoom_camera == super::zoom::ZoomCameraSettings::default()
-            && self.effects == super::project::EffectsSettings::default();
+            && self.effects == super::project::EffectsSettings::default()
+            && self
+                .quality
+                .as_ref()
+                .is_none_or(|quality| quality.get() == super::window::QualityTier::default());
         if pristine && !self.has_project {
             return None;
         }
@@ -1250,6 +1261,12 @@ impl Data {
             captions_show_single_letters: self.effects.captions.show_single_letters,
             sound: self.effects.sound.clone(),
             clip_sounds: self.effects.clip_sounds.clone(),
+            // The default tier needs no key, so a file written before the chip
+            // was stored opens on the same High it always showed.
+            quality: self.quality.as_ref().and_then(|quality| {
+                let tier = quality.get();
+                (tier != super::window::QualityTier::default()).then(|| tier.id().to_owned())
+            }),
             cursor: Default::default(),
         })
     }
@@ -1365,6 +1382,9 @@ impl Data {
         }
         self.selected_layout = None;
         self.effects = file.effects();
+        if let Some(quality) = &self.quality {
+            quality.set(super::window::QualityTier::from_id(file.quality.as_deref()));
+        }
         self.normalize_clip_sounds();
         self.scale = if file.timeline_scale.is_finite() {
             file.timeline_scale.clamp(0.0, 100.0)
@@ -3522,6 +3542,12 @@ impl Timeline {
         sink(self.current_frame());
     }
 
+    /// Share the stage's export tier with the document. The chip owns the
+    /// value; the project file reads it on save and restores it on load.
+    pub fn set_quality_handle(&self, quality: Rc<Cell<super::window::QualityTier>>) {
+        self.data.borrow_mut().quality = Some(quality);
+    }
+
     /// Length of the recording's footage, before any trimming.
     pub fn source_duration(&self) -> f64 {
         self.data.borrow().duration
@@ -3960,6 +3986,13 @@ impl Timeline {
     pub fn webcam_error(&self) -> Option<String> {
         let webcam = self.data.borrow().webcam.clone()?;
         webcam.error()
+    }
+
+    /// Whether the recording's audio could be analysed: `None` while the
+    /// analysis runs, `Some(false)` for a recording with no audio. The camera
+    /// panel uses it to say that hiding during silence would do nothing.
+    pub fn webcam_has_audio(&self) -> Option<bool> {
+        self.data.borrow().webcam.as_ref()?.has_audio()
     }
 
     /// Everything the Webcam panel shows.
@@ -9083,6 +9116,7 @@ mod tests {
     use super::super::background::{Background, DEFAULT_PADDING, DEFAULT_RADIUS};
     use super::super::project;
     use super::super::webcam::{CameraLayout, LayoutSettings};
+    use super::super::window::QualityTier;
     use super::*;
     use crate::recording::editor::sidecar::{
         CaptureRegion, ClickSample, PointerSidecar, WebcamTrack,
@@ -9182,6 +9216,28 @@ mod tests {
     }
 
     #[test]
+    fn the_export_quality_round_trips_through_the_project() {
+        let video = recording("quality");
+        let quality = Rc::new(Cell::new(QualityTier::Ultra));
+        let mut data = loaded();
+        data.path = Some(video.clone());
+        data.quality = Some(quality.clone());
+        let background = Background::default();
+
+        let file = data
+            .project_file(&background)
+            .expect("a non-default tier is worth saving");
+        assert_eq!(file.quality.as_deref(), Some("ultra"));
+
+        let reopened_quality = Rc::new(Cell::new(QualityTier::High));
+        let mut reopened = loaded();
+        reopened.path = Some(video);
+        reopened.quality = Some(reopened_quality.clone());
+        reopened.apply_project(&file);
+        assert_eq!(reopened_quality.get(), QualityTier::Ultra);
+    }
+
+    #[test]
     fn a_radius_only_stage_is_saved_and_resets_to_pristine() {
         let video = recording("stage-radius-only");
         let mut data = loaded();
@@ -9253,6 +9309,7 @@ mod tests {
             captions_show_single_letters: false,
             sound: Default::default(),
             clip_sounds: Vec::new(),
+            quality: None,
             cursor: Default::default(),
         });
 
@@ -9446,6 +9503,7 @@ mod tests {
             captions_show_single_letters: false,
             sound: Default::default(),
             clip_sounds: Vec::new(),
+            quality: None,
             cursor: Default::default(),
         });
 
@@ -9518,6 +9576,7 @@ mod tests {
             captions_show_single_letters: false,
             sound: Default::default(),
             clip_sounds: Vec::new(),
+            quality: None,
             cursor: Default::default(),
         });
 
@@ -11377,6 +11436,7 @@ mod tests {
             captions_show_single_letters: false,
             sound: Default::default(),
             clip_sounds: Vec::new(),
+            quality: None,
             cursor: Default::default(),
         });
 

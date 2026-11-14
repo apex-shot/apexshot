@@ -2517,7 +2517,6 @@ impl WebcamModel {
 
     /// Whether the recording's audio could be analysed: `None` while the
     /// analysis runs, `Some(false)` for a recording with no audio.
-    #[allow(dead_code)]
     pub fn has_audio(&self) -> Option<bool> {
         self.state
             .shared
@@ -2526,6 +2525,19 @@ impl WebcamModel {
             .unwrap()
             .as_ref()
             .map(|ranges| ranges.is_some())
+    }
+
+    /// Whether an export would snapshot the silence list before the analysis
+    /// has produced it: the camera's hide is on, the layer is drawn, and the
+    /// recording has not been analysed yet.
+    pub fn silence_pending(&self) -> bool {
+        let Some(settings) = self.settings() else {
+            return false;
+        };
+        self.layouts().uses_camera()
+            && settings.enabled
+            && settings.hide_during_silence.is_some()
+            && self.has_audio().is_none()
     }
 
     fn silence_ranges(&self) -> Vec<(f64, f64)> {

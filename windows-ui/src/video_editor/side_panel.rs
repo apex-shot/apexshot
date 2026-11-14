@@ -3411,6 +3411,7 @@ struct WebcamCameraContext {
     delay: FilledSlider,
     silence: Switch,
     silence_length: FilledSlider,
+    has_audio: Rc<dyn Fn() -> Option<bool>>,
 }
 
 impl WebcamCameraContext {
@@ -3423,6 +3424,22 @@ impl WebcamCameraContext {
         self.silence_length
             .widget()
             .set_visible(hide_during_silence.is_some());
+        sync_silence_switch(&self.silence, self.has_audio.as_ref());
+    }
+}
+
+/// A recording with no audio cannot hide anything, so the switch says so
+/// instead of silently doing nothing. The analysis runs after the document
+/// opens, so the answer is read again whenever the panel refreshes or shows.
+fn sync_silence_switch(silence: &Switch, has_audio: &dyn Fn() -> Option<bool>) {
+    if has_audio() == Some(false) {
+        silence.set_sensitive(false);
+        silence.set_tooltip_text(Some(&t("This recording has no audio.")));
+    } else {
+        silence.set_sensitive(true);
+        silence.set_tooltip_text(Some(&t(
+            "Hide the camera while nobody is talking, and bring it back when they do.",
+        )));
     }
 }
 
@@ -3434,6 +3451,7 @@ fn build_webcam_camera(
     set_delay: Rc<dyn Fn(f64)>,
     hide_during_silence: Option<f64>,
     set_silence: Rc<dyn Fn(Option<f64>)>,
+    has_audio: Rc<dyn Fn() -> Option<bool>>,
 ) -> WebcamCameraContext {
     let root = GtkBox::new(Orientation::Vertical, (8.0 * scale).round() as i32);
     root.set_hexpand(true);
@@ -3469,6 +3487,12 @@ fn build_webcam_camera(
     );
     root.append(&silence_row);
     silence.set_active(hide_during_silence.is_some());
+    sync_silence_switch(&silence, has_audio.as_ref());
+    {
+        let has_audio = has_audio.clone();
+        let silence = silence.clone();
+        silence_row.connect_map(move |_| sync_silence_switch(&silence, has_audio.as_ref()));
+    }
     let switch_silence = set_silence.clone();
     silence.connect_state_set(move |_, active| {
         switch_silence(if active {
@@ -3502,6 +3526,7 @@ fn build_webcam_camera(
         delay,
         silence,
         silence_length,
+        has_audio,
     }
 }
 
@@ -3653,6 +3678,7 @@ fn build_webcam_context(
     layouts: &LayoutSettings,
     frame_aspect: f64,
     actions: WebcamContextActions,
+    has_audio: Rc<dyn Fn() -> Option<bool>>,
 ) -> WebcamContext {
     let overlay = build_webcam_overlay(scale, &layer, frame_aspect, &actions);
     let split = build_webcam_split(
@@ -3687,6 +3713,7 @@ fn build_webcam_context(
         actions.set_delay.clone(),
         layer.hide_during_silence,
         actions.set_silence.clone(),
+        has_audio,
     );
     let transition = build_webcam_transition(
         scale,
@@ -4004,12 +4031,17 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
             })
         },
     };
+    let has_audio: Rc<dyn Fn() -> Option<bool>> = {
+        let timeline = timeline.clone();
+        Rc::new(move || timeline.webcam_has_audio())
+    };
     let context = build_webcam_context(
         scale,
         initial_layer,
         &initial_layouts,
         initial.frame_aspect,
         actions,
+        has_audio,
     );
     let settings_section = webcam_section(scale, &t("Layout settings"), true);
     settings_section.body.append(&context.root);
@@ -5986,6 +6018,7 @@ mod tests {
                     &layouts,
                     frame_aspect,
                     WebcamContextActions::idle(),
+                    Rc::new(|| None),
                 );
                 window.set_child(Some(&context.root));
                 for card in WebcamLayoutCard::ALL {

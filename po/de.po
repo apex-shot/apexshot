@@ -4874,3 +4874,6 @@ msgstr "Auflösung"
 
 msgid "Remove recording"
 msgstr "Aufnahme entfernen"
+
+msgid "This recording has no audio."
+msgstr "Diese Aufnahme hat keinen Ton."

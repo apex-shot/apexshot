@@ -16,8 +16,8 @@
 //! than as the closure the stage paints from, so the same project can be read
 //! without a renderer. Merging the two schemas later is then a promotion rather
 //! than a translation. What this editor does not model — crop, dimension,
-//! quality, extra media — has no key here, so the file never claims a feature
-//! the editor would not honour.
+//! extra media — has no key here, so the file never claims a feature the
+//! editor would not honour.
 //!
 //! The directory is its own rather than the shared `video-projects` one: the
 //! shared editor parses every file in that folder with its own loader, and a
@@ -223,6 +223,10 @@ pub(super) struct EditorProjectFile {
     /// Each cut piece's own sound, one entry per segment.
     #[serde(default)]
     pub clip_sounds: Vec<super::sound::ClipSound>,
+    /// The export quality tier by its id. Absent reads as High, the tier the
+    /// chip starts on and the one files written before this key existed show.
+    #[serde(default)]
+    pub quality: Option<String>,
 }
 
 const DEFAULT_CLICK_SOUND_VOLUME: f64 = 0.25;
@@ -686,6 +690,7 @@ mod tests {
             cursor: super::super::presets::CursorFile::default(),
             sound: Default::default(),
             clip_sounds: Vec::new(),
+            quality: Some("ultra".to_owned()),
         }
     }
 
@@ -839,6 +844,24 @@ mod tests {
         assert_eq!(loaded.background.selection, None);
         assert_eq!(loaded.background_padding, 24.0);
         assert_eq!(loaded.background_radius, 0.0);
+    }
+
+    #[test]
+    fn a_project_without_a_quality_key_keeps_the_chip_default() {
+        let directory = scratch("quality-legacy");
+        let video = recording(&directory);
+        let path = directory.join("quality-legacy.json");
+        let mut json: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&project(&video)).unwrap()).unwrap();
+        assert!(
+            json.as_object_mut().unwrap().remove("quality").is_some(),
+            "the fixture writes the quality key"
+        );
+        fs::write(&path, serde_json::to_string(&json).unwrap()).unwrap();
+
+        let loaded = read_at(&path, &video).expect("project loads");
+        assert_eq!(loaded.quality, None);
+        let _ = fs::remove_dir_all(&directory);
     }
 
     #[test]

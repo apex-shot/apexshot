@@ -52,7 +52,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     window.set_decorated(false);
     window.add_css_class("editor-window");
     window.add_css_class("video-editor-window");
-    let minimum = scaled_pair(920.0, 620.0, scale);
+    let minimum = minimum_window_size(scale);
     window.set_size_request(minimum.0, minimum.1);
 
     let prefers_dark = windowing::prefers_dark_glass_theme();
@@ -103,6 +103,9 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     // The stage reports the first frame of each playback to the transport, so
     // the playhead and the sound start with the picture.
     stage.preview.report_first_frame_to(timeline.first_frame_clock());
+    // The chip's tier is part of the document: the timeline writes it into the
+    // project file and restores it on load, through this one shared cell.
+    timeline.set_quality_handle(stage.quality.clone());
     super::presets_popover::attach(&stage.presets_button, &timeline, scale);
 
     let tools_column = super::side_panel::build_tools_column(
@@ -266,6 +269,8 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
             // The timeline probes the recording, so the stage takes its
             // lengths from there for the poster and the export estimate.
             timeline.set_document(path);
+            // The project may have restored a different export tier.
+            stage.sync_quality();
             sound.stop();
             *sound_sources.borrow_mut() = None;
             timeline.set_sound_sources(false, false);
@@ -558,7 +563,7 @@ impl FrameAspect {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum QualityTier {
+pub(super) enum QualityTier {
     Balanced,
     High,
     Ultra,
@@ -573,6 +578,24 @@ impl Default for QualityTier {
 }
 
 impl QualityTier {
+    /// How the project file names this tier. A missing or unknown name reads
+    /// as High, the default the chip starts on.
+    pub(super) fn id(self) -> &'static str {
+        match self {
+            Self::Balanced => "balanced",
+            Self::High => "high",
+            Self::Ultra => "ultra",
+        }
+    }
+
+    pub(super) fn from_id(id: Option<&str>) -> Self {
+        match id {
+            Some("balanced") => Self::Balanced,
+            Some("ultra") => Self::Ultra,
+            _ => Self::High,
+        }
+    }
+
     fn label(self) -> String {
         match self {
             Self::Balanced => t("Balanced"),
@@ -900,6 +923,8 @@ struct Stage {
     preview: Rc<super::preview::Preview>,
     estimate: Estimate,
     quality: Rc<Cell<QualityTier>>,
+    /// The chip's label, so a project load can show the tier it restored.
+    quality_label: Label,
     export_button: Button,
     presets_button: Button,
     background: super::background::BackgroundState,
@@ -1311,50 +1336,15 @@ impl Stage {
     /// The source pixel under a point in the preview overlay, or `None` off the
     /// video.
     fn source_point_at(&self, x: f64, y: f64) -> Option<(f64, f64)> {
-        let (source_width, source_height) = self.source_size.get()?;
-        let video = clip_video_rect(
+        stage_source_point(
             &self.clip,
-            self.overlay.allocated_width(),
-            self.overlay.allocated_height(),
-            (source_width, source_height),
-        )?;
-        let video = match self
-            .webcam
-            .layout_frame(Some((source_width, source_height)))
-            .map(|frame| (frame.screen, frame.screen_anchor))
-            .filter(|(screen, _)| !screen.is_full())
-        {
-            Some((screen, anchor)) => {
-                let draw = screen_transform(
-                    video,
-                    screen,
-                    f64::from(source_width) / f64::from(source_height.max(1)),
-                    anchor,
-                )
-                .draw;
-                super::cursor::VideoRect {
-                    x: draw.x,
-                    y: draw.y,
-                    width: draw.width,
-                    height: draw.height,
-                }
-            }
-            None => video,
-        };
-        if x < video.x || y < video.y || x > video.x + video.width || y > video.y + video.height {
-            return None;
-        }
-        let view = self.camera_view.get().unwrap_or((
-            0.0,
-            0.0,
-            f64::from(source_width),
-            f64::from(source_height),
-        ));
-        Some(super::zoom::stage_point_to_source(
-            (x, y),
-            view,
-            [video.x, video.y, video.width, video.height],
-        ))
+            &self.overlay,
+            &self.webcam,
+            self.source_size.get(),
+            self.camera_view.get(),
+            x,
+            y,
+        )
     }
 
     /// With the Add zoom tool armed, the outline follows the pointer and a
@@ -1409,7 +1399,12 @@ impl Stage {
 
     /// Dragging the preview places the selected Manual zoom's focus point.
     fn connect_placement(&self, place: Rc<dyn Fn((f64, f64))>) {
-        let canvas = self.canvas.clone();
+        // The drag sits on the overlay, like the Add zoom click, so its
+        // coordinates are the stage's and the placement maps through the same
+        // video rect and screen transform.
+        let overlay = self.overlay.clone();
+        let clip = self.clip.clone();
+        let webcam = self.webcam.clone();
         let source_size = self.source_size.clone();
         let camera_view = self.camera_view.clone();
         let placement = self.placement.clone();
@@ -1419,27 +1414,17 @@ impl Stage {
             if placement.get().is_none() {
                 return;
             }
-            let Some((source_width, source_height)) = source_size.get() else {
-                return;
-            };
-            let (width, height) = (
-                f64::from(canvas.allocated_width().max(1)),
-                f64::from(canvas.allocated_height().max(1)),
-            );
-            let (source_width, source_height) = (f64::from(source_width), f64::from(source_height));
-            let Some(video) =
-                super::cursor::video_rect_for(width, height, source_width, source_height)
-            else {
-                return;
-            };
-            let view = camera_view
-                .get()
-                .unwrap_or((0.0, 0.0, source_width, source_height));
-            place(super::zoom::stage_point_to_source(
-                (x, y),
-                view,
-                [video.x, video.y, video.width, video.height],
-            ));
+            if let Some(point) = stage_source_point(
+                &clip,
+                &overlay,
+                &webcam,
+                source_size.get(),
+                camera_view.get(),
+                x,
+                y,
+            ) {
+                place(point);
+            }
         });
 
         let drag = gtk4::GestureDrag::new();
@@ -1456,7 +1441,7 @@ impl Stage {
                 }
             }
         });
-        self.canvas.add_controller(drag);
+        self.overlay.add_controller(drag);
     }
 
     fn connect_open(&self, open: Rc<dyn Fn()>) {
@@ -1468,6 +1453,14 @@ impl Stage {
             }
         });
         self.canvas.add_controller(click);
+    }
+
+    /// Show the tier the open document carries. The chip's cell is shared with
+    /// the timeline, which restores it from the project file on load, so this
+    /// only has to redraw the label and the estimate that reads it.
+    fn sync_quality(&self) {
+        self.quality_label.set_text(&self.quality.get().label());
+        self.estimate.refresh();
     }
 
     fn show_document(&self, path: Option<&Path>, source_seconds: f64, composition_seconds: f64) {
@@ -1534,6 +1527,59 @@ fn clip_video_rect(
         f64::from(source_size.0),
         f64::from(source_size.1),
     )
+}
+
+/// The source pixel under a point in the preview overlay, or `None` off the
+/// video. The overlay's own allocation and the clip's margins are the stage's
+/// coordinates, so every pointer mapping goes through this one transform: the
+/// Add zoom click, its hover outline, and the Manual zoom focus drag.
+fn stage_source_point(
+    clip: &super::rounded_clip::RoundedClip,
+    overlay: &Overlay,
+    webcam: &super::webcam::WebcamModel,
+    source_size: Option<(u32, u32)>,
+    camera_view: Option<super::zoom::ViewRect>,
+    x: f64,
+    y: f64,
+) -> Option<(f64, f64)> {
+    let (source_width, source_height) = source_size?;
+    let video = clip_video_rect(
+        clip,
+        overlay.allocated_width(),
+        overlay.allocated_height(),
+        (source_width, source_height),
+    )?;
+    let video = match webcam
+        .layout_frame(Some((source_width, source_height)))
+        .map(|frame| (frame.screen, frame.screen_anchor))
+        .filter(|(screen, _)| !screen.is_full())
+    {
+        Some((screen, anchor)) => {
+            let draw = screen_transform(
+                video,
+                screen,
+                f64::from(source_width) / f64::from(source_height.max(1)),
+                anchor,
+            )
+            .draw;
+            super::cursor::VideoRect {
+                x: draw.x,
+                y: draw.y,
+                width: draw.width,
+                height: draw.height,
+            }
+        }
+        None => video,
+    };
+    if x < video.x || y < video.y || x > video.x + video.width || y > video.y + video.height {
+        return None;
+    }
+    let view = camera_view.unwrap_or((0.0, 0.0, f64::from(source_width), f64::from(source_height)));
+    Some(super::zoom::stage_point_to_source(
+        (x, y),
+        view,
+        [video.x, video.y, video.width, video.height],
+    ))
 }
 
 /// The screen's share of the video rect, in stage pixels: the cover rect the
@@ -1913,6 +1959,8 @@ fn build_stage(
     aspect_chip.set_tooltip_text(Some(&t("Change aspect ratio")));
     aspect_chip.set_child(Some(&stage_aspect_label));
 
+    // Hidden until crop is modelled: the chip has no control behind it, so it
+    // is built but never added to the tools row.
     let crop = Button::new();
     crop.set_has_frame(false);
     crop.add_css_class("recording-editor-stage-chip");
@@ -1945,8 +1993,6 @@ fn build_stage(
 
     tools.append(&aspect_chip);
     tools.append(&stage_rule());
-    tools.append(&crop);
-    tools.append(&stage_rule());
     tools.append(&quality_button);
     tools.append(&stage_rule());
     tools.append(&estimate_label);
@@ -1962,6 +2008,7 @@ fn build_stage(
         preview,
         estimate: estimate.clone(),
         quality: quality.clone(),
+        quality_label: quality_label.clone(),
         export_button: export_button.clone(),
         presets_button: presets_button.clone(),
         background: background.state(),
@@ -2412,16 +2459,42 @@ fn wire_export(
         if shell.child().is_some_and(|editor| !editor.is_sensitive()) {
             return;
         }
+        // The silence analysis runs beside the editor, so an export started
+        // before it lands would bake the camera without its silence hides.
+        // The export model is built on this thread, so waiting means replaying
+        // the click once the analysis lands rather than blocking the window.
+        if stage_handle.webcam.silence_pending() {
+            let button = stage_handle.export_button.clone();
+            let webcam = stage_handle.webcam.clone();
+            gtk4::glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+                // The window went away while the analysis ran.
+                if button.root().is_none() {
+                    return gtk4::glib::ControlFlow::Break;
+                }
+                if webcam.silence_pending() {
+                    gtk4::glib::ControlFlow::Continue
+                } else {
+                    button.emit_clicked();
+                    gtk4::glib::ControlFlow::Break
+                }
+            });
+            return;
+        }
         timeline.pause();
         let Some(model) = export_model(&stage_handle, &timeline) else {
             return;
         };
         let retry = stage_handle.export_button.downgrade();
-        if !crate::studio_upsell::gate(&window, super::studio::capabilities(&model), move || {
-            if let Some(button) = retry.upgrade() {
-                button.emit_clicked();
-            }
-        }) {
+        let composition_seconds = timeline.composition_duration();
+        if !crate::studio_upsell::gate(
+            &window,
+            super::studio::capabilities_at(&model, composition_seconds),
+            move || {
+                if let Some(button) = retry.upgrade() {
+                    button.emit_clicked();
+                }
+            },
+        ) {
             return;
         }
         let source = model.source.clone();
@@ -2517,17 +2590,22 @@ fn start_gated_video_export(
     let retry_timeline = timeline.clone();
     let retry_shell = shell.downgrade();
     let retry_request = request.clone();
-    if crate::studio_upsell::gate(window, super::studio::capabilities(&model), move || {
-        if let (Some(window), Some(shell)) = (retry_window.upgrade(), retry_shell.upgrade()) {
-            start_gated_video_export(
-                &window,
-                &retry_stage,
-                &retry_timeline,
-                &shell,
-                retry_request.clone(),
-            );
-        }
-    }) {
+    let composition_seconds = timeline.composition_duration();
+    if crate::studio_upsell::gate(
+        window,
+        super::studio::capabilities_at(&model, composition_seconds),
+        move || {
+            if let (Some(window), Some(shell)) = (retry_window.upgrade(), retry_shell.upgrade()) {
+                start_gated_video_export(
+                    &window,
+                    &retry_stage,
+                    &retry_timeline,
+                    &shell,
+                    retry_request.clone(),
+                );
+            }
+        },
+    ) {
         super::export_card::show(
             shell,
             model,
@@ -2606,21 +2684,39 @@ fn is_supported_video(path: &Path) -> bool {
             .is_some_and(|ext| ext.eq_ignore_ascii_case("mp4"))
 }
 
-fn default_window_size(scale: f64) -> (i32, i32) {
-    let requested = scaled_pair(1280.0, 860.0, scale);
-    let Some(display) = gdk::Display::default() else {
-        return requested;
-    };
-    let Some(monitor) = display.monitors().item(0).and_downcast::<gdk::Monitor>() else {
-        return requested;
-    };
+/// The room the first monitor offers a window: 92% of its width and 90% of its
+/// height, the same budget for the default size and the minimum.
+fn monitor_budget() -> Option<(i32, i32)> {
+    let display = gdk::Display::default()?;
+    let monitor = display.monitors().item(0).and_downcast::<gdk::Monitor>()?;
     let geometry = monitor.geometry();
-    let max_width = (f64::from(geometry.width()) * 0.92).round() as i32;
-    let max_height = (f64::from(geometry.height()) * 0.90).round() as i32;
-    (
-        requested.0.min(max_width).max(1),
-        requested.1.min(max_height).max(1),
-    )
+    Some((
+        (f64::from(geometry.width()) * 0.92).round() as i32,
+        (f64::from(geometry.height()) * 0.90).round() as i32,
+    ))
+}
+
+/// Fit a requested size inside the monitor's budget, per axis. Without a
+/// monitor the request stands as it is.
+fn fit_to_monitor(requested: (i32, i32), budget: Option<(i32, i32)>) -> (i32, i32) {
+    match budget {
+        Some((max_width, max_height)) => (
+            requested.0.min(max_width).max(1),
+            requested.1.min(max_height).max(1),
+        ),
+        None => requested,
+    }
+}
+
+fn default_window_size(scale: f64) -> (i32, i32) {
+    fit_to_monitor(scaled_pair(1280.0, 860.0, scale), monitor_budget())
+}
+
+/// The smallest the window may be. A high-DPI small screen scales the layout's
+/// minimum past what the monitor has, so it is clamped to the same budget as
+/// the default size instead of forcing the window off screen.
+fn minimum_window_size(scale: f64) -> (i32, i32) {
+    fit_to_monitor(scaled_pair(920.0, 620.0, scale), monitor_budget())
 }
 
 fn scaled_pair(width: f64, height: f64, scale: f64) -> (i32, i32) {
@@ -2765,8 +2861,8 @@ fn install_css() {
 #[cfg(test)]
 mod tests {
     use super::{
-        canvas_dimensions, card_radius, estimated_size_bytes, format_size, history_key,
-        output_dimensions, padding_px, screen_transform, split_stage, stage_source,
+        canvas_dimensions, card_radius, estimated_size_bytes, fit_to_monitor, format_size,
+        history_key, output_dimensions, padding_px, screen_transform, split_stage, stage_source,
         video_rect_dimensions, FrameAspect, HistoryKey, QualityTier,
     };
 
@@ -2958,6 +3054,25 @@ mod tests {
         assert_eq!(QualityTier::High.crf(), 20);
         assert_eq!(QualityTier::Ultra.crf(), 16);
         assert_eq!(QualityTier::default(), QualityTier::High);
+    }
+
+    #[test]
+    fn a_project_names_each_quality_tier_and_a_missing_name_reads_as_high() {
+        for tier in [QualityTier::Balanced, QualityTier::High, QualityTier::Ultra] {
+            assert_eq!(QualityTier::from_id(Some(tier.id())), tier);
+        }
+        assert_eq!(QualityTier::from_id(None), QualityTier::High);
+        assert_eq!(QualityTier::from_id(Some("unknown")), QualityTier::High);
+    }
+
+    #[test]
+    fn the_window_sizes_stay_inside_the_monitor_budget() {
+        let budget = Some((1366, 700));
+        assert_eq!(fit_to_monitor((1280, 860), budget), (1280, 700));
+        assert_eq!(fit_to_monitor((1150, 775), budget), (1150, 700));
+        assert_eq!(fit_to_monitor((920, 620), budget), (920, 620));
+        // Without a monitor the request is kept as it is.
+        assert_eq!(fit_to_monitor((1150, 775), None), (1150, 775));
     }
 
     #[test]

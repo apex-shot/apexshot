@@ -4854,3 +4854,6 @@ msgstr "Разрешение"
 
 msgid "Remove recording"
 msgstr "Удалить запись"
+
+msgid "This recording has no audio."
+msgstr "В этой записи нет звука."

@@ -4798,3 +4798,6 @@ msgstr "الدقة"
 
 msgid "Remove recording"
 msgstr "إزالة التسجيل"
+
+msgid "This recording has no audio."
+msgstr "لا يحتوي هذا التسجيل على صوت."
