@@ -96,6 +96,9 @@ pub(super) struct ExportModel {
     pub trim_start: f64,
     pub trim_end: f64,
     pub cuts: Vec<f64>,
+    /// Composition start of each cut piece, as the timeline holds it. Pieces
+    /// may be pulled apart or reordered, so the plan follows these starts.
+    pub segment_starts: Vec<f64>,
     /// One speed per kept source interval, in composition order; a missing or
     /// malformed entry plays at 1x.
     pub segment_speeds: Vec<f64>,
@@ -106,6 +109,9 @@ pub(super) struct ExportModel {
     /// same camera.
     pub zoom_camera: zoom::ZoomCameraSettings,
     pub cursor: CursorSettings,
+    /// The cursor hide clips, in composition time, so the exporter drops the
+    /// cursor and its click effects where the preview does.
+    pub cursor_hide_clips: Vec<CursorHideClip>,
     pub sidecar: Option<PointerSidecar>,
     /// The camera layer to bake, when the recording has one.
     pub webcam: Option<webcam::WebcamExport>,
@@ -124,8 +130,9 @@ pub(super) struct ExportModel {
 }
 
 /// One contiguous kept span of footage, rendered back to back. `speed` is how
-/// fast its source runs against composition time; 0 holds the last frame of
-/// the footage for the span's whole length.
+/// fast its source runs against composition time; 0 repeats `source_start` for
+/// the span's whole length, which covers a freeze tail and the dead air between
+/// moved pieces.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct SourceSpan {
     pub composition_start: f64,
@@ -154,12 +161,32 @@ fn interval_speed(speeds: &[f64], index: usize) -> f64 {
 /// Split the trimmed footage at the cuts, rounding frame counts on the shared
 /// grid so the spans join without a gap, a repeat, or frame drift. Each kept
 /// interval plays at its own speed, and its output length is rounded against
-/// the running total so a long sped export does not drift.
+/// the running total so a long sped export does not drift. Pieces stay in
+/// source order: use `frame_plan_with_starts` when the timeline may have
+/// moved them.
+#[cfg(test)]
 pub(super) fn frame_plan(
     trim_start: f64,
     trim_end: f64,
     cuts: &[f64],
     speeds: &[f64],
+    fps: f64,
+) -> Vec<SourceSpan> {
+    frame_plan_with_starts(trim_start, trim_end, cuts, speeds, &[], fps)
+}
+
+/// The plan the timeline's composition asks for: pieces ordered by their
+/// composition start, with a held span covering any gap between them. A piece
+/// whose start is later than the end of the piece before it leaves dead air,
+/// which the preview shows as a frozen frame; the export repeats the previous
+/// piece's last source frame (the first piece's first frame at the head) for the
+/// same length, so the file keeps the timeline's timing.
+pub(super) fn frame_plan_with_starts(
+    trim_start: f64,
+    trim_end: f64,
+    cuts: &[f64],
+    speeds: &[f64],
+    starts: &[f64],
     fps: f64,
 ) -> Vec<SourceSpan> {
     let start = trim_start.max(0.0);
@@ -173,26 +200,28 @@ pub(super) fn frame_plan(
     }
     // Every seek and every sample sits on the recording's frame grid: the trim
     // edge and the cuts each snap to the nearest frame, so a seam is exactly
-    // one frame step and never repeats or skips footage.
+    // one frame step and never repeats or skips footage. The unrounded cut
+    // time travels beside its frame so the gap check compares composition
+    // seconds, as the timeline does, instead of two rounded frame counts.
     let origin = (start * fps).round() / fps;
-    let mut cut_frames: Vec<u64> = cuts
+    let mut edges: Vec<(u64, f64)> = cuts
         .iter()
         .copied()
         .filter(|cut| cut.is_finite() && *cut > start + 1e-9 && *cut < end - 1e-9)
-        .map(|cut| ((cut - origin) * fps).round() as u64)
-        .filter(|frame| *frame > 0 && *frame < total)
+        .map(|cut| (((cut - origin) * fps).round() as u64, cut))
+        .filter(|(frame, _)| *frame > 0 && *frame < total)
         .collect();
-    cut_frames.sort_unstable();
-    cut_frames.dedup();
-    let boundaries: Vec<u64> = std::iter::once(0)
-        .chain(cut_frames)
-        .chain(std::iter::once(total))
-        .collect();
-    let mut spans = Vec::with_capacity(boundaries.len());
+    edges.sort_by_key(|(frame, _)| *frame);
+    edges.dedup_by_key(|(frame, _)| *frame);
+    let mut boundaries: Vec<(u64, f64)> = Vec::with_capacity(edges.len() + 2);
+    boundaries.push((0, start));
+    boundaries.extend(edges);
+    boundaries.push((total, end));
+    let mut pieces: Vec<(f64, f64, SourceSpan)> = Vec::with_capacity(boundaries.len());
     let mut elapsed = 0.0f64;
     let mut composition_frames = 0u64;
     for (index, pair) in boundaries.windows(2).enumerate() {
-        let frames = pair[1] - pair[0];
+        let frames = pair[1].0 - pair[0].0;
         if frames == 0 {
             continue;
         }
@@ -200,19 +229,74 @@ pub(super) fn frame_plan(
         elapsed += frames as f64 / speed;
         let boundary = elapsed.round() as u64;
         let output_frames = boundary.saturating_sub(composition_frames);
-        if output_frames == 0 {
-            continue;
-        }
-        spans.push(SourceSpan {
-            composition_start: composition_frames as f64 / fps,
-            source_start: origin + pair[0] as f64 / fps,
-            source_end: origin + pair[1] as f64 / fps,
-            speed,
-            frames: output_frames,
+        let composition_start = composition_frames as f64 / fps;
+        let explicit_start = starts.get(index).copied().filter(|start| start.is_finite());
+        let piece_start = explicit_start.map_or(composition_start, |start| start.max(0.0));
+        // A piece the timeline placed carries its own unrounded length, so the
+        // next piece that touches it does not read as a gap. A piece with no
+        // start keeps the length the frame grid gives it.
+        let length = explicit_start.map_or(output_frames as f64 / fps, |_| {
+            (pair[1].1 - pair[0].1).max(0.0) / speed
         });
+        pieces.push((
+            piece_start,
+            length,
+            SourceSpan {
+                composition_start,
+                source_start: origin + pair[0].0 as f64 / fps,
+                source_end: origin + pair[1].0 as f64 / fps,
+                speed,
+                frames: output_frames,
+            },
+        ));
         composition_frames = boundary;
     }
+    pieces.sort_by(|left, right| left.0.total_cmp(&right.0));
+    let mut spans = Vec::with_capacity(pieces.len() * 2);
+    let mut placed_frames = 0u64;
+    let mut previous: Option<SourceSpan> = None;
+    let mut timeline_end = 0.0f64;
+    for (piece_start, length, mut piece) in pieces {
+        // A start past the previous piece's end is dead air the timeline draws
+        // as a gap. Half a frame of slack keeps two pieces that touch from
+        // opening one when the plan and the timeline round apart.
+        if piece_start - timeline_end > 0.5 / fps {
+            let start_frames = (piece_start * fps).round() as u64;
+            let gap = start_frames.saturating_sub(placed_frames);
+            if gap > 0 {
+                let source = previous.map_or(piece.source_start, |previous| {
+                    held_source_frame(previous, fps)
+                });
+                spans.push(SourceSpan {
+                    composition_start: placed_frames as f64 / fps,
+                    source_start: source,
+                    source_end: source,
+                    speed: 0.0,
+                    frames: gap,
+                });
+                placed_frames += gap;
+            }
+        }
+        if piece.frames > 0 {
+            piece.composition_start = placed_frames as f64 / fps;
+            placed_frames += piece.frames;
+            previous = Some(piece);
+            spans.push(piece);
+        }
+        timeline_end = piece_start + length;
+    }
     spans
+}
+
+/// The source frame a held span repeats: the last frame the piece before it
+/// showed, which sits on the recording's frame grid. A held piece already
+/// stands on one frame.
+fn held_source_frame(span: SourceSpan, fps: f64) -> f64 {
+    if span.speed.is_finite() && span.speed > 0.0 {
+        (span.source_end - 1.0 / fps).max(span.source_start)
+    } else {
+        span.source_start
+    }
 }
 
 pub(super) fn total_frames(spans: &[SourceSpan]) -> u64 {
@@ -257,13 +341,25 @@ pub(super) enum ExportUpdate {
 
 pub(super) struct ExportHandle {
     pub receiver: Receiver<ExportUpdate>,
+    /// Stops the workers; a worker failure sets it too, so the other workers
+    /// stop as well.
     cancel: Arc<AtomicBool>,
+    /// Set only by the user's Stop, so a failed hardware attempt can still be
+    /// retried on the CPU without undoing that request.
+    user_cancel: Arc<AtomicBool>,
 }
 
 impl ExportHandle {
     pub fn cancel(&self) {
+        self.user_cancel.store(true, Ordering::Relaxed);
         self.cancel.store(true, Ordering::Relaxed);
     }
+}
+
+/// Whether a failed hardware attempt may run again on the CPU: only when the
+/// encoder failed and the user has not asked to stop.
+fn retry_on_software(result: &Result<(), End>, user_cancel: bool) -> bool {
+    matches!(result, Err(End::Failed(_))) && !user_cancel
 }
 
 #[cfg(test)]
@@ -291,44 +387,71 @@ pub(super) fn start_export_with_settings(
     }
     let (sender, receiver) = mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));
+    let user_cancel = Arc::new(AtomicBool::new(false));
     if let Err(error) =
         crate::studio_entitlement::ensure_export_allowed(super::studio::capabilities(&model))
     {
         let _ = sender.send(ExportUpdate::Failed(error.to_string()));
-        return ExportHandle { receiver, cancel };
+        return ExportHandle {
+            receiver,
+            cancel,
+            user_cancel,
+        };
     }
     let thread_cancel = cancel.clone();
+    let thread_user_cancel = user_cancel.clone();
     std::thread::spawn(move || {
         let encoder = Encoder::fastest_for(settings.codec);
+        // With hardware off the first attempt already used the software encoder.
+        let hardware = settings.hardware && !software_forced();
         let mut result = render(&model, &output, &sender, &thread_cancel, encoder, settings);
-        if !encoder.is_software() {
+        if hardware
+            && !encoder.is_software()
+            && retry_on_software(&result, thread_user_cancel.load(Ordering::Relaxed))
+        {
             if let Err(End::Failed(message)) = &result {
                 eprintln!(
                     "[export] {} failed ({message}); retrying with {}",
                     encoder.codec(),
                     Encoder::software(settings.codec).codec()
                 );
-                result = render(
-                    &model,
-                    &output,
-                    &sender,
-                    &thread_cancel,
-                    Encoder::software(settings.codec),
-                    settings,
-                );
             }
+            // The failed attempt stopped its workers through the shared flag;
+            // the retry needs it clear. A Stop that lands in between still
+            // wins, so the retry stops at its first check.
+            thread_cancel.store(false, Ordering::Relaxed);
+            if thread_user_cancel.load(Ordering::Relaxed) {
+                thread_cancel.store(true, Ordering::Relaxed);
+            }
+            result = render(
+                &model,
+                &output,
+                &sender,
+                &thread_cancel,
+                Encoder::software(settings.codec),
+                settings,
+            );
         }
         match result {
-            Ok(()) if thread_cancel.load(Ordering::Relaxed) => {
+            Ok(()) if thread_user_cancel.load(Ordering::Relaxed) => {
                 let _ = std::fs::remove_file(&output);
                 let _ = sender.send(ExportUpdate::Cancelled);
             }
             Ok(()) => {
-                let sound = audio::add(&model, settings, &output).err();
-                if let Some(error) = &sound {
-                    eprintln!("[export] the sound was not added: {error}");
+                let sound = audio::add(&model, settings, &output, &thread_cancel).err();
+                // The frame loop has finished, but the sound is still muxed:
+                // a Stop that arrived during it must still cancel the export.
+                if thread_cancel.load(Ordering::Relaxed)
+                    || thread_user_cancel.load(Ordering::Relaxed)
+                {
+                    let _ = std::fs::remove_file(&output);
+                    let _ = sender.send(ExportUpdate::Cancelled);
+                } else {
+                    if let Some(error) = &sound {
+                        eprintln!("[export] the sound was not added: {error}");
+                    }
+                    let _ = sender.send(ExportUpdate::Finished(output, sound));
                 }
-                let _ = sender.send(ExportUpdate::Finished(output, sound));
             }
             Err(End::Cancelled) => {
                 let _ = std::fs::remove_file(&output);
@@ -340,7 +463,11 @@ pub(super) fn start_export_with_settings(
             }
         }
     });
-    ExportHandle { receiver, cancel }
+    ExportHandle {
+        receiver,
+        cancel,
+        user_cancel,
+    }
 }
 
 /// The encoders an export can use: per codec, the GPU's own encoder when the
@@ -623,11 +750,12 @@ fn plan_render(model: &ExportModel, settings: ExportSettings) -> Result<RenderPl
         .or_else(|| ffmpeg::probe_frame_rate(&model.source))
         .filter(|fps| fps.is_finite() && *fps > 0.0)
         .unwrap_or(DEFAULT_FPS);
-    let mut spans = frame_plan(
+    let mut spans = frame_plan_with_starts(
         model.trim_start,
         model.trim_end,
         &model.cuts,
         &model.segment_speeds,
+        &model.segment_starts,
         fps,
     );
     if model.freeze_tail.is_finite() && model.freeze_tail > 0.0 {
@@ -809,6 +937,35 @@ fn render_with_workers(
     finished.store(true, Ordering::Relaxed);
     let _ = reporter.join();
     result
+}
+
+/// How much of the cursor the hide track leaves visible at `timeline_t`: 0
+/// while a hide clip that is not muted covers it, 1 otherwise. The shared
+/// editor's cursor export multiplies the cursor alpha by the same coverage.
+/// One span of the cursor's Hide track, in composition seconds. A muted
+/// clip stays on the timeline but no longer hides the cursor.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct CursorHideClip {
+    pub start: f64,
+    pub end: f64,
+    pub hidden: bool,
+}
+
+impl CursorHideClip {
+    pub(super) fn contains(&self, t: f64) -> bool {
+        t >= self.start && t <= self.end
+    }
+}
+
+fn cursor_hide_alpha(clips: &[CursorHideClip], timeline_t: f64) -> f64 {
+    if clips
+        .iter()
+        .any(|clip| !clip.hidden && clip.contains(timeline_t))
+    {
+        0.0
+    } else {
+        1.0
+    }
 }
 
 /// Compositor frames an export range. Every range opens its own decoder,
@@ -1205,6 +1362,7 @@ fn render_range(
             let source_time = frame_source_time(&plan.spans, done_index, fps)
                 .ok_or_else(|| End::Failed("the frame plan ran out of frames".to_string()))?;
             let composition_time = done_index as f64 / fps;
+            let hide_alpha = cursor_hide_alpha(&model.cursor_hide_clips, composition_time);
             let camera_value = camera.evaluate(
                 &model.zooms,
                 source,
@@ -1387,12 +1545,15 @@ fn render_range(
                             draw_cursor_nv12(
                                 &mut nv12,
                                 plan.output,
+                                Some(placed),
                                 zoom::card_view(whole, placed, source),
                                 sidecar,
                                 model.source.as_path(),
                                 model.cursor,
                                 source_time,
                                 model.source_size,
+                                placed.2,
+                                hide_alpha,
                                 layer,
                                 &converter,
                                 &mut stage_cursor_scratch,
@@ -1454,12 +1615,15 @@ fn render_range(
                                 draw_cursor_nv12(
                                     &mut nv12,
                                     size,
+                                    None,
                                     view,
                                     sidecar,
                                     model.source.as_path(),
                                     model.cursor,
                                     source_time,
                                     model.source_size,
+                                    f64::from(size.0),
+                                    hide_alpha,
                                     layer,
                                     &converter,
                                     &mut cursor_scratch,
@@ -1503,8 +1667,6 @@ fn render_range(
                 let whole = (0.0, 0.0, f64::from(out.0), f64::from(out.1));
                 let outer_view = zoom::card_view(whole, rect, source);
                 outer_rgba.resize(out.0 as usize * out.1 as usize * 4, 0);
-                // A second blur pass over the whole canvas costs seconds per
-                // frame while the card sweeps; the video rect keeps its blur.
                 crop_scale_into(
                     &decoded,
                     model.source_size,
@@ -1555,6 +1717,8 @@ fn render_range(
                     model.cursor,
                     source_time,
                     model.source_size,
+                    f64::from(screen_size.0),
+                    hide_alpha,
                     layer,
                 );
             }
@@ -1739,6 +1903,33 @@ fn render_range(
                 }
             };
             let picture: &[u8] = if staged_path { &staged } else { frame };
+            // A moving card is blurred whole over the canvas, as the preview
+            // blurs it: the layer carries the card's smeared edges, so it
+            // replaces the sharp card. It samples the finished picture so the
+            // cursor, click ripple, crop and camera stay on the blurred card.
+            let card_trail: Option<Vec<u8>> = match (card, previous_value) {
+                (Some((rect, _)), Some(previous)) if model.zoom_camera.motion_blur > 0.0 => {
+                    card_for(previous)
+                        .and_then(|(before, _)| {
+                            super::motion_blur::CardTrail::new(
+                                rect,
+                                before,
+                                (f64::from(plan.output.0), f64::from(plan.output.1)),
+                                plan.output,
+                                fps,
+                                model.zoom_camera.motion_blur,
+                                f64::from(sink.radius_fraction()),
+                            )
+                        })
+                        .map(|trail| {
+                            let mut layer =
+                                vec![0u8; plan.output.0 as usize * plan.output.1 as usize * 4];
+                            trail.render(picture, size, plan.output, &mut layer, 16, 4.0, 4);
+                            layer
+                        })
+                }
+                _ => None,
+            };
             converter.convert_into(picture, size, &mut nv12);
             let overlay_camera = |canvas: &mut [u8]| -> Result<(), End> {
                 if canvas_trail.is_empty() {
@@ -1759,11 +1950,18 @@ fn render_range(
                 )
                 .map_err(End::Failed)
             };
-            let submitted = match card_frame {
-                Some(card_frame) => {
+            let submitted = match (card_frame, card_trail) {
+                (Some(card_frame), Some(layer)) => sink.submit_card_layer_with(
+                    nv12,
+                    card_frame,
+                    &layer,
+                    &converter,
+                    overlay_camera,
+                ),
+                (Some(card_frame), None) => {
                     sink.submit_card_with(nv12, card_frame, &outer_nv12, &converter, overlay_camera)
                 }
-                None => sink.submit_with(nv12, overlay_camera),
+                (None, _) => sink.submit_with(nv12, overlay_camera),
             };
             if let Err(error) = submitted {
                 let _ = decoder.kill();
@@ -2359,6 +2557,7 @@ fn cursor_box(
     settings: CursorSettings,
     source_time: f64,
     source_size: (u32, u32),
+    reference_width: f64,
 ) -> Option<(u32, u32, u32, u32)> {
     if !sidecar.can_render_cursor_overlay() {
         return None;
@@ -2401,7 +2600,7 @@ fn cursor_box(
             .collect()
     };
 
-    let half = overlay_half_extent(settings, f64::from(size.0));
+    let half = overlay_half_extent(settings, reference_width);
     let mut left = cursor_point.0 - half;
     let mut top = cursor_point.1 - half;
     let mut right = cursor_point.0 + half;
@@ -2440,6 +2639,8 @@ fn draw_cursor(
     settings: CursorSettings,
     source_time: f64,
     source_size: (u32, u32),
+    reference_width: f64,
+    hide_alpha: f64,
     layer: &mut ImageSurface,
 ) {
     if !sidecar.can_render_cursor_overlay() {
@@ -2472,6 +2673,9 @@ fn draw_cursor(
         return;
     };
     frame.alpha *= typing_alpha;
+    // The hide track takes the sprite and its click rings out together, as in
+    // the preview, so the coverage multiplies the one alpha both use.
+    frame.alpha *= hide_alpha;
     let settings = settings.clamped();
     let map = |point| zoom::source_to_stage(point, view, f64::from(size.0), f64::from(size.1));
     let cursor_point = map((frame.x, frame.y));
@@ -2495,7 +2699,7 @@ fn draw_cursor(
             .collect()
     };
 
-    let half = overlay_half_extent(settings, f64::from(size.0));
+    let half = overlay_half_extent(settings, reference_width);
     let mut left = cursor_point.0 - half;
     let mut top = cursor_point.1 - half;
     let mut right = cursor_point.0 + half;
@@ -2559,7 +2763,7 @@ fn draw_cursor(
                 progress,
                 settings,
                 frame.alpha,
-                f64::from(size.0),
+                reference_width,
             );
         }
         let capture = sidecar.cursor_capture(source_path, &frame);
@@ -2601,30 +2805,52 @@ fn draw_cursor(
 /// Draw the cursor onto an NV12 frame: only the cursor's box, widened to
 /// even edges for the 4:2:0 chroma, is converted to RGBA, drawn by
 /// `draw_cursor`, and converted back, so a GPU-scaled frame never makes the
-/// whole-frame round trip.
+/// whole-frame round trip. `clip` bounds the box to the video card when the
+/// stage draws over a canvas.
 #[allow(clippy::too_many_arguments)]
 fn draw_cursor_nv12(
     nv12: &mut [u8],
     size: (u32, u32),
+    clip: Option<zoom::StageRect>,
     view: ViewRect,
     sidecar: &PointerSidecar,
     source_path: &Path,
     settings: CursorSettings,
     source_time: f64,
     source_size: (u32, u32),
+    reference_width: f64,
+    hide_alpha: f64,
     layer: &mut ImageSurface,
     converter: &Nv12Converter,
     scratch: &mut CursorScratch,
 ) {
-    let Some((x, y, width, height)) =
-        cursor_box(size, view, sidecar, settings, source_time, source_size)
-    else {
+    let Some((x, y, width, height)) = cursor_box(
+        size,
+        view,
+        sidecar,
+        settings,
+        source_time,
+        source_size,
+        reference_width,
+    ) else {
         return;
     };
-    let x0 = x & !1;
-    let y0 = y & !1;
-    let x1 = ((x + width + 1) & !1).min(size.0 & !1);
-    let y1 = ((y + height + 1) & !1).min(size.1 & !1);
+    let mut x0 = x & !1;
+    let mut y0 = y & !1;
+    let mut x1 = ((x + width + 1) & !1).min(size.0 & !1);
+    let mut y1 = ((y + height + 1) & !1).min(size.1 & !1);
+    // The stage draws the cursor over the whole output, which is larger than
+    // the video card when the export has a canvas; the card's rect bounds it
+    // there so the sprite never paints on the padding, as the preview clips it.
+    if let Some(rect) = clip {
+        let Some(clipped) = clip_cursor_box((x0, y0, x1, y1), rect) else {
+            return;
+        };
+        x0 = clipped.0;
+        y0 = clipped.1;
+        x1 = clipped.2;
+        y1 = clipped.3;
+    }
     if x1 <= x0 || y1 <= y0 {
         return;
     }
@@ -2674,6 +2900,8 @@ fn draw_cursor_nv12(
         settings,
         source_time,
         source_size,
+        reference_width,
+        hide_alpha,
         layer,
     );
 
@@ -2699,6 +2927,31 @@ fn draw_cursor_nv12(
     }
 }
 
+/// The first even column or row at or after `value`, so a clipped box keeps
+/// its chroma pairs aligned.
+fn even_up(value: f64) -> u32 {
+    let value = value.ceil().max(0.0) as u32;
+    value + (value & 1)
+}
+
+/// The last even column or row at or before `value`.
+fn even_down(value: f64) -> u32 {
+    (value.floor().max(0.0) as u32) & !1
+}
+
+/// Restrict an even-aligned box (x0, y0, x1, y1) to a card rect, keeping both
+/// edges on chroma pairs. None when the box and the card do not overlap.
+fn clip_cursor_box(
+    (x0, y0, x1, y1): (u32, u32, u32, u32),
+    rect: zoom::StageRect,
+) -> Option<(u32, u32, u32, u32)> {
+    let x0 = x0.max(even_up(rect.0));
+    let y0 = y0.max(even_up(rect.1));
+    let x1 = x1.min(even_down(rect.0 + rect.2));
+    let y1 = y1.min(even_down(rect.1 + rect.3));
+    (x1 > x0 && y1 > y0).then_some((x0, y0, x1, y1))
+}
+
 /// Buffers `draw_cursor_nv12` reuses from frame to frame.
 #[derive(Default)]
 struct CursorScratch {
@@ -2711,16 +2964,40 @@ struct CursorScratch {
 #[cfg(test)]
 mod tests {
     use super::{
-        decoder_command, frame_plan, frame_source_time, h264_level, output_size, plan_render, rate,
-        render, render_with_workers, split_ranges, start_export, start_export_with_settings,
-        total_frames, zoom, Codec, Encoder, End, ExportModel, ExportSettings, ExportUpdate,
-        SourceSpan,
+        clip_cursor_box, cursor_hide_alpha, decoder_command, frame_plan, frame_plan_with_starts,
+        frame_source_time, h264_level, output_size, plan_render, rate, render, render_with_workers,
+        retry_on_software, split_ranges, start_export, start_export_with_settings, total_frames,
+        zoom, Codec, Encoder, End, ExportModel, ExportSettings, ExportUpdate, SourceSpan,
     };
     use crate::recording::editor::ffmpeg;
     use crate::recording::editor::model::{CursorRotationMode, CursorSettings};
     use std::path::{Path, PathBuf};
     use std::sync::{atomic::AtomicBool, mpsc, Arc};
     use std::time::Duration;
+
+    #[test]
+    fn a_hide_clip_takes_the_cursor_out_of_the_export() {
+        use super::CursorHideClip;
+        let clips = [
+            CursorHideClip {
+                start: 1.0,
+                end: 2.0,
+                hidden: false,
+            },
+            CursorHideClip {
+                start: 4.0,
+                end: 5.0,
+                hidden: true,
+            },
+        ];
+        assert_eq!(cursor_hide_alpha(&clips, 0.5), 1.0);
+        assert_eq!(cursor_hide_alpha(&clips, 1.0), 0.0);
+        assert_eq!(cursor_hide_alpha(&clips, 1.5), 0.0);
+        assert_eq!(cursor_hide_alpha(&clips, 2.0), 0.0);
+        assert_eq!(cursor_hide_alpha(&clips, 2.5), 1.0);
+        // A muted clip stays on the track but leaves the cursor visible.
+        assert_eq!(cursor_hide_alpha(&clips, 4.5), 1.0);
+    }
 
     #[test]
     fn the_decoder_asks_for_d3d11_only_when_hardware_decoding() {
@@ -2748,6 +3025,33 @@ mod tests {
         let without = args(false);
         assert!(!without.iter().any(|arg| arg == "-hwaccel"));
         assert_eq!(with.len(), without.len() + 2);
+    }
+
+    #[test]
+    fn a_failed_hardware_attempt_retries_unless_the_user_stopped() {
+        let failure: Result<(), End> = Err(End::Failed("the encoder failed".to_string()));
+        assert!(retry_on_software(&failure, false));
+        assert!(!retry_on_software(&failure, true));
+        assert!(!retry_on_software(&Ok(()), false));
+        assert!(!retry_on_software(&Err(End::Cancelled), false));
+    }
+
+    #[test]
+    fn the_stage_cursor_box_is_clipped_to_the_card() {
+        let bounds = (10, 20, 210, 180);
+        // The card is inset by padding: the box loses its outside columns and
+        // rows, and the kept edges stay on even pixels.
+        assert_eq!(
+            clip_cursor_box(bounds, (101.0, 41.0, 80.0, 60.0)),
+            Some((102, 42, 180, 100))
+        );
+        // A box that does not reach the card draws nothing.
+        assert_eq!(clip_cursor_box(bounds, (400.0, 400.0, 80.0, 60.0)), None);
+        // A box inside the card keeps its own even edges.
+        assert_eq!(
+            clip_cursor_box(bounds, (0.0, 0.0, 320.0, 180.0)),
+            Some(bounds)
+        );
     }
 
     #[test]
@@ -2809,6 +3113,66 @@ mod tests {
         assert!(last_before_cut < first_after_cut);
         assert!((frame_source_time(&spans, 120, fps).unwrap() - 5.0).abs() < 1e-9);
         assert_eq!(frame_source_time(&spans, 240, fps), None);
+    }
+
+    #[test]
+    fn pieces_in_source_order_plan_exactly_as_before() {
+        let fps = 30.0;
+        let cuts = [1.017, 2.53];
+        let speeds = [1.0, 1.5, 2.0];
+        // The starts the timeline normalizes for these pieces: each is the
+        // previous start plus that piece's unrounded length.
+        let starts = [0.0, 1.017, 1.017 + (2.53 - 1.017) / 1.5];
+        assert_eq!(
+            frame_plan_with_starts(0.0, 3.0, &cuts, &speeds, &starts, fps),
+            frame_plan(0.0, 3.0, &cuts, &speeds, fps)
+        );
+    }
+
+    #[test]
+    fn a_gap_before_a_piece_adds_held_frames() {
+        let fps = 30.0;
+        let gapless = frame_plan(0.0, 4.0, &[2.0], &[], fps);
+        let spans = frame_plan_with_starts(0.0, 4.0, &[2.0], &[], &[0.0, 4.0], fps);
+        assert_eq!(spans.len(), 3);
+        assert_eq!(
+            total_frames(&spans),
+            total_frames(&gapless) + (2.0 * fps) as u64
+        );
+        let held = spans[1];
+        assert_eq!(held.speed, 0.0);
+        assert_eq!(held.frames, 60);
+        assert_eq!(held.source_start, held.source_end);
+        assert!((held.source_start - (2.0 - 1.0 / fps)).abs() < 1e-9);
+        assert!((spans[2].composition_start - 4.0).abs() < 1e-9);
+        assert_eq!(frame_source_time(&spans, 60, fps), Some(held.source_start));
+        assert_eq!(frame_source_time(&spans, 119, fps), Some(held.source_start));
+        assert!((frame_source_time(&spans, 120, fps).unwrap() - 2.0).abs() < 1e-9);
+        assert_eq!(frame_source_time(&spans, 180, fps), None);
+    }
+
+    #[test]
+    fn pieces_are_ordered_by_their_start() {
+        let fps = 30.0;
+        let spans = frame_plan_with_starts(0.0, 4.0, &[2.0], &[], &[2.0, 0.0], fps);
+        assert_eq!(spans.len(), 2);
+        assert_eq!(total_frames(&spans), 120);
+        assert!((spans[0].source_start - 2.0).abs() < 1e-9);
+        assert!((spans[1].source_start - 0.0).abs() < 1e-9);
+        assert!((spans[0].composition_start - 0.0).abs() < 1e-9);
+        assert!((spans[1].composition_start - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_leading_gap_holds_the_first_pieces_first_frame() {
+        let fps = 30.0;
+        let spans = frame_plan_with_starts(0.0, 4.0, &[2.0], &[], &[1.0, 3.0], fps);
+        assert_eq!(spans.len(), 3);
+        assert_eq!(spans[0].speed, 0.0);
+        assert_eq!(spans[0].frames, 30);
+        assert_eq!(spans[0].source_start, 0.0);
+        assert!((spans[1].composition_start - 1.0).abs() < 1e-9);
+        assert_eq!(total_frames(&spans), 150);
     }
 
     #[test]
@@ -2919,6 +3283,7 @@ mod tests {
             trim_start: 0.0,
             trim_end: 2.0,
             cuts: Vec::new(),
+            segment_starts: Vec::new(),
             segment_speeds: vec![2.0],
             freeze_tail: 1.0,
             zooms: Vec::new(),
@@ -2931,6 +3296,7 @@ mod tests {
             crf: 20,
             audio: Vec::new(),
             effects: Default::default(),
+            cursor_hide_clips: Vec::new(),
         };
         let plan = plan_render(
             &model,
@@ -2963,6 +3329,7 @@ mod tests {
             trim_start: 0.0,
             trim_end: 2.0,
             cuts: Vec::new(),
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: f64::NAN,
             zooms: Vec::new(),
@@ -2975,6 +3342,7 @@ mod tests {
             crf: 20,
             audio: Vec::new(),
             effects: Default::default(),
+            cursor_hide_clips: Vec::new(),
         };
         let plan = plan_render(
             &model,
@@ -3095,6 +3463,7 @@ mod tests {
                 trim_start: 0.0,
                 trim_end: 1.0,
                 cuts: Vec::new(),
+                segment_starts: Vec::new(),
                 segment_speeds: vec![speed],
                 freeze_tail: 0.0,
                 zooms: Vec::new(),
@@ -3107,6 +3476,7 @@ mod tests {
                 crf: 28,
                 audio: Vec::new(),
                 effects: Default::default(),
+                cursor_hide_clips: Vec::new(),
             };
             let output = dir.join(format!("out-{speed}.mp4"));
             let (sender, _receiver) = mpsc::channel();
@@ -3332,6 +3702,7 @@ mod tests {
             trim_start: 0.0,
             trim_end: 3.0,
             cuts: Vec::new(),
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: Vec::new(),
@@ -3344,6 +3715,7 @@ mod tests {
             crf: 24,
             audio: Vec::new(),
             effects: Default::default(),
+            cursor_hide_clips: Vec::new(),
         };
         let output = dir.join("out.mp4");
         let handle = start_export_with_settings(
@@ -3384,6 +3756,7 @@ mod tests {
             trim_start: 0.0,
             trim_end: 3.0,
             cuts: Vec::new(),
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: Vec::new(),
@@ -3396,6 +3769,7 @@ mod tests {
             crf: 24,
             audio: Vec::new(),
             effects: Default::default(),
+            cursor_hide_clips: Vec::new(),
         };
         let joined = dir.join("joined.mp4");
         let (sender, _receiver) = mpsc::channel();
@@ -3476,6 +3850,7 @@ mod tests {
             trim_start: 0.0,
             trim_end: 6.0,
             cuts: vec![2.0],
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: vec![crate::video_editor::timeline::ZoomClip {
@@ -3497,6 +3872,7 @@ mod tests {
             crf: 0,
             audio: Vec::new(),
             effects: Default::default(),
+            cursor_hide_clips: Vec::new(),
         };
         let settings = ExportSettings {
             fps: Some(30),
@@ -3581,6 +3957,7 @@ mod tests {
             trim_start: 0.0,
             trim_end: 2.0,
             cuts: vec![],
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: vec![ZoomClip {
@@ -3602,6 +3979,7 @@ mod tests {
             crf: 18,
             audio: Vec::new(),
             effects: Default::default(),
+            cursor_hide_clips: Vec::new(),
         };
         for fps in [24, 60] {
             let mut videos = Vec::new();
@@ -3695,6 +4073,7 @@ mod tests {
             trim_start: 0.0,
             trim_end: 0.5,
             cuts: vec![0.25],
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: Vec::new(),
@@ -3707,6 +4086,7 @@ mod tests {
             crf: 20,
             audio: Vec::new(),
             effects: Default::default(),
+            cursor_hide_clips: Vec::new(),
         };
         for fps in [24, 60] {
             let settings = ExportSettings {
@@ -3879,6 +4259,7 @@ mod tests {
             trim_start,
             trim_end,
             cuts,
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: Vec::new(),
@@ -3901,6 +4282,7 @@ mod tests {
             crf: 20,
             audio: Vec::new(),
             effects: Default::default(),
+            cursor_hide_clips: Vec::new(),
         };
         let handle = start_export(model, output.clone());
         loop {
@@ -4013,6 +4395,7 @@ mod tests {
             trim_start,
             trim_end,
             cuts: Vec::new(),
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms,
@@ -4025,6 +4408,7 @@ mod tests {
             crf: 20,
             audio: Vec::new(),
             effects: Default::default(),
+            cursor_hide_clips: Vec::new(),
         };
         let handle = start_export(model, output.clone());
         loop {
@@ -4082,6 +4466,7 @@ mod tests {
             trim_start,
             trim_end,
             cuts,
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: vec![crate::video_editor::timeline::ZoomClip {
@@ -4106,6 +4491,7 @@ mod tests {
             crf: 23,
             audio: Vec::new(),
             effects: Default::default(),
+            cursor_hide_clips: Vec::new(),
         };
         let handle = start_export(model, output.clone());
         loop {
@@ -4150,6 +4536,7 @@ mod tests {
             trim_start: 0.0,
             trim_end: 60.0,
             cuts: Vec::new(),
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: Vec::new(),
@@ -4162,6 +4549,7 @@ mod tests {
             crf: 23,
             audio: Vec::new(),
             effects: Default::default(),
+            cursor_hide_clips: Vec::new(),
         };
         let handle = start_export(model, output.clone());
         let progress = handle
@@ -4321,6 +4709,8 @@ mod tests {
                 settings,
                 0.21,
                 size,
+                f64::from(size.0),
+                1.0,
                 &mut layer,
             );
             let mut reference = frame.clone();
@@ -4423,6 +4813,8 @@ mod tests {
                 settings,
                 0.21,
                 size,
+                f64::from(size.0),
+                1.0,
                 &mut layer(),
             );
             let mut expected = vec![0u8; base.len()];
@@ -4431,19 +4823,30 @@ mod tests {
             draw_cursor_nv12(
                 &mut fast,
                 size,
+                None,
                 view,
                 &sidecar,
                 std::path::Path::new(""),
                 settings,
                 0.21,
                 size,
+                f64::from(size.0),
+                1.0,
                 &mut layer(),
                 &converter,
                 &mut CursorScratch::default(),
             );
             assert_ne!(fast, base, "{effect:?} drew nothing");
-            let (x, y, w, h) = cursor_box(size, view, &sidecar, settings, 0.21, size)
-                .expect("the cursor is on screen");
+            let (x, y, w, h) = cursor_box(
+                size,
+                view,
+                &sidecar,
+                settings,
+                0.21,
+                size,
+                f64::from(size.0),
+            )
+            .expect("the cursor is on screen");
             let (x0, y0) = ((x & !1) as usize, (y & !1) as usize);
             let x1 = (((x + w + 1) & !1).min(size.0 & !1)) as usize;
             let y1 = (((y + h + 1) & !1).min(size.1 & !1)) as usize;
@@ -4723,6 +5126,7 @@ mod tests {
                 trim_start: 0.0,
                 trim_end: 10.0,
                 cuts: Vec::new(),
+                segment_starts: Vec::new(),
                 segment_speeds: Vec::new(),
                 freeze_tail: 0.0,
                 zooms,
@@ -4735,6 +5139,7 @@ mod tests {
                 crf: 20,
                 audio: Vec::new(),
                 effects: Default::default(),
+                cursor_hide_clips: Vec::new(),
             };
             let started = std::time::Instant::now();
             let handle = start_export(model, output.clone());
@@ -5021,6 +5426,7 @@ mod webcam_export_tests {
             trim_start: 0.0,
             trim_end: 1.5,
             cuts: Vec::new(),
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms,
@@ -5045,6 +5451,7 @@ mod webcam_export_tests {
             crf: 30,
             audio: Vec::new(),
             effects: Default::default(),
+            cursor_hide_clips: Vec::new(),
         };
         let handle = start_export(model, output.clone());
         loop {
@@ -5923,6 +6330,7 @@ mod webcam_export_tests {
             trim_start: 2.0,
             trim_end: 4.5,
             cuts: Vec::new(),
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: Vec::new(),
@@ -5947,6 +6355,7 @@ mod webcam_export_tests {
             crf: 30,
             audio: Vec::new(),
             effects: Default::default(),
+            cursor_hide_clips: Vec::new(),
         };
         let handle = start_export(model, output.clone());
         loop {
@@ -6083,6 +6492,7 @@ mod webcam_export_tests {
             trim_start: 0.0,
             trim_end: 1.5,
             cuts: Vec::new(),
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: Vec::new(),
@@ -6110,6 +6520,7 @@ mod webcam_export_tests {
             crf: 30,
             audio: Vec::new(),
             effects: Default::default(),
+            cursor_hide_clips: Vec::new(),
         };
         let handle = start_export(model, output.clone());
         loop {
@@ -6238,6 +6649,7 @@ mod webcam_export_tests {
                 trim_start: 0.0,
                 trim_end: 2.8,
                 cuts: Vec::new(),
+                segment_starts: Vec::new(),
                 segment_speeds: Vec::new(),
                 freeze_tail: 0.0,
                 zooms: Vec::new(),
@@ -6272,6 +6684,7 @@ mod webcam_export_tests {
                 crf: 30,
                 audio: Vec::new(),
                 effects: Default::default(),
+                cursor_hide_clips: Vec::new(),
             };
             let handle = start_export(model, output.clone());
             loop {
@@ -6399,6 +6812,8 @@ mod webcam_export_tests {
             settings,
             0.0,
             size,
+            f64::from(size.0),
+            1.0,
             &mut layer,
         );
 
@@ -6491,6 +6906,8 @@ mod webcam_export_tests {
             settings,
             0.0,
             size,
+            f64::from(size.0),
+            1.0,
             &mut layer,
         );
 
@@ -6602,6 +7019,7 @@ mod webcam_export_tests {
                 trim_start: 0.0,
                 trim_end: 1.5,
                 cuts: Vec::new(),
+                segment_starts: Vec::new(),
                 segment_speeds: Vec::new(),
                 freeze_tail: 0.0,
                 zooms: Vec::new(),
@@ -6629,6 +7047,7 @@ mod webcam_export_tests {
                 crf: 30,
                 audio: Vec::new(),
                 effects: Default::default(),
+                cursor_hide_clips: Vec::new(),
             };
             let handle = start_export(model, output.clone());
             loop {
@@ -6775,6 +7194,7 @@ mod webcam_export_tests {
                 trim_start: 0.0,
                 trim_end: 2.5,
                 cuts: Vec::new(),
+                segment_starts: Vec::new(),
                 segment_speeds: Vec::new(),
                 freeze_tail: 0.0,
                 zooms: Vec::new(),
@@ -6802,6 +7222,7 @@ mod webcam_export_tests {
                 crf: 30,
                 audio: Vec::new(),
                 effects: Default::default(),
+                cursor_hide_clips: Vec::new(),
             };
             let handle = start_export(model, output.clone());
             loop {
@@ -6885,6 +7306,7 @@ mod webcam_export_tests {
             trim_start: 0.0,
             trim_end: 1.0,
             cuts: Vec::new(),
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: Vec::new(),
@@ -6897,6 +7319,7 @@ mod webcam_export_tests {
             crf: 18,
             audio: Vec::new(),
             effects: Default::default(),
+            cursor_hide_clips: Vec::new(),
         };
         let settings = ExportSettings {
             fps: Some(30),
@@ -6955,6 +7378,7 @@ mod webcam_export_tests {
             trim_start: 0.0,
             trim_end: 1.0,
             cuts: Vec::new(),
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: Vec::new(),
@@ -6973,6 +7397,7 @@ mod webcam_export_tests {
             crf: 18,
             audio: Vec::new(),
             effects: Default::default(),
+            cursor_hide_clips: Vec::new(),
         };
         let settings = ExportSettings {
             fps: Some(30),
@@ -7047,6 +7472,7 @@ mod webcam_export_tests {
             trim_start: 0.0,
             trim_end: 2.0,
             cuts: Vec::new(),
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: vec![crate::video_editor::timeline::ZoomClip {
@@ -7074,6 +7500,7 @@ mod webcam_export_tests {
             crf: 18,
             audio: Vec::new(),
             effects: Default::default(),
+            cursor_hide_clips: Vec::new(),
         };
         let settings = ExportSettings {
             fps: Some(30),
@@ -7190,6 +7617,7 @@ mod webcam_export_tests {
                 trim_start: 0.0,
                 trim_end: 1.5,
                 cuts: Vec::new(),
+                segment_starts: Vec::new(),
                 segment_speeds: Vec::new(),
                 freeze_tail: 0.0,
                 zooms: Vec::new(),
@@ -7217,6 +7645,7 @@ mod webcam_export_tests {
                 crf: 30,
                 audio: Vec::new(),
                 effects: Default::default(),
+                cursor_hide_clips: Vec::new(),
             };
             let handle = start_export(model, output.clone());
             loop {
@@ -7396,6 +7825,7 @@ mod webcam_export_tests {
                 trim_start: 0.0,
                 trim_end: 1.5,
                 cuts: Vec::new(),
+                segment_starts: Vec::new(),
                 segment_speeds: Vec::new(),
                 freeze_tail: 0.0,
                 zooms: Vec::new(),
@@ -7423,6 +7853,7 @@ mod webcam_export_tests {
                 crf: 30,
                 audio: Vec::new(),
                 effects: Default::default(),
+                cursor_hide_clips: Vec::new(),
             };
             let handle = start_export(model, output.clone());
             loop {

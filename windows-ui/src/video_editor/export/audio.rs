@@ -9,15 +9,20 @@ use crate::video_editor::click_sound;
 use crate::video_editor::sound::{
     graph_file_flag_for_this_ffmpeg, SoundGraph, SoundPlan, SoundSources,
 };
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::Duration;
 
 /// Add the recording's sound and its click sounds to the finished export at
-/// `output`. A recording with neither leaves the file as it is.
+/// `output`. A recording with neither leaves the file as it is. The mux polls
+/// `cancel` so a Stop still stops it while the card says it is finishing.
 pub(super) fn add(
     model: &ExportModel,
     settings: ExportSettings,
     output: &Path,
+    cancel: &AtomicBool,
 ) -> Result<(), String> {
     let videos: Vec<PathBuf> = if model.audio.is_empty() {
         vec![model.source.clone()]
@@ -69,6 +74,7 @@ pub(super) fn add(
         &script,
         duration,
         settings.codec == super::Codec::Hevc,
+        cancel,
     )
 }
 
@@ -107,6 +113,7 @@ fn mux(
     script: &Path,
     duration: f64,
     hevc: bool,
+    cancel: &AtomicBool,
 ) -> Result<(), String> {
     let temp = video.with_extension(format!("sound-{}.mp4", unique()));
     let mut command = crate::utils::hidden_command(ffmpeg::ffmpeg_executable());
@@ -131,25 +138,59 @@ fn mux(
     if hevc {
         command.args(["-tag:v", "hvc1"]);
     }
-    let output = command
+    let mut child = match command
         .args(["-c:a", "aac", "-b:a", "192k"])
         .arg("-t")
         .arg(format!("{duration:.6}"))
         .args(["-movflags", "+faststart", "-f", "mp4"])
         .arg(&temp)
-        .output();
-    let output = match output {
-        Ok(output) => output,
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
         Err(error) => {
             let _ = std::fs::remove_file(&temp);
             return Err(format!("could not start ffmpeg: {error}"));
         }
     };
-    if !output.status.success() {
+    // Drain the error stream on its own thread: ffmpeg blocks once the pipe
+    // fills, and the wait below must keep seeing the process run.
+    let mut stderr = child.stderr.take();
+    let errors = std::thread::spawn(move || {
+        let mut text = Vec::new();
+        if let Some(stderr) = stderr.as_mut() {
+            let _ = stderr.read_to_end(&mut text);
+        }
+        text
+    });
+    let status = loop {
+        if cancel.load(Ordering::Relaxed) {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = errors.join();
+            let _ = std::fs::remove_file(&temp);
+            return Err("the export was cancelled".to_string());
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = errors.join();
+                let _ = std::fs::remove_file(&temp);
+                return Err(format!("could not wait for ffmpeg: {error}"));
+            }
+        }
+    };
+    let stderr = errors.join().unwrap_or_default();
+    if !status.success() {
         let _ = std::fs::remove_file(&temp);
         return Err(format!(
             "ffmpeg could not add the sound: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
+            String::from_utf8_lossy(&stderr).trim()
         ));
     }
     if let Err(error) = std::fs::rename(&temp, video) {
@@ -206,6 +247,7 @@ mod tests {
             trim_start: 0.0,
             trim_end: 6.0,
             cuts: vec![2.0],
+            segment_starts: Vec::new(),
             segment_speeds: vec![1.0, 2.0],
             freeze_tail: 1.0,
             zooms: Vec::new(),
@@ -218,6 +260,7 @@ mod tests {
             crf: 30,
             audio: Vec::new(),
             effects: Default::default(),
+            cursor_hide_clips: Vec::new(),
         };
         let output = dir.join("out.mp4");
         let handle = super::super::start_export_with_settings(
@@ -357,6 +400,7 @@ mod tests {
             trim_start: 1.0,
             trim_end: 3.5,
             cuts: vec![2.5],
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: Vec::new(),
@@ -369,6 +413,7 @@ mod tests {
             crf: 30,
             audio: Vec::new(),
             effects: Default::default(),
+            cursor_hide_clips: Vec::new(),
         };
         let output = dir.join("out.mp4");
         let handle = super::super::start_export_with_settings(
@@ -499,6 +544,7 @@ mod tests {
             trim_start: 0.0,
             trim_end: 1.5,
             cuts: Vec::new(),
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: Vec::new(),
@@ -511,6 +557,7 @@ mod tests {
             crf: 30,
             audio: Vec::new(),
             effects: Default::default(),
+            cursor_hide_clips: Vec::new(),
         };
         let output = dir.join("out.mp4");
         let handle = super::super::start_export_with_settings(
@@ -599,6 +646,8 @@ mod tests {
             trim_start: 0.0,
             trim_end: 4.0,
             cuts: Vec::new(),
+            segment_starts: Vec::new(),
+            cursor_hide_clips: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: Vec::new(),

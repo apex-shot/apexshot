@@ -21,6 +21,9 @@ struct State {
     caption_settings: keystrokes::Settings,
     captions: Vec<Caption>,
     captions_active: bool,
+    /// How much of the cursor the hide track leaves visible at the playhead:
+    /// 0 while a hide clip covers it, 1 otherwise.
+    hide_alpha: f64,
 }
 
 fn rebuild_captions(state: &mut State) {
@@ -50,6 +53,7 @@ impl CursorModel {
                 caption_settings: keystrokes::Settings::default(),
                 captions: Vec::new(),
                 captions_active: true,
+                hide_alpha: 1.0,
             })),
         }
     }
@@ -194,6 +198,16 @@ impl CursorModel {
         self.state.borrow_mut().captions_active = active;
     }
 
+    /// How much of the cursor the hide track leaves visible at the playhead,
+    /// as the shared editor's hide coverage reports it.
+    pub fn set_hide_alpha(&self, alpha: f64) {
+        self.state.borrow_mut().hide_alpha = if alpha.is_finite() {
+            alpha.clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+    }
+
     /// Keyboard shortcut captions over the whole stage, outside the video
     /// transform, the way the export decorates the final picture.
     pub fn draw_captions(&self, cr: &Context, width: i32, height: i32, source_seconds: f64) {
@@ -267,6 +281,9 @@ impl CursorModel {
             return;
         };
         frame.alpha *= typing_alpha;
+        // A hide clip takes the sprite and its click rings out together, so
+        // the coverage multiplies the one alpha both are drawn with.
+        frame.alpha *= state.hide_alpha;
         let map_point = |point| {
             let (x, y) = super::zoom::source_to_stage(point, view, rect.width, rect.height);
             (rect.x + x, rect.y + y)
@@ -515,6 +532,40 @@ mod tests {
             });
             let showing = paints(&cursor);
             cursor.set_captions_active(false);
+            let hidden = paints(&cursor);
+            (showing, hidden)
+        }) else {
+            return;
+        };
+        assert!(showing);
+        assert!(!hidden);
+    }
+
+    #[test]
+    fn the_hide_track_takes_the_cursor_and_its_clicks_out_of_the_preview() {
+        let Some((showing, hidden)) = crate::test_support::with_gtk(|| {
+            use gtk4::cairo::{Context, Format, ImageSurface};
+
+            let paints = |cursor: &CursorModel| {
+                let mut surface = ImageSurface::create(Format::ARgb32, 320, 180).unwrap();
+                {
+                    let cr = Context::new(&surface).unwrap();
+                    cursor.draw(
+                        &cr,
+                        320,
+                        180,
+                        1.4,
+                        Some((640, 480)),
+                        Some((0.0, 0.0, 640.0, 480.0)),
+                    );
+                }
+                surface.flush();
+                let painted = surface.data().unwrap().iter().any(|byte| *byte != 0);
+                painted
+            };
+            let cursor = rippling_cursor();
+            let showing = paints(&cursor);
+            cursor.set_hide_alpha(0.0);
             let hidden = paints(&cursor);
             (showing, hidden)
         }) else {

@@ -27,7 +27,9 @@ const EDIT_COALESCE: Duration = Duration::from_millis(350);
 pub(super) struct EditHistory<T> {
     undo: Vec<T>,
     redo: Vec<T>,
-    last_continuous_edit: Option<Instant>,
+    /// When the open burst started, and which control reported it. A
+    /// different control ends the burst even inside the window.
+    last_continuous_edit: Option<(Instant, &'static str)>,
 }
 
 impl<T> Default for EditHistory<T> {
@@ -43,12 +45,14 @@ impl<T> Default for EditHistory<T> {
 impl<T: PartialEq> EditHistory<T> {
     /// Record `before` for an edit that arrives as a stream of updates. The
     /// first update of a burst takes the step; the rest leave it alone so a
-    /// whole drag collapses into one.
-    pub(super) fn record_continuous(&mut self, before: T) {
+    /// whole drag collapses into one. `key` names the control that reported:
+    /// a different control opens a burst of its own, so two sliders moved in
+    /// quick succession stay two steps instead of one.
+    pub(super) fn record_continuous(&mut self, before: T, key: &'static str) {
         let fresh_burst = self
             .last_continuous_edit
-            .is_none_or(|at| at.elapsed() > EDIT_COALESCE);
-        self.last_continuous_edit = Some(Instant::now());
+            .is_none_or(|(at, open)| open != key || at.elapsed() > EDIT_COALESCE);
+        self.last_continuous_edit = Some((Instant::now(), key));
         if fresh_burst {
             self.push(before);
         }
@@ -141,16 +145,26 @@ mod tests {
         // A drag arrives as a stream of values; they must not each become a
         // step.
         for _ in 0..5 {
-            history.record_continuous(0);
+            history.record_continuous(0, "trim-start");
         }
         assert_eq!(history.undo(1), Some(0));
         assert_eq!(history.undo(0), None);
     }
 
     #[test]
+    fn a_different_control_opens_its_own_step() {
+        let mut history = EditHistory::default();
+        // Two sliders moved inside the burst window are two edits, not one.
+        history.record_continuous(0, "trim-start");
+        history.record_continuous(1, "trim-end");
+        assert_eq!(history.undo(2), Some(1));
+        assert_eq!(history.undo(1), Some(0));
+    }
+
+    #[test]
     fn a_command_after_a_burst_keeps_its_own_step() {
         let mut history = EditHistory::default();
-        history.record_continuous(0);
+        history.record_continuous(0, "trim-start");
         history.record_command(1);
         assert_eq!(history.undo(2), Some(1));
         assert_eq!(history.undo(1), Some(0));

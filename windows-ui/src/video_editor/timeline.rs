@@ -27,6 +27,7 @@ use gtk4::{
     Scrollbar,
 };
 
+use super::export::CursorHideClip;
 use crate::capture::editor::window::icon_names;
 use crate::i18n::t;
 use crate::recording::editor::auto_zoom;
@@ -109,15 +110,17 @@ enum TimelineLane {
     Zoom,
     Sound,
     Layout,
+    /// The cursor's Hide clips. The row shows once the recording has one.
+    Cursor,
 }
 
 impl TimelineLane {
-    const ALL: [Self; 3] = [Self::Zoom, Self::Sound, Self::Layout];
+    const ALL: [Self; 4] = [Self::Zoom, Self::Sound, Self::Layout, Self::Cursor];
 
     fn of_effect(track: EffectTrack) -> Self {
         match track {
             EffectTrack::Zoom => Self::Zoom,
-            EffectTrack::Hide => Self::Sound,
+            EffectTrack::Hide => Self::Cursor,
         }
     }
 
@@ -126,6 +129,7 @@ impl TimelineLane {
             Self::Zoom => 0,
             Self::Sound => 1,
             Self::Layout => 2,
+            Self::Cursor => 3,
         }
     }
 }
@@ -137,6 +141,7 @@ struct LaneState {
     camera: bool,
     zoom: bool,
     sound: bool,
+    cursor: bool,
     expanded: TimelineLane,
 }
 
@@ -217,6 +222,9 @@ struct Data {
     zoom_camera: super::zoom::ZoomCameraSettings,
     /// The click sound and the keyboard captions the edit list carries.
     effects: super::project::EffectsSettings,
+    /// The export tier the stage's chip shows. Shared with the stage, so a
+    /// pick reaches the project file and a load reaches the chip.
+    quality: Option<Rc<Cell<super::window::QualityTier>>>,
     hide_clips: Vec<HideClip>,
     selected_zoom: Option<usize>,
     /// Bumped every time a zoom clip is selected. The panel reveals itself on
@@ -293,6 +301,9 @@ struct Data {
     /// The look the last undo or redo put back, for the timeline to apply to
     /// the stage and the cursor it does not own.
     restored_look: Option<Look>,
+    /// The look a cursor-look slider drag is about to change, held until the
+    /// drag ends so the whole sweep is one undo step.
+    pending_look_edit: Option<EditSnapshot>,
     /// The layout change the Webcam panel is editing, when one is selected.
     selected_layout: Option<usize>,
     /// Bumped every time a layout change is selected, including a repeated
@@ -305,7 +316,7 @@ struct Data {
     /// The secondary lane drawn at full height; the others rest thin.
     expanded_lane: TimelineLane,
     /// How expanded each lane is drawn right now, 0 thin .. 1 full.
-    lane_progress: [f64; 3],
+    lane_progress: [f64; 4],
 }
 
 impl Default for Data {
@@ -329,6 +340,7 @@ impl Default for Data {
             zoom_clips: Vec::new(),
             zoom_camera: super::zoom::ZoomCameraSettings::default(),
             effects: super::project::EffectsSettings::default(),
+            quality: None,
             hide_clips: Vec::new(),
             selected_zoom: None,
             zoom_selection_epoch: 0,
@@ -357,11 +369,12 @@ impl Default for Data {
             background: None,
             cursor: None,
             restored_look: None,
+            pending_look_edit: None,
             selected_layout: None,
             layout_selection_epoch: 0,
             layout_burst: None,
             expanded_lane: TimelineLane::Zoom,
-            lane_progress: [1.0, 0.0, 0.0],
+            lane_progress: [1.0, 0.0, 0.0, 0.0],
         }
     }
 }
@@ -411,12 +424,26 @@ struct EditSnapshot {
 
 /// The stage and the cursor look a preset writes. They live beside the edit
 /// list, so a step that applies a preset carries them to take back or replay
-/// with the document.
+/// with the document. The panel also hands this back when it records a stage
+/// change of its own as one undo step.
 #[derive(Clone, PartialEq)]
-struct Look {
+pub(crate) struct Look {
     stage: (Option<String>, f64, f64),
     stage_aspect: Option<String>,
     cursor: super::presets::CursorFile,
+    /// The custom fill, when the look was taken from the open stage. A preset
+    /// carries no fill (`None`), so applying one keeps the fill on screen; an
+    /// undo step carries the fill it saw (`Some`), so it can put that back.
+    fill: Option<Option<super::background::FillSpec>>,
+}
+
+/// What the background listener saw last, so a frame change made straight
+/// through the model can record the look it started from. `restoring` keeps an
+/// undo, redo, preset or document swap from recording the look it puts back as
+/// a new step.
+struct LookWatch {
+    last: Option<Look>,
+    restoring: bool,
 }
 
 impl ZoomClip {
@@ -626,7 +653,7 @@ impl Data {
         if index >= self.segment_count() {
             return;
         }
-        self.record_continuous_edit();
+        self.record_continuous_edit("segment-start");
         let start = if self.segment_count() <= 1 || !start.is_finite() {
             0.0
         } else {
@@ -804,7 +831,7 @@ impl Data {
             return false;
         }
         let before = if continuous {
-            self.record_continuous_edit();
+            self.record_continuous_edit("segment-speed");
             None
         } else {
             Some(self.snapshot())
@@ -870,8 +897,21 @@ impl Data {
     /// Move the in-point. Every piece after it slides earlier in composition
     /// time, so anchored zooms follow their footage instead of drifting off it.
     fn set_trim_start(&mut self, start: f64) {
-        self.record_continuous_edit();
+        self.record_continuous_edit("trim-start");
+        let old_trim = self.trim_start;
         self.trim_start = start.clamp(0.0, (self.trim_end - MIN_CLIP_SECONDS).max(0.0));
+        // The first piece rides with the in-point: moving it by the trim in
+        // composition time keeps the handle under the pointer and the footage
+        // it exposes together. A lone piece stays pinned at zero, where it is
+        // the whole composition; when the trim crosses the first cut that
+        // piece is gone and `clamp_cuts` keeps the survivors' own starts.
+        if !self.cuts.is_empty() {
+            let shift = (self.trim_start - old_trim) / self.segment_speed(0);
+            if self.segment_starts.is_empty() {
+                self.segment_starts.push(0.0);
+            }
+            self.segment_starts[0] = (self.segment_starts[0] + shift).max(0.0);
+        }
         self.clamp_playhead();
         self.clamp_cuts();
         self.reproject_anchored_zooms();
@@ -886,7 +926,7 @@ impl Data {
         if !self.has_media() {
             return;
         }
-        self.record_continuous_edit();
+        self.record_continuous_edit("trim-end");
         let duration = self.duration.max(0.0);
         let final_cut = self.cuts.last().copied().unwrap_or(self.trim_start);
         let floor = (self.trim_start + MIN_CLIP_SECONDS)
@@ -945,6 +985,9 @@ impl Data {
         self.dragging_effect = false;
         self.zoom_camera = super::zoom::ZoomCameraSettings::default();
         self.effects = super::project::EffectsSettings::default();
+        if let Some(quality) = &self.quality {
+            quality.set(super::window::QualityTier::default());
+        }
         self.cuts.clear();
         self.segment_starts.clear();
         self.segment_speeds.clear();
@@ -954,8 +997,9 @@ impl Data {
         self.selected_layout = None;
         self.layout_selection_epoch = 0;
         self.layout_burst = None;
+        self.pending_look_edit = None;
         self.expanded_lane = TimelineLane::Zoom;
-        self.lane_progress = [1.0, 0.0, 0.0];
+        self.lane_progress = [1.0, 0.0, 0.0, 0.0];
     }
 
     /// The editable state, as one undo step keeps it.
@@ -993,12 +1037,14 @@ impl Data {
     ///
     /// One trim drag or one slider sweep arrives as a stream of updates, so
     /// the step is taken on the first of the burst and the rest leave it
-    /// alone. It also closes any layout sweep, because a different control
+    /// alone. `key` names the reporting control: a different control opens a
+    /// burst of its own, so two sliders moved in quick succession stay two
+    /// steps. It also closes any layout sweep, because a different control
     /// reporting means that sweep is over and the next one is its own step.
-    fn record_continuous_edit(&mut self) {
+    fn record_continuous_edit(&mut self, key: &'static str) {
         self.layout_burst = None;
         let before = self.snapshot();
-        self.history.record_continuous(before);
+        self.history.record_continuous(before, key);
     }
 
     /// Record a step for a command that has already been applied, so an edit
@@ -1006,6 +1052,35 @@ impl Data {
     fn record_edit(&mut self, before: EditSnapshot) {
         self.layout_burst = None;
         self.history.record_command(before);
+    }
+
+    /// Record a cursor-look edit as one step, carrying the look so one undo
+    /// puts the whole panel back instead of an earlier timeline edit.
+    fn record_cursor_look_edit(&mut self) {
+        let mut before = self.snapshot();
+        before.look = self.live_look();
+        self.record_edit(before);
+    }
+
+    /// Take the step a cursor-look slider drag is about to change. The look is
+    /// held until the drag ends, so a sweep reports many values but lands as
+    /// one undo step.
+    fn begin_cursor_look_edit(&mut self) {
+        if self.pending_look_edit.is_some() {
+            return;
+        }
+        self.layout_burst = None;
+        let mut before = self.snapshot();
+        before.look = self.live_look();
+        self.pending_look_edit = Some(before);
+    }
+
+    /// Finish a cursor-look slider drag by recording the step taken at its
+    /// start.
+    fn end_cursor_look_edit(&mut self) {
+        if let Some(before) = self.pending_look_edit.take() {
+            self.record_edit(before);
+        }
     }
 
     /// Take the step a layout edit is about to change.
@@ -1075,6 +1150,7 @@ impl Data {
             stage: background.snapshot(),
             stage_aspect: background.aspect(),
             cursor: super::presets::CursorFile::from_settings(cursor.settings()),
+            fill: Some(background.fill_spec()),
         })
     }
 
@@ -1116,6 +1192,7 @@ impl Data {
         self.clipboard = snapshot.clipboard;
         self.restored_look = snapshot.look;
         self.layout_burst = None;
+        self.pending_look_edit = None;
         self.playing = false;
         // A restored selection is a new one for the panel, which reveals
         // itself when the epoch changes.
@@ -1141,8 +1218,10 @@ impl Data {
     ) -> Option<super::project::EditorProjectFile> {
         let path = self.path.as_ref()?;
         let (stage_selection, background_padding, background_radius) = background.snapshot();
+        let stage_fill = background.fill_spec();
         let stage_aspect = background.aspect();
         let stage_edited = stage_selection.is_some()
+            || stage_fill.is_some()
             || stage_aspect.is_some()
             || (background_padding - super::background::DEFAULT_PADDING).abs() > f64::EPSILON
             || background_radius.abs() > f64::EPSILON;
@@ -1173,7 +1252,11 @@ impl Data {
             && self.trim_start.abs() <= 0.001
             && (self.duration - self.trim_end).abs() <= 0.001
             && self.zoom_camera == super::zoom::ZoomCameraSettings::default()
-            && self.effects == super::project::EffectsSettings::default();
+            && self.effects == super::project::EffectsSettings::default()
+            && self
+                .quality
+                .as_ref()
+                .is_none_or(|quality| quality.get() == super::window::QualityTier::default());
         if pristine && !self.has_project {
             return None;
         }
@@ -1210,6 +1293,7 @@ impl Data {
             background: super::project::StageFile {
                 selection: stage_selection,
                 aspect: stage_aspect,
+                fill: stage_fill,
             },
             background_padding,
             background_radius,
@@ -1222,6 +1306,12 @@ impl Data {
             captions_show_single_letters: self.effects.captions.show_single_letters,
             sound: self.effects.sound.clone(),
             clip_sounds: self.effects.clip_sounds.clone(),
+            // The default tier needs no key, so a file written before the chip
+            // was stored opens on the same High it always showed.
+            quality: self.quality.as_ref().and_then(|quality| {
+                let tier = quality.get();
+                (tier != super::window::QualityTier::default()).then(|| tier.id().to_owned())
+            }),
             cursor: Default::default(),
         })
     }
@@ -1337,6 +1427,9 @@ impl Data {
         }
         self.selected_layout = None;
         self.effects = file.effects();
+        if let Some(quality) = &self.quality {
+            quality.set(super::window::QualityTier::from_id(file.quality.as_deref()));
+        }
         self.normalize_clip_sounds();
         self.scale = if file.timeline_scale.is_finite() {
             file.timeline_scale.clamp(0.0, 100.0)
@@ -2021,6 +2114,7 @@ impl Data {
                 .is_some_and(|webcam| webcam.has_track()),
             zoom: true,
             sound: self.has_microphone || self.has_system || self.effects.sound.background_active(),
+            cursor: !self.hide_clips.is_empty(),
             expanded: self.expanded_lane,
         }
     }
@@ -2048,7 +2142,7 @@ impl Data {
         // About 180 ms to settle: an exponential ease with a 45 ms constant.
         let amount = 1.0 - (-dt.max(0.0) / 0.045).exp();
         let mut next = self.lane_progress;
-        let mut targets = [0.0; 3];
+        let mut targets = [0.0; 4];
         for lane in TimelineLane::ALL {
             let index = lane.index();
             targets[index] = if self.expanded_lane == lane { 1.0 } else { 0.0 };
@@ -2056,9 +2150,24 @@ impl Data {
         }
         // Snap only once every lane has arrived: snapping one early would
         // break their sum, which is what keeps the timeline's height fixed.
-        let arrived = (0..3).all(|index| (targets[index] - next[index]).abs() < 0.002);
+        let arrived = (0..4).all(|index| (targets[index] - next[index]).abs() < 0.002);
         self.lane_progress = if arrived { targets } else { next };
         !arrived
+    }
+
+    /// How much of the cursor the hide track leaves visible at `time`: 0
+    /// while a hide clip that is not muted covers it, 1 otherwise. This is the
+    /// shared editor's coverage rule, applied on the composition clock.
+    fn cursor_hide_alpha(&self, time: f64) -> f64 {
+        if self
+            .hide_clips
+            .iter()
+            .any(|clip| !clip.hidden && time >= clip.start && time <= clip.end)
+        {
+            0.0
+        } else {
+            1.0
+        }
     }
 
     fn hover_time(&self, track: EffectTrack) -> Option<f64> {
@@ -2257,7 +2366,7 @@ impl Data {
         if clip.center == center {
             return false;
         }
-        self.record_continuous_edit();
+        self.record_continuous_edit("zoom-center");
         self.zoom_clips[index].center = center;
         true
     }
@@ -2287,7 +2396,7 @@ impl Data {
         if self.zoom_clips.get(index).is_none() {
             return;
         }
-        self.record_continuous_edit();
+        self.record_continuous_edit("zoom-scale");
         self.zoom_clips[index].scale = scale.clamp(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE);
         let clip = self.zoom_clips[index];
         self.last_zoom_style = Some((clip.scale, clip.instant));
@@ -2329,7 +2438,7 @@ impl Data {
         if settings == self.zoom_camera {
             return;
         }
-        self.record_continuous_edit();
+        self.record_continuous_edit("zoom-camera");
         self.zoom_camera = settings;
     }
 
@@ -2340,8 +2449,66 @@ impl Data {
         if effects == self.effects {
             return;
         }
-        self.record_continuous_edit();
+        match self.effects_sweep_key(&effects) {
+            Some(key) => self.record_continuous_edit(key),
+            None => {
+                let before = self.snapshot();
+                self.record_edit(before);
+            }
+        }
         self.effects = effects;
+    }
+
+    /// The burst key for a settings change, or `None` when the change flips a
+    /// switch, picks a preset or picks a file. A switch is one step of its
+    /// own; a volume slider reports continuously, and each one names its own
+    /// burst so two different sliders moved in quick succession stay two
+    /// steps.
+    fn effects_sweep_key(&self, after: &super::project::EffectsSettings) -> Option<&'static str> {
+        let before = &self.effects;
+        if before.click_sound != after.click_sound
+            || before.captions != after.captions
+            || before.sound.mute_microphone != after.sound.mute_microphone
+            || before.sound.microphone_preset != after.sound.microphone_preset
+            || before.sound.mute_system != after.sound.mute_system
+            || before.sound.background_file != after.sound.background_file
+            || before.sound.mute_background != after.sound.mute_background
+            || before.clip_sounds.len() != after.clip_sounds.len()
+            || before
+                .clip_sounds
+                .iter()
+                .zip(&after.clip_sounds)
+                .any(|(old, new)| old.muted != new.muted)
+        {
+            return None;
+        }
+        if before.click_sound_volume != after.click_sound_volume {
+            return Some("click-sound-volume");
+        }
+        if before.sound.volume != after.sound.volume {
+            return Some("master-volume");
+        }
+        if before.sound.background_volume != after.sound.background_volume {
+            return Some("background-volume");
+        }
+        if before
+            .clip_sounds
+            .iter()
+            .zip(&after.clip_sounds)
+            .any(|(old, new)| old.mic_volume != new.mic_volume)
+        {
+            return Some("clip-mic-volume");
+        }
+        if before
+            .clip_sounds
+            .iter()
+            .zip(&after.clip_sounds)
+            .any(|(old, new)| old.system_volume != new.system_volume)
+        {
+            return Some("clip-system-volume");
+        }
+        // A change the checks above did not name is a command, not a sweep.
+        None
     }
 
     /// Delete on the video clip empties the composition. The window still has
@@ -2352,8 +2519,77 @@ impl Data {
             return;
         }
         let before = self.snapshot();
+        // The export tier is not part of an undo step, so removing the clip
+        // must not reset it: undo would bring the clip back on the wrong tier.
+        let tier = self.quality.as_ref().map(|quality| quality.get());
         self.reset_media();
+        if let (Some(quality), Some(tier)) = (&self.quality, tier) {
+            quality.set(tier);
+        }
         self.clamp_layout_cues();
+        self.record_edit(before);
+    }
+
+    /// Delete one piece of a split clip. The recording stays: only the piece
+    /// under the pointer leaves the composition, and the pieces after it close
+    /// the gap. The piece's own start, speed and sound go with it.
+    ///
+    /// Pieces are named by the cuts between them, so an edge piece is removed
+    /// by trimming the composition past it, while an interior piece joins the
+    /// piece before it: the model keeps no kept flag, and a source range cannot
+    /// be dropped from the middle without one.
+    fn remove_selected_piece(&mut self) {
+        let Some(index) = self.clip_segment() else {
+            return;
+        };
+        let boundaries = self.segment_boundaries();
+        let last = boundaries.len().saturating_sub(1);
+        if boundaries.len() <= 1 || index > last {
+            return;
+        }
+        let (source_start, source_end) = boundaries[index];
+        let footage = (source_end - source_start).max(0.0);
+        let length = footage / self.segment_speed(index);
+        let before = self.snapshot();
+        if index == 0 {
+            self.trim_start = source_end.clamp(0.0, (self.trim_end - MIN_CLIP_SECONDS).max(0.0));
+            self.cuts.remove(0);
+            // Every later piece moves up by the length the removed one took,
+            // so the gap that followed it stays where the user put it.
+            for start in &mut self.segment_starts {
+                *start = (*start - length).max(0.0);
+            }
+        } else if index == last {
+            self.trim_end = source_start.clamp(
+                (self.trim_start + MIN_CLIP_SECONDS).min(self.duration),
+                self.duration,
+            );
+            self.cuts.remove(index - 1);
+        } else {
+            // The previous piece takes the removed footage at its own speed,
+            // so the pieces after it move by however much that changes the
+            // merged piece's end.
+            let merged = footage / self.segment_speed(index - 1);
+            let shift = merged - length;
+            self.cuts.remove(index - 1);
+            for start in self.segment_starts.iter_mut().skip(index + 1) {
+                *start = (*start + shift).max(0.0);
+            }
+        }
+        if index < self.segment_starts.len() {
+            self.segment_starts.remove(index);
+        }
+        if index < self.segment_speeds.len() {
+            self.segment_speeds.remove(index);
+        }
+        if index < self.effects.clip_sounds.len() {
+            self.effects.clip_sounds.remove(index);
+        }
+        self.clamp_playhead();
+        self.clamp_cuts();
+        self.reproject_anchored_zooms();
+        self.clamp_effects();
+        self.clamp_scroll();
         self.record_edit(before);
     }
 
@@ -2539,7 +2775,7 @@ impl Data {
         if self.effect_span(track, index).is_none() {
             return;
         }
-        self.record_continuous_edit();
+        self.record_continuous_edit("effect-range");
         let limit = self.total_duration();
         let lower = if index > 0 {
             self.effect_span(track, index - 1)
@@ -3223,11 +3459,15 @@ pub(super) struct ExportFootage {
     pub trim_start: f64,
     pub trim_end: f64,
     pub cuts: Vec<f64>,
+    pub segment_starts: Vec<f64>,
     pub segment_speeds: Vec<f64>,
     pub freeze_tail: f64,
     pub zooms: Vec<ZoomClip>,
     pub zoom_camera: super::zoom::ZoomCameraSettings,
     pub effects: super::project::EffectsSettings,
+    /// The hide clips, in composition time, so the exporter drops the cursor
+    /// where the preview does.
+    pub cursor_hide_clips: Vec<CursorHideClip>,
 }
 
 type PreviewFrameSink = Rc<RefCell<Option<Rc<dyn Fn(PreviewFrame)>>>>;
@@ -3243,6 +3483,9 @@ pub(super) struct Timeline {
     zoom_scale: Scale,
     repaint: Rc<dyn Fn()>,
     frame_sink: PreviewFrameSink,
+    /// The instant the first frame of a playback reached the stage. The
+    /// preview writes it; the transport holds the playhead until it is set.
+    first_frame: Rc<Cell<Option<Instant>>>,
     zoom_listener: ChangeListener,
     webcam_listener: ChangeListener,
     effects_listener: ChangeListener,
@@ -3265,6 +3508,10 @@ pub(super) struct Timeline {
     /// and its only listener holds the project sync handle, so the panel never
     /// keeps the timeline or its document alive.
     background: super::background::Background,
+    /// The look the background listener saw last. The panel records its own
+    /// stage edits when the interaction ends; this is what lets the listener
+    /// record a frame change, which has no interaction of its own.
+    look_watch: Rc<RefCell<LookWatch>>,
     /// The saved edit list: what was last written, and whether the editor has
     /// repainted since, which is when it may need writing again.
     project: super::project::ProjectSync,
@@ -3279,6 +3526,12 @@ impl Timeline {
         sink(self.current_frame());
     }
 
+    /// The clock the preview reports its first presented frame to. The
+    /// playhead holds until that frame is on screen, then runs from it.
+    pub fn first_frame_clock(&self) -> Rc<Cell<Option<Instant>>> {
+        self.first_frame.clone()
+    }
+
     /// What the stage should show right now. The 50 ms tick reads it every
     /// step, and an edit calls [`Timeline::publish_frame`] so a drag or a
     /// slider is on screen in the same event instead of at the next tick.
@@ -3286,6 +3539,8 @@ impl Timeline {
         let data = self.data.borrow();
         self.cursor.set_cuts(&data.cuts);
         self.cursor.set_end(data.trim_end);
+        self.cursor
+            .set_hide_alpha(data.cursor_hide_alpha(data.playhead));
         self.cursor.set_caption_settings(data.effects.captions);
         let placement = data.placement();
         let add_zoom = data.add_zoom_tool();
@@ -3356,6 +3611,12 @@ impl Timeline {
         sink(self.current_frame());
     }
 
+    /// Share the stage's export tier with the document. The chip owns the
+    /// value; the project file reads it on save and restores it on load.
+    pub fn set_quality_handle(&self, quality: Rc<Cell<super::window::QualityTier>>) {
+        self.data.borrow_mut().quality = Some(quality);
+    }
+
     /// Length of the recording's footage, before any trimming.
     pub fn source_duration(&self) -> f64 {
         self.data.borrow().duration
@@ -3376,11 +3637,21 @@ impl Timeline {
             trim_start: data.trim_start,
             trim_end: data.trim_end,
             cuts: data.cuts.clone(),
+            segment_starts: data.segment_starts.clone(),
             segment_speeds: data.segment_speeds.clone(),
             freeze_tail: data.freeze_tail,
             zooms: data.zoom_clips.clone(),
             zoom_camera: data.zoom_camera,
             effects: data.effects.clone(),
+            cursor_hide_clips: data
+                .hide_clips
+                .iter()
+                .map(|clip| CursorHideClip {
+                    start: clip.start,
+                    end: clip.end,
+                    hidden: clip.hidden,
+                })
+                .collect(),
         })
     }
 
@@ -3593,7 +3864,8 @@ impl Timeline {
 
     /// The typing pauses the recording's key stream suggests, in source
     /// seconds. Ranges the user applied or removed, and ranges that no longer
-    /// touch the kept footage, are left out.
+    /// touch the kept footage, are left out. The Cursor panel prints them at
+    /// their composition times, which is what the timeline shows.
     pub fn typing_suggestions(&self) -> Vec<(f64, f64)> {
         let ranges = self.typing_ranges();
         let data = self.data.borrow();
@@ -3604,6 +3876,12 @@ impl Timeline {
             })
             .map(|(clipped_start, clipped_end, _)| (clipped_start, clipped_end))
             .collect()
+    }
+
+    /// The composition time a source time lands on, or `None` when the edit
+    /// cut that footage away.
+    pub fn composition_time_for_source(&self, source_time: f64) -> Option<f64> {
+        self.data.borrow().composition_time_for_source(source_time)
     }
 
     /// Ask to be told whenever the typing suggestions or the resolved ranges
@@ -3744,7 +4022,7 @@ impl Timeline {
             return;
         };
         update(&mut settings);
-        self.data.borrow_mut().record_continuous_edit();
+        self.data.borrow_mut().record_continuous_edit("webcam");
         webcam.set_settings(settings);
         (self.repaint)();
     }
@@ -3761,7 +4039,7 @@ impl Timeline {
         let layouts = webcam.layouts();
         {
             let mut data = self.data.borrow_mut();
-            data.record_continuous_edit();
+            data.record_continuous_edit("webcam-reset");
         }
         webcam.reset();
         webcam.set_layouts(layouts);
@@ -3793,6 +4071,13 @@ impl Timeline {
     pub fn webcam_error(&self) -> Option<String> {
         let webcam = self.data.borrow().webcam.clone()?;
         webcam.error()
+    }
+
+    /// Whether the recording's audio could be analysed: `None` while the
+    /// analysis runs, `Some(false)` for a recording with no audio. The camera
+    /// panel uses it to say that hiding during silence would do nothing.
+    pub fn webcam_has_audio(&self) -> Option<bool> {
+        self.data.borrow().webcam.as_ref()?.has_audio()
     }
 
     /// Everything the Webcam panel shows.
@@ -3995,11 +4280,11 @@ impl Timeline {
 
     /// Follow the pointer, or hold the focus point the clip carries.
     ///
-    /// Switching to Manual keeps what the preview currently shows: the camera
-    /// may be chasing a pointer position that is nowhere near the clip's
-    /// stored centre, and the user expects the framing they can see to stay.
+    /// Switching to Manual keeps what the preview currently shows only while
+    /// the playhead is inside the selected clip. Outside it the camera belongs
+    /// to another clip or to the full frame, so the stored centre stays.
     pub fn set_zoom_mode(&self, mode: ZoomMode) {
-        let visible_center = if mode == ZoomMode::Manual {
+        let visible_center = if mode == ZoomMode::Manual && self.playhead_in_selected_zoom() {
             self.camera_at_playhead().map(|camera| camera.1)
         } else {
             None
@@ -4011,6 +4296,15 @@ impl Timeline {
         }
         (self.repaint)();
         self.publish_frame();
+    }
+
+    /// Whether the playhead sits inside the selected zoom clip, where the
+    /// preview's camera is that clip's framing.
+    fn playhead_in_selected_zoom(&self) -> bool {
+        let data = self.data.borrow();
+        data.selected_zoom
+            .and_then(|index| data.zoom_clips.get(index))
+            .is_some_and(|clip| data.playhead >= clip.start && data.playhead <= clip.end)
     }
 
     pub fn set_zoom_scale(&self, scale: f64) {
@@ -4137,6 +4431,23 @@ impl Timeline {
         self.project.mark_changed();
     }
 
+    /// Put a cursor-look edit on the undo history as one step, so Ctrl+Z takes
+    /// back the theme, size, motion or visibility change the panel just made.
+    pub fn record_cursor_look_edit(&self) {
+        self.data.borrow_mut().record_cursor_look_edit();
+    }
+
+    /// Take the step a cursor-look slider drag is about to change; pair it
+    /// with [`Timeline::end_cursor_look_edit`] so the whole drag is one step.
+    pub fn begin_cursor_look_edit(&self) {
+        self.data.borrow_mut().begin_cursor_look_edit();
+    }
+
+    /// Record the step taken when the cursor-look slider drag started.
+    pub fn end_cursor_look_edit(&self) {
+        self.data.borrow_mut().end_cursor_look_edit();
+    }
+
     /// Save this project's look as a preset the preset store keeps.
     ///
     /// The look is the stage, the cursor's current settings, the camera's
@@ -4179,6 +4490,24 @@ impl Timeline {
         let cursor = self.cursor.settings();
         file.cursor = super::presets::CursorFile::from_settings(cursor);
         super::presets::from_project(&file, cursor, name)
+    }
+
+    /// Whether `preset` is still the look the open project carries.
+    ///
+    /// The preset popover has no history listener, so it asks this when it
+    /// opens: an undo, a document swap or a later edit that moved the look
+    /// must drop the row's applied highlight. The camera is left out because a
+    /// preset only restyles a layer the recording already has, so a recording
+    /// with a camera keeps it even when the preset carries none.
+    pub fn look_matches(&self, preset: &super::presets::Preset) -> bool {
+        let Ok(current) = self.captured_look(&preset.name) else {
+            return false;
+        };
+        current.stage == preset.stage
+            && current.cursor == preset.cursor
+            && current.captions == preset.captions
+            && current.click_sound == preset.click_sound
+            && (current.click_sound_volume - preset.click_sound_volume).abs() <= f64::EPSILON
     }
 
     /// Put a saved look on the open project as one undo step.
@@ -4224,6 +4553,7 @@ impl Timeline {
                 ),
                 stage_aspect: file.background.aspect.clone(),
                 cursor: file.cursor,
+                fill: None,
             }
         };
         self.apply_look(&look);
@@ -4231,15 +4561,49 @@ impl Timeline {
         self.publish_frame();
     }
 
+    /// The stage and cursor as they stand now, so a direct stage change the
+    /// panel makes can be recorded as one step when the interaction ends.
+    pub(crate) fn look_before_change(&self) -> Option<Look> {
+        self.data.borrow().live_look()
+    }
+
+    /// Record a direct stage change as one undo step. `before` is the look
+    /// [`Timeline::look_before_change`] returned before the change; the rest of
+    /// the document is unchanged by these edits, so it is captured as it stands
+    /// now.
+    pub(crate) fn record_look_change(&self, before: Option<Look>) {
+        let Some(before) = before else {
+            return;
+        };
+        let mut data = self.data.borrow_mut();
+        let mut snapshot = data.snapshot();
+        snapshot.look = Some(before);
+        data.record_edit(snapshot);
+        let last = data.live_look();
+        drop(data);
+        self.look_watch.borrow_mut().last = last;
+    }
+
     /// Put a look's stage and cursor on the open project and tell the panels
     /// that show them. The background's listeners mark the project changed,
     /// and the cursor's change is marked here.
     fn apply_look(&self, look: &Look) {
         let (selection, padding, radius) = &look.stage;
+        // An undo step puts back the fill it saw; a preset carries none, so the
+        // fill the model already holds stays.
+        let fill = match &look.fill {
+            Some(fill) => fill.clone(),
+            None => self.background.fill_spec(),
+        };
+        // A look being put back is not an edit: the listener must not record
+        // the restore as a new step of its own.
+        self.look_watch.borrow_mut().restoring = true;
         self.background
-            .apply(selection.as_deref(), *padding, *radius);
+            .apply(selection.as_deref(), *padding, *radius, fill.as_ref());
         self.background.set_aspect(look.stage_aspect.clone());
         self.cursor.set_settings(look.cursor.settings());
+        self.look_watch.borrow_mut().restoring = false;
+        self.look_watch.borrow_mut().last = self.data.borrow().live_look();
         if let Some(listener) = self.cursor_listener.borrow().as_ref() {
             listener();
         }
@@ -4259,6 +4623,11 @@ impl Timeline {
     /// this one and when the window closes, both of which land before the
     /// repaint-driven autosave's next tick.
     pub fn flush_project(&self) {
+        // With the recording removed there is nothing to save, and its saved
+        // edits must survive for the next time it opens.
+        if self.data.borrow().path.is_none() {
+            return;
+        }
         self.project.sync(
             snapshot_with_cursor(
                 self.data.borrow().project_file(&self.background),
@@ -4383,12 +4752,16 @@ impl Timeline {
         if let Some(listener) = self.cursor_listener.borrow().as_ref() {
             listener();
         }
+        // The incoming stage is a document swap, not an edit: the listener
+        // must not record it as a step on the new recording.
+        self.look_watch.borrow_mut().restoring = true;
         match &incoming {
             Some(file) => {
                 self.background.apply(
                     file.background.selection.as_deref(),
                     file.background_padding,
                     file.background_radius,
+                    file.background.fill.as_ref(),
                 );
                 self.background.set_aspect(file.background.aspect.clone());
             }
@@ -4397,10 +4770,13 @@ impl Timeline {
                     None,
                     super::background::DEFAULT_PADDING,
                     super::background::DEFAULT_RADIUS,
+                    None,
                 );
                 self.background.set_aspect(None);
             }
         }
+        self.look_watch.borrow_mut().restoring = false;
+        self.look_watch.borrow_mut().last = self.data.borrow().live_look();
         if let Some(file) = imported {
             self.project.sync(Some(file), true);
         }
@@ -4450,6 +4826,36 @@ impl Timeline {
 /// panel's starting look when the document brought none.
 fn incoming_cursor(file: Option<&super::project::EditorProjectFile>) -> CursorSettings {
     file.map(|file| file.cursor.settings()).unwrap_or_default()
+}
+
+/// Record a frame change the panel made straight through the model as one undo
+/// step. The listener hears every stage change, so only a change of the frame
+/// records here; the panel records its own padding, radius, wallpaper and fill
+/// edits when the interaction ends.
+fn record_frame_change(data: &Rc<RefCell<Data>>, watch: &Rc<RefCell<LookWatch>>) {
+    let next = data.borrow().live_look();
+    let before = watch.borrow().last.clone();
+    let frame_changed = before.as_ref().map(|look| &look.stage_aspect)
+        != next.as_ref().map(|look| &look.stage_aspect);
+    let fill_changed =
+        before.as_ref().map(|look| &look.fill) != next.as_ref().map(|look| &look.fill);
+    let restoring = watch.borrow().restoring;
+    if (frame_changed || fill_changed) && !restoring {
+        if let Some(before) = before {
+            let mut data = data.borrow_mut();
+            let mut snapshot = data.snapshot();
+            snapshot.look = Some(before);
+            if frame_changed {
+                data.record_edit(snapshot);
+            } else {
+                // A colour or gradient drag publishes a fill per pointer
+                // event; one burst keeps the whole drag a single step.
+                data.layout_burst = None;
+                data.history.record_continuous(snapshot, "custom-fill");
+            }
+        }
+    }
+    watch.borrow_mut().last = next;
 }
 
 /// A snapshot with this session's cursor look in it.
@@ -4509,9 +4915,18 @@ pub(super) fn build(
     }
     let camera_cache = Rc::new(RefCell::new(super::zoom::ZoomCameraCache::default()));
     let project = super::project::ProjectSync::default();
+    let look_watch = Rc::new(RefCell::new(LookWatch {
+        last: data.borrow().live_look(),
+        restoring: false,
+    }));
     {
         let project = project.clone();
-        background.connect(Rc::new(move || project.mark_changed()));
+        let data = data.clone();
+        let look_watch = look_watch.clone();
+        background.connect(Rc::new(move || {
+            project.mark_changed();
+            record_frame_change(&data, &look_watch);
+        }));
     }
 
     let dock = GtkBox::new(Orientation::Vertical, 0);
@@ -4670,6 +5085,70 @@ pub(super) fn build(
         }
     });
 
+    // The cursor's Hide clips, drawn and edited like zoom clips.
+    let hide_track_lane = DrawingArea::new();
+    hide_track_lane.set_visible(false);
+    hide_track_lane.add_css_class("recording-editor-card-zoom-track");
+    hide_track_lane.set_hexpand(true);
+    hide_track_lane.set_size_request(-1, (THIN_LANE_HEIGHT * scale).round() as i32);
+    hide_track_lane.set_draw_func({
+        let data = data.clone();
+        move |_, context, width, height| {
+            let data = data.borrow();
+            let lane = TimelineLane::of_effect(EffectTrack::Hide);
+            let progress = data.lane_progress(lane);
+            let thin = |context: &Context| {
+                let bars: Vec<_> = data
+                    .effect_spans(EffectTrack::Hide)
+                    .into_iter()
+                    .map(|(index, start, end)| {
+                        let tone = effect_tone(
+                            EffectTrack::Hide,
+                            prefers_dark,
+                            data.effect_hidden(EffectTrack::Hide, index),
+                        );
+                        (start, end, tone.fill)
+                    })
+                    .collect();
+                draw_thin_lane(
+                    context,
+                    width,
+                    height,
+                    &data,
+                    &t("Cursor"),
+                    &bars,
+                    prefers_dark,
+                    scale,
+                );
+            };
+            let full = |context: &Context| {
+                draw_effect_clips(
+                    context,
+                    width,
+                    height,
+                    &data,
+                    EffectTrack::Hide,
+                    prefers_dark,
+                    scale,
+                );
+            };
+            if progress >= 0.999 {
+                full(context);
+            } else if progress <= 0.001 {
+                thin(context);
+            } else {
+                context.push_group();
+                thin(context);
+                let _ = context.pop_group_to_source();
+                let _ = context.paint_with_alpha(1.0 - progress);
+                context.push_group();
+                full(context);
+                let _ = context.pop_group_to_source();
+                let _ = context.paint_with_alpha(progress);
+            }
+        }
+    });
+
     let sound_track = DrawingArea::new();
     sound_track.add_css_class("recording-editor-card-sound-track");
     sound_track.set_hexpand(true);
@@ -4788,17 +5267,19 @@ pub(super) fn build(
     lanes.append(&zoom_track_lane);
     lanes.append(&sound_track);
     lanes.append(&layout_track);
+    lanes.append(&hide_track_lane);
 
     lanes.add_tick_callback({
         let data = data.clone();
         let zoom = zoom_track_lane.clone();
         let sound = sound_track.clone();
         let layout = layout_track.clone();
+        let hide = hide_track_lane.clone();
         let last = Rc::new(Cell::new(None::<i64>));
         // The heights on screen. Every tick derives them from the progress
         // and which lanes show, and applies them only when they change, so a
         // lane appearing or the first switch never jumps the total a pixel.
-        let applied = Rc::new(Cell::new([0i32; 3]));
+        let applied = Rc::new(Cell::new([0i32; 4]));
         move |_, clock| {
             let now = clock.frame_time();
             let dt = last
@@ -4814,7 +5295,12 @@ pub(super) fn build(
             };
             let heights = lane_heights(
                 progress,
-                [zoom.is_visible(), sound.is_visible(), layout.is_visible()],
+                [
+                    zoom.is_visible(),
+                    sound.is_visible(),
+                    layout.is_visible(),
+                    hide.is_visible(),
+                ],
                 scale,
             );
             if heights != applied.get() {
@@ -4822,11 +5308,13 @@ pub(super) fn build(
                 zoom.set_size_request(-1, heights[0]);
                 sound.set_size_request(-1, heights[1]);
                 layout.set_size_request(-1, heights[2]);
+                hide.set_size_request(-1, heights[3]);
             }
             if moving {
                 zoom.queue_draw();
                 sound.queue_draw();
                 layout.queue_draw();
+                hide.queue_draw();
             }
             gtk4::glib::ControlFlow::Continue
         }
@@ -4929,6 +5417,7 @@ pub(super) fn build(
         let zoom_track_lane = zoom_track_lane.clone();
         let sound_track = sound_track.clone();
         let layout_track = layout_track.clone();
+        let hide_track_lane = hide_track_lane.clone();
         let playhead = playhead.clone();
         let extend = extend.clone();
         let playhead_clock = playhead_clock.clone();
@@ -4959,6 +5448,7 @@ pub(super) fn build(
             zoom_track_lane.queue_draw();
             sound_track.queue_draw();
             layout_track.queue_draw();
+            hide_track_lane.queue_draw();
             extend.queue_draw();
             playhead.queue_draw();
             // The camera and sound rows follow the track; the zoom row never
@@ -4966,7 +5456,13 @@ pub(super) fn build(
             // lane heights.
             if lane_state.get() != Some(state) {
                 lane_state.set(Some(state));
-                apply_lane_state(state, &layout_track, &zoom_track_lane, &sound_track);
+                apply_lane_state(
+                    state,
+                    &layout_track,
+                    &zoom_track_lane,
+                    &sound_track,
+                    &hide_track_lane,
+                );
             }
             if let Some(listener) = zoom_listener.borrow().as_ref() {
                 listener();
@@ -5005,7 +5501,9 @@ pub(super) fn build(
         let project = project.clone();
         let cursor = cursor.clone();
         gtk4::glib::timeout_add_local(Duration::from_secs(2), move || {
-            if project.take_changed() {
+            // No recording open (it was removed): nothing to write, and the
+            // saved edits stay on disk.
+            if project.take_changed() && data.borrow().path.is_some() {
                 let snapshot = data.borrow().project_file(&background);
                 project.sync(snapshot_with_cursor(snapshot, cursor.settings()), false);
             }
@@ -5047,6 +5545,16 @@ pub(super) fn build(
     bind_effect_lane(
         &zoom_track_lane,
         EffectTrack::Zoom,
+        data.clone(),
+        cursor.clone(),
+        source_size.clone(),
+        repaint.clone(),
+        sync_play_icon.clone(),
+        scale,
+    );
+    bind_effect_lane(
+        &hide_track_lane,
+        EffectTrack::Hide,
         data.clone(),
         cursor.clone(),
         source_size.clone(),
@@ -5285,6 +5793,10 @@ pub(super) fn build(
     // the preview the source frame under the playhead, and the stage the
     // composition's current length for its export estimate.
     let frame_sink: PreviewFrameSink = Rc::new(RefCell::new(None));
+    // The instant the first frame of the current playback reached the stage.
+    // The preview writes it; the playhead holds until it is set, so the clock
+    // runs from the picture instead of from the press.
+    let first_frame: Rc<Cell<Option<Instant>>> = Rc::new(Cell::new(None));
     gtk4::glib::timeout_add_local(Duration::from_millis(50), {
         let data = data.clone();
         let cursor = cursor.clone();
@@ -5303,6 +5815,10 @@ pub(super) fn build(
         // The wall clock the last tick ran at. The timer fires late, so the
         // step is measured instead of assumed to be its 50 ms period.
         let last_tick = Rc::new(Cell::new(None::<Instant>));
+        // Whether this playback has been seen by the tick yet, so the clock is
+        // cleared once per press rather than on every held tick.
+        let playback_started = Rc::new(Cell::new(false));
+        let first_frame = first_frame.clone();
         move || {
             let (playing, changed, preview) = {
                 let mut data = data.borrow_mut();
@@ -5311,16 +5827,32 @@ pub(super) fn build(
                 let was_playing = data.playing;
                 if was_playing {
                     let now = Instant::now();
-                    let step = last_tick.get().map_or(0.05, |previous| {
-                        now.duration_since(previous).as_secs_f64().min(0.25)
-                    });
-                    last_tick.set(Some(now));
+                    if !playback_started.get() {
+                        // A new playback holds its playhead until the first
+                        // frame of the request is on screen, so the picture,
+                        // the playhead and the sound start together.
+                        playback_started.set(true);
+                        first_frame.set(None);
+                        last_tick.set(None);
+                    }
+                    let step = match first_frame.get() {
+                        Some(started) => {
+                            let step = last_tick.get().map_or_else(
+                                || now.duration_since(started).as_secs_f64(),
+                                |previous| now.duration_since(previous).as_secs_f64(),
+                            );
+                            last_tick.set(Some(now));
+                            step.min(0.25)
+                        }
+                        None => 0.0,
+                    };
                     data.playhead += step;
                     if data.playhead >= data.total_duration() {
                         data.playhead = 0.0;
                         data.playing = false;
                     }
                 } else {
+                    playback_started.set(false);
                     last_tick.set(None);
                 }
                 let composition_time = data.playhead;
@@ -5430,6 +5962,7 @@ pub(super) fn build(
         zoom_scale,
         repaint,
         frame_sink,
+        first_frame,
         zoom_listener,
         webcam_listener,
         effects_listener,
@@ -5438,6 +5971,7 @@ pub(super) fn build(
         cursor_listener,
         typing_epoch: Rc::new(Cell::new(0)),
         background,
+        look_watch,
         project,
     };
     bind_layout_lane(&layout_track, data, timeline.clone(), sync_play_icon, scale);
@@ -5462,9 +5996,9 @@ fn lane_height(progress: f64, scale: f64) -> i32 {
 /// running totals, so a pixel one lane loses to rounding the next one gains.
 /// Rounding each lane alone made the total wobble by a pixel a frame, and
 /// the preview above resized with it.
-fn lane_heights(progress: [f64; 3], visible: [bool; 3], scale: f64) -> [i32; 3] {
-    let mut heights = [0; 3];
-    let shown: Vec<usize> = (0..3).filter(|&index| visible[index]).collect();
+fn lane_heights(progress: [f64; 4], visible: [bool; 4], scale: f64) -> [i32; 4] {
+    let mut heights = [0; 4];
+    let shown: Vec<usize> = (0..4).filter(|&index| visible[index]).collect();
     // The resting total: one lane full and the rest thin, in whole pixels.
     // Pinning the sum to it keeps a total that lands on half a pixel from
     // flipping between frames on floating-point noise.
@@ -5483,7 +6017,7 @@ fn lane_heights(progress: [f64; 3], visible: [bool; 3], scale: f64) -> [i32; 3] 
         heights[index] = rounded - placed;
         placed = rounded;
     }
-    for index in 0..3 {
+    for index in 0..4 {
         if !visible[index] {
             heights[index] = lane_height(progress[index], scale);
         }
@@ -5498,12 +6032,14 @@ fn apply_lane_state(
     layout_track: &DrawingArea,
     zoom_track: &DrawingArea,
     sound_track: &DrawingArea,
+    hide_track: &DrawingArea,
 ) {
     layout_track.set_visible(state.camera);
     // The zoom lane is a permanent drop target, so its row never collapses,
     // even while empty.
     zoom_track.set_visible(state.zoom);
     sound_track.set_visible(state.sound);
+    hide_track.set_visible(state.cursor);
 }
 
 /// The one stylesheet this card adds on top of the shared editor sheet.
@@ -6882,18 +7418,55 @@ fn show_clip_menu(
     let mut items = Vec::new();
     let mut offer_paste = false;
     match target {
-        MenuTarget::Video => items.push(MenuItem {
-            icon: icon_names::custom::USER_TRASH_SYMBOLIC,
-            label: t("Delete"),
-            action: {
-                let data = data.clone();
-                let repaint = repaint.clone();
-                Rc::new(move || {
-                    data.borrow_mut().remove_video_clip();
-                    repaint();
-                })
-            },
-        }),
+        MenuTarget::Video => {
+            // A split clip offers Delete for the piece under the pointer; a
+            // recording that was never cut has no piece to remove, so the row
+            // names what it really does.
+            let split = data.borrow().segment_count() > 1;
+            items.push(MenuItem {
+                icon: icon_names::custom::USER_TRASH_SYMBOLIC,
+                label: if split {
+                    t("Delete")
+                } else {
+                    t("Remove recording")
+                },
+                action: {
+                    let data = data.clone();
+                    let repaint = repaint.clone();
+                    Rc::new(move || {
+                        {
+                            let mut data = data.borrow_mut();
+                            if split {
+                                data.remove_selected_piece();
+                            } else {
+                                data.remove_video_clip();
+                            }
+                        }
+                        repaint();
+                    })
+                },
+            });
+            // The cursor's Hide track has no tool button: a clip starts here,
+            // at the playhead, and its row appears with it.
+            items.push(MenuItem {
+                icon: icon_names::shipped::EYE_OFF_REGULAR,
+                label: t("Hide cursor here"),
+                action: {
+                    let data = data.clone();
+                    let repaint = repaint.clone();
+                    Rc::new(move || {
+                        {
+                            let mut data = data.borrow_mut();
+                            let at = data.playhead;
+                            if data.add_effect(EffectTrack::Hide, at).is_some() {
+                                data.expand_lane(TimelineLane::Cursor);
+                            }
+                        }
+                        repaint();
+                    })
+                },
+            });
+        }
         MenuTarget::Zoom(index) => {
             offer_paste = effect_menu_items(EffectTrack::Zoom, index, &data, &repaint, &mut items);
         }
@@ -8590,21 +9163,27 @@ fn draw_video_clip(
         }
 
         if show_handles {
-            // Every segment carries its own pair of edge handles, so after a
-            // split each chip reads as a clip you can trim on both sides.
+            // Only the composition's outer edges are the clip's own trim
+            // handles. An edge between two pieces belongs to the cut, and
+            // `clip_edge_at` does not grab it, so drawing one there would
+            // promise a trim the pointer cannot take.
             let inset = (HANDLE_INSET * scale).min(body_width / 4.0);
             let handle_w = (HANDLE_WIDTH * scale).min(body_width / 3.0).max(1.0);
             let handle_h = (clip_height - inset * 2.0).max(10.0);
             let handle_y = y + (clip_height - handle_h) / 2.0;
-            draw_edge_handle(context, left + inset, handle_y, handle_w, handle_h, tone);
-            draw_edge_handle(
-                context,
-                left + body_width - handle_w - inset,
-                handle_y,
-                handle_w,
-                handle_h,
-                tone,
-            );
+            if index == 0 {
+                draw_edge_handle(context, left + inset, handle_y, handle_w, handle_h, tone);
+            }
+            if index == last_index {
+                draw_edge_handle(
+                    context,
+                    left + body_width - handle_w - inset,
+                    handle_y,
+                    handle_w,
+                    handle_h,
+                    tone,
+                );
+            }
         }
     }
 }
@@ -8781,6 +9360,7 @@ mod tests {
     use super::super::background::{Background, DEFAULT_PADDING, DEFAULT_RADIUS};
     use super::super::project;
     use super::super::webcam::{CameraLayout, LayoutSettings};
+    use super::super::window::QualityTier;
     use super::*;
     use crate::recording::editor::sidecar::{
         CaptureRegion, ClickSample, PointerSidecar, WebcamTrack,
@@ -8847,7 +9427,7 @@ mod tests {
             "an untouched flat stage is still a freshly opened recording"
         );
 
-        background.apply(Some("wallpaper-004.jpg"), 48.0, 6.0);
+        background.apply(Some("wallpaper-004.jpg"), 48.0, 6.0, None);
         let file = data
             .project_file(&background)
             .expect("a staged session is saved");
@@ -8867,7 +9447,7 @@ mod tests {
         data.path = Some(video);
         let background = Background::default();
 
-        background.apply(None, 48.0, DEFAULT_RADIUS);
+        background.apply(None, 48.0, DEFAULT_RADIUS, None);
         let file = data
             .project_file(&background)
             .expect("a padded stage is saved");
@@ -8875,8 +9455,30 @@ mod tests {
         assert!((file.background_padding - 48.0).abs() < 1e-9);
         assert!((file.background_radius - DEFAULT_RADIUS).abs() < 1e-9);
 
-        background.apply(None, DEFAULT_PADDING, DEFAULT_RADIUS);
+        background.apply(None, DEFAULT_PADDING, DEFAULT_RADIUS, None);
         assert!(data.project_file(&background).is_none());
+    }
+
+    #[test]
+    fn the_export_quality_round_trips_through_the_project() {
+        let video = recording("quality");
+        let quality = Rc::new(Cell::new(QualityTier::Ultra));
+        let mut data = loaded();
+        data.path = Some(video.clone());
+        data.quality = Some(quality.clone());
+        let background = Background::default();
+
+        let file = data
+            .project_file(&background)
+            .expect("a non-default tier is worth saving");
+        assert_eq!(file.quality.as_deref(), Some("ultra"));
+
+        let reopened_quality = Rc::new(Cell::new(QualityTier::High));
+        let mut reopened = loaded();
+        reopened.path = Some(video);
+        reopened.quality = Some(reopened_quality.clone());
+        reopened.apply_project(&file);
+        assert_eq!(reopened_quality.get(), QualityTier::Ultra);
     }
 
     #[test]
@@ -8886,7 +9488,7 @@ mod tests {
         data.path = Some(video);
         let background = Background::default();
 
-        background.apply(None, DEFAULT_PADDING, 6.0);
+        background.apply(None, DEFAULT_PADDING, 6.0, None);
         let file = data
             .project_file(&background)
             .expect("a rounded stage is saved");
@@ -8894,7 +9496,7 @@ mod tests {
         assert!((file.background_padding - DEFAULT_PADDING).abs() < 1e-9);
         assert!((file.background_radius - 6.0).abs() < 1e-9);
 
-        background.apply(None, DEFAULT_PADDING, DEFAULT_RADIUS);
+        background.apply(None, DEFAULT_PADDING, DEFAULT_RADIUS, None);
         assert!(data.project_file(&background).is_none());
     }
 
@@ -8906,10 +9508,10 @@ mod tests {
         data.has_project = true;
         let background = Background::default();
 
-        background.apply(Some("wallpaper-004.jpg"), 40.0, 0.0);
+        background.apply(Some("wallpaper-004.jpg"), 40.0, 0.0, None);
         assert!(data.project_file(&background).is_some());
 
-        background.apply(None, DEFAULT_PADDING, DEFAULT_RADIUS);
+        background.apply(None, DEFAULT_PADDING, DEFAULT_RADIUS, None);
         let file = data
             .project_file(&background)
             .expect("a reset stage keeps its project");
@@ -8951,6 +9553,7 @@ mod tests {
             captions_show_single_letters: false,
             sound: Default::default(),
             clip_sounds: Vec::new(),
+            quality: None,
             cursor: Default::default(),
         });
 
@@ -9144,6 +9747,7 @@ mod tests {
             captions_show_single_letters: false,
             sound: Default::default(),
             clip_sounds: Vec::new(),
+            quality: None,
             cursor: Default::default(),
         });
 
@@ -9216,6 +9820,7 @@ mod tests {
             captions_show_single_letters: false,
             sound: Default::default(),
             clip_sounds: Vec::new(),
+            quality: None,
             cursor: Default::default(),
         });
 
@@ -9633,6 +10238,32 @@ mod tests {
     }
 
     #[test]
+    fn deleting_one_piece_keeps_the_recording_and_closes_the_gap() {
+        let mut data = loaded();
+        assert!(data.add_cut(3.0));
+        assert!(data.add_cut(6.0));
+        assert_eq!(data.segment_count(), 3);
+        data.selected = true;
+        data.selected_segment = Some(1);
+
+        data.remove_selected_piece();
+
+        // Only the middle piece left the composition; the recording is still
+        // there and the two survivors meet without a frozen gap.
+        assert_eq!(data.segment_count(), 2);
+        assert!(data.has_media());
+        assert_eq!(data.cuts, vec![6.0]);
+        assert!((data.segment_start(0) - 0.0).abs() < 1e-9);
+        assert!((data.segment_start(1) - 6.0).abs() < 1e-9);
+        assert!((data.total_duration() - 10.0).abs() < 1e-9);
+
+        // The removal is one step, like every other command.
+        assert!(data.undo_edit());
+        assert_eq!(data.segment_count(), 3);
+        assert_eq!(data.cuts, vec![3.0, 6.0]);
+    }
+
+    #[test]
     fn split_adds_one_cut_and_refuses_edges_and_duplicates() {
         let mut data = loaded();
         assert_eq!(data.segment_boundaries(), vec![(0.0, 10.0)]);
@@ -9741,8 +10372,25 @@ mod tests {
 
         assert_eq!(data.segment_boundaries(), vec![(5.0, 8.0), (8.0, 10.0)]);
         assert_eq!(data.segment_speeds, vec![4.0, 1.0]);
+        // The trim crossed the first cut, so that piece and the start it moved
+        // with are gone; the survivors keep their own starts.
         assert!((data.segment_start(0) - 4.0).abs() < 1e-9);
         assert!((data.segment_start(1) - 8.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn trimming_the_in_point_slides_the_first_piece_with_the_handle() {
+        let mut data = loaded();
+        assert!(data.add_cut(4.0));
+        assert_eq!(data.segment_starts, vec![0.0, 4.0]);
+
+        data.set_trim_start(2.0);
+
+        // The first piece moves with the in-point by the trim in composition
+        // time, so the handle stays under the pointer instead of snapping back
+        // to zero and leaving the next piece stranded behind a frozen gap.
+        assert!((data.segment_start(0) - 2.0).abs() < 1e-9);
+        assert!((data.segment_start(1) - 4.0).abs() < 1e-9);
     }
 
     #[test]
@@ -10893,7 +11541,7 @@ mod tests {
     #[test]
     fn a_layout_sweep_is_its_own_step_after_a_geometry_sweep() {
         let (mut data, scratch) = webcam_loaded("sweep");
-        data.record_continuous_edit();
+        data.record_continuous_edit("trim-start");
         data.trim_start = 1.0;
         assert!(data.update_layouts(|layouts| layouts.transition_seconds = 0.8, true));
         assert!(data.update_layouts(|layouts| layouts.transition_seconds = 1.0, true));
@@ -11032,6 +11680,7 @@ mod tests {
             captions_show_single_letters: false,
             sound: Default::default(),
             clip_sounds: Vec::new(),
+            quality: None,
             cursor: Default::default(),
         });
 
@@ -11214,7 +11863,7 @@ mod tests {
         timeline: &Timeline,
         background: &Background,
     ) -> super::super::presets::Preset {
-        background.apply(Some("wallpaper-019.jpg"), 66.0, 9.0);
+        background.apply(Some("wallpaper-019.jpg"), 66.0, 9.0, None);
         let file = timeline
             .data
             .borrow()
@@ -11229,7 +11878,7 @@ mod tests {
         let Some(()) = crate::test_support::with_gtk(|| {
             let (timeline, background, paths) = timeline_with_camera_cues("preset-cues");
             let look = captured_stage_look(&timeline, &background);
-            background.apply(Some("wallpaper-004.jpg"), 40.0, 5.0);
+            background.apply(Some("wallpaper-004.jpg"), 40.0, 5.0, None);
 
             timeline.apply_preset(&look);
 
@@ -11257,7 +11906,7 @@ mod tests {
         let Some(()) = crate::test_support::with_gtk(|| {
             let (timeline, background, paths) = timeline_with_camera_cues("preset-undo");
             let look = captured_stage_look(&timeline, &background);
-            background.apply(Some("wallpaper-004.jpg"), 40.0, 5.0);
+            background.apply(Some("wallpaper-004.jpg"), 40.0, 5.0, None);
             timeline.apply_preset(&look);
 
             assert!(timeline.undo());
@@ -11284,7 +11933,7 @@ mod tests {
         let Some(()) = crate::test_support::with_gtk(|| {
             let (timeline, background, paths) = timeline_with_camera_cues("preset-edit");
             let look = captured_stage_look(&timeline, &background);
-            background.apply(Some("wallpaper-004.jpg"), 40.0, 5.0);
+            background.apply(Some("wallpaper-004.jpg"), 40.0, 5.0, None);
             timeline.apply_preset(&look);
             timeline
                 .data
@@ -11868,7 +12517,7 @@ mod tests {
     #[test]
     fn the_lanes_keep_one_total_height_while_they_trade() {
         let mut data = Data::default();
-        let resting: i32 = lane_heights(data.lane_progress, [true; 3], 1.25)
+        let resting: i32 = lane_heights(data.lane_progress, [true; 4], 1.25)
             .iter()
             .sum();
         data.expand_lane(TimelineLane::Sound);
@@ -11878,7 +12527,7 @@ mod tests {
                 data.expand_lane(TimelineLane::Layout);
             }
             data.step_lane_progress(0.016);
-            let total: i32 = lane_heights(data.lane_progress, [true; 3], 1.25)
+            let total: i32 = lane_heights(data.lane_progress, [true; 4], 1.25)
                 .iter()
                 .sum();
             assert_eq!(total, resting, "frame {frame}: {:?}", data.lane_progress);
@@ -11888,7 +12537,7 @@ mod tests {
     #[test]
     fn a_lane_eases_to_its_new_height_and_settles() {
         let mut data = Data::default();
-        assert_eq!(data.lane_progress, [1.0, 0.0, 0.0]);
+        assert_eq!(data.lane_progress, [1.0, 0.0, 0.0, 0.0]);
         data.expand_lane(TimelineLane::Sound);
         assert!(data.step_lane_progress(0.016), "a change starts moving");
         let zoom = data.lane_progress(TimelineLane::Zoom);
@@ -11900,7 +12549,7 @@ mod tests {
             steps += 1;
             assert!(steps < 100, "it settles");
         }
-        assert_eq!(data.lane_progress, [0.0, 1.0, 0.0]);
+        assert_eq!(data.lane_progress, [0.0, 1.0, 0.0, 0.0]);
         assert!(steps > 5, "it takes several frames, not a jump: {steps}");
         assert_eq!(lane_height(0.0, 1.0), THIN_LANE_HEIGHT as i32);
         assert_eq!(lane_height(1.0, 1.0), EFFECT_LANE_HEIGHT as i32);

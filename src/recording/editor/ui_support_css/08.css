@@ -80,6 +80,20 @@
                 background: @recording-editor-video-surface-light;
             }
 
+            /* The preview's canvas is the export's canvas: with no fill the
+             * export paints it black, so the preview does too. Only the
+             * canvas changes; the stage chrome around it keeps the light
+             * surface and its dark chips stay readable. */
+            .editor-theme-light .recording-editor-preview-canvas {
+                background: #000000;
+            }
+
+            /* The empty preview has no video to cover that black canvas, so
+             * its hint takes the light text the dark theme already uses. */
+            .editor-theme-light .recording-editor-empty-preview-hint {
+                color: alpha(white, 0.55);
+            }
+
             .editor-theme-light .recording-editor-timeline-dock {
                 background: @recording-editor-surface-light;
             }

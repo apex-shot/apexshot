@@ -4,7 +4,7 @@
 //! editor. Gradient stops open their own color picker, mirroring the shared
 //! editor's two-level interaction.
 
-use super::background::Background;
+use super::background::{Background, FillSpec, GradientKind, GradientStop};
 use crate::i18n::t;
 use gtk4::cairo::{LinearGradient, RadialGradient};
 use gtk4::prelude::*;
@@ -25,32 +25,50 @@ const SPECTRUM_BAR_THICKNESS: f64 = 10.0;
 /// The clear gap between the stop picker's card and the card it inspects.
 const PICKER_CARD_GAP: f64 = 6.0;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 enum FillValue {
     Empty,
     Plain(Color),
     Gradient(CustomGradient),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum GradientKind {
-    Linear,
-    Radial,
-    Angular,
-    Diamond,
-}
-
-#[derive(Clone)]
-struct GradientStop {
-    position: f64,
-    color: Color,
-}
-
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 struct CustomGradient {
     kind: GradientKind,
     angle: f64,
     stops: Vec<GradientStop>,
+}
+
+impl FillValue {
+    /// The serialisable shape the background stores, or `None` when the tab
+    /// holds no fill.
+    fn to_spec(&self) -> Option<FillSpec> {
+        match self {
+            FillValue::Empty => None,
+            FillValue::Plain(color) => Some(FillSpec::Color {
+                rgb: [color.0, color.1, color.2],
+            }),
+            FillValue::Gradient(gradient) => Some(FillSpec::Gradient {
+                kind: gradient.kind,
+                stops: gradient.stops.clone(),
+                angle: gradient.angle,
+            }),
+        }
+    }
+
+    /// Read a fill the model holds. A picture is not one of this tab's shapes,
+    /// so it reads as no custom fill here; the Image tab shows it instead.
+    fn from_spec(spec: &FillSpec) -> Self {
+        match spec {
+            FillSpec::Color { rgb } => FillValue::Plain((rgb[0], rgb[1], rgb[2])),
+            FillSpec::Gradient { kind, stops, angle } => FillValue::Gradient(CustomGradient {
+                kind: *kind,
+                angle: *angle,
+                stops: stops.clone(),
+            }),
+            FillSpec::Image { .. } => FillValue::Empty,
+        }
+    }
 }
 
 impl Default for CustomGradient {
@@ -88,6 +106,8 @@ impl CustomGradient {
 pub(crate) struct CustomFillPage {
     pub widget: GtkBox,
     pub clear: Rc<dyn Fn()>,
+    /// Copy the model's fill into the tab and its popover without publishing.
+    pub sync: Rc<dyn Fn()>,
 }
 
 pub(crate) fn build_custom_page(
@@ -155,30 +175,25 @@ pub(crate) fn build_custom_page(
         }) as Rc<dyn Fn()>
     };
 
-    // Hand the stage a painter for whatever the tab now holds, so the picked
-    // color or gradient is what the preview sits on. Rebuilt on every change
-    // because the stage redraws with the value it was handed: this is what makes
-    // a drag in the picker live on the stage as well as in the panel.
-    let publish_fill = {
+    // Hand the stage the fill the tab now holds. The model stores the shape
+    // itself, so the panel publishes a serialisable value and the background
+    // rebuilds the painter from it; this is what makes a drag in the picker
+    // live on the stage as well as in the panel.
+    let publish_fill: Rc<dyn Fn()> = {
         let background = background.clone();
         let state = state.clone();
-        move || {
-            let value = state.borrow().clone();
-            let paint: Option<super::background::FillPainter> = match value {
-                FillValue::Empty => None,
-                value => Some(Rc::new(move |context, width, height| {
-                    paint_fill(context, width, height, &value);
-                })),
-            };
-            background.set_custom_fill(paint);
-        }
+        Rc::new(move || {
+            // Read the value out before publishing: the background notifies
+            // its listeners synchronously, and one of them reads this state
+            // again, so the borrow must not still be alive.
+            let spec = state.borrow().to_spec();
+            background.set_custom_fill(spec);
+        })
     };
-    let refresh_internal: Rc<dyn Fn()> = {
+    let refresh_view: Rc<dyn Fn()> = {
         let refresh_summary = refresh_summary.clone();
         let repainters = repainters.clone();
-        let publish_fill = publish_fill.clone();
         Rc::new(move || {
-            publish_fill();
             refresh_summary();
             for repaint in repainters.borrow().iter() {
                 repaint();
@@ -186,41 +201,81 @@ pub(crate) fn build_custom_page(
         })
     };
     let notify: Rc<dyn Fn()> = {
-        let refresh_internal = refresh_internal.clone();
+        let publish_fill = publish_fill.clone();
+        let refresh_view = refresh_view.clone();
         let on_selected = on_selected.clone();
         Rc::new(move || {
+            // Publish before telling the panel a fill is picked: the panel's
+            // listener re-reads the model, so the model must already hold the
+            // new value when it runs.
+            publish_fill();
             on_selected();
-            refresh_internal();
+            refresh_view();
         })
     };
 
     let (popover, refresh_popover) =
         build_custom_popover(&edit, column, state.clone(), notify.clone(), scale);
     repainters.borrow_mut().push(refresh_popover);
-    refresh_internal();
+
+    // The popover is a view of the model, not its owner: opening it, applying a
+    // preset or undoing copies the model's fill into the tab without publishing
+    // it back. Publishing only happens from an actual edit.
+    let sync: Rc<dyn Fn()> = {
+        let state = state.clone();
+        let background = background.state();
+        let refresh_view = refresh_view.clone();
+        Rc::new(move || {
+            let next = background
+                .fill_spec()
+                .map_or(FillValue::Empty, |spec| FillValue::from_spec(&spec));
+            let changed = {
+                let mut current = state.borrow_mut();
+                if *current == next {
+                    false
+                } else {
+                    *current = next;
+                    true
+                }
+            };
+            if changed {
+                refresh_view();
+            }
+        })
+    };
+    sync();
+    refresh_view();
 
     edit.connect_clicked({
         let popover = popover.clone();
-        let refresh_internal = refresh_internal.clone();
+        let sync = sync.clone();
+        let refresh_view = refresh_view.clone();
         move |_| {
-            refresh_internal();
+            sync();
+            refresh_view();
             popover.popup();
         }
     });
 
     let clear: Rc<dyn Fn()> = {
         let state = state.clone();
-        let refresh_internal = refresh_internal.clone();
+        let publish_fill = publish_fill.clone();
+        let refresh_view = refresh_view.clone();
         Rc::new(move || {
             *state.borrow_mut() = FillValue::Empty;
-            refresh_internal();
+            publish_fill();
+            refresh_view();
         })
     };
 
     let widget = GtkBox::new(Orientation::Vertical, 0);
     widget.set_hexpand(true);
     widget.append(&row);
-    CustomFillPage { widget, clear }
+    CustomFillPage {
+        widget,
+        clear,
+        sync,
+    }
 }
 
 fn build_custom_popover(
@@ -290,7 +345,13 @@ fn build_custom_popover(
         let state = state.clone();
         Rc::new(move || match &*state.borrow() {
             FillValue::Plain(color) => *color,
-            _ => (17, 17, 17),
+            // A gradient opens its own tab, but the colour picker still starts
+            // from the fill rather than an unrelated placeholder.
+            FillValue::Gradient(gradient) => gradient
+                .stops
+                .first()
+                .map_or((17, 17, 17), |stop| stop.color),
+            FillValue::Empty => (17, 17, 17),
         }) as Rc<dyn Fn() -> Color>
     };
     let set_color = {
@@ -333,7 +394,18 @@ fn build_custom_popover(
     let refresh = {
         let color_repaint = color_picker.repaint;
         let gradient_repaint = gradient_page.repaint;
+        let state = state.clone();
+        let color_tab = color_tab.clone();
+        let gradient_tab = gradient_tab.clone();
         Rc::new(move || {
+            // The tab follows the fill the popover is showing, so reopening on
+            // a gradient does not present the flat colour picker.
+            let showing_gradient = matches!(*state.borrow(), FillValue::Gradient(_));
+            if showing_gradient {
+                gradient_tab.set_active(true);
+            } else {
+                color_tab.set_active(true);
+            }
             color_repaint();
             gradient_repaint();
         }) as Rc<dyn Fn()>
@@ -1481,6 +1553,13 @@ fn paint_fill(context: &gtk4::cairo::Context, width: i32, height: i32, value: &F
     }
 }
 
+/// Paint a fill in the serialisable shape the background stores. The stage
+/// calls this through its painter; the panel's own previews keep using
+/// [`paint_fill`] with the local value.
+pub(crate) fn paint_spec(context: &gtk4::cairo::Context, width: i32, height: i32, spec: &FillSpec) {
+    paint_fill(context, width, height, &FillValue::from_spec(spec));
+}
+
 fn draw_fill_chip(
     context: &gtk4::cairo::Context,
     width: i32,
@@ -1901,9 +1980,8 @@ fn parse_hex(text: &str) -> Option<Color> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        hex_string, parse_hex, CustomGradient, FillValue, GradientKind, GradientStop, RebuildSlot,
-    };
+    use super::super::background::{GradientKind, GradientStop};
+    use super::{hex_string, parse_hex, CustomGradient, FillValue, RebuildSlot};
 
     #[test]
     fn hex_colors_round_trip() {

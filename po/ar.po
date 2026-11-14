@@ -4791,6 +4791,15 @@ msgstr "وقت التصدير"
 msgid "Resolution"
 msgstr "الدقة"
 
+msgid "Remove recording"
+msgstr "إزالة التسجيل"
+
+msgid "This recording has no audio."
+msgstr "لا يحتوي هذا التسجيل على صوت."
+
+msgid "Hide cursor here"
+msgstr "إخفاء المؤشر هنا"
+
 msgid "Exporting {percent}%"
 msgstr "جارٍ التصدير {percent}%"
 

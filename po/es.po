@@ -4865,6 +4865,15 @@ msgstr "Tiempo de exportación"
 msgid "Resolution"
 msgstr "Resolución"
 
+msgid "Remove recording"
+msgstr "Quitar grabación"
+
+msgid "This recording has no audio."
+msgstr "Esta grabación no tiene audio."
+
+msgid "Hide cursor here"
+msgstr "Ocultar el cursor aquí"
+
 msgid "Exporting {percent}%"
 msgstr "Exportando {percent} %"
 

@@ -4765,6 +4765,15 @@ msgstr "書き出し時間"
 msgid "Resolution"
 msgstr "解像度"
 
+msgid "Remove recording"
+msgstr "録画を削除"
+
+msgid "This recording has no audio."
+msgstr "この録画には音声がありません。"
+
+msgid "Hide cursor here"
+msgstr "ここでカーソルを隠す"
+
 msgid "Exporting {percent}%"
 msgstr "エクスポート中 {percent}%"
 

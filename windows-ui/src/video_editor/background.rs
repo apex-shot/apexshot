@@ -8,6 +8,7 @@
 use gtk4::cairo::Context;
 use gtk4::gdk_pixbuf::Pixbuf;
 use gtk4::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -121,12 +122,50 @@ fn stage_metric(value: f64, default: f64) -> f64 {
 /// its state: the stage needs pixels, not a fill type.
 pub(crate) type FillPainter = Rc<dyn Fn(&Context, i32, i32)>;
 
+/// The shape a gradient fill can take, kept beside the fill so the project file
+/// can name it without the panel's widgets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum GradientKind {
+    Linear,
+    Radial,
+    Angular,
+    Diamond,
+}
+
+/// One stop of a gradient fill: where it sits from 0 to 1 and its color.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct GradientStop {
+    pub position: f64,
+    pub color: (u8, u8, u8),
+}
+
+/// A stage fill in the form the project file stores it. The panel's own model
+/// is a local `FillValue`; this is the serialisable shape the background keeps
+/// so reopening a recording can rebuild the painter it was saved with.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) enum FillSpec {
+    Color {
+        rgb: [u8; 3],
+    },
+    Gradient {
+        kind: GradientKind,
+        stops: Vec<GradientStop>,
+        angle: f64,
+    },
+    Image {
+        path: PathBuf,
+    },
+}
+
 /// The fill chosen in the Background panel. Shared by the panel, which sets
 /// it, and the stage, which paints it behind the video.
 #[derive(Clone)]
 pub(crate) struct Background {
     selection: Rc<RefCell<Option<String>>>,
     custom_fill: Rc<RefCell<Option<FillPainter>>>,
+    /// The serialisable form of `custom_fill`, kept beside the painter so the
+    /// project file and the panel can read the fill the stage is painting.
+    fill_spec: Rc<RefCell<Option<FillSpec>>>,
     padding: Rc<Cell<f64>>,
     radius: Rc<Cell<f64>>,
     /// The frame the project file names, or `None` for the recording's own shape.
@@ -141,6 +180,7 @@ impl Default for Background {
         Self {
             selection: Rc::new(RefCell::new(None)),
             custom_fill: Rc::new(RefCell::new(None)),
+            fill_spec: Rc::new(RefCell::new(None)),
             padding: Rc::new(Cell::new(DEFAULT_PADDING)),
             radius: Rc::new(Cell::new(DEFAULT_RADIUS)),
             aspect: Rc::new(RefCell::new(None)),
@@ -157,6 +197,7 @@ impl Background {
         BackgroundState {
             selection: self.selection.clone(),
             custom_fill: self.custom_fill.clone(),
+            fill_spec: self.fill_spec.clone(),
             padding: self.padding.clone(),
             radius: self.radius.clone(),
         }
@@ -175,23 +216,37 @@ impl Background {
     /// Put the stage back to what a project file recorded, or to no fill at all
     /// when the recording carries no stage.
     ///
-    /// The panel's own painter has no serialised form, so it is always dropped,
-    /// even when the incoming selection is empty too: the last document's
-    /// gradient must not stay behind the next one's video. Every value lands
-    /// before the single notification, so a listener never reads a stage that is
-    /// only half replaced, and a stage that already matches is left alone.
-    pub fn apply(&self, selection: Option<&str>, padding: f64, radius: f64) {
+    /// The panel's fill is part of the stage now, so the painter is rebuilt
+    /// from the spec the file carries rather than always dropped. Every value
+    /// lands before the single notification, so a listener never reads a stage
+    /// that is only half replaced, and a stage that already matches is left
+    /// alone.
+    pub fn apply(
+        &self,
+        selection: Option<&str>,
+        padding: f64,
+        radius: f64,
+        fill: Option<&FillSpec>,
+    ) {
         let selection = selection.map(str::to_owned);
+        // The two fills are exclusive: a wallpaper wins over a saved painter.
+        let fill = if selection.is_some() {
+            None
+        } else {
+            fill.cloned()
+        };
         let padding = stage_metric(padding, DEFAULT_PADDING);
         let radius = stage_metric(radius, DEFAULT_RADIUS);
-        let had_custom_fill = self.custom_fill.borrow_mut().take().is_some();
         let unchanged = *self.selection.borrow() == selection
             && (self.padding.get() - padding).abs() <= f64::EPSILON
-            && (self.radius.get() - radius).abs() <= f64::EPSILON;
-        if unchanged && !had_custom_fill {
+            && (self.radius.get() - radius).abs() <= f64::EPSILON
+            && *self.fill_spec.borrow() == fill;
+        if unchanged {
             return;
         }
         *self.selection.borrow_mut() = selection;
+        *self.fill_spec.borrow_mut() = fill.clone();
+        *self.custom_fill.borrow_mut() = fill.as_ref().and_then(painter_for);
         self.padding.set(padding);
         self.radius.set(radius);
         self.notify();
@@ -207,20 +262,31 @@ impl Background {
         // stage never has to decide which of them wins.
         if next.is_some() {
             *self.custom_fill.borrow_mut() = None;
+            *self.fill_spec.borrow_mut() = None;
         }
         *self.selection.borrow_mut() = next;
         self.notify();
     }
 
-    /// Install the panel's own painter, or clear it. Setting one drops the
+    /// Install the panel's own fill, or clear it. Setting one drops the
     /// wallpaper selection for the same reason [`select`](Self::select) drops it.
-    pub fn set_custom_fill(&self, paint: Option<FillPainter>) {
-        let picking = paint.is_some();
+    ///
+    /// The spec is the model; the painter is derived from it so the stage has
+    /// pixels to draw and the project file has a value to save.
+    pub fn set_custom_fill(&self, spec: Option<FillSpec>) {
+        let picking = spec.is_some();
+        let paint = spec.as_ref().and_then(painter_for);
+        *self.fill_spec.borrow_mut() = spec;
         *self.custom_fill.borrow_mut() = paint;
         if picking {
             *self.selection.borrow_mut() = None;
         }
         self.notify();
+    }
+
+    /// The panel's own fill in the form the project file stores.
+    pub fn fill_spec(&self) -> Option<FillSpec> {
+        self.fill_spec.borrow().clone()
     }
 
     pub fn padding(&self) -> f64 {
@@ -280,6 +346,7 @@ impl Background {
 pub(crate) struct BackgroundState {
     selection: Rc<RefCell<Option<String>>>,
     custom_fill: Rc<RefCell<Option<FillPainter>>>,
+    fill_spec: Rc<RefCell<Option<FillSpec>>>,
     padding: Rc<Cell<f64>>,
     radius: Rc<Cell<f64>>,
 }
@@ -293,7 +360,12 @@ impl BackgroundState {
     /// painter. The stage insets and grows the canvas only then, so an empty
     /// background leaves the video edge to edge.
     pub fn has_fill(&self) -> bool {
-        self.selection.borrow().is_some() || self.custom_fill.borrow().is_some()
+        self.selection.borrow().is_some() || self.fill_spec.borrow().is_some()
+    }
+
+    /// The panel's own fill in the form the project file stores.
+    pub fn fill_spec(&self) -> Option<FillSpec> {
+        self.fill_spec.borrow().clone()
     }
 
     /// The panel's own fill, for a stage with no wallpaper picked.
@@ -382,6 +454,27 @@ pub(super) fn paint_cover(context: &Context, width: i32, height: i32, pixbuf: &P
     let _ = context.restore();
 }
 
+/// Build the painter for a saved fill. The stage only needs pixels, so every
+/// fill shape becomes one closure here instead of in the panels that choose it.
+/// An image that cannot be decoded has no painter; the spec stays in the model
+/// so the panel can still name the file the project asked for.
+fn painter_for(spec: &FillSpec) -> Option<FillPainter> {
+    match spec {
+        FillSpec::Image { path } => {
+            let pixbuf = load_picture(path)?;
+            Some(Rc::new(move |context, width, height| {
+                paint_cover(context, width, height, &pixbuf);
+            }))
+        }
+        spec => {
+            let spec = spec.clone();
+            Some(Rc::new(move |context, width, height| {
+                super::custom_fill::paint_spec(context, width, height, &spec);
+            }))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -465,7 +558,7 @@ mod tests {
         background.set_padding(48.0);
         background.set_radius(6.0);
 
-        background.apply(Some("wallpaper-001.jpg"), 12.0, 3.0);
+        background.apply(Some("wallpaper-001.jpg"), 12.0, 3.0, None);
         assert_eq!(
             background.state().selection().as_deref(),
             Some("wallpaper-001.jpg")
@@ -480,7 +573,7 @@ mod tests {
         background.set_padding(48.0);
         background.select(Some("wallpaper-004.jpg"));
 
-        background.apply(None, DEFAULT_PADDING, DEFAULT_RADIUS);
+        background.apply(None, DEFAULT_PADDING, DEFAULT_RADIUS, None);
 
         assert!(background.state().selection().is_none());
         assert_eq!(background.padding(), DEFAULT_PADDING);
@@ -493,10 +586,9 @@ mod tests {
         background.select(Some("wallpaper-001.jpg"));
         background.set_padding(60.0);
         background.set_radius(12.0);
-        let painter: super::FillPainter = std::rc::Rc::new(|_: &super::Context, _: i32, _: i32| {});
-        background.set_custom_fill(Some(painter));
+        background.set_custom_fill(Some(super::FillSpec::Color { rgb: [1, 2, 3] }));
 
-        background.apply(None, DEFAULT_PADDING, DEFAULT_RADIUS);
+        background.apply(None, DEFAULT_PADDING, DEFAULT_RADIUS, None);
 
         assert!(background.state().selection().is_none());
         assert!(
@@ -505,6 +597,44 @@ mod tests {
         );
         assert_eq!(background.padding(), DEFAULT_PADDING);
         assert_eq!(background.radius(), DEFAULT_RADIUS);
+    }
+
+    #[test]
+    fn a_saved_fill_rebuilds_its_painter() {
+        let background = Background::default();
+        let spec = super::FillSpec::Color { rgb: [12, 34, 56] };
+
+        background.apply(None, DEFAULT_PADDING, DEFAULT_RADIUS, Some(&spec));
+
+        assert_eq!(background.fill_spec(), Some(spec));
+        assert!(background.state().custom_fill().is_some());
+        assert!(background.state().has_fill());
+
+        background.apply(None, DEFAULT_PADDING, DEFAULT_RADIUS, None);
+
+        assert_eq!(background.fill_spec(), None);
+        assert!(background.state().custom_fill().is_none());
+        assert!(!background.state().has_fill());
+    }
+
+    #[test]
+    fn a_wallpaper_drops_a_saved_fill() {
+        let background = Background::default();
+        let spec = super::FillSpec::Color { rgb: [12, 34, 56] };
+
+        background.apply(
+            Some("wallpaper-004.jpg"),
+            DEFAULT_PADDING,
+            DEFAULT_RADIUS,
+            Some(&spec),
+        );
+
+        assert_eq!(
+            background.state().selection().as_deref(),
+            Some("wallpaper-004.jpg")
+        );
+        assert_eq!(background.fill_spec(), None);
+        assert!(background.state().custom_fill().is_none());
     }
 
     #[test]
@@ -521,7 +651,7 @@ mod tests {
         }
         seen.borrow_mut().clear();
 
-        background.apply(Some("wallpaper-004.jpg"), 48.0, 6.0);
+        background.apply(Some("wallpaper-004.jpg"), 48.0, 6.0, None);
 
         let seen = seen.borrow();
         assert_eq!(seen.len(), 1, "one redraw per applied stage");
@@ -540,7 +670,7 @@ mod tests {
         background.connect(std::rc::Rc::new(move || counter.set(counter.get() + 1)));
         assert_eq!(calls.get(), 1, "connect paints once");
 
-        background.apply(Some("wallpaper-004.jpg"), 48.0, DEFAULT_RADIUS);
+        background.apply(Some("wallpaper-004.jpg"), 48.0, DEFAULT_RADIUS, None);
         assert_eq!(calls.get(), 1, "an unchanged stage is not a redraw");
     }
 
@@ -548,11 +678,11 @@ mod tests {
     fn a_saved_stage_with_nonsense_metrics_reads_as_defaults() {
         let background = Background::default();
 
-        background.apply(Some("wallpaper-004.jpg"), f64::NAN, -8.0);
+        background.apply(Some("wallpaper-004.jpg"), f64::NAN, -8.0, None);
         assert_eq!(background.padding(), DEFAULT_PADDING);
         assert_eq!(background.radius(), DEFAULT_RADIUS);
 
-        background.apply(None, -12.0, f64::INFINITY);
+        background.apply(None, -12.0, f64::INFINITY, None);
         assert_eq!(background.padding(), 0.0);
         assert_eq!(background.radius(), DEFAULT_RADIUS);
     }

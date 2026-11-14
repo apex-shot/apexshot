@@ -525,6 +525,17 @@ impl Panel {
         *self.pending.borrow_mut() = Pending::Idle;
         self.close_form();
         self.say("");
+        // An undo, a document swap or a later edit can leave the highlighted
+        // preset no longer applied. The popover has no history listener, so it
+        // checks the highlight against the open project whenever it opens.
+        let applied = self.applied.borrow().clone();
+        if let Some(id) = applied {
+            let still_applied =
+                presets::load(&id).is_some_and(|preset| self.timeline.look_matches(&preset));
+            if !still_applied {
+                *self.applied.borrow_mut() = None;
+            }
+        }
         self.fill();
     }
 
