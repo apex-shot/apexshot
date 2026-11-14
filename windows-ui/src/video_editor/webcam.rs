@@ -24,7 +24,7 @@
 //! on its last frame past the end, the way a still camera would.
 
 use crate::recording::editor::sidecar::{PointerSidecar, WebcamTrack};
-use gtk4::cairo::{Context, Format, ImageSurface};
+use gtk4::cairo::{Context, Format, ImageSurface, Operator};
 use gtk4::glib;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -49,6 +49,10 @@ const PREVIEW_WIDTH: u32 = 720;
 const PREVIEW_MAX_HEIGHT: u32 = 1280;
 /// The smallest bubble the panel can make, as a fraction of the frame width.
 pub(super) const MIN_SIZE: f64 = 0.06;
+/// The most camera samples the preview draws along its motion blur trail.
+const PREVIEW_TRAIL_SAMPLES: usize = 5;
+/// The shadow surfaces to keep: one per trail sample, plus the still frame.
+const SHADOW_CACHE_ENTRIES: usize = PREVIEW_TRAIL_SAMPLES + 1;
 /// The largest bubble that still reads as an overlay.
 pub(super) const MAX_SIZE: f64 = 0.9;
 /// The shortest studied silence the camera can hide in.
@@ -2088,8 +2092,15 @@ struct State {
     source_path: RefCell<Option<PathBuf>>,
     cache: RefCell<Option<(u64, ImageSurface)>>,
     cutout_cache: RefCell<Option<(u64, f64, ImageSurface)>>,
-    /// The camera shadow's surface, rebuilt only when its mask changes.
-    shadow_cache: RefCell<Option<(Rc<super::camera_shadow::ShadowMask>, ImageSurface)>>,
+    /// The camera shadow's surfaces, rebuilt only when a mask or the camera
+    /// alpha baked into it changes. One entry per trail sample.
+    shadow_cache: RefCell<Vec<(Rc<super::camera_shadow::ShadowMask>, f64, ImageSurface)>>,
+    /// The zoom clips the preview samples its layout trail from, and the
+    /// settings that trail reads.
+    zoom_clips: RefCell<Vec<super::timeline::ZoomClip>>,
+    zoom_lead_in: Cell<f64>,
+    zoom_frame_rate: Cell<f64>,
+    zoom_motion_blur: Cell<f64>,
     requested: Cell<f64>,
     requested_cutout: Cell<bool>,
     requested_matte: Cell<(f64, f64)>,
@@ -2138,7 +2149,11 @@ impl WebcamModel {
                 source_path: RefCell::new(None),
                 cache: RefCell::new(None),
                 cutout_cache: RefCell::new(None),
-                shadow_cache: RefCell::new(None),
+                shadow_cache: RefCell::new(Vec::new()),
+                zoom_clips: RefCell::new(Vec::new()),
+                zoom_lead_in: Cell::new(0.0),
+                zoom_frame_rate: Cell::new(60.0),
+                zoom_motion_blur: Cell::new(1.0),
                 requested: Cell::new(-1.0),
                 requested_cutout: Cell::new(false),
                 requested_matte: Cell::new((0.0, 0.0)),
@@ -2166,7 +2181,8 @@ impl WebcamModel {
         *self.state.source_path.borrow_mut() = None;
         *self.state.cache.borrow_mut() = None;
         *self.state.cutout_cache.borrow_mut() = None;
-        *self.state.shadow_cache.borrow_mut() = None;
+        self.state.shadow_cache.borrow_mut().clear();
+        self.state.zoom_clips.borrow_mut().clear();
         self.state.requested.set(-1.0);
         self.state.requested_cutout.set(false);
         self.state.requested_matte.set((0.0, 0.0));
@@ -2274,7 +2290,6 @@ impl WebcamModel {
                 *self.state.layouts.borrow_mut() = layouts;
             }
         }
-        self.state.requested.set(-1.0);
         (self.state.repaint)();
     }
 
@@ -2290,7 +2305,6 @@ impl WebcamModel {
             return;
         }
         *self.state.layouts.borrow_mut() = clamped;
-        self.state.requested.set(-1.0);
         (self.state.repaint)();
     }
 
@@ -2397,6 +2411,27 @@ impl WebcamModel {
         source_size: Option<(u32, u32)>,
         sidecar: impl FnOnce() -> Option<crate::recording::editor::sidecar::PointerSidecar>,
     ) {
+        // The preview's own motion blur trail reads these, so keep them even
+        // when the split has nothing to place.
+        self.state.zoom_frame_rate.set(
+            if zoom.frame_rate.is_finite() && zoom.frame_rate > 0.0 {
+                zoom.frame_rate
+            } else {
+                30.0
+            },
+        );
+        self.state.zoom_motion_blur.set(if zoom.motion_blur.is_finite() {
+            zoom.motion_blur.clamp(0.0, 1.0)
+        } else {
+            0.0
+        });
+        self.state.zoom_lead_in.set(zoom.lead_in_seconds());
+        {
+            let mut clips = self.state.zoom_clips.borrow_mut();
+            if clips.as_slice() != zooms {
+                *clips = zooms.to_vec();
+            }
+        }
         let Some(settings) = self.settings() else {
             self.state.split_rest.set(0.0);
             return;
@@ -2479,6 +2514,26 @@ impl WebcamModel {
     /// video rect. `source_size` is the recording's own frame size, which sets
     /// the video's aspect.
     pub fn layout_frame(&self, source_size: Option<(u32, u32)>) -> Option<LayoutFrame> {
+        self.layout_frame_at(
+            source_size,
+            self.state.composition_seconds.get(),
+            self.state.source_seconds.get(),
+            self.state.zoom_shrink.get(),
+            self.state.split_rest.get(),
+        )
+    }
+
+    /// [`Self::layout_frame`] at an explicit composition instant, for the
+    /// motion blur trail. The silence hide is read from `source_seconds`, which
+    /// the trail holds at the current frame the way the export does.
+    fn layout_frame_at(
+        &self,
+        source_size: Option<(u32, u32)>,
+        composition_seconds: f64,
+        source_seconds: f64,
+        zoom_shrink: f64,
+        split_rest: f64,
+    ) -> Option<LayoutFrame> {
         let track = self.state.track.borrow();
         let track = track.as_ref()?;
         let settings = self.settings()?;
@@ -2492,27 +2547,97 @@ impl WebcamModel {
             _ => video_aspect,
         };
         let frame = self.state.layouts.borrow().frame_at_staged(
-            self.state.composition_seconds.get(),
+            composition_seconds,
             settings,
             StageShape {
                 aspect: stage,
                 screen_aspect: video_aspect,
                 split_gap: self.state.split_gap.get(),
                 pane_radius: self.state.pane_radius.get(),
-                split_rest: self.state.split_rest.get(),
+                split_rest,
                 canvas: self.state.canvas.get(),
             },
             camera_aspect,
-            self.state.zoom_shrink.get(),
+            zoom_shrink,
         );
         Some(hide_for_silence(
             frame,
             silence_hide_at(
                 &self.silence_ranges(),
-                self.state.source_seconds.get(),
+                source_seconds,
                 settings.hide_during_silence,
             ),
         ))
+    }
+
+    /// The zoom shrink the trail sees at `time`. When the placement tool holds
+    /// the camera unzoomed, every sample is unzoomed too.
+    fn zoom_shrink_at_time(&self, time: f64) -> f64 {
+        let clips = self.state.zoom_clips.borrow();
+        if clips.is_empty() {
+            return 0.0;
+        }
+        let lead = self.state.zoom_lead_in.get();
+        let now = zoom_shrink_at(clips.as_slice(), self.state.composition_seconds.get(), lead);
+        if now > 0.0 && self.state.zoom_shrink.get() <= 0.0 {
+            return 0.0;
+        }
+        zoom_shrink_at(clips.as_slice(), time, lead)
+    }
+
+    /// The split's resting edge at `time`, from the plan the playhead built.
+    fn split_rest_at_time(&self, time: f64) -> f64 {
+        let plan = self.state.split_rest_plan.borrow();
+        let value = plan
+            .as_ref()
+            .map(|(_, plan)| plan.value_at(time))
+            .unwrap_or(self.state.split_rest.get());
+        if value.is_finite() {
+            value.clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+
+    /// The layouts the preview composites for the camera's motion blur: the
+    /// current one, then a trail back over the same span the export uses,
+    /// capped so a preview frame stays cheap.
+    fn trail_frames(
+        &self,
+        frame: LayoutFrame,
+        source_size: Option<(u32, u32)>,
+        size: (u32, u32),
+    ) -> Vec<LayoutFrame> {
+        let fps = self.state.zoom_frame_rate.get();
+        let strength =
+            camera_blur_strength(self.state.zoom_motion_blur.get(), fps, frame.camera_alpha);
+        if strength <= 0.0 {
+            return vec![frame];
+        }
+        let span = strength / fps;
+        let composition = self.state.composition_seconds.get();
+        let source = self.state.source_seconds.get();
+        let at = |time: f64| {
+            self.layout_frame_at(
+                source_size,
+                time,
+                source,
+                self.zoom_shrink_at_time(time),
+                self.split_rest_at_time(time),
+            )
+            .unwrap_or(frame)
+        };
+        let before = at((composition - span).max(0.0));
+        let count = trail_sample_count(frame, before, size).min(PREVIEW_TRAIL_SAMPLES);
+        if count <= 1 {
+            return vec![frame];
+        }
+        (0..count)
+            .map(|k| {
+                let back = span * (count - 1 - k) as f64 / (count - 1) as f64;
+                at((composition - back).max(0.0))
+            })
+            .collect()
     }
 
     /// Whether the recording's audio could be analysed: `None` while the
@@ -2700,28 +2825,68 @@ impl WebcamModel {
             width: f64::from(allocation_width.max(0)),
             height: f64::from(allocation_height.max(0)),
         };
-        let rect = frame.camera.inside(video);
-        if rect.width < 1.0 || rect.height < 1.0 {
-            return;
-        }
         let Some(image) = self.camera_surface(frame.cutout) else {
             return;
         };
-        let radius = frame.camera_radius * rect.width.min(rect.height) / 2.0;
-        self.draw_shadow(context, canvas, rect, radius, &frame, &image);
-        draw_camera_cover_blurred(
-            context,
-            rect,
-            radius,
-            frame.mirror,
-            frame.camera_alpha,
-            &image,
-            fade_blur_sigma_px(frame.camera_alpha, canvas.height),
+        let Some(stamp) = self.frame_stamp() else {
+            return;
+        };
+        let samples = self.trail_frames(
+            frame,
+            source_size,
+            (
+                allocation_width.max(1) as u32,
+                allocation_height.max(1) as u32,
+            ),
         );
+        let weight = 1.0 / samples.len().max(1) as f64;
+        // Samples are averaged in an additive group so overlapping copies of
+        // an opaque camera add up to one camera instead of fading it out.
+        let grouped = samples.len() > 1 && context.push_group().is_ok();
+        if grouped {
+            context.set_operator(Operator::Add);
+        }
+        for sample in samples {
+            if sample.camera_alpha <= 0.0 {
+                continue;
+            }
+            let rect = sample.camera.inside(video);
+            if rect.width < 1.0 || rect.height < 1.0 {
+                continue;
+            }
+            let radius = sample.camera_radius * rect.width.min(rect.height) / 2.0;
+            self.draw_shadow(
+                context,
+                canvas,
+                rect,
+                radius,
+                &sample,
+                &image,
+                stamp,
+                sample.camera_alpha * weight,
+            );
+            draw_camera_cover_blurred(
+                context,
+                rect,
+                radius,
+                sample.mirror,
+                sample.camera_alpha * weight,
+                &image,
+                fade_blur_sigma_px(sample.camera_alpha, canvas.height),
+            );
+        }
+        if grouped {
+            context.set_operator(Operator::Over);
+            if let Ok(group) = context.pop_group() {
+                let _ = context.set_source(&group);
+                let _ = context.paint();
+            }
+        }
     }
 
     /// Paint the camera's studied shadow under where the camera will be
-    /// drawn, cut to the stage, faded with the camera.
+    /// drawn, cut to the stage, with the camera's alpha baked into it.
+    #[allow(clippy::too_many_arguments)]
     fn draw_shadow(
         &self,
         context: &Context,
@@ -2730,32 +2895,51 @@ impl WebcamModel {
         radius: f64,
         frame: &LayoutFrame,
         image: &ImageSurface,
+        stamp: u64,
+        alpha: f64,
     ) {
-        let Some(mask) = super::camera_shadow::camera_shadow(
+        let alpha = if alpha.is_finite() {
+            alpha.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        if alpha <= 0.0 {
+            return;
+        }
+        let Some(mask) = super::camera_shadow::camera_shadow_keyed(
             stage,
             rect,
             radius,
             frame.cutout,
+            Some(stamp),
+            frame.mirror,
             &|context, rect, radius| {
                 draw_camera_cover(context, rect, radius, frame.mirror, 1.0, image)
             },
         ) else {
             return;
         };
+        let quantized = (alpha * 1000.0).round() / 1000.0;
         let cached = self
             .state
             .shadow_cache
             .borrow()
-            .as_ref()
-            .filter(|(cached, _)| Rc::ptr_eq(cached, &mask))
-            .map(|(_, surface)| surface.clone());
+            .iter()
+            .find(|(cached, cached_alpha, _)| {
+                Rc::ptr_eq(cached, &mask) && (*cached_alpha - quantized).abs() < 1e-9
+            })
+            .map(|(_, _, surface)| surface.clone());
         let surface = match cached {
             Some(surface) => surface,
             None => {
-                let Some(surface) = super::camera_shadow::preview_surface(&mask) else {
+                let Some(surface) = super::camera_shadow::preview_surface(&mask, quantized) else {
                     return;
                 };
-                *self.state.shadow_cache.borrow_mut() = Some((mask.clone(), surface.clone()));
+                let mut cache = self.state.shadow_cache.borrow_mut();
+                if cache.len() >= SHADOW_CACHE_ENTRIES {
+                    cache.remove(0);
+                }
+                cache.push((mask.clone(), quantized, surface.clone()));
                 surface
             }
         };
@@ -2765,8 +2949,20 @@ impl WebcamModel {
         context.translate(rect.x + mask.offset_x, rect.y + mask.offset_y);
         context.scale(mask.texel, mask.texel);
         let _ = context.set_source_surface(&surface, 0.0, 0.0);
-        let _ = context.paint_with_alpha(frame.camera_alpha.clamp(0.0, 1.0));
+        let _ = context.paint();
         let _ = context.restore();
+    }
+
+    /// The stamp of the decoded frame the preview is showing, so the shadow
+    /// cache can tell two cut-out frames apart.
+    fn frame_stamp(&self) -> Option<u64> {
+        self.state
+            .shared
+            .frame
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|frame| frame.stamp)
     }
 
     fn target_seconds(&self, source_seconds: f64) -> Option<f64> {
