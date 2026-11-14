@@ -608,13 +608,63 @@ fn gate_image_output(
     let Some(capabilities) = host.read(|st| st.studio_capabilities()) else {
         return false;
     };
+    let retry: Rc<dyn Fn()> = Rc::new(retry);
     let retry_host = Rc::downgrade(host);
-    crate::studio_upsell::gate(window, capabilities, move || {
+    let gate_retry = retry.clone();
+    if !crate::studio_upsell::gate(window, capabilities, move || {
         if let Some(host) = retry_host.upgrade() {
             host.invalidate_studio_cache();
         }
-        retry();
-    })
+        gate_retry();
+    }) {
+        return false;
+    }
+    upscale_ready(host, retry)
+}
+
+thread_local! {
+    static ENHANCING: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Neural enhancement takes seconds on a large source, and the image outputs
+/// render on the main loop. Run it on a worker first and retry the output,
+/// which then renders from the cached result without blocking the window.
+fn upscale_ready(host: &Rc<super::annotate::EditorHost>, retry: Rc<dyn Fn()>) -> bool {
+    let Some((mode, base)) = host.read(|st| st.pending_upscale()).flatten() else {
+        return true;
+    };
+    if ENHANCING.with(Cell::get) {
+        return false;
+    }
+    ENHANCING.with(|busy| busy.set(true));
+    host.report_error(t("Enhancing the image…"));
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(
+            crate::capture::editor::upscale::enhance_cached(&base, mode).map(|_| ()),
+        );
+    });
+    let host = Rc::downgrade(host);
+    gtk4::glib::timeout_add_local(std::time::Duration::from_millis(16), move || {
+        let result = match receiver.try_recv() {
+            Ok(result) => result,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return gtk4::glib::ControlFlow::Continue,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                Err("The upscaling preview worker stopped unexpectedly.".to_string())
+            }
+        };
+        ENHANCING.with(|busy| busy.set(false));
+        match result {
+            Ok(()) => retry(),
+            Err(error) => {
+                if let Some(host) = host.upgrade() {
+                    host.report_error(t(&error));
+                }
+            }
+        }
+        gtk4::glib::ControlFlow::Break
+    });
+    false
 }
 
 fn copy_image(window: &ApplicationWindow, host: &Rc<super::annotate::EditorHost>) {

@@ -29,6 +29,10 @@ static MODEL_4X: OnceLock<Result<Model, String>> = OnceLock::new();
 /// The most recent enhancement per mode, so a comparison preview and the
 /// export that follows it run the network once.
 static RECENT: Mutex<Vec<Cached>> = Mutex::new(Vec::new());
+/// Held while the network runs, so a background warm-up and an export that
+/// asks for the same pixels run it once: the second caller waits, then hits
+/// the cache.
+static COMPUTING: Mutex<()> = Mutex::new(());
 
 struct Cached {
     key: u64,
@@ -206,19 +210,33 @@ fn run_tile(
     })
 }
 
+/// A finished enhancement of these pixels in `mode`, if one is cached.
+pub fn cached(image: &RgbaImage, mode: SourceUpscale) -> Option<Arc<RgbaImage>> {
+    lookup(fingerprint(image), mode)
+}
+
+fn lookup(key: u64, mode: SourceUpscale) -> Option<Arc<RgbaImage>> {
+    let recent = RECENT.lock().ok()?;
+    recent
+        .iter()
+        .find(|entry| entry.key == key && entry.mode == mode)
+        .map(|entry| Arc::clone(&entry.image))
+}
+
 /// `enhance`, reusing the last result for the same pixels and mode.
 pub fn enhance_cached(image: &RgbaImage, mode: SourceUpscale) -> Result<Arc<RgbaImage>, String> {
     if mode == SourceUpscale::Off {
         return Ok(Arc::new(image.clone()));
     }
     let key = fingerprint(image);
-    if let Ok(recent) = RECENT.lock() {
-        if let Some(entry) = recent
-            .iter()
-            .find(|entry| entry.key == key && entry.mode == mode)
-        {
-            return Ok(Arc::clone(&entry.image));
-        }
+    if let Some(hit) = lookup(key, mode) {
+        return Ok(hit);
+    }
+    let _computing = COMPUTING
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(hit) = lookup(key, mode) {
+        return Ok(hit);
     }
     let enhanced = Arc::new(enhance(image, mode)?);
     if let Ok(mut recent) = RECENT.lock() {
@@ -368,8 +386,12 @@ mod tests {
         let second = enhance_cached(&image, SourceUpscale::Neural2x).unwrap();
         assert!(Arc::ptr_eq(&first, &second));
         assert_eq!(first.dimensions(), (40, 24));
+        assert!(
+            cached(&image, SourceUpscale::Neural2x).is_some_and(|hit| Arc::ptr_eq(&hit, &first))
+        );
 
         image.put_pixel(0, 0, image::Rgba([31, 60, 90, 255]));
+        assert!(cached(&image, SourceUpscale::Neural2x).is_none());
         let changed = enhance_cached(&image, SourceUpscale::Neural2x).unwrap();
         assert!(!Arc::ptr_eq(&first, &changed));
     }

@@ -248,6 +248,19 @@ impl EditorState {
         None
     }
 
+    /// The flattened export pixels when neural enhancement still has to run
+    /// for this export, or `None` when the export can render right away.
+    pub(crate) fn pending_upscale(&self) -> Option<(SourceUpscale, RgbaImage)> {
+        let mode = self.source_upscale;
+        if mode == SourceUpscale::Off || self.upscale_unavailable_reason(mode).is_some() {
+            return None;
+        }
+        let base = self.export_base();
+        super::super::upscale::cached(&base, mode)
+            .is_none()
+            .then_some((mode, base))
+    }
+
     /// The final export image. Always flattens `base + actions` so a pending
     /// preview rebuild cannot leak an unredacted frame.
     pub fn to_final_image(&self) -> Result<RgbaImage, EditorError> {
@@ -264,14 +277,6 @@ impl EditorState {
             &super::background::Appearance::default(),
             false,
         )
-    }
-
-    pub(crate) fn card_surface(
-        &self,
-        working: &RgbaImage,
-        radius: f64,
-    ) -> Result<gtk4::cairo::ImageSurface, EditorError> {
-        self.card_surface_scaled(working, radius, self.export_scale)
     }
 
     fn card_surface_scaled(
@@ -934,5 +939,15 @@ mod tests {
 
         state.source_upscale = SourceUpscale::Neural2x;
         assert!(state.studio_capabilities().image_upscale);
+    }
+
+    #[test]
+    fn a_rendered_enhancement_is_no_longer_pending() {
+        let mut state = EditorState::new(RgbaImage::from_pixel(24, 18, Rgba([12, 140, 200, 255])));
+        assert!(state.pending_upscale().is_none());
+        state.source_upscale = SourceUpscale::Neural2x;
+        let (mode, base) = state.pending_upscale().expect("enhancement has not run yet");
+        crate::capture::editor::upscale::enhance_cached(&base, mode).unwrap();
+        assert!(state.pending_upscale().is_none());
     }
 }
