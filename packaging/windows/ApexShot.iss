@@ -25,10 +25,11 @@
 #define AppUrl "https://apexshot.org"
 #define AppIssuesUrl "https://github.com/apex-shot/apexshot/issues"
 #define AppReleasesUrl "https://github.com/apex-shot/apexshot/releases"
+#define AppGuid "7E3C8F1B-2B4A-4E4C-9C1E-6A5D24A3F9B7"
 
 [Setup]
 ; A fixed AppId keeps an upgrade in place instead of stacking a second install.
-AppId={{7E3C8F1B-2B4A-4E4C-9C1E-6A5D24A3F9B7}
+AppId={{{#AppGuid}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
@@ -78,4 +79,26 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\bin\apexshot-settings.exe"; W
 [Run]
 ; The settings binary owns the first-run flow and hands over to the tray shell
 ; when setup finishes, so it is the right entry point for a fresh install.
-Filename: "{app}\bin\apexshot-settings.exe"; Description: "{cm:LaunchProgram,{#StringChange(AppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\bin\apexshot-settings.exe"; Description: "{cm:LaunchProgram,{#StringChange(AppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent; Check: not IsUpgrade
+; An upgrade closed the tray shell to replace its files. Start it again in the
+; background, silent or not, so the hotkeys come back without the user opening
+; Settings; onboarding already ran on the first install.
+Filename: "{app}\bin\apexshot-capture.exe"; Parameters: "--background"; WorkingDir: "{app}\bin"; Flags: nowait; Check: IsUpgrade
+
+[Code]
+var
+  Upgrading: Boolean;
+
+// Read before the files are copied: the uninstall key the previous install
+// left behind is what tells an upgrade from a fresh install.
+function InitializeSetup(): Boolean;
+begin
+  Upgrading := RegKeyExists(HKA,
+    'Software\Microsoft\Windows\CurrentVersion\Uninstall\{' + '{#AppGuid}' + '}_is1');
+  Result := True;
+end;
+
+function IsUpgrade(): Boolean;
+begin
+  Result := Upgrading;
+end;
