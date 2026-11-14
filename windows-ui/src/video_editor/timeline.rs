@@ -4623,6 +4623,11 @@ impl Timeline {
     /// this one and when the window closes, both of which land before the
     /// repaint-driven autosave's next tick.
     pub fn flush_project(&self) {
+        // With the recording removed there is nothing to save, and its saved
+        // edits must survive for the next time it opens.
+        if self.data.borrow().path.is_none() {
+            return;
+        }
         self.project.sync(
             snapshot_with_cursor(
                 self.data.borrow().project_file(&self.background),
@@ -5496,7 +5501,9 @@ pub(super) fn build(
         let project = project.clone();
         let cursor = cursor.clone();
         gtk4::glib::timeout_add_local(Duration::from_secs(2), move || {
-            if project.take_changed() {
+            // No recording open (it was removed): nothing to write, and the
+            // saved edits stay on disk.
+            if project.take_changed() && data.borrow().path.is_some() {
                 let snapshot = data.borrow().project_file(&background);
                 project.sync(snapshot_with_cursor(snapshot, cursor.settings()), false);
             }
