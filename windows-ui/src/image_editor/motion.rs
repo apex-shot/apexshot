@@ -703,6 +703,12 @@ impl TextDragContext {
     }
 }
 
+/// Preview margins at 100% scale: beside the tool notch, under the mode
+/// pill, and above the timeline.
+const PREVIEW_SIDE_INSET: f64 = 72.0;
+const PREVIEW_TOP_INSET: f64 = 60.0;
+const PREVIEW_BOTTOM_INSET: f64 = 20.0;
+
 fn preview_transform(
     width: f64,
     height: f64,
@@ -711,14 +717,19 @@ fn preview_transform(
     image_height: u32,
     layout: crate::capture::editor::state::background::Layout,
 ) -> ViewTransform {
-    let inset = (24.0 * ui_scale).min(width.min(height).max(0.0) * 0.25);
-    let available_width = (width - inset * 2.0).max(1.0);
-    let available_height = (height - inset * 2.0).max(1.0);
-    let zoom = (available_width / layout.width.max(1.0))
-        .min(available_height / layout.height.max(1.0))
-        .min(1.0);
+    // The composition fills the stage, the way the video editor's preview
+    // does, enlarging a small image past 1:1. The sides keep clear of the
+    // tool notch (both sides, so the picture stays centred), the top clears
+    // the mode pill, and the bottom keeps a small gap above the timeline.
+    let side = (PREVIEW_SIDE_INSET * ui_scale).min(width.max(0.0) * 0.15);
+    let top = (PREVIEW_TOP_INSET * ui_scale).min(height.max(0.0) * 0.2);
+    let bottom = (PREVIEW_BOTTOM_INSET * ui_scale).min(height.max(0.0) * 0.1);
+    let available_width = (width - side * 2.0).max(1.0);
+    let available_height = (height - top - bottom).max(1.0);
+    let zoom =
+        (available_width / layout.width.max(1.0)).min(available_height / layout.height.max(1.0));
     let x = (width - layout.width * zoom) / 2.0;
-    let y = (height - layout.height * zoom) / 2.0;
+    let y = top + (available_height - layout.height * zoom) / 2.0;
     ViewTransform {
         scale: zoom,
         offset_x: x + layout.image_x * zoom,
@@ -914,14 +925,20 @@ mod tests {
         appearance.fill = Fill::Image(Arc::new(RgbaImage::from_pixel(1, 1, Rgba([0; 4]))));
         appearance.padding = 40.0;
         let layout = appearance.layout(400, 200);
+        // A small stage clamps the margins: 45 a side, 40 on top, 20 below,
+        // leaving 210 × 140 for the 480 × 280 canvas.
         let fit = preview_transform(300.0, 200.0, 1.0, 400, 200, layout);
-        assert!((fit.canvas_width * fit.canvas_scale - 252.0).abs() < 0.001);
-        assert!((fit.canvas_offset_x - 24.0).abs() < 0.001);
+        assert!((fit.canvas_width * fit.canvas_scale - 210.0).abs() < 0.001);
+        assert!((fit.canvas_offset_x - 45.0).abs() < 0.001);
         assert!((fit.offset_x - fit.canvas_offset_x - layout.image_x * fit.scale).abs() < 0.001);
-        let native = preview_transform(1200.0, 800.0, 1.0, 400, 200, layout);
-        assert_eq!(native.scale, 1.0);
-        assert_eq!(native.canvas_offset_x, (1200.0 - layout.width) / 2.0);
-        assert_eq!(native.canvas_offset_y, (800.0 - layout.height) / 2.0);
+        // A large stage fills past 1:1, centred between the pill and the
+        // timeline: 1056 × 720 available, so the width decides at 2.2×.
+        let large = preview_transform(1200.0, 800.0, 1.0, 400, 200, layout);
+        assert!((large.scale - 1056.0 / layout.width).abs() < 1e-9);
+        assert!(large.scale > 1.0);
+        assert!((large.canvas_offset_x - 72.0).abs() < 0.001);
+        let drawn_height = layout.height * large.scale;
+        assert!((large.canvas_offset_y - (60.0 + (720.0 - drawn_height) / 2.0)).abs() < 0.001);
     }
 
     #[test]
