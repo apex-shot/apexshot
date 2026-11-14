@@ -258,14 +258,16 @@ impl EditorState {
                     alignment: TextAlignment::Left,
                 };
                 let clamped_position = Point {
-                    x: position.x.clamp(min_x, (max_x - font.size * 1.8).max(min_x)),
+                    x: position
+                        .x
+                        .clamp(min_x, (max_x - font.size * 1.8).max(min_x)),
                     y: position.y.clamp(
                         min_y + font.size + 8.0,
                         (max_y - 8.0).max(min_y + font.size + 8.0),
                     ),
                 };
-                let clamped_width = (b.rect.width as f64)
-                    .min((max_x - clamped_position.x).max(font.size * 1.8));
+                let clamped_width =
+                    (b.rect.width as f64).min((max_x - clamped_position.x).max(font.size * 1.8));
                 return Some(AnnotationAction::Text {
                     position: clamped_position,
                     text: trimmed_text,

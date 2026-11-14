@@ -1647,6 +1647,7 @@ fn paint_source_text(
 
 /// One clip lane: the hover ghost, then the clips, their glyphs and labels,
 /// and the trim grips on a selected clip.
+#[allow(clippy::too_many_arguments)]
 fn draw_clip_track(
     context: &CairoContext,
     width: i32,
@@ -1784,6 +1785,7 @@ struct GhostStyle {
     label: &'static str,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_add_track(
     context: &CairoContext,
     w: f64,

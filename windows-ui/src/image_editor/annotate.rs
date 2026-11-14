@@ -3618,14 +3618,7 @@ mod tests {
             });
             let mut surface = ImageSurface::create(gtk4::cairo::Format::ARgb32, 160, 120).unwrap();
             let context = gtk4::cairo::Context::new(&surface).unwrap();
-            host.paint_document_inner(
-                &context,
-                t,
-                None,
-                MotionPaintPart::Complete,
-                false,
-                false,
-            );
+            host.paint_document_inner(&context, t, None, MotionPaintPart::Complete, false, false);
             drop(context);
             surface.flush();
             let data = surface.data().unwrap().to_vec();

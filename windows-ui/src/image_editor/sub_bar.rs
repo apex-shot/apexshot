@@ -185,20 +185,16 @@ pub(super) fn build(
     // ----- crop: ratio pill, dimensions, Cancel/Apply -----
     let (crop, crop_refresh) = {
         let root = bar();
-        let ratio_options: Vec<String> = CROP_RATIOS.iter().map(|(_, label)| t(*label)).collect();
+        let ratio_options: Vec<String> = CROP_RATIOS.iter().map(|(_, label)| t(label)).collect();
         let ratio_labels: Vec<&str> = ratio_options.iter().map(String::as_str).collect();
-        let ratio = pill(
-            scale,
-            &ratio_labels,
-            {
-                let host = host.clone();
-                Rc::new(move |index| {
-                    if let Some((ratio, _)) = CROP_RATIOS.get(index) {
-                        host.mutate(|st| st.set_crop_ratio(*ratio));
-                    }
-                })
-            },
-        );
+        let ratio = pill(scale, &ratio_labels, {
+            let host = host.clone();
+            Rc::new(move |index| {
+                if let Some((ratio, _)) = CROP_RATIOS.get(index) {
+                    host.mutate(|st| st.set_crop_ratio(*ratio));
+                }
+            })
+        });
         root.append(&ratio.button);
         let dimensions = Label::new(Some("—"));
         dimensions.add_css_class("image-editor-subbar-dimensions");
@@ -352,23 +348,19 @@ pub(super) fn build(
         let root = bar();
         let mode_options: Vec<String> = HIGHLIGHTER_MODES
             .iter()
-            .map(|(_, label)| t(*label))
+            .map(|(_, label)| t(label))
             .collect();
         let mode_labels: Vec<&str> = mode_options.iter().map(String::as_str).collect();
-        let mode = pill(
-            scale,
-            &mode_labels,
-            {
-                let host = host.clone();
-                Rc::new(move |index| {
-                    if let Some((mode, _)) = HIGHLIGHTER_MODES.get(index) {
-                        host.mutate(|st| {
-                            st.set_highlighter_mode_and_check(*mode);
-                        });
-                    }
-                })
-            },
-        );
+        let mode = pill(scale, &mode_labels, {
+            let host = host.clone();
+            Rc::new(move |index| {
+                if let Some((mode, _)) = HIGHLIGHTER_MODES.get(index) {
+                    host.mutate(|st| {
+                        st.set_highlighter_mode_and_check(*mode);
+                    });
+                }
+            })
+        });
         root.append(&mode.button);
         let weight = StrokeControl::new(scale, &host);
         root.append(&weight.button);

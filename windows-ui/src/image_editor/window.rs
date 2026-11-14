@@ -147,14 +147,10 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
             // Export stays clickable during its own render so it can cancel,
             // and Static's Save As is unaffected by a still upload.
             upload.set_sensitive(
-                has_doc
-                    && !host.background_loading()
-                    && !(exporting.get() || uploading.get()),
+                has_doc && !host.background_loading() && !(exporting.get() || uploading.get()),
             );
             export.set_sensitive(
-                has_doc
-                    && !host.background_loading()
-                    && !(in_motion.get() && uploading.get()),
+                has_doc && !host.background_loading() && !(in_motion.get() && uploading.get()),
             );
             canvas.refresh_cursor();
         })
@@ -274,14 +270,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
                 }
                 let sync_all: Rc<dyn Fn()> = sync_for_export.clone();
                 save_motion_video_dialog(
-                    &window,
-                    &host,
-                    &motion,
-                    &inspector,
-                    &exporting,
-                    &uploading,
-                    &cancel,
-                    &name,
+                    &window, &host, &motion, &inspector, &exporting, &uploading, &cancel, &name,
                     sync_all,
                 );
             } else {
@@ -451,9 +440,8 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
         &mode_confirm,
         &motion,
         &inspector.copy_button,
+        &inspector.export_button,
         &exporting,
-        &motion_export_name,
-        &sync_all,
     );
 
     window.present();
@@ -645,7 +633,6 @@ fn save_motion_video_dialog(
     let host = host.clone();
     let inspector = inspector.clone();
     let exporting = exporting.clone();
-    let uploading = uploading.clone();
     let cancel = cancel.clone();
     let sync_all = sync_all.clone();
     dialog.save(Some(window), gtk4::gio::Cancellable::NONE, move |result| {
@@ -659,10 +646,9 @@ fn save_motion_video_dialog(
                     .label()
                     .map(|label| label.to_string())
                     .unwrap_or_else(|| t("Export"));
-                inspector.export_button.set_label(&tfmt(
-                    "Exporting {percent}%",
-                    &[("percent", "0")],
-                ));
+                inspector
+                    .export_button
+                    .set_label(&tfmt("Exporting {percent}%", &[("percent", "0")]));
                 sync_all();
                 let result = motion.export_video(
                     path,
@@ -728,15 +714,6 @@ fn save_motion_video_dialog(
                         );
                         host.report_error(error);
                     }
-                });
-                if let Err(error) = result {
-                    exporting.set(false);
-                    sync_all();
-                    crate::utils::notify::desktop_notification_important(
-                        &t("Export failed"),
-                        &error,
-                    );
-                    host.report_error(error);
                 }
             }
         }
@@ -925,61 +902,56 @@ fn upload_motion_video(
     button.set_sensitive(false);
     set_motion_controls_sensitive(inspector, false);
     sync_all();
-    let result = motion.export_video(
-        path,
-        |_, _| {},
-        {
-            let window = window.downgrade();
-            let button = button.downgrade();
-            let uploading = uploading.clone();
-            let host = host.clone();
-            let inspector = inspector.clone();
-            let sync_all = sync_all.clone();
-            move |result| {
-                set_motion_controls_sensitive(&inspector, true);
-                match result {
-                    Ok(path) => {
-                        if let (Some(window), Some(button)) =
-                            (window.upgrade(), button.upgrade())
-                        {
-                            upload_path(
-                                &window,
-                                &button,
-                                &uploading,
-                                config,
-                                path,
-                                Some(cleanup),
-                                Some(sync_all),
-                            );
-                        } else {
-                            uploading.set(false);
-                            let _ = std::fs::remove_dir_all(&cleanup);
-                            sync_all();
-                        }
-                    }
-                    Err(error) => {
+    let result = motion.export_video(path, |_, _| {}, {
+        let window = window.downgrade();
+        let button = button.downgrade();
+        let uploading = uploading.clone();
+        let host = host.clone();
+        let inspector = inspector.clone();
+        let sync_all = sync_all.clone();
+        move |result| {
+            set_motion_controls_sensitive(&inspector, true);
+            match result {
+                Ok(path) => {
+                    if let (Some(window), Some(button)) = (window.upgrade(), button.upgrade()) {
+                        upload_path(
+                            &window,
+                            &button,
+                            &uploading,
+                            config,
+                            path,
+                            Some(cleanup),
+                            Some(sync_all),
+                        );
+                    } else {
                         uploading.set(false);
-                        if let Some(button) = button.upgrade() {
-                            button.set_sensitive(true);
-                        }
                         let _ = std::fs::remove_dir_all(&cleanup);
                         sync_all();
-                        crate::utils::notify::desktop_notification_important(
-                            &t("Upload failed"),
-                            &error,
-                        );
-                        host.report_error(error);
                     }
                 }
+                Err(error) => {
+                    uploading.set(false);
+                    if let Some(button) = button.upgrade() {
+                        button.set_sensitive(true);
+                    }
+                    let _ = std::fs::remove_dir_all(&cleanup);
+                    sync_all();
+                    crate::utils::notify::desktop_notification_important(
+                        &t("Upload failed"),
+                        &error,
+                    );
+                    host.report_error(error);
+                }
             }
-        },
-    );
+        }
+    });
     if let Err(error) = result {
         set_motion_controls_sensitive(inspector, true);
         uploading.set(false);
         button.set_sensitive(true);
         let _ = std::fs::remove_dir_all(&directory);
         sync_all();
+        crate::utils::notify::desktop_notification_important(&t("Upload failed"), &error);
         host.report_error(error);
     }
 }
@@ -1112,6 +1084,7 @@ fn upload_rendered_image(
     poll_upload(window, button, uploading, receiver, None);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn install_keys(
     window: &ApplicationWindow,
     canvas: &Rc<canvas::Canvas>,
@@ -1120,9 +1093,8 @@ fn install_keys(
     mode_confirm: &Rc<mode_confirm::ModeConfirm>,
     motion: &Rc<motion::MotionMode>,
     copy_button: &gtk4::Button,
+    export_button: &gtk4::Button,
     exporting: &Rc<Cell<bool>>,
-    export_name: &str,
-    sync_all: &Rc<dyn Fn()>,
 ) {
     // Space held = pan mode. Capture phase so it wins over the canvas, but a
     // focused text entry still gets its literal space character.
@@ -1195,8 +1167,7 @@ fn install_keys(
         let motion = motion.clone();
         let copy_button = copy_button.clone();
         let exporting = exporting.clone();
-        let export_name = export_name.to_string();
-        let sync_all = sync_all.clone();
+        let export_button = export_button.clone();
         move |controller, key, _, modifiers| {
             if mode_confirm.visible() {
                 if key == gdk::Key::Escape {
@@ -1209,10 +1180,9 @@ fn install_keys(
                 let shift = modifiers.contains(gdk::ModifierType::SHIFT_MASK);
                 // A focused text field keeps its own undo, redo and copy keys
                 // while Motion is open.
-                let text_focused =
-                    gtk4::prelude::RootExt::focus(&window).is_some_and(|w| {
-                        w.is::<gtk4::Text>() || w.is::<gtk4::Entry>() || w.is::<gtk4::TextView>()
-                    });
+                let text_focused = gtk4::prelude::RootExt::focus(&window).is_some_and(|w| {
+                    w.is::<gtk4::Text>() || w.is::<gtk4::Entry>() || w.is::<gtk4::TextView>()
+                });
                 if text_focused
                     && ctrl
                     && matches!(
@@ -1233,15 +1203,12 @@ fn install_keys(
                         Propagation::Stop
                     }
                     gdk::Key::s | gdk::Key::S if ctrl => {
-                        let sync_all: Rc<dyn Fn()> = sync_all.clone();
-                        save_motion_video_dialog(
-                            &window,
-                            &canvas.host,
-                            &motion,
-                            &exporting,
-                            &export_name,
-                            sync_all,
-                        );
+                        // The Export button owns Motion's gate, dialog and
+                        // progress; while it runs, a click there means cancel,
+                        // which a save shortcut must not trigger.
+                        if !exporting.get() {
+                            export_button.emit_clicked();
+                        }
                         Propagation::Stop
                     }
                     gdk::Key::c | gdk::Key::C if ctrl => {
