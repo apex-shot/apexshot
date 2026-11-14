@@ -100,6 +100,9 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
         background.clone(),
         stage.source_size.clone(),
     );
+    // The stage reports the first frame of each playback to the transport, so
+    // the playhead and the sound start with the picture.
+    stage.preview.report_first_frame_to(timeline.first_frame_clock());
     super::presets_popover::attach(&stage.presets_button, &timeline, scale);
 
     let tools_column = super::side_panel::build_tools_column(
@@ -128,7 +131,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
             stage.source_seconds.set(frame.source_seconds);
             stage.webcam.set_composition_time(frame.composition_time);
             stage.webcam.request(frame.source_seconds);
-            stage.preview.show_time(frame.source_seconds, frame.playing);
+            stage.preview.show_time(frame.source_seconds, frame.composition_time, frame.playing);
             stage
                 .estimate
                 .set_composition_seconds(frame.composition_seconds);
@@ -192,7 +195,11 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
             );
             let plan_stage = stage.clone();
             let plan_sources = sound_sources.clone();
-            sound.update(frame.playing, frame.composition_time, key, move || {
+            // The sound starts with the picture, not with the press: the
+            // playhead holds until the first frame of the playback is on
+            // screen, so the sound waits for that same instant.
+            let sound_playing = frame.playing && timeline.first_frame_clock().get().is_some();
+            sound.update(sound_playing, frame.composition_time, key, move || {
                 let spans = super::export::frame_plan(
                     footage.trim_start,
                     footage.trim_end,

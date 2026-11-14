@@ -19,7 +19,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Frames are decoded small enough that a raw RGBA frame crosses the pipe
 /// quickly, and the `Picture` scales them up into the stage. Either edge is
@@ -28,6 +28,15 @@ use std::time::Duration;
 const MAX_FRAME_EDGE: u32 = 1280;
 /// While paused, decode again once the playhead has moved a frame's worth.
 const STILL_STEP: f64 = 1.0 / 30.0;
+/// How far the running stream may sit from the frame the playhead asks for
+/// before the decode is restarted there. A cut, a speed change or a moved
+/// piece moves the picture away from where the stream has decoded to, and
+/// past this much the difference is visible.
+const STREAM_DRIFT_SECONDS: f64 = 0.25;
+/// Two ticks asking for the same source frame while the playhead moves mean the
+/// composition is holding that frame: a gap between moved pieces, or the
+/// freeze tail.
+const HELD_STEP: f64 = 1e-6;
 
 struct Frame {
     generation: u64,
@@ -62,6 +71,20 @@ struct State {
     playing: bool,
     /// Source time of the last frame requested while paused.
     still_at: Option<f64>,
+    /// Source time the running realtime stream was requested at.
+    stream_start: Option<f64>,
+    /// When the running stream's first frame reached the stage, which is where
+    /// its expected position is measured from.
+    stream_started: Option<Instant>,
+    /// The source time the previous tick asked for while playing.
+    last_requested: Option<f64>,
+    /// The playhead the previous tick asked for while playing, which keeps
+    /// moving over a held source frame and so tells a hold from an edit
+    /// republishing the same frame.
+    last_composition: Option<f64>,
+    /// The composition is holding one source frame, so a still shows instead
+    /// of the running stream.
+    holding: bool,
 }
 
 /// The latest decoded frame, retained so effect changes can repaint without decoding.
@@ -149,6 +172,9 @@ pub(super) struct Preview {
     /// The full-stage picture the card layer shows in, and the card it stands in for.
     card_layer: RefCell<Option<(Picture, gtk4::Widget)>>,
     raw: RefCell<Option<RawFrame>>,
+    /// The transport's clock, reported to when the first frame of a playback
+    /// reaches the stage so the playhead can start from the picture.
+    first_frame: RefCell<Option<Rc<Cell<Option<Instant>>>>>,
 }
 
 impl Preview {
@@ -183,6 +209,7 @@ impl Preview {
             card: Cell::new(None),
             card_layer: RefCell::new(None),
             raw: RefCell::new(None),
+            first_frame: RefCell::new(None),
         });
         glib::timeout_add_local(Duration::from_millis(16), {
             let preview = Rc::downgrade(&preview);
@@ -208,6 +235,11 @@ impl Preview {
         state.height = height;
         state.playing = false;
         state.still_at = None;
+        state.stream_start = None;
+        state.stream_started = None;
+        state.last_requested = None;
+        state.last_composition = None;
+        state.holding = false;
         drop(state);
 
         // Anything already decoded belongs to the previous recording.
@@ -256,10 +288,23 @@ impl Preview {
         }
     }
 
-    /// Show the frame at a source time. While playing, the stream is only
-    /// started once; afterwards it advances on its own and the playhead
-    /// follows it. Anything else decodes the exact frame for that time.
-    pub fn show_time(&self, seconds: f64, playing: bool) {
+    /// Give the preview the clock the transport holds the playhead with. The
+    /// preview reports the instant the first frame of a playback request
+    /// reached the stage, so the playhead can start from the picture rather
+    /// than from the press.
+    pub fn report_first_frame_to(&self, clock: Rc<Cell<Option<Instant>>>) {
+        *self.first_frame.borrow_mut() = Some(clock);
+    }
+
+    /// Show the frame at a source time. While playing, the stream is started
+    /// once and then runs at 1× from that frame, so it only matches the
+    /// composition while the edit keeps mapping to the same footage: a cut, a
+    /// speed change or a moved piece restarts the stream at the requested
+    /// frame, and a held frame (a gap or the freeze tail) shows a still instead
+    /// of running on into footage the edit no longer shows. `composition` is
+    /// the playhead itself, which keeps moving over a held frame; a repeat of
+    /// both times is only an edit republishing the same frame.
+    pub fn show_time(&self, seconds: f64, composition: f64, playing: bool) {
         let mut state = self.state.borrow_mut();
         let Some(source) = state.source.clone() else {
             return;
@@ -268,6 +313,55 @@ impl Preview {
             if !state.playing {
                 state.playing = true;
                 state.still_at = Some(seconds);
+                state.last_requested = Some(seconds);
+                state.last_composition = Some(composition);
+                state.stream_start = Some(seconds);
+                state.stream_started = None;
+                state.holding = false;
+                drop(state);
+                self.request(source, seconds, true);
+                return;
+            }
+
+            let same_frame = state
+                .last_requested
+                .is_some_and(|last| (seconds - last).abs() <= HELD_STEP);
+            let playhead_moved = state
+                .last_composition
+                .is_some_and(|last| (composition - last).abs() > HELD_STEP);
+            state.last_requested = Some(seconds);
+            state.last_composition = Some(composition);
+            if state.holding {
+                if same_frame {
+                    return;
+                }
+                // The hold ended, so the stream runs again from the frame the
+                // playhead has moved on to.
+                state.holding = false;
+                state.stream_start = Some(seconds);
+                state.stream_started = None;
+                drop(state);
+                self.request(source, seconds, true);
+                return;
+            }
+            if same_frame && playhead_moved {
+                // The composition holds this source frame. A running stream
+                // would walk on past it into cut footage.
+                state.holding = true;
+                state.still_at = Some(seconds);
+                state.stream_start = None;
+                state.stream_started = None;
+                drop(state);
+                self.request(source, seconds, false);
+                return;
+            }
+            let expected = match (state.stream_start, state.stream_started) {
+                (Some(start), Some(started)) => Some(start + started.elapsed().as_secs_f64()),
+                _ => None,
+            };
+            if expected.is_some_and(|expected| stream_drifted(expected, seconds)) {
+                state.stream_start = Some(seconds);
+                state.stream_started = None;
                 drop(state);
                 self.request(source, seconds, true);
             }
@@ -277,6 +371,11 @@ impl Preview {
         // Stopping the transport always repaints the exact frame, even when
         // the playhead has not moved: the stream's last frame is behind it.
         let was_playing = std::mem::replace(&mut state.playing, false);
+        state.holding = false;
+        state.last_requested = None;
+        state.last_composition = None;
+        state.stream_start = None;
+        state.stream_started = None;
         let moved = was_playing
             || state
                 .still_at
@@ -361,6 +460,28 @@ impl Preview {
             if frame.generation == self.generation.get() && valid_revision {
                 self.shown_revision.set(frame.revision);
                 self.show(frame.pixels, frame.size.0, frame.size.1, frame.layer);
+                self.note_presented();
+            }
+        }
+    }
+
+    /// Record that the picture for the running playback request reached the
+    /// stage. The first frame of a request is where its stream's position is
+    /// measured from, and the first frame of a playback starts the transport
+    /// clock, so the playhead and the sound run from the same instant as the
+    /// picture.
+    fn note_presented(&self) {
+        let mut state = self.state.borrow_mut();
+        if !state.playing {
+            return;
+        }
+        let now = Instant::now();
+        if state.stream_started.is_none() {
+            state.stream_started = Some(now);
+        }
+        if let Some(clock) = self.first_frame.borrow().as_ref() {
+            if clock.get().is_none() {
+                clock.set(Some(now));
             }
         }
     }
@@ -413,6 +534,14 @@ fn accepts_effect_frame(playing: bool, revision: u64, shown: u64, latest: u64) -
     } else {
         revision == latest
     }
+}
+
+/// Whether the running stream has left the frame the playhead asks for by
+/// more than a viewer can miss, so the decode must restart at the requested
+/// time. A cut, a speed change, a moved piece and the end of a hold all move
+/// the picture away from the running decode.
+fn stream_drifted(expected: f64, requested: f64) -> bool {
+    (expected - requested).abs() > STREAM_DRIFT_SECONDS
 }
 
 impl Drop for Preview {
@@ -631,6 +760,20 @@ mod tests {
     use crate::recording::editor::click_effect::{ripple_pull_px, RIPPLE_PULL_SIZE_01};
     use crate::recording::editor::ripple_preview::{PreviewRipple, PreviewRippleClick};
     use crate::video_editor::zoom;
+
+    #[test]
+    fn the_stream_restarts_only_after_it_has_drifted_a_quarter_second() {
+        // Small differences are the stream's own pacing, and restarting for
+        // them would hiccup on every frame.
+        assert!(!super::stream_drifted(3.0, 3.1));
+        assert!(!super::stream_drifted(3.0, 3.25));
+        assert!(!super::stream_drifted(3.25, 3.0));
+        // A cut, a speed change or a hold moves the picture further than
+        // that, in either direction.
+        assert!(super::stream_drifted(3.0, 3.26));
+        assert!(super::stream_drifted(3.0, 2.74));
+        assert!(super::stream_drifted(12.0, 0.0));
+    }
 
     #[test]
     fn worker_repaints_and_terminates_after_a_blur_job() {
