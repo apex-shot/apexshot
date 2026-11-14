@@ -215,10 +215,21 @@ struct ShadowKey {
     texel: i64,
     light_x: i64,
     light_y: i64,
+    /// The camera frame a cut-out silhouette was drawn from, 0 for the rect.
+    frame: u64,
+    /// The cutout blend in thousandths, so the same frame at another blend
+    /// gets its own mask.
+    cutout: i64,
+    /// Whether that frame was mirrored when its coverage was drawn.
+    mirror: bool,
 }
 
+/// How many masks to keep: the preview's motion blur trail draws up to five
+/// samples, and the still frame needs one more.
+const MASK_CACHE_ENTRIES: usize = 6;
+
 thread_local! {
-    static MASK_CACHE: RefCell<Option<(ShadowKey, Rc<ShadowMask>)>> = const { RefCell::new(None) };
+    static MASK_CACHE: RefCell<Vec<(ShadowKey, Rc<ShadowMask>)>> = const { RefCell::new(Vec::new()) };
 }
 
 /// The camera's shadow on a stage, or None when there is none to draw.
@@ -233,6 +244,21 @@ pub(super) fn camera_shadow(
     camera: Rect,
     radius: f64,
     cutout: f64,
+    draw: &dyn Fn(&Context, Rect, f64),
+) -> Option<Rc<ShadowMask>> {
+    camera_shadow_keyed(stage, camera, radius, cutout, None, false, draw)
+}
+
+/// [`camera_shadow`] with the camera frame in its cache key. The export passes
+/// no frame and rebuilds its silhouette every frame; the preview passes the
+/// decoded frame's stamp and mirror so a still camera reuses its mask.
+pub(super) fn camera_shadow_keyed(
+    stage: Rect,
+    camera: Rect,
+    radius: f64,
+    cutout: f64,
+    frame: Option<u64>,
+    mirror: bool,
     draw: &dyn Fn(&Context, Rect, f64),
 ) -> Option<Rc<ShadowMask>> {
     if !stage.width.is_finite()
@@ -280,7 +306,12 @@ pub(super) fn camera_shadow(
         ((light_y - center.1) / step).round() * step,
     );
 
-    let use_cache = cutout <= 0.001;
+    let identity = match frame {
+        Some(stamp) if cutout > 0.001 => Some((stamp, (cutout * 1000.0).round() as i64)),
+        _ if cutout <= 0.001 => Some((0, 0)),
+        _ => None,
+    };
+    let use_cache = identity.is_some();
     let key = ShadowKey {
         width: (camera.width * 8.0).round() as i64,
         height: (camera.height * 8.0).round() as i64,
@@ -288,13 +319,16 @@ pub(super) fn camera_shadow(
         texel: (texel * 8.0).round() as i64,
         light_x: (light.0 * 8.0).round() as i64,
         light_y: (light.1 * 8.0).round() as i64,
+        frame: identity.map(|(stamp, _)| stamp).unwrap_or(0),
+        cutout: identity.map(|(_, cutout)| cutout).unwrap_or(0),
+        mirror: identity.is_some() && mirror,
     };
     if use_cache {
         let cached = MASK_CACHE.with(|cache| {
             cache
                 .borrow()
-                .as_ref()
-                .filter(|(cached_key, _)| *cached_key == key)
+                .iter()
+                .find(|(cached_key, _)| *cached_key == key)
                 .map(|(_, mask)| Rc::clone(mask))
         });
         if let Some(mask) = cached {
@@ -425,7 +459,11 @@ pub(super) fn camera_shadow(
     });
     if use_cache {
         MASK_CACHE.with(|cache| {
-            *cache.borrow_mut() = Some((key, Rc::clone(&mask)));
+            let mut cache = cache.borrow_mut();
+            if cache.len() >= MASK_CACHE_ENTRIES {
+                cache.remove(0);
+            }
+            cache.push((key, Rc::clone(&mask)));
         });
     }
     Some(mask)
@@ -480,9 +518,16 @@ pub(super) fn darken_rgba(
 }
 
 /// The mask as a premultiplied black ARGB32 surface for cairo, one pixel per
-/// texel. Cairo blends in sRGB, so each alpha is taken from squared light the
-/// way `darken_rgba` darkens: 1 - sqrt(1 - opacity).
-pub(super) fn preview_surface(mask: &ShadowMask) -> Option<ImageSurface> {
+/// texel, with the camera layer's `alpha` baked in. Cairo blends in sRGB, so
+/// each alpha is taken from squared light the way `darken_rgba` darkens:
+/// `1 - sqrt(1 - alpha * opacity)`. Painting the surface at full opacity then
+/// leaves `sqrt(1 - alpha * opacity)`, the export's curve.
+pub(super) fn preview_surface(mask: &ShadowMask, alpha: f64) -> Option<ImageSurface> {
+    let alpha = if alpha.is_finite() {
+        alpha.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
     let mut surface =
         ImageSurface::create(Format::ARgb32, mask.width as i32, mask.height as i32).ok()?;
     let stride = surface.stride() as usize;
@@ -492,7 +537,7 @@ pub(super) fn preview_surface(mask: &ShadowMask) -> Option<ImageSurface> {
             for i in 0..mask.width {
                 let index = j * mask.width + i;
                 let o = (mask.cast[index] as f64 * (1.0 - mask.coverage[index] as f64)).max(0.0);
-                let a = 1.0 - (1.0 - o).max(0.0).sqrt();
+                let a = 1.0 - (1.0 - alpha * o).max(0.0).sqrt();
                 let offset = j * stride + i * 4;
                 data[offset] = 0;
                 data[offset + 1] = 0;
@@ -674,8 +719,93 @@ mod tests {
     #[test]
     fn the_preview_surface_matches_the_mask_size() {
         let mask = test_mask();
-        let surface = preview_surface(&mask).unwrap();
+        let surface = preview_surface(&mask, 1.0).unwrap();
         assert_eq!(surface.width(), mask.width as i32);
         assert_eq!(surface.height(), mask.height as i32);
+    }
+
+    #[test]
+    fn the_preview_surface_bakes_the_camera_alpha_into_the_shadow() {
+        let mask = test_mask();
+        let full = preview_surface(&mask, 1.0).unwrap();
+        let half = preview_surface(&mask, 0.5).unwrap();
+        let index = mask
+            .cast
+            .iter()
+            .enumerate()
+            .position(|(index, cast)| *cast > 0.1 && mask.coverage[index] < 0.1)
+            .expect("a cast texel outside the camera");
+        let offset = (index / mask.width) * full.stride() as usize + (index % mask.width) * 4 + 3;
+        let read = |surface: &ImageSurface| {
+            surface.flush();
+            let data = surface.data().unwrap();
+            data[offset] as f64 / 255.0
+        };
+        let o = f64::from(mask.cast[index]) * (1.0 - f64::from(mask.coverage[index]));
+        let expected = 1.0 - (1.0 - 0.5 * o).sqrt();
+        let half_alpha = read(&half);
+        assert!(
+            (half_alpha - expected).abs() < 0.01,
+            "half {half_alpha} expected {expected}"
+        );
+        assert!(half_alpha < read(&full));
+    }
+
+    #[test]
+    fn a_cut_out_mask_is_reused_for_the_same_frame_and_blend() {
+        let draw = |context: &Context, rect: Rect, _radius: f64| {
+            context.arc(
+                rect.x + rect.width * 0.25,
+                rect.y + rect.height * 0.75,
+                rect.width * 0.2,
+                0.0,
+                std::f64::consts::TAU,
+            );
+            context.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+            let _ = context.fill();
+        };
+        let first = camera_shadow_keyed(
+            stage(1920.0, 1080.0),
+            camera(),
+            0.0,
+            1.0,
+            Some(11),
+            false,
+            &draw,
+        )
+        .unwrap();
+        let again = camera_shadow_keyed(
+            stage(1920.0, 1080.0),
+            camera(),
+            0.0,
+            1.0,
+            Some(11),
+            false,
+            &draw,
+        )
+        .unwrap();
+        assert!(Rc::ptr_eq(&first, &again));
+        let next_frame = camera_shadow_keyed(
+            stage(1920.0, 1080.0),
+            camera(),
+            0.0,
+            1.0,
+            Some(12),
+            false,
+            &draw,
+        )
+        .unwrap();
+        assert!(!Rc::ptr_eq(&first, &next_frame));
+        let other_blend = camera_shadow_keyed(
+            stage(1920.0, 1080.0),
+            camera(),
+            0.0,
+            0.5,
+            Some(11),
+            false,
+            &draw,
+        )
+        .unwrap();
+        assert!(!Rc::ptr_eq(&first, &other_blend));
     }
 }

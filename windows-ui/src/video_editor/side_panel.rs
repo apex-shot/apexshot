@@ -1913,7 +1913,10 @@ fn webcam_editing_controls(state: &super::timeline::WebcamPanelState) -> WebcamC
     let editing = webcam_editing_layout(state);
     let camera_options = matches!(
         editing,
-        CameraLayout::CameraOverlay | CameraLayout::SplitScreen | CameraLayout::CameraCutout
+        CameraLayout::CameraOverlay
+            | CameraLayout::SplitScreen
+            | CameraLayout::CameraCutout
+            | CameraLayout::FullscreenCamera
     );
     WebcamControlUse {
         overlay: editing == CameraLayout::CameraOverlay,
@@ -3058,7 +3061,15 @@ fn build_webcam_overlay(
         let button = webcam_shape_button(label, chip_height);
         let set_aspect = actions.set_aspect.clone();
         let value = *value;
-        button.connect_clicked(move |_| set_aspect(value));
+        button.connect_clicked(move |button| {
+            // A chip is not in a group, so clicking the selected one toggles
+            // it off while the camera keeps that aspect. Put it back instead.
+            if !button.is_active() {
+                button.set_active(true);
+                return;
+            }
+            set_aspect(value);
+        });
         aspect_grid.attach(&button, index as i32, 0, 1, 1);
         aspects.push(button);
     }
@@ -4172,14 +4183,20 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
     });
 
     let last = Rc::new(RefCell::new(None::<super::timeline::WebcamPanelState>));
+    let settings_section_root = settings_section.root.clone();
     let shape_section_root = shape_section.root.clone();
+    let camera_section_root = camera_section.root.clone();
+    let motion_section_root = motion_section.root.clone();
     let refresh: Rc<dyn Fn()> = {
         let last = last.clone();
         let syncing = syncing.clone();
         let empty = empty.clone();
         let error_hint = error_hint.clone();
         let editor = editor.clone();
+        let settings_section_root = settings_section_root.clone();
         let shape_section_root = shape_section_root.clone();
+        let camera_section_root = camera_section_root.clone();
+        let motion_section_root = motion_section_root.clone();
         let camera_switch = camera_switch.clone();
         let reset = reset.clone();
         let default_scope = rows.default_scope.clone();
@@ -4291,7 +4308,11 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
                     controls,
                     state.auto_split_share,
                 );
+                settings_section_root
+                    .set_visible(controls.overlay || controls.split || controls.cutout);
                 shape_section_root.set_visible(controls.overlay);
+                camera_section_root.set_visible(controls.mirror);
+                motion_section_root.set_visible(controls.transitions);
                 if let Some((_, cue)) = selected {
                     time_spin.adjustment().set_upper(state.duration.max(0.1));
                     time_spin.set_value(cue.at);
@@ -5872,8 +5893,8 @@ mod tests {
         assert!(!controls.overlay);
         assert!(!controls.split);
         assert!(!controls.cutout);
-        assert!(!controls.mirror);
-        assert!(!controls.transitions);
+        assert!(controls.mirror);
+        assert!(controls.transitions);
 
         let screen = panel_state(
             CameraLayout::ScreenOnly,
