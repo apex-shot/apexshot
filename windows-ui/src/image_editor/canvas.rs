@@ -118,6 +118,8 @@ pub(super) struct Canvas {
     crop_mode: Rc<Cell<bool>>,
     /// Bumped for each open so a late decode cannot replace a newer image.
     generation: Rc<Cell<u64>>,
+    /// The file the current document was opened from, if any.
+    source_path: Rc<RefCell<Option<std::path::PathBuf>>>,
     toast_generation: Rc<Cell<u64>>,
     /// The annotation document and interaction controller.
     pub host: Rc<super::annotate::EditorHost>,
@@ -280,6 +282,7 @@ pub(super) fn build(scale: f64, dark: bool) -> Rc<Canvas> {
         docked_inset,
         crop_mode,
         generation: Rc::new(Cell::new(0)),
+        source_path: Rc::new(RefCell::new(None)),
         toast_generation: Rc::new(Cell::new(0)),
         host,
         hover: Rc::new(Hover::default()),
@@ -371,6 +374,7 @@ impl Canvas {
         });
 
         let canvas = Rc::downgrade(self);
+        let loaded_path = path.to_path_buf();
         glib::timeout_add_local(Duration::from_millis(16), move || {
             let Some(canvas) = canvas.upgrade() else {
                 return glib::ControlFlow::Break;
@@ -380,6 +384,7 @@ impl Canvas {
             }
             match receiver.try_recv() {
                 Ok(Ok(decoded)) => {
+                    *canvas.source_path.borrow_mut() = Some(loaded_path.clone());
                     canvas.finish_load(decoded);
                     glib::ControlFlow::Break
                 }
@@ -394,6 +399,11 @@ impl Canvas {
                 }
             }
         });
+    }
+
+    /// The file the current document came from, for Export's suggestions.
+    pub(super) fn source_path(&self) -> Option<std::path::PathBuf> {
+        self.source_path.borrow().clone()
     }
 
     /// Step the zoom in, as the pill's plus and Ctrl+plus do.
