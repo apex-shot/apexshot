@@ -4857,6 +4857,27 @@ msgstr "Tempo de exportação"
 msgid "Resolution"
 msgstr "Resolução"
 
+msgid "Compare enhancement"
+msgstr "Comparar aprimoramento"
+
+msgid "Drag the divider across the image."
+msgstr "Arraste o divisor pela imagem."
+
+msgid "Enhancing the image…"
+msgstr "Aprimorando a imagem…"
+
+msgid "Free preview. Exporting with enhancement needs Studio."
+msgstr "Prévia gratuita. Exportar com aprimoramento requer o Studio."
+
+msgid "Sharpens small screenshots on this device, up to 1 megapixel. Missing detail cannot always be recovered."
+msgstr "Deixa capturas pequenas mais nítidas neste dispositivo, até 1 megapixel. Detalhes ausentes nem sempre podem ser recuperados."
+
+msgid "Source"
+msgstr "Origem"
+
+msgid "Use Neural 2×"
+msgstr "Usar Neural 2×"
+
 msgid "16:9 image aspect ratio; banners may be cropped on some devices."
 msgstr "Proporção de imagem 16:9; banners podem ser cortados em alguns dispositivos."
 
