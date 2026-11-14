@@ -222,6 +222,8 @@ pub(super) fn export_quality(scale: f64) -> GtkBox {
     card.append(&compare);
 
     card.append(&hint("Offline neural enhancement for small images. Image exports grow by 2× or 4×; Motion keeps its Frame size. Compare the export for free before enabling Studio enhancement. Supports up to 1 megapixel. Missing detail cannot always be recovered."));
+    // Hidden until the upscale backend exists on Windows.
+    card.set_visible(false);
     card
 }
 
@@ -414,6 +416,22 @@ fn transform_interaction(
     (begin, end)
 }
 
+/// The inset that keeps the whole handle inside the pad at an extreme, shared
+/// by the drawing and the pointer mapping so the dot tracks the pointer.
+fn marker_margin(width: f64, height: f64) -> f64 {
+    19.0_f64.min(width * 0.5).min(height * 0.5)
+}
+
+/// A pointer position on one pad axis as a -1..1 value, measured inside the
+/// same inset the handle is drawn in.
+fn pad_value(pos: f64, size: f64, margin: f64) -> f64 {
+    let span = size - margin * 2.0;
+    if span <= 0.0 {
+        return 0.0;
+    }
+    ((pos - margin) / span * 2.0 - 1.0).clamp(-1.0, 1.0)
+}
+
 /// The camera-framing pad: a soft square with a draggable dot, top-right
 /// showing top-right. It reports its normalized position through the handle
 /// so Reset can park it back at the origin.
@@ -440,8 +458,9 @@ fn position_pad(
         move |point_x: f64, point_y: f64| {
             let width = f64::from(area.allocated_width().max(1));
             let height = f64::from(area.allocated_height().max(1));
-            let x = (point_x / width * 2.0 - 1.0).clamp(-1.0, 1.0);
-            let y = (point_y / height * 2.0 - 1.0).clamp(-1.0, 1.0);
+            let margin = marker_margin(width, height);
+            let x = pad_value(point_x, width, margin);
+            let y = pad_value(point_y, height, margin);
             position.set((x, y));
             area.queue_draw();
             on_point(x, y);
@@ -551,9 +570,9 @@ pub(super) fn paint_position_pad(
     let (pos_x, pos_y) = *position;
     // Leave room for the complete marker at every extreme; the control value
     // still reaches +/- 1 exactly when the pointer reaches an edge.
-    let marker_margin = 19.0_f64.min(width * 0.5).min(height * 0.5);
-    let x = marker_margin + (pos_x + 1.0) * 0.5 * (width - marker_margin * 2.0);
-    let y = marker_margin + (pos_y + 1.0) * 0.5 * (height - marker_margin * 2.0);
+    let margin = marker_margin(width, height);
+    let x = margin + (pos_x + 1.0) * 0.5 * (width - margin * 2.0);
+    let y = margin + (pos_y + 1.0) * 0.5 * (height - margin * 2.0);
     paint_soft_handle(context, x, y);
 }
 
@@ -2182,7 +2201,7 @@ fn background_card(
                 )
             }) {
                 padding.set_value(padding_value);
-                blur.set_value(blur_value);
+                blur.set_value(blur_value * 100.0);
                 radius.set_value(radius_value);
                 noise.set_value(noise_value * 100.0);
             }
@@ -2757,5 +2776,19 @@ mod tests {
         }) else {
             return;
         };
+    }
+
+    #[test]
+    fn pad_value_maps_the_inset_edges_to_the_extremes() {
+        let margin = marker_margin(152.0, 152.0);
+        let size = 152.0;
+        assert_eq!(pad_value(0.0, size, margin), -1.0);
+        assert_eq!(pad_value(size, size, margin), 1.0);
+        assert!(pad_value(size * 0.5, size, margin).abs() < 1e-9);
+        assert_eq!(
+            pad_value(10.0, 30.0, 19.0),
+            0.0,
+            "a pad too small for its inset has no span"
+        );
     }
 }
