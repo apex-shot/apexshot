@@ -634,6 +634,9 @@ impl EditorHost {
                             st.background.changed();
                         });
                     }
+                    // A failed load is not an edit: closing the interaction
+                    // drops its snapshot without recording a step.
+                    host.with_state(|st| st.finish_history_interaction());
                     if let Some(failure) = on_failure.take() {
                         failure();
                     }
@@ -680,11 +683,18 @@ impl EditorHost {
             self.background_previous.borrow_mut().take();
         }
         self.mutate(|st| {
+            // The first frame of a load opens the step and the final image
+            // closes it, so a preview followed by the sharp image undoes as
+            // one edit.
+            st.begin_history_interaction();
             st.background
                 .set_fill(crate::capture::editor::state::background::Fill::Image(
                     image,
                 ));
             st.background.changed();
+            if !preview {
+                st.finish_history_interaction();
+            }
         });
         if preview {
             glib::ControlFlow::Continue
