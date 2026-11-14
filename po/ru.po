@@ -4427,8 +4427,8 @@ msgstr "Ссылка для общего доступа скопирована �
 msgid "The Motion encoder is not running."
 msgstr "Кодировщик Motion не запущен."
 
-msgid "These annotate preferences are not applied by the Windows image editor yet."
-msgstr "Редактор изображений Windows пока не применяет эти настройки аннотаций."
+msgid "The Windows image editor names each color when you point at its swatch."
+msgstr "Редактор изображений Windows называет каждый цвет при наведении на его образец."
 
 msgid "Upload"
 msgstr "Загрузить"

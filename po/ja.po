@@ -4345,8 +4345,8 @@ msgstr "共有リンクをクリップボードにコピーしました: {url}"
 msgid "The Motion encoder is not running."
 msgstr "Motion エンコーダーが実行されていません。"
 
-msgid "These annotate preferences are not applied by the Windows image editor yet."
-msgstr "これらの注釈設定は、Windows の画像エディターではまだ適用されません。"
+msgid "The Windows image editor names each color when you point at its swatch."
+msgstr "Windows 画像エディターでは、色見本にポインターを合わせると色の名前が表示されます。"
 
 msgid "Upload"
 msgstr "アップロード"

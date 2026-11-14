@@ -4457,8 +4457,8 @@ msgstr "Lien de partage copié dans le presse-papiers : {url}"
 msgid "The Motion encoder is not running."
 msgstr "L'encodeur Motion n'est pas en cours d'exécution."
 
-msgid "These annotate preferences are not applied by the Windows image editor yet."
-msgstr "L'éditeur d'images Windows n'applique pas encore ces préférences d'annotation."
+msgid "The Windows image editor names each color when you point at its swatch."
+msgstr "L’éditeur d’images Windows nomme chaque couleur lorsque vous pointez sur sa pastille."
 
 msgid "Upload"
 msgstr "Envoyer"

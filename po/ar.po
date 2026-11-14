@@ -4371,8 +4371,8 @@ msgstr "تم نسخ رابط المشاركة إلى الحافظة: {url}"
 msgid "The Motion encoder is not running."
 msgstr "مشفّر Motion لا يعمل."
 
-msgid "These annotate preferences are not applied by the Windows image editor yet."
-msgstr "محرر الصور في Windows لا يطبّق تفضيلات التعليقات هذه بعد."
+msgid "The Windows image editor names each color when you point at its swatch."
+msgstr "يعرض محرر الصور في Windows اسم كل لون عند الإشارة إلى عينته."
 
 msgid "Upload"
 msgstr "رفع"

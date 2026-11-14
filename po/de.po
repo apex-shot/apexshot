@@ -4447,8 +4447,8 @@ msgstr "Freigabelink in die Zwischenablage kopiert: {url}"
 msgid "The Motion encoder is not running."
 msgstr "Der Motion-Encoder läuft nicht."
 
-msgid "These annotate preferences are not applied by the Windows image editor yet."
-msgstr "Diese Anmerkungs-Einstellungen werden vom Windows-Bildeditor noch nicht angewendet."
+msgid "The Windows image editor names each color when you point at its swatch."
+msgstr "Der Windows-Bildeditor nennt jede Farbe, wenn Sie auf ihr Farbfeld zeigen."
 
 msgid "Upload"
 msgstr "Hochladen"
