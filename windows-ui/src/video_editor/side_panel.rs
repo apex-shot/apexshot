@@ -3570,7 +3570,9 @@ impl WebcamCameraContext {
 /// instead of silently doing nothing. The analysis runs after the document
 /// opens, so the answer is read again whenever the panel refreshes or shows.
 fn sync_silence_switch(silence: &Switch, has_audio: &dyn Fn() -> Option<bool>) {
-    if has_audio() == Some(false) {
+    // A switch already on stays usable so it can still be turned off; it was
+    // set before the analysis landed or by a preset.
+    if has_audio() == Some(false) && !silence.is_active() {
         silence.set_sensitive(false);
         silence.set_tooltip_text(Some(&t("This recording has no audio.")));
     } else {

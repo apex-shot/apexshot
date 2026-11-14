@@ -2460,6 +2460,9 @@ fn wire_export(
             }
         });
     }
+    // One replay at a time: more clicks while the analysis runs would each
+    // reopen the export card when it lands.
+    let export_waiting = std::rc::Rc::new(std::cell::Cell::new(false));
     stage.export_button.connect_clicked(move |_| {
         if shell.child().is_some_and(|editor| !editor.is_sensitive()) {
             return;
@@ -2469,16 +2472,22 @@ fn wire_export(
         // The export model is built on this thread, so waiting means replaying
         // the click once the analysis lands rather than blocking the window.
         if stage_handle.webcam.silence_pending() {
+            if export_waiting.replace(true) {
+                return;
+            }
+            let waiting = export_waiting.clone();
             let button = stage_handle.export_button.clone();
             let webcam = stage_handle.webcam.clone();
             gtk4::glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
                 // The window went away while the analysis ran.
                 if button.root().is_none() {
+                    waiting.set(false);
                     return gtk4::glib::ControlFlow::Break;
                 }
                 if webcam.silence_pending() {
                     gtk4::glib::ControlFlow::Continue
                 } else {
+                    waiting.set(false);
                     button.emit_clicked();
                     gtk4::glib::ControlFlow::Break
                 }
