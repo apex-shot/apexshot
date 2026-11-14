@@ -2519,7 +2519,13 @@ impl Data {
             return;
         }
         let before = self.snapshot();
+        // The export tier is not part of an undo step, so removing the clip
+        // must not reset it: undo would bring the clip back on the wrong tier.
+        let tier = self.quality.as_ref().map(|quality| quality.get());
         self.reset_media();
+        if let (Some(quality), Some(tier)) = (&self.quality, tier) {
+            quality.set(tier);
+        }
         self.clamp_layout_cues();
         self.record_edit(before);
     }

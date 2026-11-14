@@ -271,11 +271,12 @@ pub(super) fn show(
     card.append(&summary);
     card.append(&actions);
 
-    // The estimate must describe the export's real length: cuts, speeds, and
-    // the freeze tail all change it.
+    // The estimate must describe the export's real length: cuts, speeds, moved
+    // pieces, and the freeze tail all change it.
     let trim = (model.trim_start, model.trim_end);
     let cuts = model.cuts.clone();
     let speeds = model.segment_speeds.clone();
+    let starts = model.segment_starts.clone();
     let freeze_tail = model.freeze_tail;
     let update: Rc<dyn Fn()> = Rc::new({
         let settings = settings.clone();
@@ -292,7 +293,8 @@ pub(super) fn show(
             codec_note.set_visible(selected.codec == Codec::Hevc);
             description.set_text(&t(QUALITIES[quality.get()].2));
             let crf = effective_crf(project_crf, initial_quality, quality.get());
-            let spans = super::export::frame_plan(trim.0, trim.1, &cuts, &speeds, fps);
+            let spans =
+                super::export::frame_plan_with_starts(trim.0, trim.1, &cuts, &speeds, &starts, fps);
             let mut frames = super::export::total_frames(&spans);
             if !spans.is_empty() && freeze_tail.is_finite() && freeze_tail > 0.0 {
                 frames += (freeze_tail * fps).round() as u64;

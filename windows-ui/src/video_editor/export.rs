@@ -164,6 +164,7 @@ fn interval_speed(speeds: &[f64], index: usize) -> f64 {
 /// the running total so a long sped export does not drift. Pieces stay in
 /// source order: use `frame_plan_with_starts` when the timeline may have
 /// moved them.
+#[cfg(test)]
 pub(super) fn frame_plan(
     trim_start: f64,
     trim_end: f64,
@@ -401,8 +402,11 @@ pub(super) fn start_export_with_settings(
     let thread_user_cancel = user_cancel.clone();
     std::thread::spawn(move || {
         let encoder = Encoder::fastest_for(settings.codec);
+        // With hardware off the first attempt already used the software encoder.
+        let hardware = settings.hardware && !software_forced();
         let mut result = render(&model, &output, &sender, &thread_cancel, encoder, settings);
-        if !encoder.is_software()
+        if hardware
+            && !encoder.is_software()
             && retry_on_software(&result, thread_user_cancel.load(Ordering::Relaxed))
         {
             if let Err(End::Failed(message)) = &result {
@@ -1681,40 +1685,6 @@ fn render_range(
                     ),
                 }
             });
-            // A moving card is blurred whole over the canvas, as the preview
-            // blurs it: the layer carries the card's smeared edges, so it
-            // replaces the sharp card instead of only blurring the video rect.
-            let card_trail: Option<Vec<u8>> = match (card, previous_value) {
-                (Some((rect, _)), Some(previous)) if model.zoom_camera.motion_blur > 0.0 => {
-                    card_for(previous)
-                        .and_then(|(before, _)| {
-                            super::motion_blur::CardTrail::new(
-                                rect,
-                                before,
-                                (f64::from(plan.output.0), f64::from(plan.output.1)),
-                                plan.output,
-                                fps,
-                                model.zoom_camera.motion_blur,
-                                f64::from(sink.radius_fraction()),
-                            )
-                        })
-                        .map(|trail| {
-                            let mut layer =
-                                vec![0u8; plan.output.0 as usize * plan.output.1 as usize * 4];
-                            trail.render(
-                                &decoded,
-                                model.source_size,
-                                plan.output,
-                                &mut layer,
-                                16,
-                                4.0,
-                                4,
-                            );
-                            layer
-                        })
-                }
-                _ => None,
-            };
             let base: &[u8] = if cropped { &scaled } else { &decoded };
 
             let mut warped = None;
@@ -1933,6 +1903,33 @@ fn render_range(
                 }
             };
             let picture: &[u8] = if staged_path { &staged } else { frame };
+            // A moving card is blurred whole over the canvas, as the preview
+            // blurs it: the layer carries the card's smeared edges, so it
+            // replaces the sharp card. It samples the finished picture so the
+            // cursor, click ripple, crop and camera stay on the blurred card.
+            let card_trail: Option<Vec<u8>> = match (card, previous_value) {
+                (Some((rect, _)), Some(previous)) if model.zoom_camera.motion_blur > 0.0 => {
+                    card_for(previous)
+                        .and_then(|(before, _)| {
+                            super::motion_blur::CardTrail::new(
+                                rect,
+                                before,
+                                (f64::from(plan.output.0), f64::from(plan.output.1)),
+                                plan.output,
+                                fps,
+                                model.zoom_camera.motion_blur,
+                                f64::from(sink.radius_fraction()),
+                            )
+                        })
+                        .map(|trail| {
+                            let mut layer =
+                                vec![0u8; plan.output.0 as usize * plan.output.1 as usize * 4];
+                            trail.render(picture, size, plan.output, &mut layer, 16, 4.0, 4);
+                            layer
+                        })
+                }
+                _ => None,
+            };
             converter.convert_into(picture, size, &mut nv12);
             let overlay_camera = |canvas: &mut [u8]| -> Result<(), End> {
                 if canvas_trail.is_empty() {
