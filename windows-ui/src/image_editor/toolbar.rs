@@ -42,22 +42,31 @@ const TOOL_GROUPS: [&[Tool]; 5] = [
 
 impl Tool {
     /// The rail button for a model tool, for model-authoritative sync.
-    pub(super) fn from_model(tool: crate::capture::editor::types::Tool) -> Self {
+    /// Background mode has no rail button: the canvas ignores pointer input
+    /// there, so highlighting Select would claim a tool that is not armed.
+    pub(super) fn rail_from_model(tool: crate::capture::editor::types::Tool) -> Option<Self> {
         use crate::capture::editor::types::Tool as Model;
         match tool {
-            Model::Select | Model::Background => Self::Select,
-            Model::Crop => Self::Crop,
-            Model::Pen => Self::Pen,
-            Model::Highlighter => Self::Highlighter,
-            Model::Arrow => Self::Arrow,
-            Model::Line => Self::Line,
-            Model::Box => Self::Box,
-            Model::Circle => Self::Circle,
-            Model::Text => Self::Text,
-            Model::Number => Self::Number,
-            Model::Obfuscate => Self::Obfuscate,
-            Model::Focus => Self::Focus,
+            Model::Background => None,
+            Model::Select => Some(Self::Select),
+            Model::Crop => Some(Self::Crop),
+            Model::Pen => Some(Self::Pen),
+            Model::Highlighter => Some(Self::Highlighter),
+            Model::Arrow => Some(Self::Arrow),
+            Model::Line => Some(Self::Line),
+            Model::Box => Some(Self::Box),
+            Model::Circle => Some(Self::Circle),
+            Model::Text => Some(Self::Text),
+            Model::Number => Some(Self::Number),
+            Model::Obfuscate => Some(Self::Obfuscate),
+            Model::Focus => Some(Self::Focus),
         }
+    }
+
+    /// The sub-bars' tool for a model tool. Background mode still needs a
+    /// page, so it falls back to Select's.
+    pub(super) fn from_model(tool: crate::capture::editor::types::Tool) -> Self {
+        Self::rail_from_model(tool).unwrap_or(Self::Select)
     }
 
     /// The shared editor's tool this rail button arms.
@@ -148,7 +157,7 @@ pub(super) fn build(scale: f64, initial: Tool, on_select: Rc<dyn Fn(Tool)>) -> T
                 let buttons = buttons.clone();
                 let on_select = on_select.clone();
                 move |_| {
-                    set_active(&buttons, tool);
+                    set_active(&buttons, Some(tool));
                     on_select(tool);
                 }
             });
@@ -196,19 +205,20 @@ pub(super) fn build(scale: f64, initial: Tool, on_select: Rc<dyn Fn(Tool)>) -> T
 
 impl Toolbar {
     /// Move the active highlight; used when the model's tool changes from
-    /// elsewhere (crop apply/cancel, shortcuts, loads).
-    pub(super) fn set_active_tool(&self, tool: Tool) {
+    /// elsewhere (crop apply/cancel, shortcuts, loads). `None` clears every
+    /// button, which is how Background mode shows no armed tool.
+    pub(super) fn set_active_tool(&self, tool: Option<Tool>) {
         set_active(&self.buttons, tool);
     }
 
     pub(super) fn set_active(&self, tool: Tool) {
-        set_active(&self.buttons, tool);
+        set_active(&self.buttons, Some(tool));
     }
 }
 
-fn set_active(buttons: &Rc<RefCell<Vec<(Tool, Button)>>>, tool: Tool) {
+fn set_active(buttons: &Rc<RefCell<Vec<(Tool, Button)>>>, tool: Option<Tool>) {
     for (candidate, button) in buttons.borrow().iter() {
-        if *candidate == tool {
+        if Some(*candidate) == tool {
             button.add_css_class("image-editor-tool-active");
         } else {
             button.remove_css_class("image-editor-tool-active");
@@ -231,5 +241,13 @@ mod tests {
     fn the_tool_row_starts_with_select_and_ends_with_focus() {
         assert_eq!(TOOL_GROUPS.first().unwrap().first(), Some(&Tool::Select));
         assert_eq!(TOOL_GROUPS.last().unwrap().last(), Some(&Tool::Focus));
+    }
+
+    #[test]
+    fn background_mode_leaves_the_rail_unhighlighted() {
+        use crate::capture::editor::types::Tool as Model;
+        assert_eq!(Tool::rail_from_model(Model::Background), None);
+        assert_eq!(Tool::rail_from_model(Model::Select), Some(Tool::Select));
+        assert_eq!(Tool::rail_from_model(Model::Crop), Some(Tool::Crop));
     }
 }
