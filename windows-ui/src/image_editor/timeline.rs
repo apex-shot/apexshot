@@ -233,6 +233,9 @@ pub(super) struct Timeline {
     redraw: Rc<dyn Fn()>,
     update_clock: Rc<dyn Fn()>,
     start_playback: Rc<dyn Fn(Option<PreviewRange>)>,
+    /// One step of the Motion history, shared by the dock's Undo/Redo
+    /// buttons and the window's Ctrl+Z / Ctrl+Y shortcuts.
+    history_step: Rc<dyn Fn(bool)>,
     shared: Rc<Shared>,
 }
 
@@ -241,6 +244,17 @@ impl Timeline {
     /// against; the clock label follows.
     pub(super) fn set_duration(&self, seconds: f64) {
         (self.update_duration)(seconds);
+    }
+
+    /// Step the Motion history back one snapshot, the same path the dock's
+    /// Undo button takes.
+    pub(super) fn undo(&self) {
+        (self.history_step)(true);
+    }
+
+    /// Step the Motion history forward again after an undo.
+    pub(super) fn redo(&self) {
+        (self.history_step)(false);
     }
 
     pub(super) fn preview_frames(
@@ -1093,13 +1107,13 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
         })
     };
 
-    for (button, undo) in [(&undo_btn, true), (&redo_btn, false)] {
+    let history_step: Rc<dyn Fn(bool)> = {
         let shared = shared.clone();
         let redraw = redraw.clone();
         let set_playhead_label = set_playhead_label.clone();
         let duration_label = duration_label.clone();
         let pause = pause.clone();
-        button.connect_clicked(move |_| {
+        Rc::new(move |undo: bool| {
             pause();
             let (source, target) = if undo {
                 (&shared.undo, &shared.redo)
@@ -1119,7 +1133,12 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
             redraw();
             shared.notify_preview();
             shared.notify_state();
-        });
+        })
+    };
+
+    for (button, undo) in [(&undo_btn, true), (&redo_btn, false)] {
+        let history_step = history_step.clone();
+        button.connect_clicked(move |_| history_step(undo));
     }
 
     Timeline {
@@ -1130,6 +1149,7 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
         redraw,
         update_clock: set_playhead_label,
         start_playback,
+        history_step,
         shared,
     }
 }

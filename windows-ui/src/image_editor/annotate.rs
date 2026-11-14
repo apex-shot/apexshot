@@ -3004,16 +3004,19 @@ impl EditorHost {
 
     /// The flattened document for a Cloud upload. Commits inline text first
     /// and refuses while the background image is still loading, exactly like
-    /// Copy and Save As.
-    pub fn upload_snapshot(&self) -> Option<image::RgbaImage> {
+    /// Copy and Save As. A failed flatten carries its render error text so
+    /// the caller can report it instead of silently doing nothing.
+    pub fn upload_snapshot(&self) -> Result<image::RgbaImage, String> {
         if self.background_loading() {
-            self.report_error(crate::i18n::t(
+            return Err(crate::i18n::t(
                 "Wait for the background image to finish loading.",
             ));
-            return None;
         }
         self.commit_text_if_active();
-        self.with_state(|st| st.to_final_image().ok()).flatten()
+        match self.with_state(|st| st.to_final_image().map_err(|error| error.to_string())) {
+            Some(result) => result,
+            None => Err(crate::i18n::t("Could not render the image.")),
+        }
     }
 
     /// Save the flattened document with the platform file dialog handling

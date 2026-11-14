@@ -192,7 +192,16 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
             }
             match motion.current_frame_image() {
                 Some(frame) => copy_frame_image(&host, frame),
-                None => host.report_error(t("Could not render the Motion frame.")),
+                None => {
+                    // The Motion page covers the canvas toast, so the failure
+                    // also goes to a system notification.
+                    let message = t("Could not render the Motion frame.");
+                    crate::utils::notify::desktop_notification_important(
+                        &t("Copy failed"),
+                        &message,
+                    );
+                    host.report_error(message);
+                }
             }
         }
     });
@@ -219,6 +228,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
         let in_motion = in_motion.clone();
         let exporting = exporting.clone();
         let name = motion_export_name.clone();
+        let sync_all = sync_all.clone();
         move |_| {
             if in_motion.get() {
                 let sync_all: Rc<dyn Fn()> = sync_all.clone();
@@ -382,7 +392,18 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
         move |_| canvas.choose_image(&window)
     });
 
-    install_keys(&window, &canvas, &sub_bars, &workspace_stack, &mode_confirm);
+    install_keys(
+        &window,
+        &canvas,
+        &sub_bars,
+        &workspace_stack,
+        &mode_confirm,
+        &motion,
+        &inspector.copy_button,
+        &exporting,
+        &motion_export_name,
+        &sync_all,
+    );
 
     window.present();
 
@@ -573,13 +594,25 @@ fn save_motion_video_dialog(
                                     &path.display().to_string(),
                                 );
                             }
-                            Err(error) => host.report_error(error),
+                            Err(error) => {
+                                // The Motion page hides the canvas toast, so
+                                // the export failure also goes to the desktop.
+                                crate::utils::notify::desktop_notification_important(
+                                    &t("Export failed"),
+                                    &error,
+                                );
+                                host.report_error(error);
+                            }
                         }
                     }
                 });
                 if let Err(error) = result {
                     exporting.set(false);
                     sync_all();
+                    crate::utils::notify::desktop_notification_important(
+                        &t("Export failed"),
+                        &error,
+                    );
                     host.report_error(error);
                 }
             }
@@ -672,8 +705,15 @@ fn upload_image(
     let Some(config) = configured_cloud() else {
         return;
     };
-    let Some(snapshot) = host.upload_snapshot() else {
-        return;
+    let snapshot = match host.upload_snapshot() {
+        Ok(snapshot) => snapshot,
+        Err(message) => {
+            // A render failure must not look like a no-op: report it the way
+            // Copy reports its own flatten failure.
+            crate::utils::notify::desktop_notification_important(&t("Upload failed"), &message);
+            host.report_error(message);
+            return;
+        }
     };
     upload_rendered_image(window, button, uploading, config, snapshot);
 }
@@ -741,7 +781,9 @@ fn upload_motion_video(
     };
     let directory = upload_temp_dir();
     if let Err(error) = std::fs::create_dir_all(&directory) {
-        host.report_error(format!("Could not prepare the Motion upload: {error}"));
+        let message = format!("Could not prepare the Motion upload: {error}");
+        crate::utils::notify::desktop_notification_important(&t("Upload failed"), &message);
+        host.report_error(message);
         return;
     }
     let path = directory.join(name);
@@ -777,6 +819,7 @@ fn upload_motion_video(
         uploading.set(false);
         button.set_sensitive(true);
         let _ = std::fs::remove_dir_all(&directory);
+        crate::utils::notify::desktop_notification_important(&t("Upload failed"), &error);
         host.report_error(error);
     }
 }
@@ -907,6 +950,11 @@ fn install_keys(
     sub_bars: &Rc<super::sub_bar::SubBars>,
     workspace: &gtk4::Stack,
     mode_confirm: &Rc<mode_confirm::ModeConfirm>,
+    motion: &Rc<motion::MotionMode>,
+    copy_button: &gtk4::Button,
+    exporting: &Rc<Cell<bool>>,
+    export_name: &str,
+    sync_all: &Rc<dyn Fn()>,
 ) {
     // Space held = pan mode. Capture phase so it wins over the canvas, but a
     // focused text entry still gets its literal space character.
@@ -920,7 +968,13 @@ fn install_keys(
         let mode_confirm = mode_confirm.clone();
         move |controller, key, _, _| {
             if mode_confirm.visible() {
-                return Propagation::Stop;
+                if key == gdk::Key::Escape {
+                    mode_confirm.cancel();
+                    return Propagation::Stop;
+                }
+                // Tab, Enter and Space belong to the card's buttons, so every
+                // other key must reach them instead of stopping here.
+                return Propagation::Proceed;
             }
             if workspace.visible_child_name().as_deref() == Some("motion") {
                 return Propagation::Proceed;
@@ -970,6 +1024,11 @@ fn install_keys(
         let window = window.clone();
         let workspace = workspace.clone();
         let mode_confirm = mode_confirm.clone();
+        let motion = motion.clone();
+        let copy_button = copy_button.clone();
+        let exporting = exporting.clone();
+        let export_name = export_name.to_string();
+        let sync_all = sync_all.clone();
         move |controller, key, _, modifiers| {
             if mode_confirm.visible() {
                 if key == gdk::Key::Escape {
@@ -978,7 +1037,69 @@ fn install_keys(
                 return Propagation::Stop;
             }
             if workspace.visible_child_name().as_deref() == Some("motion") {
-                return Propagation::Proceed;
+                let ctrl = modifiers.contains(gdk::ModifierType::CONTROL_MASK);
+                let shift = modifiers.contains(gdk::ModifierType::SHIFT_MASK);
+                // A focused text field keeps its own undo, redo and copy keys
+                // while Motion is open.
+                let text_focused =
+                    gtk4::prelude::RootExt::focus(&window).is_some_and(|w| {
+                        w.is::<gtk4::Text>() || w.is::<gtk4::Entry>() || w.is::<gtk4::TextView>()
+                    });
+                if text_focused
+                    && ctrl
+                    && matches!(
+                        key,
+                        gdk::Key::z
+                            | gdk::Key::Z
+                            | gdk::Key::y
+                            | gdk::Key::Y
+                            | gdk::Key::c
+                            | gdk::Key::C
+                    )
+                {
+                    return Propagation::Proceed;
+                }
+                return match key {
+                    gdk::Key::Escape => {
+                        window.close();
+                        Propagation::Stop
+                    }
+                    gdk::Key::s | gdk::Key::S if ctrl => {
+                        let sync_all: Rc<dyn Fn()> = sync_all.clone();
+                        save_motion_video_dialog(
+                            &window,
+                            &canvas.host,
+                            &motion,
+                            &exporting,
+                            &export_name,
+                            sync_all,
+                        );
+                        Propagation::Stop
+                    }
+                    gdk::Key::c | gdk::Key::C if ctrl => {
+                        // The Copy button already runs Motion's Studio gate
+                        // and frame render; the shortcut takes that path.
+                        copy_button.emit_clicked();
+                        Propagation::Stop
+                    }
+                    gdk::Key::z | gdk::Key::Z if ctrl && shift => {
+                        motion.timeline.redo();
+                        Propagation::Stop
+                    }
+                    gdk::Key::z | gdk::Key::Z if ctrl => {
+                        motion.timeline.undo();
+                        Propagation::Stop
+                    }
+                    gdk::Key::y | gdk::Key::Y if ctrl => {
+                        motion.timeline.redo();
+                        Propagation::Stop
+                    }
+                    gdk::Key::w | gdk::Key::W if ctrl => {
+                        window.close();
+                        Propagation::Stop
+                    }
+                    _ => Propagation::Proceed,
+                };
             }
             let ctrl = modifiers.contains(gdk::ModifierType::CONTROL_MASK);
             // A focused editable owns its keys: entries keep characters and
