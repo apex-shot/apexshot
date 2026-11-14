@@ -59,10 +59,11 @@ WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 ; Ask a running copy to close so no DLL is replaced under it. The tray shell
-; holds the hotkeys; Restart Manager finds it through its windows.
+; holds the hotkeys; Restart Manager finds it through its windows. No AppMutex:
+; its check runs before Restart Manager and stops the upgrade with a "close
+; ApexShot first" prompt, which a silent install answers with Cancel.
 CloseApplications=yes
 RestartApplications=no
-AppMutex=Local\ApexShotShell
 MinVersion=10.0
 
 [Tasks]
