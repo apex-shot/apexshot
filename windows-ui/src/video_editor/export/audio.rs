@@ -218,6 +218,7 @@ mod tests {
             crf: 30,
             audio: Vec::new(),
             effects: Default::default(),
+            cursor_hide_clips: Vec::new(),
         };
         let output = dir.join("out.mp4");
         let handle = super::super::start_export_with_settings(
@@ -369,6 +370,7 @@ mod tests {
             crf: 30,
             audio: Vec::new(),
             effects: Default::default(),
+            cursor_hide_clips: Vec::new(),
         };
         let output = dir.join("out.mp4");
         let handle = super::super::start_export_with_settings(
@@ -511,6 +513,7 @@ mod tests {
             crf: 30,
             audio: Vec::new(),
             effects: Default::default(),
+            cursor_hide_clips: Vec::new(),
         };
         let output = dir.join("out.mp4");
         let handle = super::super::start_export_with_settings(
