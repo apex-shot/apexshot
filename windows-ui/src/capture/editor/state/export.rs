@@ -4,8 +4,10 @@
 //! selection chrome, handles, drafts or the active text edit.
 
 use super::super::types::{AnnotationAction, EditorError};
+use super::super::upscale::SourceUpscale;
 use super::EditorState;
 use image::RgbaImage;
+use std::sync::Arc;
 
 impl EditorState {
     /// The document as the user sees it: base pixels with effect actions
@@ -17,11 +19,25 @@ impl EditorState {
 
     /// Flatten `base + actions` without consulting the live preview layer —
     /// used by export so a pending effect rebuild can never leak an
-    /// unredacted frame.
+    /// unredacted frame. Neural upscaling enlarges the flattened pixels and
+    /// draws the vectors at the same factor.
     pub fn to_export_image(&self) -> Result<RgbaImage, EditorError> {
-        let mut base = (*self.base_image).clone();
-        super::effects::apply_effect_actions(&mut base, &self.actions);
-        self.render_from_working(&base, &self.background, true)
+        let base = self.export_base();
+        let factor = self.source_upscale.factor();
+        if factor == 1 {
+            return self.render_from_working(&base, &self.background, true);
+        }
+        if let Some(reason) = self.upscale_unavailable_reason(self.source_upscale) {
+            return Err(EditorError::ImageSave(reason));
+        }
+        let enhanced = super::super::upscale::enhance_cached(&base, self.source_upscale)
+            .map_err(EditorError::ImageSave)?;
+        self.render_scaled(
+            &enhanced,
+            &self.background,
+            true,
+            self.export_scale * f64::from(factor),
+        )
     }
 
     fn render_from_working(
@@ -29,6 +45,16 @@ impl EditorState {
         working: &RgbaImage,
         appearance: &super::background::Appearance,
         transform: bool,
+    ) -> Result<RgbaImage, EditorError> {
+        self.render_scaled(working, appearance, transform, self.export_scale)
+    }
+
+    fn render_scaled(
+        &self,
+        working: &RgbaImage,
+        appearance: &super::background::Appearance,
+        transform: bool,
+        annotation_scale: f64,
     ) -> Result<RgbaImage, EditorError> {
         let (image_width, image_height) = working.dimensions();
         if image_width == 0 || image_height == 0 {
@@ -97,7 +123,7 @@ impl EditorState {
             style.paint_backings(&context);
             style.paint_underlay(&context);
             if transform && !self.static_image_transform.is_identity() {
-                let card = self.card_surface(working, layout.radius)?;
+                let card = self.card_surface_scaled(working, layout.radius, annotation_scale)?;
                 super::super::transform_render::paint_card(
                     &context,
                     &card,
@@ -128,7 +154,7 @@ impl EditorState {
                 context.restore().ok();
                 style.paint_frame(&context);
                 context.translate(layout.image_x, layout.image_y);
-                context.scale(self.export_scale, self.export_scale);
+                context.scale(annotation_scale, annotation_scale);
                 for action in self.vector_annotation_actions() {
                     super::super::render::draw_annotation_action(&context, action);
                 }
@@ -170,10 +196,56 @@ impl EditorState {
     }
 
     pub(crate) fn studio_capabilities(&self) -> crate::studio_entitlement::StudioCapabilities {
-        crate::studio_entitlement::capabilities_for_image_style(
-            self.static_image_transform,
-            self.uses_studio_style(),
-        )
+        crate::studio_entitlement::StudioCapabilities {
+            image_upscale: self.source_upscale.factor() > 1,
+            ..crate::studio_entitlement::capabilities_for_image_style(
+                self.static_image_transform,
+                self.uses_studio_style(),
+            )
+        }
+    }
+
+    /// Base pixels with the effect actions applied, the image export draws.
+    pub(crate) fn export_base(&self) -> RgbaImage {
+        Self::flatten_effects(&self.base_image, &self.actions)
+    }
+
+    /// `export_base` for a worker: the pixels and actions it is built from.
+    pub(crate) fn export_source(&self) -> (Arc<RgbaImage>, Vec<AnnotationAction>) {
+        (Arc::clone(&self.base_image), self.actions.clone())
+    }
+
+    pub(crate) fn flatten_effects(base: &RgbaImage, actions: &[AnnotationAction]) -> RgbaImage {
+        let mut flattened = base.clone();
+        super::effects::apply_effect_actions(&mut flattened, actions);
+        flattened
+    }
+
+    /// The exported canvas size when the source is enlarged by `mode`.
+    pub(crate) fn upscale_output_dimensions(&self, mode: SourceUpscale) -> (u32, u32) {
+        let (width, height) = self.working_image.dimensions();
+        let factor = mode.factor();
+        let layout = self
+            .background
+            .layout(width.saturating_mul(factor), height.saturating_mul(factor));
+        (layout.width.ceil() as u32, layout.height.ceil() as u32)
+    }
+
+    /// Why `mode` cannot enhance this document, or `None` when it can. The
+    /// message is an untranslated msgid.
+    pub(crate) fn upscale_unavailable_reason(&self, mode: SourceUpscale) -> Option<String> {
+        if mode == SourceUpscale::Off {
+            return None;
+        }
+        let (width, height) = self.working_image.dimensions();
+        if let Err(reason) = super::super::upscale::validate_input_dimensions(width, height, mode) {
+            return Some(reason);
+        }
+        let (width, height) = self.upscale_output_dimensions(mode);
+        if u64::from(width) * u64::from(height) > 16_777_216 || width.max(height) > 16_384 {
+            return Some("The enhanced canvas exceeds the 16-megapixel output limit. Reduce upscaling or background padding.".into());
+        }
+        None
     }
 
     /// The final export image. Always flattens `base + actions` so a pending
@@ -199,9 +271,24 @@ impl EditorState {
         working: &RgbaImage,
         radius: f64,
     ) -> Result<gtk4::cairo::ImageSurface, EditorError> {
+        self.card_surface_scaled(working, radius, self.export_scale)
+    }
+
+    fn card_surface_scaled(
+        &self,
+        working: &RgbaImage,
+        radius: f64,
+        annotation_scale: f64,
+    ) -> Result<gtk4::cairo::ImageSurface, EditorError> {
         let source = super::super::render::rgba_image_to_surface(working)
             .ok_or_else(|| EditorError::ImageSave("could not render image".into()))?;
-        self.card_surface_from_source(&source, radius, working.width(), working.height())
+        self.card_surface_from_source_scaled(
+            &source,
+            radius,
+            working.width(),
+            working.height(),
+            annotation_scale,
+        )
     }
 
     pub(crate) fn card_surface_from_source(
@@ -210,6 +297,17 @@ impl EditorState {
         radius: f64,
         width: u32,
         height: u32,
+    ) -> Result<gtk4::cairo::ImageSurface, EditorError> {
+        self.card_surface_from_source_scaled(source, radius, width, height, self.export_scale)
+    }
+
+    fn card_surface_from_source_scaled(
+        &self,
+        source: &gtk4::cairo::ImageSurface,
+        radius: f64,
+        width: u32,
+        height: u32,
+        annotation_scale: f64,
     ) -> Result<gtk4::cairo::ImageSurface, EditorError> {
         use gtk4::cairo::{Context, Filter, Format, ImageSurface};
         let surface = ImageSurface::create(Format::ARgb32, width as i32, height as i32)
@@ -234,7 +332,7 @@ impl EditorState {
         context.set_source_surface(source, 0.0, 0.0).ok();
         context.source().set_filter(Filter::Good);
         context.paint().ok();
-        context.scale(self.export_scale, self.export_scale);
+        context.scale(annotation_scale, annotation_scale);
         for action in self.vector_annotation_actions() {
             super::super::render::draw_annotation_action(&context, action);
         }
@@ -262,6 +360,7 @@ mod tests {
     use super::super::background::{Fill, FrameRatio};
     use super::EditorState;
     use crate::capture::editor::types::FrameStyle;
+    use crate::capture::editor::upscale::SourceUpscale;
     use crate::recording::editor::model::MotionSceneShadowPreset;
 
     fn document() -> EditorState {
@@ -788,5 +887,52 @@ mod tests {
         assert_eq!(framed.dimensions(), (100, 100));
         assert_eq!(*framed.get_pixel(0, 10), Rgba([240, 0, 0, 255]));
         assert_eq!(*framed.get_pixel(50, 0), Rgba([0, 0, 255, 255]));
+    }
+
+    #[test]
+    fn neural_export_enlarges_a_plain_image() {
+        let mut state = EditorState::new(RgbaImage::from_pixel(40, 30, Rgba([200, 40, 10, 255])));
+        state.background.fill = Fill::None;
+        assert_eq!(state.to_export_image().unwrap().dimensions(), (40, 30));
+
+        state.source_upscale = SourceUpscale::Neural2x;
+        assert_eq!(state.to_export_image().unwrap().dimensions(), (80, 60));
+
+        state.source_upscale = SourceUpscale::Neural4x;
+        assert_eq!(state.to_export_image().unwrap().dimensions(), (160, 120));
+    }
+
+    #[test]
+    fn neural_export_matches_the_reported_canvas_with_padding() {
+        let mut state = EditorState::new(RgbaImage::from_pixel(60, 40, Rgba([200, 40, 10, 255])));
+        state.background.fill = Fill::Image(Arc::new(RgbaImage::from_pixel(
+            1,
+            1,
+            Rgba([130, 180, 220, 255]),
+        )));
+        state.background.padding = 40.0;
+        state.source_upscale = SourceUpscale::Neural2x;
+        assert_eq!(
+            state.to_export_image().unwrap().dimensions(),
+            state.upscale_output_dimensions(SourceUpscale::Neural2x)
+        );
+    }
+
+    #[test]
+    fn oversized_sources_cannot_be_enhanced() {
+        let oversized = EditorState::new(RgbaImage::new(1025, 1024));
+        assert!(oversized
+            .upscale_unavailable_reason(SourceUpscale::Neural2x)
+            .is_some());
+
+        let mut state = EditorState::new(RgbaImage::new(1024, 1024));
+        assert!(state
+            .upscale_unavailable_reason(SourceUpscale::Neural2x)
+            .is_none());
+        assert!(state.upscale_unavailable_reason(SourceUpscale::Off).is_none());
+        assert!(!state.studio_capabilities().image_upscale);
+
+        state.source_upscale = SourceUpscale::Neural2x;
+        assert!(state.studio_capabilities().image_upscale);
     }
 }
