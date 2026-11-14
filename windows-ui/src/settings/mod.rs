@@ -88,17 +88,6 @@ fn page_title<'a>(titles: &'a [String], name: &str) -> Option<&'a str> {
         .map(String::as_str)
 }
 
-/// A short page-level note for a feature the Windows shell does not run yet.
-fn platform_note(text: &str) -> Label {
-    let note = Label::new(Some(text));
-    note.add_css_class("settings-sub-option-hint");
-    note.set_wrap(true);
-    note.set_xalign(0.0);
-    note.set_halign(Align::Start);
-    note.set_margin_bottom(12);
-    note
-}
-
 /// Short, user-facing summary of a save failure (full chain goes to stderr).
 pub(crate) fn format_save_error(err: &anyhow::Error) -> String {
     const MAX_LEN: usize = 160;
@@ -413,8 +402,11 @@ fn build_settings_window(app: &Application) {
             "This action requires the Windows image editor or overlay backend.",
         )));
     }
-    annotate.section.prepend(&platform_note(&t(
-        "These annotate preferences are not applied by the Windows image editor yet.",
+    // The Windows swatches already name their color on hover and to screen
+    // readers, so this preference has nothing left to switch.
+    annotate.show_color_names_check.set_sensitive(false);
+    annotate.show_color_names_check.set_tooltip_text(Some(&t(
+        "The Windows image editor names each color when you point at its swatch.",
     )));
     let (cloud_page, cloud_login) = cloud_login::wrap_cloud_page(&cloud.section, {
         let auto_upload_check = cloud.auto_upload_check.clone();

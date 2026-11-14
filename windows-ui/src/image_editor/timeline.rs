@@ -42,6 +42,20 @@ const PLAYHEAD_HANDLE_W: f64 = 12.0;
 const PLAYHEAD_HANDLE_H: f64 = 26.0;
 const PLAYHEAD_HANDLE_TOP: f64 = 2.0;
 
+/// Row metrics, the video editor's compact timeline: a short ruler, the
+/// source filmstrip, and two clip lanes of which one is drawn at full height
+/// while the other rests as a thin strip. The dock keeps one height whichever
+/// lane is open, and the preview above gets the rest.
+const RULER_HEIGHT: f64 = 28.0;
+const SOURCE_LANE_HEIGHT: f64 = 42.0;
+const CLIP_LANE_HEIGHT: f64 = 42.0;
+const THIN_LANE_HEIGHT: f64 = 18.0;
+const LANE_GAP: f64 = 8.0;
+
+thread_local! {
+    static COMPACT_CSS: OnceCell<()> = const { OnceCell::new() };
+}
+
 /// The source badge's cast: a blurred silhouette with enough pad for the
 /// blur to fall off before the surface edge.
 const BADGE_SHADOW_PAD: f64 = 10.0;
@@ -179,9 +193,71 @@ struct Shared {
     /// image is loaded.
     thumbnail: RefCell<Option<ThumbnailSource>>,
     source_revision: Cell<u64>,
+    /// The clip lane drawn at full height; the other rests thin.
+    open_lane: Cell<HoverLane>,
+    /// How far each clip lane is drawn toward full height right now,
+    /// `[motion, text]`, 0 thin .. 1 full.
+    lane_progress: Cell<[f64; 2]>,
+    /// The selection last seen, so a new selection brings its lane forward.
+    seen_selection: Cell<(Option<usize>, Option<usize>)>,
 }
 
 impl Shared {
+    fn lane_of(text: bool) -> HoverLane {
+        if text {
+            HoverLane::Text
+        } else {
+            HoverLane::Motion
+        }
+    }
+
+    /// Whether the lane is the one drawn at full height.
+    fn lane_open(&self, text: bool) -> bool {
+        self.open_lane.get() == Self::lane_of(text)
+    }
+
+    /// Make the lane the full-height one. Returns whether it changed.
+    fn open(&self, text: bool) -> bool {
+        let lane = Self::lane_of(text);
+        self.open_lane.replace(lane) != lane
+    }
+
+    /// A newly selected clip opens its lane, so a selection made from the
+    /// inspector or by adding a clip is always in view.
+    fn follow_selection(&self) {
+        let now = {
+            let model = self.model.borrow();
+            (model.selected, model.selected_text)
+        };
+        if self.seen_selection.replace(now) == now {
+            return;
+        }
+        if now.1.is_some() {
+            self.open(true);
+        } else if now.0.is_some() {
+            self.open(false);
+        }
+    }
+
+    /// Ease both lanes toward their targets by `dt` seconds, the video
+    /// editor's curve. Returns whether either is still moving.
+    fn step_lanes(&self, dt: f64) -> bool {
+        // About 180 ms to settle: an exponential ease with a 45 ms constant.
+        let amount = 1.0 - (-dt.max(0.0) / 0.045).exp();
+        let targets = [
+            f64::from(u8::from(self.lane_open(false))),
+            f64::from(u8::from(self.lane_open(true))),
+        ];
+        let mut next = self.lane_progress.get();
+        for index in 0..2 {
+            next[index] += (targets[index] - next[index]) * amount;
+        }
+        // Snap only once both arrive: their sum keeps the dock's height.
+        let arrived = (0..2).all(|index| (targets[index] - next[index]).abs() < 0.002);
+        self.lane_progress.set(if arrived { targets } else { next });
+        !arrived
+    }
+
     fn hover_previewing(&self) -> bool {
         if self.playing.get() || self.hover_lane.get() != HoverLane::Motion {
             return false;
@@ -434,11 +510,16 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
         scrubbing: Cell::new(false),
         thumbnail: RefCell::new(None),
         source_revision: Cell::new(0),
+        open_lane: Cell::new(HoverLane::Motion),
+        lane_progress: Cell::new([1.0, 0.0]),
+        seen_selection: Cell::new((None, None)),
     });
 
+    install_compact_css(scale);
     let dock = GtkBox::new(Orientation::Vertical, 0);
     dock.add_css_class("recording-editor-timeline-dock");
     dock.add_css_class("editor-motion-timeline-dock");
+    dock.add_css_class("recording-editor-timeline-compact");
     dock.set_hexpand(true);
     dock.set_vexpand(false);
     dock.set_valign(Align::End);
@@ -506,12 +587,19 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
     toolbar.append(&center);
     toolbar.append(&right);
 
-    let ruler = rows_drawing_area(scale, 36.0, "recording-editor-card-ruler");
-    let source_track = rows_drawing_area(scale, 48.0, "recording-editor-card-zoom-track");
-    let motion_track = rows_drawing_area(scale, 56.0, "recording-editor-card-zoom-track");
-    let text_track = rows_drawing_area(scale, 44.0, "recording-editor-card-zoom-track");
+    let ruler = rows_drawing_area(scale, RULER_HEIGHT, "recording-editor-card-ruler");
+    let source_track = rows_drawing_area(
+        scale,
+        SOURCE_LANE_HEIGHT,
+        "recording-editor-card-zoom-track",
+    );
+    let motion_track =
+        rows_drawing_area(scale, CLIP_LANE_HEIGHT, "recording-editor-card-zoom-track");
+    let text_track = rows_drawing_area(scale, THIN_LANE_HEIGHT, "recording-editor-card-zoom-track");
+    motion_track.set_tooltip_text(Some(&t("Motion")));
+    text_track.set_tooltip_text(Some(&t("Text")));
 
-    let tracks = GtkBox::new(Orientation::Vertical, px(10.0, scale));
+    let tracks = GtkBox::new(Orientation::Vertical, px(LANE_GAP, scale));
     tracks.add_css_class("recording-editor-card-tracks");
     tracks.set_hexpand(true);
     tracks.append(&ruler);
@@ -554,6 +642,7 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
         let undo_btn = undo_btn.downgrade();
         let redo_btn = redo_btn.downgrade();
         move || {
+            shared.follow_selection();
             ruler.queue_draw();
             source_track.queue_draw();
             motion_track.queue_draw();
@@ -747,6 +836,7 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
             };
             drop(model);
             shared.record_edit(before);
+            shared.open(text);
             redraw();
             shared.notify_state();
             shared.notify_preview();
@@ -879,6 +969,27 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
                     return;
                 }
                 let width = f64::from(row.allocated_width().max(1));
+                // A resting lane opens on click, and selects the clip under
+                // the pointer, instead of adding one blind.
+                if !shared.lane_open(text) {
+                    {
+                        let mut model = shared.model.borrow_mut();
+                        let time = (x / width).clamp(0.0, 1.0) * model.duration;
+                        let index = if text {
+                            model.text_index_at(time)
+                        } else {
+                            model.segment_index_at(time)
+                        };
+                        if let Some(index) = index {
+                            model.selected = (!text).then_some(index);
+                            model.selected_text = text.then_some(index);
+                        }
+                    }
+                    shared.open(text);
+                    redraw();
+                    shared.notify_state();
+                    return;
+                }
                 let mut model = shared.model.borrow_mut();
                 let before = model.clone();
                 let count = model.segments.len() + model.text_segments.len();
@@ -1005,20 +1116,79 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
         (&text_track, HoverLane::Text),
     ] {
         let shared = shared.clone();
+        let text = lane == HoverLane::Text;
         row.set_draw_func(move |_, context, width, height| {
             let model = shared.model.borrow();
-            draw_clip_track(
-                context,
-                width,
-                height,
-                &model,
-                lane,
-                shared.hover_lane.get(),
-                shared.hover_time.get(),
-                scale,
-            );
+            let progress = shared.lane_progress.get()[usize::from(text)];
+            let thin = |context: &CairoContext| {
+                draw_thin_lane(context, width, height, &model, text, light, scale);
+            };
+            let full = |context: &CairoContext| {
+                // The add ghost belongs to the open lane only.
+                let hover_lane = if shared.lane_open(text) {
+                    shared.hover_lane.get()
+                } else {
+                    HoverLane::None
+                };
+                draw_clip_track(
+                    context,
+                    width,
+                    height,
+                    &model,
+                    lane,
+                    hover_lane,
+                    shared.hover_time.get(),
+                    scale,
+                );
+            };
+            // Between states the two drawings cross-fade while the row's
+            // height trades with its neighbour.
+            if progress >= 0.999 {
+                full(context);
+            } else if progress <= 0.001 {
+                thin(context);
+            } else {
+                context.push_group();
+                thin(context);
+                let _ = context.pop_group_to_source();
+                let _ = context.paint_with_alpha(1.0 - progress);
+                context.push_group();
+                full(context);
+                let _ = context.pop_group_to_source();
+                let _ = context.paint_with_alpha(progress);
+            }
         });
     }
+
+    // Each frame eases the lanes toward the open one and hands them whole
+    // pixels whose sum never changes, so the preview above never shakes.
+    tracks.add_tick_callback({
+        let shared = shared.clone();
+        let motion_track = motion_track.clone();
+        let text_track = text_track.clone();
+        let last = Cell::new(None::<i64>);
+        let applied = Cell::new([0i32; 2]);
+        move |_, clock| {
+            let now = clock.frame_time();
+            let dt = last
+                .replace(Some(now))
+                .map(|previous| (now - previous) as f64 / 1_000_000.0)
+                .unwrap_or(0.0)
+                .min(0.1);
+            let moving = shared.step_lanes(dt);
+            let heights = clip_lane_heights(shared.lane_progress.get(), scale);
+            if heights != applied.get() {
+                applied.set(heights);
+                motion_track.set_size_request(-1, heights[0]);
+                text_track.set_size_request(-1, heights[1]);
+            }
+            if moving {
+                motion_track.queue_draw();
+                text_track.queue_draw();
+            }
+            glib::ControlFlow::Continue
+        }
+    });
     hover_playhead.set_draw_func({
         let shared = shared.clone();
         move |_, context, width, height| {
@@ -1329,11 +1499,14 @@ fn draw_ruler(
         gtk4::cairo::FontSlant::Normal,
         gtk4::cairo::FontWeight::Normal,
     );
-    context.set_font_size(10.0 * scale);
+    context.set_font_size((11.0 * scale).round());
     context.set_line_width(1.0);
 
-    let mut tick = 0.0;
-    while tick <= duration + 0.0001 {
+    // Ticks step by index, not by accumulating `minor`: a running sum drifts
+    // below whole seconds and a label floors to the second before it.
+    let steps = (duration / minor + 0.0001).floor() as i64;
+    for step in 0..=steps {
+        let tick = step as f64 * minor;
         let x = time_to_x(tick, duration, w).floor() + 0.5;
         let on_major = ((tick / major) - (tick / major).round()).abs() < 0.02;
         let (tick_r, tick_g, tick_b) = if light {
@@ -1353,7 +1526,14 @@ fn draw_ruler(
             0.10
         };
         context.set_source_rgba(tick_r, tick_g, tick_b, tick_alpha);
-        context.move_to(x, if on_major { h - 11.0 } else { h - 5.0 });
+        context.move_to(
+            x,
+            if on_major {
+                h - 11.0 * scale
+            } else {
+                h - 5.0 * scale
+            },
+        );
         context.line_to(x, h);
         let _ = context.stroke();
         if on_major {
@@ -1373,11 +1553,10 @@ fn draw_ruler(
                 } else {
                     (x - ext.width() / 2.0).clamp(0.0, w - ext.width())
                 };
-                context.move_to(label_x, 12.0);
+                context.move_to(label_x, (12.0 * scale).round());
                 let _ = context.show_text(&label);
             }
         }
-        tick += minor;
     }
 }
 
@@ -1396,7 +1575,8 @@ fn format_ruler_label(seconds: f64, major: f64) -> String {
     if major < 1.0 {
         format!("{minutes}:{secs:04.1}")
     } else {
-        format!("{minutes}:{:0>2}", secs.floor() as u64)
+        // A tick a hair under a whole second still names that second.
+        format!("{minutes}:{:0>2}", (secs + 1e-6).floor() as u64)
     }
 }
 
@@ -1981,6 +2161,146 @@ fn draw_playhead(
     context.set_source_rgba(stem_r, stem_g, stem_b, 1.0);
     context.set_line_width(1.5);
     let _ = context.stroke();
+}
+
+/// A resting clip lane, the video editor's thin strip: the lane's name at the
+/// left edge and each clip as a slim bar in its own colour. A bar running
+/// under the name fades in from transparent, so the name never sits on solid
+/// colour.
+fn draw_thin_lane(
+    context: &CairoContext,
+    width: i32,
+    height: i32,
+    model: &Model,
+    text: bool,
+    light: bool,
+    scale: f64,
+) {
+    let w = f64::from(width.max(1));
+    let h = f64::from(height.max(1));
+    let duration = model.duration.max(0.001);
+    let label = t(if text { "Text" } else { "Motion" });
+    context.select_font_face(
+        "Inter",
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Bold,
+    );
+    context.set_font_size((12.0 * scale).round());
+    let extents = context.text_extents(&label).ok();
+    let text_w = extents.map_or(40.0 * scale, |extents| extents.x_advance());
+    let text_h = extents.map_or(9.0 * scale, |extents| extents.height());
+    let label_x = 6.0 * scale;
+    let label_end = label_x + text_w;
+    let fade_end = label_end + 40.0 * scale;
+
+    let colour = if text {
+        TEXT_CLIP_ORANGE
+    } else {
+        MOTION_CLIP_BLUE
+    };
+    let spans: Vec<(f64, f64, bool)> = if text {
+        model
+            .text_segments
+            .iter()
+            .map(|clip| (clip.start, clip.end, clip.is_disabled))
+            .collect()
+    } else {
+        model
+            .segments
+            .iter()
+            .map(|clip| (clip.start, clip.end, clip.is_disabled))
+            .collect()
+    };
+    let bar_h = (h - 4.0 * scale).max(3.0);
+    let y = (h - bar_h) / 2.0;
+    for (start, end, disabled) in spans {
+        let alpha = if disabled { 0.35 } else { 1.0 };
+        let x0 = time_to_x(start, duration, w);
+        let x1 = time_to_x(end, duration, w).max(x0 + 4.0 * scale);
+        rounded_rect(
+            context,
+            x0,
+            y,
+            x1 - x0,
+            bar_h,
+            (bar_h * 0.35).min(5.0 * scale),
+        );
+        if x0 < fade_end {
+            let fade = gtk4::cairo::LinearGradient::new(0.0, 0.0, fade_end, 0.0);
+            fade.add_color_stop_rgba(0.0, colour.0, colour.1, colour.2, 0.0);
+            fade.add_color_stop_rgba(
+                label_end / fade_end,
+                colour.0,
+                colour.1,
+                colour.2,
+                alpha * 0.15,
+            );
+            fade.add_color_stop_rgba(1.0, colour.0, colour.1, colour.2, alpha);
+            let _ = context.set_source(&fade);
+        } else {
+            context.set_source_rgba(colour.0, colour.1, colour.2, alpha);
+        }
+        let _ = context.fill();
+    }
+    let ink = if light { 0.0 } else { 1.0 };
+    context.set_source_rgba(ink, ink, ink, 0.6);
+    context.move_to(label_x, (h + text_h) / 2.0);
+    let _ = context.show_text(&label);
+}
+
+/// A clip lane's height for how open it is drawn, in device pixels.
+fn clip_lane_height_exact(progress: f64, scale: f64) -> f64 {
+    let progress = progress.clamp(0.0, 1.0);
+    (THIN_LANE_HEIGHT + (CLIP_LANE_HEIGHT - THIN_LANE_HEIGHT) * progress) * scale
+}
+
+/// Whole-pixel heights for the two clip lanes whose sum never changes while
+/// they trade: the Motion lane rounds on its own and the Text lane takes the
+/// rest of the fixed total, so a pixel one loses the other gains.
+fn clip_lane_heights(progress: [f64; 2], scale: f64) -> [i32; 2] {
+    let resting =
+        (clip_lane_height_exact(1.0, scale) + clip_lane_height_exact(0.0, scale)).round() as i32;
+    let motion = clip_lane_height_exact(progress[0], scale).round() as i32;
+    [motion, resting - motion]
+}
+
+/// The compact floors over the shared recording-editor sheet, whose Motion
+/// board and lanes are sized for the taller Linux dock. A lane's floor rounds
+/// down so the animation can hand it the pixel below its exact height.
+fn install_compact_css(scale: f64) {
+    COMPACT_CSS.with(|installed| {
+        installed.get_or_init(|| {
+            let Some(display) = gtk4::gdk::Display::default() else {
+                return;
+            };
+            let px = |value: f64| format!("{}px", (value * scale).round() as i32);
+            let floor = |value: f64| format!("{}px", (value * scale).floor() as i32);
+            let board = RULER_HEIGHT
+                + SOURCE_LANE_HEIGHT
+                + CLIP_LANE_HEIGHT
+                + THIN_LANE_HEIGHT
+                + 3.0 * LANE_GAP;
+            let css = format!(
+                ".editor-motion-timeline-dock.recording-editor-timeline-compact \
+                 .recording-editor-card-board {{ min-height: {board}; padding: 0 0 {pad} 0; }} \
+                 .editor-motion-timeline-dock.recording-editor-timeline-compact \
+                 .recording-editor-card-ruler {{ min-height: {ruler}; }} \
+                 .editor-motion-timeline-dock.recording-editor-timeline-compact \
+                 .recording-editor-card-zoom-track {{ min-height: {lane}; }}",
+                board = px(board),
+                pad = px(4.0),
+                ruler = px(RULER_HEIGHT),
+                lane = floor(THIN_LANE_HEIGHT),
+            );
+            let provider = gtk4::CssProvider::new();
+            provider.load_from_data(&css);
+            gtk4::style_context_add_provider_for_display(
+                &display,
+                &provider,
+                gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION + 3,
+            );
+        });
+    });
 }
 
 pub(super) fn format_clock(seconds: f64) -> String {

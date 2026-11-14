@@ -20,6 +20,7 @@ mod effects;
 pub(crate) mod export;
 mod history;
 mod selection;
+mod tool_colors;
 #[path = "../../../../../src/capture/editor/state/text_input.rs"]
 #[rustfmt::skip]
 mod text_input;
@@ -62,6 +63,8 @@ pub struct EditorState {
     pub selected_tool: Tool,
     pub selected_action_index: Option<usize>,
     pub selected_color: DrawColor,
+    /// The colour each annotate tool last used, keyed by its config name.
+    pub tool_colors: std::collections::BTreeMap<String, DrawColor>,
     pub stroke_size: f64,
     pub smooth_drawing_enabled: bool,
     pub draw_object_shadow: bool,
@@ -290,6 +293,7 @@ impl EditorState {
             selected_tool: Tool::Select,
             selected_action_index: None,
             selected_color: DRAW_COLORS[DEFAULT_COLOR_INDEX],
+            tool_colors: std::collections::BTreeMap::new(),
             stroke_size: STROKE_WIDTH,
             smooth_drawing_enabled: false,
             draw_object_shadow: false,
@@ -423,6 +427,9 @@ impl EditorState {
             self.finalize_arrow_control_editing();
         }
         self.selected_tool = tool;
+        if let Some(color) = self.remembered_tool_color(tool) {
+            self.selected_color = color;
+        }
         if tool == Tool::Crop && self.crop_rect.is_none() {
             self.crop_rect = Some(Rect {
                 x: 0,

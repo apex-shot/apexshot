@@ -3322,11 +3322,6 @@ msgid "Image export width; select a preset to change the aspect ratio"
 msgstr "画像の書き出し幅。プリセットを選択するとアスペクト比を変更できます"
 
 msgid ""
-"Image presets change the aspect ratio, not a fixed pixel size. W/H shows the export size. Click the selected preset again to reset."
-msgstr ""
-"画像プリセットは固定のピクセルサイズではなくアスペクト比を変更します。W/H は書き出しサイズを示します。選択中のプリセットをもう一度クリックするとリセットされます。"
-
-msgid ""
 "Increase Scene Shadows opacity to see the effect and change its placement."
 msgstr "Scene Shadows の不透明度を上げると、効果を確認して配置を変更できます。"
 
@@ -4345,8 +4340,8 @@ msgstr "共有リンクをクリップボードにコピーしました: {url}"
 msgid "The Motion encoder is not running."
 msgstr "Motion エンコーダーが実行されていません。"
 
-msgid "These annotate preferences are not applied by the Windows image editor yet."
-msgstr "これらの注釈設定は、Windows の画像エディターではまだ適用されません。"
+msgid "The Windows image editor names each color when you point at its swatch."
+msgstr "Windows 画像エディターでは、色見本にポインターを合わせると色の名前が表示されます。"
 
 msgid "Upload"
 msgstr "アップロード"
@@ -4779,3 +4774,33 @@ msgstr "エクスポートをキャンセルしました"
 
 msgid "Could not render the image."
 msgstr "画像をレンダリングできませんでした。"
+
+msgid "Compare enhancement"
+msgstr "補正を比較"
+
+msgid "Drag the divider across the image."
+msgstr "仕切りを画像の上でドラッグします。"
+
+msgid "Enhancing the image…"
+msgstr "画像を補正しています…"
+
+msgid "Free preview. Exporting with enhancement needs Studio."
+msgstr "無料プレビューです。補正付きの書き出しには Studio が必要です。"
+
+msgid "Sharpens small screenshots on this device, up to 1 megapixel. Missing detail cannot always be recovered."
+msgstr "このデバイス上で小さなスクリーンショットを最大 1 メガピクセルまで鮮明にします。失われた細部は必ずしも復元できません。"
+
+msgid "Source"
+msgstr "元画像"
+
+msgid "Use Neural 2×"
+msgstr "ニューラル 2× を使用"
+
+msgid "16:9 image aspect ratio; banners may be cropped on some devices."
+msgstr "画像のアスペクト比 16:9。バナーは一部のデバイスで切り取られる場合があります。"
+
+msgid "Exports at {width} × {height} px."
+msgstr "{width} × {height} px で書き出します。"
+
+msgid "Ratio presets change the aspect ratio; platform presets also export at the size that platform asks for. W/H shows the export size. Click the selected preset again to reset."
+msgstr "比率プリセットはアスペクト比を変更します。プラットフォームのプリセットは、そのプラットフォームが求めるサイズでも書き出します。W/H には書き出しサイズが表示されます。選択中のプリセットをもう一度クリックするとリセットされます。"

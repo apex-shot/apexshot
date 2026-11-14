@@ -3385,11 +3385,6 @@ msgstr ""
 "Ancho de exportación de la imagen; selecciona un preajuste para cambiar la relación de aspecto"
 
 msgid ""
-"Image presets change the aspect ratio, not a fixed pixel size. W/H shows the export size. Click the selected preset again to reset."
-msgstr ""
-"Los preajustes de imagen cambian la relación de aspecto, no un tamaño de píxeles fijo. W/H muestra el tamaño de exportación. Vuelve a hacer clic en el preajuste seleccionado para restablecer."
-
-msgid ""
 "Increase Scene Shadows opacity to see the effect and change its placement."
 msgstr ""
 "Aumenta la opacidad de Scene Shadows para ver el efecto y cambiar su posición."
@@ -4445,8 +4440,8 @@ msgstr "Enlace para compartir copiado al portapapeles: {url}"
 msgid "The Motion encoder is not running."
 msgstr "El codificador de Motion no está en ejecución."
 
-msgid "These annotate preferences are not applied by the Windows image editor yet."
-msgstr "El editor de imágenes de Windows aún no aplica estas preferencias de anotación."
+msgid "The Windows image editor names each color when you point at its swatch."
+msgstr "El editor de imágenes de Windows nombra cada color al señalar su muestra."
 
 msgid "Upload"
 msgstr "Subir"
@@ -4879,3 +4874,33 @@ msgstr "Exportación cancelada"
 
 msgid "Could not render the image."
 msgstr "No se pudo renderizar la imagen."
+
+msgid "Compare enhancement"
+msgstr "Comparar mejora"
+
+msgid "Drag the divider across the image."
+msgstr "Arrastra el divisor sobre la imagen."
+
+msgid "Enhancing the image…"
+msgstr "Mejorando la imagen…"
+
+msgid "Free preview. Exporting with enhancement needs Studio."
+msgstr "Vista previa gratuita. Exportar con mejora requiere Studio."
+
+msgid "Sharpens small screenshots on this device, up to 1 megapixel. Missing detail cannot always be recovered."
+msgstr "Mejora la nitidez de capturas pequeñas en este dispositivo, hasta 1 megapíxel. Los detalles perdidos no siempre se pueden recuperar."
+
+msgid "Source"
+msgstr "Origen"
+
+msgid "Use Neural 2×"
+msgstr "Usar Neural 2×"
+
+msgid "16:9 image aspect ratio; banners may be cropped on some devices."
+msgstr "Relación de aspecto 16:9; los banners pueden recortarse en algunos dispositivos."
+
+msgid "Exports at {width} × {height} px."
+msgstr "Se exporta a {width} × {height} px."
+
+msgid "Ratio presets change the aspect ratio; platform presets also export at the size that platform asks for. W/H shows the export size. Click the selected preset again to reset."
+msgstr "Los preajustes de proporción cambian la relación de aspecto; los de plataforma también exportan al tamaño que pide esa plataforma. W/H muestra el tamaño de exportación. Vuelve a hacer clic en el preajuste seleccionado para restablecerlo."

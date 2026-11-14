@@ -41,6 +41,11 @@ pub(crate) struct Appearance {
     pub radius: f64,
     pub noise: f64,
     pub frame_aspect: Option<FrameRatio>,
+    /// The exact pixels a platform preset exports at (YouTube Banner is
+    /// 2560 × 1440, Thumbnail 1280 × 720). Always the same aspect as
+    /// `frame_aspect`; generic ratios leave it unset and export at the
+    /// composed canvas size.
+    pub frame_size: Option<(u32, u32)>,
     pub frame_style: super::super::types::FrameStyle,
     pub revision: u64,
     padding_initialized: bool,
@@ -55,6 +60,7 @@ impl Default for Appearance {
             radius: 0.0,
             noise: 0.0,
             frame_aspect: None,
+            frame_size: None,
             frame_style: Default::default(),
             revision: 0,
             padding_initialized: false,

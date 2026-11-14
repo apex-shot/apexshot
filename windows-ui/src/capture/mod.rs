@@ -37,8 +37,7 @@ pub mod editor {
     #[rustfmt::skip]
     pub mod render;
 
-    /// Source upscaling options. The Windows editor ships the enum so the
-    /// shared types compile; the neural path itself is not offered yet.
+    /// Offline neural enlargement for still-image exports.
     pub mod upscale;
 
     /// Composition layout types. Only the rectangle the renderer's frame
@@ -49,6 +48,10 @@ pub mod editor {
     #[path = "../../../../src/capture/editor/image_transform.rs"]
     #[rustfmt::skip]
     pub mod image_transform;
+
+    /// The Cast light layer's on-disk shape the still-image sidecar shares
+    /// with the Motion project file.
+    pub mod motion_project;
 
     pub(crate) mod shadow_render;
     /// The "Made with ApexShot" mark painted over unlicensed Studio previews.
