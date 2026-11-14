@@ -3392,11 +3392,6 @@ msgstr ""
 "Largeur d’export de l’image ; sélectionnez un préréglage pour modifier le format d’image"
 
 msgid ""
-"Image presets change the aspect ratio, not a fixed pixel size. W/H shows the export size. Click the selected preset again to reset."
-msgstr ""
-"Les préréglages d’image modifient le format d’image, pas une taille de pixels fixe. W/H indique la taille d’export. Cliquez à nouveau sur le préréglage sélectionné pour réinitialiser."
-
-msgid ""
 "Increase Scene Shadows opacity to see the effect and change its placement."
 msgstr ""
 "Augmentez l’opacité de Scene Shadows pour voir l’effet et modifier son placement."
@@ -4902,3 +4897,12 @@ msgstr "Source"
 
 msgid "Use Neural 2×"
 msgstr "Utiliser Neural 2×"
+
+msgid "16:9 image aspect ratio; banners may be cropped on some devices."
+msgstr "Format d’image 16:9 ; les bannières peuvent être recadrées sur certains appareils."
+
+msgid "Exports at {width} × {height} px."
+msgstr "Exporté en {width} × {height} px."
+
+msgid "Ratio presets change the aspect ratio; platform presets also export at the size that platform asks for. W/H shows the export size. Click the selected preset again to reset."
+msgstr "Les préréglages de format changent le rapport d’aspect ; ceux des plateformes exportent aussi à la taille demandée par la plateforme. W/H indique la taille d’exportation. Cliquez de nouveau sur le préréglage sélectionné pour le réinitialiser."

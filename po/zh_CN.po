@@ -3314,10 +3314,6 @@ msgid "Image export width; select a preset to change the aspect ratio"
 msgstr "图像导出宽度；选择预设可更改宽高比"
 
 msgid ""
-"Image presets change the aspect ratio, not a fixed pixel size. W/H shows the export size. Click the selected preset again to reset."
-msgstr "图像预设会更改宽高比，而不是固定的像素尺寸。W/H 显示导出尺寸。再次点击已选预设即可重置。"
-
-msgid ""
 "Increase Scene Shadows opacity to see the effect and change its placement."
 msgstr "提高 Scene Shadows 的不透明度以查看效果并更改其位置。"
 
@@ -4779,3 +4775,12 @@ msgstr "源图像"
 
 msgid "Use Neural 2×"
 msgstr "使用 Neural 2×"
+
+msgid "16:9 image aspect ratio; banners may be cropped on some devices."
+msgstr "16:9 图像宽高比；横幅在部分设备上可能会被裁剪。"
+
+msgid "Exports at {width} × {height} px."
+msgstr "以 {width} × {height} 像素导出。"
+
+msgid "Ratio presets change the aspect ratio; platform presets also export at the size that platform asks for. W/H shows the export size. Click the selected preset again to reset."
+msgstr "比例预设会改变宽高比；平台预设还会按该平台要求的尺寸导出。W/H 显示导出尺寸。再次点击已选预设即可重置。"

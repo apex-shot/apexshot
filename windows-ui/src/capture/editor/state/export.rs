@@ -22,6 +22,27 @@ impl EditorState {
     /// unredacted frame. Neural upscaling enlarges the flattened pixels and
     /// draws the vectors at the same factor.
     pub fn to_export_image(&self) -> Result<RgbaImage, EditorError> {
+        self.render_export().map(|image| self.fit_frame_size(image))
+    }
+
+    /// A platform frame preset exports at its exact pixels. The composed
+    /// canvas already has the preset's aspect, so this is one uniform scale.
+    fn fit_frame_size(&self, image: RgbaImage) -> RgbaImage {
+        let background = &self.background;
+        let Some((width, height)) = background
+            .frame_size
+            .filter(|_| background.frame_aspect.is_some())
+            .filter(|&(width, height)| width > 0 && height > 0)
+        else {
+            return image;
+        };
+        if image.dimensions() == (width, height) {
+            return image;
+        }
+        image::imageops::resize(&image, width, height, image::imageops::FilterType::Lanczos3)
+    }
+
+    fn render_export(&self) -> Result<RgbaImage, EditorError> {
         let base = self.export_base();
         let factor = self.source_upscale.factor();
         if factor == 1 {
@@ -229,6 +250,15 @@ impl EditorState {
             .background
             .layout(width.saturating_mul(factor), height.saturating_mul(factor));
         (layout.width.ceil() as u32, layout.height.ceil() as u32)
+    }
+
+    /// The pixels the export file will have under `mode`: a platform frame
+    /// preset's fixed size, else the composed canvas.
+    pub(crate) fn export_dimensions(&self, mode: SourceUpscale) -> (u32, u32) {
+        match self.background.frame_size {
+            Some(size) if self.background.frame_aspect.is_some() => size,
+            _ => self.upscale_output_dimensions(mode),
+        }
     }
 
     /// Why `mode` cannot enhance this document, or `None` when it can. The
