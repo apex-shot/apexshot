@@ -165,13 +165,14 @@ const IMAGE_EDITOR_TYPE_CSS: &str = r#"
         .image-editor-upscale-title {
             font-size: 16px;
         }
-        .image-editor-upscale-subtitle,
-        .image-editor-upscale-dims,
-        .image-editor-upscale-message {
+        .image-editor-upscale-meta-line,
+        .image-editor-upscale-message,
+        togglebutton.image-editor-upscale-seg-button,
+        togglebutton.image-editor-upscale-seg-button label {
             font-size: 13px;
         }
-        .image-editor-upscale-badge {
-            font-size: 11px;
+        .image-editor-upscale-free {
+            font-size: 12px;
         }
         "#;
 

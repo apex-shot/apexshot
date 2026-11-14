@@ -2180,42 +2180,60 @@ button.image-editor-confirm-continue:active {
 
 /* ── Enhancement comparison sheet ──────────────────────────────────── */
 
+/* Sheets live in the window overlay, outside the editor root, so they restate
+ * its typeface instead of falling back to the platform font. */
+.image-editor-confirm-scrim {
+    font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
+}
+
 .image-editor-upscale-card {
-    padding: 18px 18px 16px;
-    background: #1c1c1e;
+    background: #19191b;
     border: 1px solid rgba(255, 255, 255, 0.10);
     border-radius: 14px;
-    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+    box-shadow: 0 28px 72px rgba(0, 0, 0, 0.50);
 }
 
 .image-editor-upscale-card.editor-theme-light {
     background: #ffffff;
     border-color: rgba(17, 24, 39, 0.10);
-    box-shadow: 0 24px 64px rgba(17, 24, 39, 0.18);
+    box-shadow: 0 28px 72px rgba(17, 24, 39, 0.20);
+}
+
+.image-editor-upscale-header {
+    padding: 14px 14px 14px 20px;
 }
 
 .image-editor-upscale-title {
-    color: rgba(255, 255, 255, 0.94);
+    color: rgba(255, 255, 255, 0.95);
     font-size: 15px;
     font-weight: 600;
 }
 
-.image-editor-upscale-subtitle,
-.image-editor-upscale-dims {
-    color: rgba(255, 255, 255, 0.56);
+.image-editor-upscale-meta-line {
+    color: rgba(255, 255, 255, 0.50);
     font-size: 12px;
+    font-feature-settings: "tnum";
+}
+
+.image-editor-upscale-free {
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: rgba(255, 103, 13, 0.14);
+    color: #ff9250;
+    font-size: 11px;
+    font-weight: 600;
 }
 
 button.image-editor-upscale-close {
-    min-width: 28px;
-    min-height: 28px;
+    min-width: 30px;
+    min-height: 30px;
     padding: 0;
     border: none;
     border-radius: 999px;
     background: transparent;
     background-image: none;
     box-shadow: none;
-    color: rgba(255, 255, 255, 0.62);
+    color: rgba(255, 255, 255, 0.60);
 }
 
 button.image-editor-upscale-close:hover {
@@ -2223,42 +2241,69 @@ button.image-editor-upscale-close:hover {
     color: #ffffff;
 }
 
-.image-editor-upscale-card togglebutton.image-editor-bg-tab {
-    min-width: 52px;
-}
-
 .image-editor-upscale-stage {
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 10px;
-    background: #0f0f10;
+    background: #0e0e10;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 }
 
-.image-editor-upscale-scroll {
+.image-editor-upscale-scroll,
+.image-editor-upscale-scroll > viewport {
     background: transparent;
 }
 
 .image-editor-upscale-message {
-    color: rgba(255, 255, 255, 0.70);
+    color: rgba(255, 255, 255, 0.62);
     font-size: 13px;
-}
-
-.image-editor-upscale-badge {
-    padding: 3px 9px;
-    border-radius: 999px;
-    background: rgba(0, 0, 0, 0.62);
-    color: rgba(255, 255, 255, 0.92);
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.4px;
-}
-
-.image-editor-upscale-badge-accent {
-    background: #ff670d;
-    color: #ffffff;
 }
 
 .image-editor-upscale-card spinner {
     color: #ff670d;
+}
+
+.image-editor-upscale-footer {
+    padding: 12px 16px;
+}
+
+.image-editor-upscale-seg {
+    margin-right: 4px;
+    padding: 2px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+}
+
+togglebutton.image-editor-upscale-seg-button {
+    min-width: 40px;
+    min-height: 26px;
+    padding: 0 10px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: rgba(255, 255, 255, 0.58);
+    font-size: 12px;
+    font-weight: 500;
+}
+
+togglebutton.image-editor-upscale-seg-button label {
+    color: inherit;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+togglebutton.image-editor-upscale-seg-button:hover {
+    color: rgba(255, 255, 255, 0.92);
+}
+
+togglebutton.image-editor-upscale-seg-button:checked,
+togglebutton.image-editor-upscale-seg-button:checked:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+}
+
+togglebutton.image-editor-upscale-seg-button:disabled {
+    color: rgba(255, 255, 255, 0.24);
 }
 
 .image-editor-upscale-card button.image-editor-confirm-continue:disabled {
@@ -2270,10 +2315,14 @@ button.image-editor-upscale-close:hover {
     color: #1d2129;
 }
 
-.image-editor-upscale-card.editor-theme-light .image-editor-upscale-subtitle,
-.image-editor-upscale-card.editor-theme-light .image-editor-upscale-dims,
+.image-editor-upscale-card.editor-theme-light .image-editor-upscale-meta-line,
 .image-editor-upscale-card.editor-theme-light .image-editor-upscale-message {
-    color: rgba(17, 24, 39, 0.62);
+    color: rgba(17, 24, 39, 0.58);
+}
+
+.image-editor-upscale-card.editor-theme-light .image-editor-upscale-free {
+    background: rgba(255, 103, 13, 0.12);
+    color: #c2410c;
 }
 
 .image-editor-upscale-card.editor-theme-light button.image-editor-upscale-close {
@@ -2286,8 +2335,31 @@ button.image-editor-upscale-close:hover {
 }
 
 .image-editor-upscale-card.editor-theme-light .image-editor-upscale-stage {
-    border-color: rgba(17, 24, 39, 0.10);
     background: #eef0f5;
+    border-color: rgba(17, 24, 39, 0.08);
+}
+
+.image-editor-upscale-card.editor-theme-light .image-editor-upscale-seg {
+    background: rgba(17, 24, 39, 0.06);
+}
+
+.image-editor-upscale-card.editor-theme-light togglebutton.image-editor-upscale-seg-button {
+    color: rgba(17, 24, 39, 0.56);
+}
+
+.image-editor-upscale-card.editor-theme-light togglebutton.image-editor-upscale-seg-button:hover {
+    color: rgba(17, 24, 39, 0.90);
+}
+
+.image-editor-upscale-card.editor-theme-light togglebutton.image-editor-upscale-seg-button:checked,
+.image-editor-upscale-card.editor-theme-light togglebutton.image-editor-upscale-seg-button:checked:hover {
+    background: #ffffff;
+    color: #1d2129;
+    box-shadow: 0 1px 2px rgba(17, 24, 39, 0.12);
+}
+
+.image-editor-upscale-card.editor-theme-light togglebutton.image-editor-upscale-seg-button:disabled {
+    color: rgba(17, 24, 39, 0.24);
 }
 
 .image-editor-upscale-card.editor-theme-light button.image-editor-confirm-cancel {
