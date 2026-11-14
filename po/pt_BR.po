@@ -4868,3 +4868,6 @@ msgstr "Exportando {percent}%"
 msgid "Export cancelled"
 msgstr "Exportação cancelada"
 
+
+msgid "Could not render the image."
+msgstr "Não foi possível renderizar a imagem."

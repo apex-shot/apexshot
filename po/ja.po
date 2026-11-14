@@ -4776,3 +4776,6 @@ msgstr "エクスポート中 {percent}%"
 msgid "Export cancelled"
 msgstr "エクスポートをキャンセルしました"
 
+
+msgid "Could not render the image."
+msgstr "画像をレンダリングできませんでした。"

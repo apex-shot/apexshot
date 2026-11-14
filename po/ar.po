@@ -4802,3 +4802,6 @@ msgstr "جارٍ التصدير {percent}%"
 msgid "Export cancelled"
 msgstr "تم إلغاء التصدير"
 
+
+msgid "Could not render the image."
+msgstr "تعذّر عرض الصورة."
