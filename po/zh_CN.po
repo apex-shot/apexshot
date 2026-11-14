@@ -4758,3 +4758,12 @@ msgstr "导出时间"
 
 msgid "Resolution"
 msgstr "分辨率"
+
+msgid "Remove recording"
+msgstr "移除录制"
+
+msgid "This recording has no audio."
+msgstr "此录制没有音频。"
+
+msgid "Hide cursor here"
+msgstr "在此隐藏光标"

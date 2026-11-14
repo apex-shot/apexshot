@@ -11,12 +11,13 @@
 //! `trim_start_seconds`, `cuts`, `segment_starts`, `freeze_tail`, `zoom_clips`,
 //! `zoom_camera`, `cursor_hide_clips`, and the three view fields. The stage is
 //! three plain keys: the wallpaper the user picked, the inset around the video
-//! and its corner radius. A fill the panel paints itself has no key, because
-//! the Windows model holds it as a closure and a schema for gradients is a
-//! separate design. Merging the two schemas later is then a promotion rather
+//! and its corner radius, plus the panel's own fill when the background is a
+//! colour, gradient or picked picture. A fill is stored as its shape rather
+//! than as the closure the stage paints from, so the same project can be read
+//! without a renderer. Merging the two schemas later is then a promotion rather
 //! than a translation. What this editor does not model — crop, dimension,
-//! quality, extra media — has no key here, so the file never claims a feature
-//! the editor would not honour.
+//! extra media — has no key here, so the file never claims a feature the
+//! editor would not honour.
 //!
 //! The directory is its own rather than the shared `video-projects` one: the
 //! shared editor parses every file in that folder with its own loader, and a
@@ -43,9 +44,8 @@ use sha2::{Digest, Sha256};
 pub(super) const PROJECT_VERSION: u32 = 3;
 
 /// The stage behind the video as the file stores it: the wallpaper the user
-/// picked, by its bundled catalog name. A recording opened with no fill reads
-/// back with no selection, which is also how a fill the panel paints itself
-/// comes back, since that painter has no serialised form.
+/// picked, by its bundled catalog name, and the fill the panel painted itself
+/// when it is not a wallpaper.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(super) struct StageFile {
     #[serde(default)]
@@ -53,6 +53,10 @@ pub(super) struct StageFile {
     /// The frame the project was saved with; absent means the recording's own shape.
     #[serde(default)]
     pub aspect: Option<String>,
+    /// The panel's own fill: a colour, a gradient or a picked picture. Absent
+    /// in files written before it was stored, which open with no custom fill.
+    #[serde(default)]
+    pub fill: Option<super::background::FillSpec>,
 }
 
 /// The camera layer as the project file stores it: fractions of the frame, a
@@ -219,6 +223,10 @@ pub(super) struct EditorProjectFile {
     /// Each cut piece's own sound, one entry per segment.
     #[serde(default)]
     pub clip_sounds: Vec<super::sound::ClipSound>,
+    /// The export quality tier by its id. Absent reads as High, the tier the
+    /// chip starts on and the one files written before this key existed show.
+    #[serde(default)]
+    pub quality: Option<String>,
 }
 
 const DEFAULT_CLICK_SOUND_VOLUME: f64 = 0.25;
@@ -569,6 +577,7 @@ impl ProjectSync {
 
 #[cfg(test)]
 mod tests {
+    use super::super::background::{FillSpec, GradientKind, GradientStop};
     use super::super::webcam::{CameraLayout, LayoutCue, LayoutSettings};
     use super::*;
     use std::fs;
@@ -681,6 +690,7 @@ mod tests {
             cursor: super::super::presets::CursorFile::default(),
             sound: Default::default(),
             clip_sounds: Vec::new(),
+            quality: Some("ultra".to_owned()),
         }
     }
 
@@ -722,6 +732,7 @@ mod tests {
         file.background = StageFile {
             selection: Some("wallpaper-004.jpg".to_owned()),
             aspect: None,
+            fill: None,
         };
         file.background_padding = 48.0;
         file.background_radius = 6.0;
@@ -747,6 +758,7 @@ mod tests {
         file.background = StageFile {
             selection: None,
             aspect: Some("9:16".to_owned()),
+            fill: None,
         };
 
         write_at(&path, &file).unwrap();
@@ -761,6 +773,54 @@ mod tests {
         let stage: StageFile =
             serde_json::from_str(r#"{"selection":null}"#).expect("a stage without a frame reads");
         assert_eq!(stage.aspect, None);
+    }
+
+    #[test]
+    fn the_stage_fill_round_trips_through_the_project_file() {
+        let directory = scratch("stage-fill");
+        let video = recording(&directory);
+        let path = directory.join("stage-fill.json");
+        let mut file = project(&video);
+        let gradient = FillSpec::Gradient {
+            kind: GradientKind::Radial,
+            stops: vec![
+                GradientStop {
+                    position: 0.0,
+                    color: (255, 103, 13),
+                },
+                GradientStop {
+                    position: 1.0,
+                    color: (38, 70, 122),
+                },
+            ],
+            angle: 45.0,
+        };
+        file.background = StageFile {
+            selection: None,
+            aspect: None,
+            fill: Some(gradient.clone()),
+        };
+
+        write_at(&path, &file).unwrap();
+        let loaded = read_at(&path, &video).expect("project loads");
+        assert_eq!(loaded.background.fill, Some(gradient));
+
+        let image = FillSpec::Image {
+            path: directory.join("background.png"),
+        };
+        file.background.fill = Some(image.clone());
+        write_at(&path, &file).unwrap();
+        let loaded = read_at(&path, &video).expect("project loads");
+        assert_eq!(loaded.background.fill, Some(image));
+    }
+
+    #[test]
+    fn an_older_stage_without_a_fill_reads_no_fill() {
+        let stage: StageFile =
+            serde_json::from_str(r#"{"selection":"wallpaper-004.jpg","aspect":null}"#)
+                .expect("a stage without a fill reads");
+        assert_eq!(stage.selection.as_deref(), Some("wallpaper-004.jpg"));
+        assert_eq!(stage.fill, None);
     }
 
     #[test]
@@ -787,6 +847,24 @@ mod tests {
     }
 
     #[test]
+    fn a_project_without_a_quality_key_keeps_the_chip_default() {
+        let directory = scratch("quality-legacy");
+        let video = recording(&directory);
+        let path = directory.join("quality-legacy.json");
+        let mut json: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&project(&video)).unwrap()).unwrap();
+        assert!(
+            json.as_object_mut().unwrap().remove("quality").is_some(),
+            "the fixture writes the quality key"
+        );
+        fs::write(&path, serde_json::to_string(&json).unwrap()).unwrap();
+
+        let loaded = read_at(&path, &video).expect("project loads");
+        assert_eq!(loaded.quality, None);
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
     fn the_stage_is_content_where_the_view_is_not() {
         let directory = scratch("stage-content");
         let video = recording(&directory);
@@ -794,6 +872,7 @@ mod tests {
             background: StageFile {
                 selection: Some("wallpaper-004.jpg".to_owned()),
                 aspect: None,
+                fill: None,
             },
             background_padding: 48.0,
             background_radius: 6.0,

@@ -4881,3 +4881,12 @@ msgstr "Durée d'exportation"
 
 msgid "Resolution"
 msgstr "Résolution"
+
+msgid "Remove recording"
+msgstr "Supprimer l'enregistrement"
+
+msgid "This recording has no audio."
+msgstr "Cet enregistrement n'a pas de son."
+
+msgid "Hide cursor here"
+msgstr "Masquer le curseur ici"

@@ -258,14 +258,29 @@ struct ZoomCameraPlan {
     frames: Vec<CameraMotion>,
 }
 
+/// The settings that decide where the plan's movement groups sit and when the
+/// camera starts moving. Speed and smoothness are not here: they only drive the
+/// spring that integrates the frames, so changing them must not re-filter or
+/// re-group the pointer samples.
+#[derive(Clone, Copy, PartialEq)]
+struct ZoomPlanShape {
+    start_early: bool,
+    stage_aspect: f64,
+}
+
 #[derive(Default)]
 pub(super) struct ZoomCameraCache {
     clips: Option<Vec<ZoomClip>>,
     frame: Option<(f64, f64)>,
     mapping: Option<TimeMapping>,
+    shape: Option<ZoomPlanShape>,
     settings: Option<ZoomCameraSettings>,
     shake_threshold: Option<f64>,
     plan: Option<ZoomCameraPlan>,
+    /// How many times the plan was rebuilt. A drag of the spring knobs must
+    /// leave this alone.
+    #[cfg(test)]
+    plan_builds: u64,
 }
 
 impl ZoomCameraCache {
@@ -273,6 +288,7 @@ impl ZoomCameraCache {
         self.clips = None;
         self.frame = None;
         self.mapping = None;
+        self.shape = None;
         self.settings = None;
         self.shake_threshold = None;
         self.plan = None;
@@ -297,10 +313,14 @@ impl ZoomCameraCache {
         } else {
             0.0
         };
+        let shape = ZoomPlanShape {
+            start_early: settings.start_early,
+            stage_aspect: settings.stage_aspect,
+        };
         if self.clips.as_deref() != Some(clips)
             || self.frame != Some(frame)
             || self.mapping.as_ref() != Some(mapping)
-            || self.settings != Some(settings)
+            || self.shape != Some(shape)
             || self.shake_threshold != Some(shake_threshold)
             || self.plan.is_none()
         {
@@ -316,9 +336,26 @@ impl ZoomCameraCache {
             self.clips = Some(clips.to_vec());
             self.frame = Some(frame);
             self.mapping = Some(mapping.clone());
-            self.settings = Some(settings);
+            self.shape = Some(shape);
             self.shake_threshold = Some(shake_threshold);
+            #[cfg(test)]
+            {
+                self.plan_builds += 1;
+            }
+        } else if self.settings.is_none_or(|cached| {
+            cached.speed != settings.speed
+                || cached.smoothness != settings.smoothness
+                || cached.frame_rate != settings.frame_rate
+        }) {
+            if let Some(plan) = self.plan.as_mut() {
+                // Only the spring-integrated frames depend on these. Keep the
+                // groups the plan built and drop the frames so they integrate
+                // again with the new spring.
+                plan.settings = settings;
+                plan.frames.truncate(1);
+            }
         }
+        self.settings = Some(settings);
         self.plan
             .as_mut()
             .map(|plan| plan.evaluate(time))
@@ -2090,6 +2127,51 @@ mod tests {
         assert!(
             (filtered.0 - unfiltered.0).abs() + (filtered.1 - unfiltered.1).abs() > 1.0,
             "a new threshold must rebuild the plan: {filtered:?} vs {unfiltered:?}"
+        );
+    }
+
+    #[test]
+    fn changing_only_the_spring_knobs_reuses_the_grouped_plan() {
+        let frame = (640.0, 480.0);
+        let clips = [auto_clip(0.5, 4.0, 2.0, (320.0, 240.0))];
+        let sidecar = sidecar((640, 480), &[(0.5, 500.0, 240.0), (3.0, 500.0, 240.0)]);
+        let identity = TimeMapping::default();
+        let mut cache = ZoomCameraCache::default();
+        let evaluate = |cache: &mut ZoomCameraCache, settings: ZoomCameraSettings| {
+            cache.evaluate(
+                &clips,
+                frame,
+                &identity,
+                settings,
+                DEFAULT_REMOVE_SHAKE_THRESHOLD,
+                2.0,
+                || Some(sidecar.clone()),
+            )
+        };
+        let default = ZoomCameraSettings::default();
+        let _ = evaluate(&mut cache, default);
+        assert_eq!(cache.plan_builds, 1);
+        let _ = evaluate(
+            &mut cache,
+            ZoomCameraSettings {
+                speed: 2.0,
+                ..default
+            },
+        );
+        assert_eq!(
+            cache.plan_builds, 1,
+            "a speed change must reuse the grouped plan"
+        );
+        let _ = evaluate(
+            &mut cache,
+            ZoomCameraSettings {
+                smoothness: 0.9,
+                ..default
+            },
+        );
+        assert_eq!(
+            cache.plan_builds, 1,
+            "a smoothness change must reuse the grouped plan"
         );
     }
 

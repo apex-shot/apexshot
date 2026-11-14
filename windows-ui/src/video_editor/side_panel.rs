@@ -63,7 +63,8 @@ pub(super) fn build_tools_column(
     pages.set_hexpand(false);
     pages.set_vexpand(true);
     pages.set_size_request((TOOL_COLUMN_WIDTH as f64 * scale).round() as i32, -1);
-    let (background_panel, _, _, _) = build_background_panel(scale, window, background, &column);
+    let (background_panel, _, _, _) =
+        build_background_panel(scale, window, background, &column, timeline);
     pages.add_named(&background_panel, Some("background"));
     pages.add_named(
         &build_cursor_panel(scale, cursor, cursor_repaint, timeline.clone()),
@@ -229,6 +230,7 @@ fn build_background_panel(
     window: &ApplicationWindow,
     background: Background,
     column: &GtkBox,
+    timeline: &super::timeline::Timeline,
 ) -> (GtkBox, GtkBox, FilledSlider, FilledSlider) {
     let body = panel_body();
     body.set_vexpand(false);
@@ -264,7 +266,7 @@ fn build_background_panel(
     source_pages.set_valign(Align::Start);
     source_pages.set_hexpand(true);
     let (wallpaper_page, wallpaper_scroll) =
-        build_wallpaper_page(scale, choice_buttons.clone(), background.clone());
+        build_wallpaper_page(scale, choice_buttons.clone(), background.clone(), timeline);
     wallpaper_page.set_visible(true);
     let select_custom = {
         let choices = choice_buttons.clone();
@@ -279,7 +281,7 @@ fn build_background_panel(
     let custom_page =
         super::custom_fill::build_custom_page(scale, column, &background, select_custom);
     custom_page.widget.set_visible(false);
-    let (image_page, reset_image) = build_image_page(scale, window, &background);
+    let (image_page, sync_image) = build_image_page(scale, window, &background, timeline);
     image_page.set_visible(false);
     source_pages.append(&wallpaper_page);
     source_pages.append(&custom_page.widget);
@@ -357,13 +359,13 @@ fn build_background_panel(
     let wallpaper_scroll_for_none = wallpaper_scroll.clone();
     let background_for_none = background.clone();
     let sync_none_for_click = sync_none.clone();
-    let reset_image_for_none = reset_image.clone();
+    let sync_image_for_none = sync_image.clone();
     none.connect_clicked(move |_| {
         for card in choices_for_none.borrow().iter() {
             card.set_active(false);
         }
         clear_custom();
-        reset_image_for_none();
+        sync_image_for_none();
         background_for_none.select(None);
         sync_none_for_click();
         let adjustment = wallpaper_scroll_for_none.vadjustment();
@@ -373,7 +375,7 @@ fn build_background_panel(
     let frame_section = webcam_section(scale, &t("Frame"), true);
     let padding_slider = value_slider_control(
         &t("Padding"),
-        0.0,
+        background::MIN_PADDING,
         80.0,
         background.padding(),
         1.0,
@@ -401,11 +403,42 @@ fn build_background_panel(
     frame_section.body.append(&radius_slider.widget());
     body.append(&frame_section.root);
 
+    // One drag is one undo step: the look is taken when the drag starts and
+    // recorded when it ends, so the values in between do not each add a step.
+    for (slider, before) in [
+        (
+            &padding_slider,
+            Rc::new(RefCell::new(None::<super::timeline::Look>)),
+        ),
+        (
+            &radius_slider,
+            Rc::new(RefCell::new(None::<super::timeline::Look>)),
+        ),
+    ] {
+        slider.on_interaction(
+            {
+                let timeline = timeline.clone();
+                let before = before.clone();
+                Rc::new(move || *before.borrow_mut() = timeline.look_before_change())
+            },
+            {
+                let timeline = timeline.clone();
+                let before = before.clone();
+                Rc::new(move || {
+                    let before = before.borrow_mut().take();
+                    timeline.record_look_change(before);
+                })
+            },
+        );
+    }
+
     {
         let state = background.state();
         let choices = choice_buttons.clone();
         let padding = padding_slider.clone();
         let radius = radius_slider.clone();
+        let sync_custom = custom_page.sync.clone();
+        let sync_image = sync_image.clone();
         background.connect(Rc::new(move || {
             padding.set_value(state.padding());
             radius.set_value(state.radius());
@@ -414,6 +447,11 @@ fn build_background_panel(
             for (card, file_name) in cards.iter().zip(background::WALLPAPERS) {
                 card.set_active(selection.as_deref() == Some(file_name));
             }
+            // The Custom and Image rows are views of the same model: an open,
+            // a preset or an undo must move them with the stage rather than
+            // leave the last document's fill selected.
+            sync_custom();
+            sync_image();
         }));
     }
 
@@ -425,6 +463,7 @@ fn build_wallpaper_page(
     scale: f64,
     choices: Rc<RefCell<Vec<ToggleButton>>>,
     background: Background,
+    timeline: &super::timeline::Timeline,
 ) -> (GtkBox, ScrolledWindow) {
     let page = GtkBox::new(Orientation::Vertical, 0);
     page.set_hexpand(true);
@@ -479,9 +518,12 @@ fn build_wallpaper_page(
         let selected = file_name.to_owned();
         card.connect_clicked({
             let background = background.clone();
+            let timeline = timeline.clone();
             move |card| {
                 if card.is_active() {
+                    let before = timeline.look_before_change();
                     background.select(Some(&selected));
+                    timeline.record_look_change(before);
                 }
             }
         });
@@ -507,6 +549,7 @@ fn build_image_page(
     scale: f64,
     window: &ApplicationWindow,
     background: &Background,
+    timeline: &super::timeline::Timeline,
 ) -> (GtkBox, Rc<dyn Fn()>) {
     let page = GtkBox::new(Orientation::Vertical, 8);
     page.set_hexpand(true);
@@ -528,13 +571,43 @@ fn build_image_page(
     picker.set_child(Some(&inner));
     page.append(&picker);
 
-    let reset: Rc<dyn Fn()> = {
+    // The row is a view of the model: every stage change resets it to the
+    // picture the project holds, or to the empty prompt. The last path avoids
+    // decoding the same file on every slider tick.
+    let shown: Rc<RefCell<Option<PathBuf>>> = Rc::new(RefCell::new(None));
+    let sync: Rc<dyn Fn()> = {
+        let state = background.state();
         let label = label.clone();
         let icon = icon.clone();
+        let shown = shown.clone();
         Rc::new(move || {
-            label.set_text(&t("Select image…"));
-            icon.set_icon_name(Some(icon_names::custom::IMAGE_ALT_SYMBOLIC));
-            icon.set_pixel_size((15.0 * scale).round() as i32);
+            let path = match state.fill_spec() {
+                Some(background::FillSpec::Image { path }) => Some(path),
+                _ => None,
+            };
+            if *shown.borrow() == path {
+                return;
+            }
+            *shown.borrow_mut() = path.clone();
+            match path {
+                Some(path) => {
+                    label.set_text(&path.file_name().map_or_else(
+                        || t("Background image"),
+                        |name| name.to_string_lossy().to_string(),
+                    ));
+                    if let Some(pixbuf) = super::background::load_picture(&path) {
+                        icon.set_from_pixbuf(Some(&thumbnail_pixbuf(&pixbuf, scale)));
+                    } else {
+                        icon.set_icon_name(Some(icon_names::custom::IMAGE_ALT_SYMBOLIC));
+                        icon.set_pixel_size((15.0 * scale).round() as i32);
+                    }
+                }
+                None => {
+                    label.set_text(&t("Select image…"));
+                    icon.set_icon_name(Some(icon_names::custom::IMAGE_ALT_SYMBOLIC));
+                    icon.set_pixel_size((15.0 * scale).round() as i32);
+                }
+            }
         })
     };
     let choose = {
@@ -542,16 +615,21 @@ fn build_image_page(
         let label = label.clone();
         let icon = icon.clone();
         let background = background.clone();
+        let shown = shown.clone();
+        let timeline = timeline.clone();
         Rc::new(move || {
             let label = label.clone();
             let icon = icon.clone();
             let background = background.clone();
+            let shown = shown.clone();
+            let timeline = timeline.clone();
             let scale = scale;
             choose_background_image(&window, move |picked| {
                 let pixbuf = super::background::load_picture(&picked);
                 let Some(pixbuf) = pixbuf else {
                     return;
                 };
+                *shown.borrow_mut() = Some(picked.clone());
                 label.set_text(&picked.file_name().map_or_else(
                     || t("Background image"),
                     |name| name.to_string_lossy().to_string(),
@@ -559,14 +637,14 @@ fn build_image_page(
                 icon.set_from_pixbuf(Some(&thumbnail_pixbuf(&pixbuf, scale)));
                 // The stage paints the picture itself from here: the same slot the
                 // Custom tab uses, so a picture and a color never both apply.
-                background.set_custom_fill(Some(Rc::new(move |context, width, height| {
-                    super::background::paint_cover(context, width, height, &pixbuf);
-                })));
+                let before = timeline.look_before_change();
+                background.set_custom_fill(Some(background::FillSpec::Image { path: picked }));
+                timeline.record_look_change(before);
             });
         })
     };
     picker.connect_clicked(move |_| choose());
-    (page, reset)
+    (page, sync)
 }
 
 /// The row's own preview of the picked picture, small enough to sit where the
@@ -587,6 +665,34 @@ fn update_cursor_settings(
     update(&mut settings);
     cursor.set_settings(settings);
     repaint();
+}
+
+/// Apply a cursor-look edit as one undo step, so Ctrl+Z takes it back instead
+/// of an earlier timeline edit.
+fn update_cursor_look(
+    timeline: &super::timeline::Timeline,
+    cursor: &super::cursor::CursorModel,
+    repaint: &Rc<dyn Fn()>,
+    update: impl FnOnce(&mut CursorSettings),
+) {
+    timeline.record_cursor_look_edit();
+    update_cursor_settings(cursor, repaint, update);
+}
+
+/// Make a cursor slider's whole drag one undo step: the step is taken when the
+/// drag starts and recorded when it ends.
+fn cursor_look_slider(timeline: &super::timeline::Timeline, slider: FilledSlider) -> FilledSlider {
+    slider.on_interaction(
+        {
+            let timeline = timeline.clone();
+            Rc::new(move || timeline.begin_cursor_look_edit())
+        },
+        {
+            let timeline = timeline.clone();
+            Rc::new(move || timeline.end_cursor_look_edit())
+        },
+    );
+    slider
 }
 
 fn build_cursor_panel(
@@ -682,10 +788,28 @@ fn build_cursor_panel(
             effects_page.append(&clicks.root);
             effects_page.append(&keyboard.root);
             effects_page.append(&typing.root);
+            let settings = cursor.settings();
+            let focused = preset_card(&t("Focused"), &t("Tighter, faster"), scale);
+            let smooth = preset_card(&t("Smooth"), &t("Softer follow"), scale);
+            smooth.set_group(Some(&focused));
+            let active_preset = settings.matching_motion_preset();
+            focused.set_active(active_preset == Some(CursorMotionStyle::Focused));
+            smooth.set_active(active_preset == Some(CursorMotionStyle::Smooth));
+            let sync_presets: Rc<dyn Fn(&CursorSettings)> = {
+                let focused = focused.clone();
+                let smooth = smooth.clone();
+                Rc::new(move |settings| {
+                    let active = settings.matching_motion_preset();
+                    focused.set_active(active == Some(CursorMotionStyle::Focused));
+                    smooth.set_active(active == Some(CursorMotionStyle::Smooth));
+                })
+            };
             let size_slider = build_cursor_style_page(
                 scale,
                 cursor.clone(),
                 repaint.clone(),
+                &timeline,
+                &sync_presets,
                 &picker,
                 &style.body,
             );
@@ -693,7 +817,11 @@ fn build_cursor_panel(
                 scale,
                 cursor.clone(),
                 repaint.clone(),
+                &timeline,
                 size_slider,
+                focused,
+                smooth,
+                &sync_presets,
                 &style.body,
                 &movement.body,
                 &rotation.body,
@@ -727,6 +855,8 @@ fn build_cursor_style_page(
     scale: f64,
     cursor: super::cursor::CursorModel,
     repaint: Rc<dyn Fn()>,
+    timeline: &super::timeline::Timeline,
+    sync_presets: &Rc<dyn Fn(&CursorSettings)>,
     picker: &GtkBox,
     style: &GtkBox,
 ) -> FilledSlider {
@@ -749,9 +879,12 @@ fn build_cursor_style_page(
         card.connect_clicked({
             let cursor = cursor.clone();
             let repaint = repaint.clone();
+            let timeline = timeline.clone();
             move |card| {
-                if card.is_active() {
-                    update_cursor_settings(&cursor, &repaint, |settings| settings.theme = theme);
+                if card.is_active() && cursor.settings().theme != theme {
+                    update_cursor_look(&timeline, &cursor, &repaint, |settings| {
+                        settings.theme = theme
+                    });
                 }
             }
         });
@@ -761,31 +894,41 @@ fn build_cursor_style_page(
     // The sprite art is 48 pixels across, so anything past 2x is a magnified
     // picture; the shared model still clamps to 3.0 for platforms with finer
     // art.
-    let size_slider = cursor_slider(
-        &t("Size"),
-        0.5,
-        2.0,
-        settings.size,
-        0.05,
-        1,
-        scale,
-        cursor.clone(),
-        repaint.clone(),
-        |settings, value| settings.size = value,
-    );
-    style.append(&size_slider.widget());
-    style.append(
-        &cursor_slider(
-            &t("Shadow"),
-            0.0,
-            1.0,
-            settings.shadow,
+    let size_sync = sync_presets.clone();
+    let size_slider = cursor_look_slider(
+        timeline,
+        cursor_slider(
+            &t("Size"),
+            0.5,
+            2.0,
+            settings.size,
             0.05,
             1,
             scale,
-            cursor,
-            repaint,
-            |settings, value| settings.shadow = value,
+            cursor.clone(),
+            repaint.clone(),
+            move |settings, value| {
+                settings.size = value;
+                size_sync(settings);
+            },
+        ),
+    );
+    style.append(&size_slider.widget());
+    style.append(
+        &cursor_look_slider(
+            timeline,
+            cursor_slider(
+                &t("Shadow"),
+                0.0,
+                1.0,
+                settings.shadow,
+                0.05,
+                1,
+                scale,
+                cursor,
+                repaint,
+                |settings, value| settings.shadow = value,
+            ),
         )
         .widget(),
     );
@@ -797,7 +940,11 @@ fn build_cursor_follow_page(
     scale: f64,
     cursor: super::cursor::CursorModel,
     repaint: Rc<dyn Fn()>,
+    timeline: &super::timeline::Timeline,
     size_slider: FilledSlider,
+    focused: ToggleButton,
+    smooth: ToggleButton,
+    sync_presets: &Rc<dyn Fn(&CursorSettings)>,
     style: &GtkBox,
     movement: &GtkBox,
     rotation: &GtkBox,
@@ -807,39 +954,47 @@ fn build_cursor_follow_page(
 
     let presets = GtkBox::new(Orientation::Horizontal, 8);
     presets.set_homogeneous(true);
-    let focused = preset_card(&t("Focused"), &t("Tighter, faster"), scale);
-    let smooth = preset_card(&t("Smooth"), &t("Softer follow"), scale);
-    smooth.set_group(Some(&focused));
-    let active_preset = settings.matching_motion_preset();
-    focused.set_active(active_preset == Some(CursorMotionStyle::Focused));
-    smooth.set_active(active_preset == Some(CursorMotionStyle::Smooth));
     presets.append(&focused);
     presets.append(&smooth);
     movement.append(&presets);
-    let smoothing_slider = cursor_slider(
-        &t("Smoothing"),
-        0.0,
-        1.0,
-        settings.smooth,
-        0.05,
-        1,
-        scale,
-        cursor.clone(),
-        repaint.clone(),
-        |settings, value| settings.smooth = value,
+    let smoothing_sync = sync_presets.clone();
+    let smoothing_slider = cursor_look_slider(
+        timeline,
+        cursor_slider(
+            &t("Smoothing"),
+            0.0,
+            1.0,
+            settings.smooth,
+            0.05,
+            1,
+            scale,
+            cursor.clone(),
+            repaint.clone(),
+            move |settings, value| {
+                settings.smooth = value;
+                smoothing_sync(settings);
+            },
+        ),
     );
     movement.append(&smoothing_slider.widget());
-    let speed_slider = cursor_slider(
-        &t("Speed"),
-        0.25,
-        3.0,
-        settings.speed,
-        0.05,
-        1,
-        scale,
-        cursor.clone(),
-        repaint.clone(),
-        |settings, value| settings.speed = value,
+    let speed_sync = sync_presets.clone();
+    let speed_slider = cursor_look_slider(
+        timeline,
+        cursor_slider(
+            &t("Speed"),
+            0.25,
+            3.0,
+            settings.speed,
+            0.05,
+            1,
+            scale,
+            cursor.clone(),
+            repaint.clone(),
+            move |settings, value| {
+                settings.speed = value;
+                speed_sync(settings);
+            },
+        ),
     );
     movement.append(&speed_slider.widget());
 
@@ -852,17 +1007,20 @@ fn build_cursor_follow_page(
     );
     rotation_modes.widget().set_hexpand(true);
     rotation.append(rotation_modes.widget());
-    let tilt_slider = cursor_slider(
-        &t("Tilt amount"),
-        0.0,
-        1.0,
-        settings.rotate_on_x_movement_ratio,
-        0.05,
-        2,
-        scale,
-        cursor.clone(),
-        repaint.clone(),
-        |settings, value| settings.rotate_on_x_movement_ratio = value,
+    let tilt_slider = cursor_look_slider(
+        timeline,
+        cursor_slider(
+            &t("Tilt amount"),
+            0.0,
+            1.0,
+            settings.rotate_on_x_movement_ratio,
+            0.05,
+            2,
+            scale,
+            cursor.clone(),
+            repaint.clone(),
+            |settings, value| settings.rotate_on_x_movement_ratio = value,
+        ),
     );
     rotation.append(&tilt_slider.widget());
     let tilt_widget = tilt_slider.widget().clone();
@@ -871,28 +1029,34 @@ fn build_cursor_follow_page(
         let rotation_modes = rotation_modes.clone();
         let cursor = cursor.clone();
         let repaint = repaint.clone();
+        let timeline = timeline.clone();
         let tilt_widget = tilt_widget.clone();
         move || {
             let mode = rotation_modes
                 .active_id()
                 .map(|id| CursorRotationMode::parse(&id))
                 .unwrap_or_default();
-            update_cursor_settings(&cursor, &repaint, |settings| settings.rotation_mode = mode);
+            update_cursor_look(&timeline, &cursor, &repaint, |settings| {
+                settings.rotation_mode = mode
+            });
             tilt_widget.set_sensitive(mode == CursorRotationMode::Velocity);
         }
     });
     rotation.append(
-        &cursor_slider(
-            &t("Base angle"),
-            -180.0,
-            180.0,
-            settings.base_rotation_deg,
-            5.0,
-            0,
-            scale,
-            cursor.clone(),
-            repaint.clone(),
-            |settings, value| settings.base_rotation_deg = value,
+        &cursor_look_slider(
+            timeline,
+            cursor_slider(
+                &t("Base angle"),
+                -180.0,
+                180.0,
+                settings.base_rotation_deg,
+                5.0,
+                0,
+                scale,
+                cursor.clone(),
+                repaint.clone(),
+                |settings, value| settings.base_rotation_deg = value,
+            ),
         )
         .widget(),
     );
@@ -904,19 +1068,26 @@ fn build_cursor_follow_page(
         button.connect_clicked({
             let cursor = cursor.clone();
             let repaint = repaint.clone();
+            let timeline = timeline.clone();
             let size_slider = size_slider.clone();
             let smoothing_slider = smoothing_slider.clone();
             let speed_slider = speed_slider.clone();
+            let sync_presets = sync_presets.clone();
             move |button| {
                 if !button.is_active() {
                     return;
                 }
                 let mut settings = cursor.settings();
                 settings.apply_motion_preset(style);
+                if settings == cursor.settings() {
+                    return;
+                }
+                timeline.record_cursor_look_edit();
                 cursor.set_settings(settings);
                 size_slider.set_value(settings.size);
                 smoothing_slider.set_value(settings.smooth);
                 speed_slider.set_value(settings.speed);
+                sync_presets(&settings);
                 repaint();
             }
         });
@@ -935,8 +1106,9 @@ fn build_cursor_follow_page(
     always_default.connect_state_set({
         let cursor = cursor.clone();
         let repaint = repaint.clone();
+        let timeline = timeline.clone();
         move |_, use_default| {
-            update_cursor_settings(&cursor, &repaint, |settings| {
+            update_cursor_look(&timeline, &cursor, &repaint, |settings| {
                 settings.always_use_default = use_default
             });
             gtk4::glib::Propagation::Proceed
@@ -959,10 +1131,11 @@ fn build_cursor_follow_page(
     remove_shake.connect_state_set({
         let cursor = cursor.clone();
         let repaint = repaint.clone();
+        let timeline = timeline.clone();
         move |_, active| {
             // The studied panel turns the filter off by writing zero and back
             // on at its default threshold.
-            update_cursor_settings(&cursor, &repaint, |settings| {
+            update_cursor_look(&timeline, &cursor, &repaint, |settings| {
                 settings.remove_shake_threshold = if active {
                     crate::recording::editor::cursor_shake::DEFAULT_REMOVE_SHAKE_THRESHOLD
                 } else {
@@ -989,8 +1162,11 @@ fn build_cursor_follow_page(
     idle.connect_state_set({
         let cursor = cursor.clone();
         let repaint = repaint.clone();
+        let timeline = timeline.clone();
         move |_, hide_idle| {
-            update_cursor_settings(&cursor, &repaint, |settings| settings.hide_idle = hide_idle);
+            update_cursor_look(&timeline, &cursor, &repaint, |settings| {
+                settings.hide_idle = hide_idle
+            });
             gtk4::glib::Propagation::Proceed
         }
     });
@@ -998,47 +1174,27 @@ fn build_cursor_follow_page(
     idle_row.append(&idle);
     visibility.append(&idle_row);
     visibility.append(
-        &cursor_slider(
-            &t("Idle delay"),
-            120.0,
-            5000.0,
-            settings.idle_ms,
-            40.0,
-            0,
-            scale,
-            cursor.clone(),
-            repaint.clone(),
-            |settings, value| settings.idle_ms = value,
+        &cursor_look_slider(
+            timeline,
+            cursor_slider(
+                &t("Idle delay"),
+                120.0,
+                5000.0,
+                settings.idle_ms,
+                40.0,
+                0,
+                scale,
+                cursor.clone(),
+                repaint.clone(),
+                |settings, value| settings.idle_ms = value,
+            ),
         )
         .widget(),
     );
 
-    let loop_row = GtkBox::new(Orientation::Horizontal, 8);
-    loop_row.add_css_class("recording-editor-zoom-classic");
-    let loop_label = Label::new(Some(&t("Loop cursor position")));
-    loop_label.add_css_class("recording-editor-zoom-classic-label");
-    loop_label.set_hexpand(true);
-    loop_label.set_xalign(0.0);
-    let loop_switch = Switch::new();
-    loop_switch.add_css_class("recording-editor-zoom-switch");
-    loop_switch.set_active(settings.loop_position_before_end_ms.is_some());
-    loop_switch.set_halign(Align::End);
-    loop_switch.connect_state_set({
-        let cursor = cursor.clone();
-        let repaint = repaint.clone();
-        move |_, active| {
-            // The studied panel turns the loop on one second before the end.
-            update_cursor_settings(&cursor, &repaint, |settings| {
-                settings.loop_position_before_end_ms = if active { Some(1000.0) } else { None };
-            });
-            gtk4::glib::Propagation::Proceed
-        }
-    });
-    loop_row.append(&loop_label);
-    loop_row.append(&loop_switch);
-    visibility.append(&loop_row);
-    visibility.append(
-        &cursor_slider(
+    let loop_slider = cursor_look_slider(
+        timeline,
+        cursor_slider(
             &t("Loop before end"),
             1000.0,
             4000.0,
@@ -1053,21 +1209,65 @@ fn build_cursor_follow_page(
                     settings.loop_position_before_end_ms = Some(value);
                 }
             },
-        )
-        .widget(),
+        ),
     );
+    // The loop distance only applies while the loop is on, so it is dead
+    // while the switch is off rather than silently doing nothing.
+    loop_slider
+        .widget()
+        .set_sensitive(settings.loop_position_before_end_ms.is_some());
+
+    let loop_row = GtkBox::new(Orientation::Horizontal, 8);
+    loop_row.add_css_class("recording-editor-zoom-classic");
+    let loop_label = Label::new(Some(&t("Loop cursor position")));
+    loop_label.add_css_class("recording-editor-zoom-classic-label");
+    loop_label.set_hexpand(true);
+    loop_label.set_xalign(0.0);
+    let loop_switch = Switch::new();
+    loop_switch.add_css_class("recording-editor-zoom-switch");
+    loop_switch.set_active(settings.loop_position_before_end_ms.is_some());
+    loop_switch.set_halign(Align::End);
+    loop_switch.connect_state_set({
+        let cursor = cursor.clone();
+        let repaint = repaint.clone();
+        let timeline = timeline.clone();
+        let loop_slider = loop_slider.clone();
+        move |_, active| {
+            // The studied panel turns the loop on one second before the end.
+            update_cursor_look(&timeline, &cursor, &repaint, |settings| {
+                settings.loop_position_before_end_ms = if active { Some(1000.0) } else { None };
+            });
+            // The slider follows the value the switch just wrote, so the two
+            // controls never disagree.
+            loop_slider.set_value(
+                cursor
+                    .settings()
+                    .loop_position_before_end_ms
+                    .unwrap_or(1000.0),
+            );
+            loop_slider.widget().set_sensitive(active);
+            gtk4::glib::Propagation::Proceed
+        }
+    });
+    loop_row.append(&loop_label);
+    loop_row.append(&loop_switch);
+    visibility.append(&loop_row);
+    visibility.append(&loop_slider.widget());
     visibility.append(
-        &cursor_slider(
-            &t("Stop at the end"),
-            0.0,
-            5000.0,
-            settings.stop_movement_in_last_part_ms,
-            50.0,
-            0,
-            scale,
-            cursor,
-            repaint,
-            |settings, value| settings.stop_movement_in_last_part_ms = value,
+        &cursor_look_slider(
+            timeline,
+            cursor_slider(
+                &t("Stop at the end"),
+                0.0,
+                5000.0,
+                settings.stop_movement_in_last_part_ms,
+                50.0,
+                0,
+                scale,
+                cursor,
+                repaint,
+                |settings, value| settings.stop_movement_in_last_part_ms = value,
+            ),
         )
         .widget(),
     );
@@ -1397,7 +1597,12 @@ fn build_typing_suggestions(
             for &(start, end) in &suggestions {
                 let card = GtkBox::new(Orientation::Vertical, (6.0 * scale).round() as i32);
                 card.add_css_class("recording-editor-zoom-classic");
-                let range = Label::new(Some(&format!("{} · {start:.1}s – {end:.1}s", t("Typing"))));
+                let shown_start = timeline.composition_time_for_source(start).unwrap_or(start);
+                let shown_end = timeline.composition_time_for_source(end).unwrap_or(end);
+                let range = Label::new(Some(&format!(
+                    "{} · {shown_start:.1}s – {shown_end:.1}s",
+                    t("Typing")
+                )));
                 range.add_css_class("recording-editor-zoom-classic-label");
                 range.set_xalign(0.0);
                 card.append(&range);
@@ -1835,7 +2040,10 @@ fn webcam_editing_controls(state: &super::timeline::WebcamPanelState) -> WebcamC
     let editing = webcam_editing_layout(state);
     let camera_options = matches!(
         editing,
-        CameraLayout::CameraOverlay | CameraLayout::SplitScreen | CameraLayout::CameraCutout
+        CameraLayout::CameraOverlay
+            | CameraLayout::SplitScreen
+            | CameraLayout::CameraCutout
+            | CameraLayout::FullscreenCamera
     );
     WebcamControlUse {
         overlay: editing == CameraLayout::CameraOverlay,
@@ -2980,7 +3188,15 @@ fn build_webcam_overlay(
         let button = webcam_shape_button(label, chip_height);
         let set_aspect = actions.set_aspect.clone();
         let value = *value;
-        button.connect_clicked(move |_| set_aspect(value));
+        button.connect_clicked(move |button| {
+            // A chip is not in a group, so clicking the selected one toggles
+            // it off while the camera keeps that aspect. Put it back instead.
+            if !button.is_active() {
+                button.set_active(true);
+                return;
+            }
+            set_aspect(value);
+        });
         aspect_grid.attach(&button, index as i32, 0, 1, 1);
         aspects.push(button);
     }
@@ -3333,6 +3549,7 @@ struct WebcamCameraContext {
     delay: FilledSlider,
     silence: Switch,
     silence_length: FilledSlider,
+    has_audio: Rc<dyn Fn() -> Option<bool>>,
 }
 
 impl WebcamCameraContext {
@@ -3345,9 +3562,28 @@ impl WebcamCameraContext {
         self.silence_length
             .widget()
             .set_visible(hide_during_silence.is_some());
+        sync_silence_switch(&self.silence, self.has_audio.as_ref());
     }
 }
 
+/// A recording with no audio cannot hide anything, so the switch says so
+/// instead of silently doing nothing. The analysis runs after the document
+/// opens, so the answer is read again whenever the panel refreshes or shows.
+fn sync_silence_switch(silence: &Switch, has_audio: &dyn Fn() -> Option<bool>) {
+    // A switch already on stays usable so it can still be turned off; it was
+    // set before the analysis landed or by a preset.
+    if has_audio() == Some(false) && !silence.is_active() {
+        silence.set_sensitive(false);
+        silence.set_tooltip_text(Some(&t("This recording has no audio.")));
+    } else {
+        silence.set_sensitive(true);
+        silence.set_tooltip_text(Some(&t(
+            "Hide the camera while nobody is talking, and bring it back when they do.",
+        )));
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn build_webcam_camera(
     scale: f64,
     mirror: bool,
@@ -3356,6 +3592,7 @@ fn build_webcam_camera(
     set_delay: Rc<dyn Fn(f64)>,
     hide_during_silence: Option<f64>,
     set_silence: Rc<dyn Fn(Option<f64>)>,
+    has_audio: Rc<dyn Fn() -> Option<bool>>,
 ) -> WebcamCameraContext {
     let root = GtkBox::new(Orientation::Vertical, (8.0 * scale).round() as i32);
     root.set_hexpand(true);
@@ -3391,6 +3628,12 @@ fn build_webcam_camera(
     );
     root.append(&silence_row);
     silence.set_active(hide_during_silence.is_some());
+    sync_silence_switch(&silence, has_audio.as_ref());
+    {
+        let has_audio = has_audio.clone();
+        let silence = silence.clone();
+        silence_row.connect_map(move |_| sync_silence_switch(&silence, has_audio.as_ref()));
+    }
     let switch_silence = set_silence.clone();
     silence.connect_state_set(move |_, active| {
         switch_silence(if active {
@@ -3424,6 +3667,7 @@ fn build_webcam_camera(
         delay,
         silence,
         silence_length,
+        has_audio,
     }
 }
 
@@ -3575,6 +3819,7 @@ fn build_webcam_context(
     layouts: &LayoutSettings,
     frame_aspect: f64,
     actions: WebcamContextActions,
+    has_audio: Rc<dyn Fn() -> Option<bool>>,
 ) -> WebcamContext {
     let overlay = build_webcam_overlay(scale, &layer, frame_aspect, &actions);
     let split = build_webcam_split(
@@ -3609,6 +3854,7 @@ fn build_webcam_context(
         actions.set_delay.clone(),
         layer.hide_during_silence,
         actions.set_silence.clone(),
+        has_audio,
     );
     let transition = build_webcam_transition(
         scale,
@@ -3926,12 +4172,17 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
             })
         },
     };
+    let has_audio: Rc<dyn Fn() -> Option<bool>> = {
+        let timeline = timeline.clone();
+        Rc::new(move || timeline.webcam_has_audio())
+    };
     let context = build_webcam_context(
         scale,
         initial_layer,
         &initial_layouts,
         initial.frame_aspect,
         actions,
+        has_audio,
     );
     let settings_section = webcam_section(scale, &t("Layout settings"), true);
     settings_section.body.append(&context.root);
@@ -4062,14 +4313,20 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
     });
 
     let last = Rc::new(RefCell::new(None::<super::timeline::WebcamPanelState>));
+    let settings_section_root = settings_section.root.clone();
     let shape_section_root = shape_section.root.clone();
+    let camera_section_root = camera_section.root.clone();
+    let motion_section_root = motion_section.root.clone();
     let refresh: Rc<dyn Fn()> = {
         let last = last.clone();
         let syncing = syncing.clone();
         let empty = empty.clone();
         let error_hint = error_hint.clone();
         let editor = editor.clone();
+        let settings_section_root = settings_section_root.clone();
         let shape_section_root = shape_section_root.clone();
+        let camera_section_root = camera_section_root.clone();
+        let motion_section_root = motion_section_root.clone();
         let camera_switch = camera_switch.clone();
         let reset = reset.clone();
         let default_scope = rows.default_scope.clone();
@@ -4181,7 +4438,11 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
                     controls,
                     state.auto_split_share,
                 );
+                settings_section_root
+                    .set_visible(controls.overlay || controls.split || controls.cutout);
                 shape_section_root.set_visible(controls.overlay);
+                camera_section_root.set_visible(controls.mirror);
+                motion_section_root.set_visible(controls.transitions);
                 if let Some((_, cue)) = selected {
                     time_spin.adjustment().set_upper(state.duration.max(0.1));
                     time_spin.set_value(cue.at);
@@ -5411,10 +5672,21 @@ mod tests {
             let window = gtk4::ApplicationWindow::new(&app);
             let background = super::Background::default();
             let column = gtk4::Box::new(Orientation::Vertical, 0);
+            let canvas = gtk4::AspectFrame::new(0.5, 0.5, 1.0, false);
+            let timeline = super::super::timeline::build(
+                &window,
+                &canvas,
+                1.0,
+                false,
+                super::super::cursor::CursorModel::new(),
+                super::super::webcam::WebcamModel::new(std::rc::Rc::new(|| {})),
+                background.clone(),
+                std::rc::Rc::new(std::cell::Cell::new(None)),
+            );
             let (panel, _, padding, radius) =
-                super::build_background_panel(1.0, &window, background.clone(), &column);
+                super::build_background_panel(1.0, &window, background.clone(), &column, &timeline);
 
-            background.apply(Some("wallpaper-004.jpg"), 48.0, 6.0);
+            background.apply(Some("wallpaper-004.jpg"), 48.0, 6.0, None);
             assert_eq!(padding.value.get(), 48.0);
             assert_eq!(radius.value.get(), 6.0);
             assert_eq!(active_wallpaper_cards(&panel), 1);
@@ -5428,6 +5700,7 @@ mod tests {
                 None,
                 super::background::DEFAULT_PADDING,
                 super::background::DEFAULT_RADIUS,
+                None,
             );
             assert_eq!(padding.value.get(), super::background::DEFAULT_PADDING);
             assert_eq!(radius.value.get(), super::background::DEFAULT_RADIUS);
@@ -5745,8 +6018,8 @@ mod tests {
         assert!(!controls.overlay);
         assert!(!controls.split);
         assert!(!controls.cutout);
-        assert!(!controls.mirror);
-        assert!(!controls.transitions);
+        assert!(controls.mirror);
+        assert!(controls.transitions);
 
         let screen = panel_state(
             CameraLayout::ScreenOnly,
@@ -5891,6 +6164,7 @@ mod tests {
                     &layouts,
                     frame_aspect,
                     WebcamContextActions::idle(),
+                    std::rc::Rc::new(|| None),
                 );
                 window.set_child(Some(&context.root));
                 for card in WebcamLayoutCard::ALL {
