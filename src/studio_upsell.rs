@@ -445,11 +445,35 @@ fn present(
     keys.set_propagation_phase(PropagationPhase::Capture);
     keys.connect_key_pressed({
         let dismiss = dismiss.clone();
+        let scrim = scrim.downgrade();
         move |_, key, _, _| {
-            if key != gtk4::gdk::Key::Escape {
+            if key == gtk4::gdk::Key::Escape {
+                dismiss();
+                return glib::Propagation::Stop;
+            }
+            // The card's buttons still need their own keys; everything else
+            // stops here so the editor shortcuts cannot act behind the card.
+            if matches!(
+                key,
+                gtk4::gdk::Key::Tab
+                    | gtk4::gdk::Key::ISO_Left_Tab
+                    | gtk4::gdk::Key::Return
+                    | gtk4::gdk::Key::KP_Enter
+                    | gtk4::gdk::Key::space
+            ) {
                 return glib::Propagation::Proceed;
             }
-            dismiss();
+            // The license field is the card's focused widget when a key is
+            // needed; it keeps its typing and paste keys.
+            let text_focused = scrim.upgrade().is_some_and(|scrim| {
+                scrim.root().is_some_and(|root| {
+                    root.focus()
+                        .is_some_and(|widget| widget.is::<gtk4::Editable>())
+                })
+            });
+            if text_focused {
+                return glib::Propagation::Proceed;
+            }
             glib::Propagation::Stop
         }
     });

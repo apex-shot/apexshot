@@ -11,8 +11,9 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 use gtk4::{
-    Align, Box as GtkBox, Button, DrawingArea, DropDown, GestureClick, GestureDrag, Grid, Image,
-    Label, Orientation, Popover, PositionType, ScrolledWindow, TextView, ToggleButton,
+    Align, Box as GtkBox, Button, DrawingArea, DropDown, EventControllerFocus, EventControllerKey,
+    GestureClick, GestureDrag, Grid, Image, Label, Orientation, Popover, PositionType,
+    ScrolledWindow, TextView, ToggleButton,
 };
 
 use super::sections;
@@ -373,9 +374,16 @@ impl TextControls {
             }
         });
 
+        let typing = Rc::new(Cell::new(false));
+        // The title the open typing step belongs to. Picking another title's
+        // clip does not move focus out of the text box, so the step must also
+        // close when the typing lands on a different title.
+        let typing_title = Rc::new(Cell::new(None::<usize>));
         self.text_view.buffer().connect_changed({
             let timeline = Rc::downgrade(timeline);
             let syncing = syncing.clone();
+            let typing = typing.clone();
+            let typing_title = typing_title.clone();
             move |buffer| {
                 if syncing.get() {
                     return;
@@ -384,10 +392,52 @@ impl TextControls {
                     .text(&buffer.start_iter(), &buffer.end_iter(), false)
                     .to_string();
                 if let Some(timeline) = timeline.upgrade() {
+                    // Typing is one undo step per title: the edit opens on the
+                    // first change and closes on focus-out, Enter, or a switch
+                    // to another title, so the history does not walk back
+                    // through every keystroke.
+                    let title = timeline.motion_state().selected_text;
+                    if typing.get() && typing_title.get() != title {
+                        timeline.finish_edit();
+                        typing.set(false);
+                    }
+                    if !typing.replace(true) {
+                        timeline.begin_edit();
+                    }
+                    typing_title.set(title);
                     timeline.edit_motion(|state| state.set_selected_text_value(text), false);
                 }
             }
         });
+        let focus = EventControllerFocus::new();
+        focus.connect_leave({
+            let timeline = Rc::downgrade(timeline);
+            let typing = typing.clone();
+            move |_| {
+                if typing.replace(false) {
+                    if let Some(timeline) = timeline.upgrade() {
+                        timeline.finish_edit();
+                    }
+                }
+            }
+        });
+        self.text_view.add_controller(focus);
+        let keys = EventControllerKey::new();
+        keys.connect_key_pressed({
+            let timeline = Rc::downgrade(timeline);
+            let typing = typing.clone();
+            move |_, key, _, _| {
+                if (key == gtk4::gdk::Key::Return || key == gtk4::gdk::Key::KP_Enter)
+                    && typing.replace(false)
+                {
+                    if let Some(timeline) = timeline.upgrade() {
+                        timeline.finish_edit();
+                    }
+                }
+                gtk4::glib::Propagation::Proceed
+            }
+        });
+        self.text_view.add_controller(keys);
 
         self.font.connect_selected_notify({
             let timeline = Rc::downgrade(timeline);
@@ -425,6 +475,12 @@ impl TextControls {
                 }
             }
         });
+        // The picker's open and close bracket one undo step for the whole
+        // drag, so releasing it does not leave every sampled color behind.
+        self.color.on_interaction(
+            interaction_callback(timeline, true),
+            interaction_callback(timeline, false),
+        );
 
         connect_slider(&self.opacity, &syncing, timeline, |state, value| {
             state.set_selected_text_opacity(value / 100.0)
@@ -765,6 +821,8 @@ struct TextColorControl {
     value: Rc<Cell<[f64; 4]>>,
     picker: ColorPicker,
     changed: ColorChanged,
+    on_start: Interaction,
+    on_end: Interaction,
 }
 
 impl TextColorControl {
@@ -858,6 +916,8 @@ impl TextColorControl {
             scale,
         );
         *repaint.borrow_mut() = Some(picker.repaint.clone());
+        let on_start: Interaction = Rc::new(RefCell::new(None));
+        let on_end: Interaction = Rc::new(RefCell::new(None));
 
         // The same card the Appearance panel opens: header, close, and the
         // shared picker body, sized and styled by the recording editor sheet.
@@ -870,6 +930,7 @@ impl TextColorControl {
             let edit = edit.clone();
             let column = column.downgrade();
             let repaint = picker.repaint.clone();
+            let on_start = on_start.clone();
             move |popover| {
                 if let Some(column) = column.upgrade() {
                     if let Some(bounds) = edit.compute_bounds(&column) {
@@ -882,6 +943,9 @@ impl TextColorControl {
                     }
                 }
                 repaint();
+                if let Some(callback) = on_start.borrow().as_ref() {
+                    callback();
+                }
             }
         });
         let body = GtkBox::new(Orientation::Vertical, 0);
@@ -909,6 +973,14 @@ impl TextColorControl {
         body.append(&header);
         body.append(&picker.widget);
         popover.set_child(Some(&body));
+        popover.connect_closed({
+            let on_end = on_end.clone();
+            move |_| {
+                if let Some(callback) = on_end.borrow().as_ref() {
+                    callback();
+                }
+            }
+        });
         row.connect_destroy({
             let popover = popover.downgrade();
             move |_| {
@@ -925,6 +997,8 @@ impl TextColorControl {
             value,
             picker,
             changed,
+            on_start,
+            on_end,
         }
     }
 
@@ -937,6 +1011,11 @@ impl TextColorControl {
 
     fn connect_changed(&self, callback: impl Fn([f64; 4]) + 'static) {
         *self.changed.borrow_mut() = Some(Rc::new(callback));
+    }
+
+    fn on_interaction(&self, start: Rc<dyn Fn()>, end: Rc<dyn Fn()>) {
+        *self.on_start.borrow_mut() = Some(start);
+        *self.on_end.borrow_mut() = Some(end);
     }
 }
 

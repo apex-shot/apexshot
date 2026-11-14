@@ -4414,6 +4414,10 @@ impl FilledSlider {
             }
         });
         area.add_controller(motion);
+        // The draw fades a switched-off slider, but a parent turning
+        // sensitive again (an image loading) does not repaint a drawing
+        // area, so the faded frame stayed until the pointer crossed it.
+        area.connect_state_flags_changed(|area, _| area.queue_draw());
         area.set_cursor(gdk::Cursor::from_name("ew-resize", None).as_ref());
         slider
     }
@@ -4579,14 +4583,16 @@ impl FilledSlider {
             } else if hot {
                 (0.13, 0.22, 0.82, 0.92)
             } else {
-                (0.10, 0.16, 0.72, 0.82)
+                // At rest the label and fill read at full strength, so the
+                // value is legible without hovering; only the track lifts.
+                (0.10, 0.22, 0.82, 0.92)
             }
         } else if active {
             (0.12, 0.22, 0.92, 1.0)
         } else if hot {
             (0.10, 0.18, 0.86, 0.95)
         } else {
-            (0.07, 0.12, 0.72, 0.82)
+            (0.07, 0.18, 0.86, 0.95)
         };
 
         // A switched-off slider still shows its value, faded the way a

@@ -4877,6 +4877,16 @@ msgstr "Durée d'exportation"
 msgid "Resolution"
 msgstr "Résolution"
 
+msgid "Exporting {percent}%"
+msgstr "Export en cours {percent} %"
+
+msgid "Export cancelled"
+msgstr "Export annulé"
+
+
+msgid "Could not render the image."
+msgstr "Impossible de générer l’image."
+
 msgid "Compare enhancement"
 msgstr "Comparer l’amélioration"
 

@@ -4765,6 +4765,16 @@ msgstr "書き出し時間"
 msgid "Resolution"
 msgstr "解像度"
 
+msgid "Exporting {percent}%"
+msgstr "エクスポート中 {percent}%"
+
+msgid "Export cancelled"
+msgstr "エクスポートをキャンセルしました"
+
+
+msgid "Could not render the image."
+msgstr "画像をレンダリングできませんでした。"
+
 msgid "Compare enhancement"
 msgstr "補正を比較"
 

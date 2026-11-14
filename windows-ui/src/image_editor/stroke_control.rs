@@ -198,6 +198,9 @@ impl StrokeControl {
                         })
                         .map(|weight| weight.index())
                 });
+                // Mark the nearest preset when the stored width sits between
+                // presets, so the menu agrees with the trigger glyph.
+                let selected = selected.or(preview_index);
                 kind.set(active_kind);
                 current.set(preview_index);
                 preview.queue_draw();
@@ -391,10 +394,14 @@ mod tests {
             let control = StrokeControl::new(1.0, &host);
             host.mutate(|st| st.stroke_size = 6.0);
             host.read(|st| control.sync(st));
+            // 6 px sits between the 5 px and 8 px presets: the menu marks the
+            // nearest one (5 px) without rewriting the stored width.
+            assert!(control.options[1].has_css_class("selected"));
             assert!(control
                 .options
                 .iter()
-                .all(|option| !option.has_css_class("selected")));
+                .enumerate()
+                .all(|(index, option)| index == 1 || !option.has_css_class("selected")));
             assert_eq!(host.read(|st| st.stroke_size), Some(6.0));
             control.options[2].emit_clicked();
             host.read(|st| control.sync(st));
