@@ -7,14 +7,14 @@
 //! controls.
 
 use crate::capture::editor::window::icon_names;
-use crate::i18n::t;
+use crate::i18n::{t, tfmt};
 use crate::settings::ui_support::{caption_button, CaptionGlyph};
 use crate::settings::windowing;
 use gtk4::gdk;
 use gtk4::glib::Propagation;
 use gtk4::prelude::*;
 use gtk4::{Align, Application, ApplicationWindow, Box as GtkBox};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::Once;
@@ -23,6 +23,9 @@ use super::inspector;
 use super::toolbar::{self, Tool};
 use super::ui_support::{self, px, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, TOP_CHROME_HEIGHT};
 use super::{canvas, mode_confirm, motion};
+
+/// The running Motion encoder's cancel flag, shared with the Export button.
+type MotionCancel = Rc<RefCell<Option<Rc<Cell<bool>>>>>;
 
 pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     static INIT_ICONS: Once = Once::new();
@@ -97,6 +100,8 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     // is up; video exports disable the button until the encoder finishes.
     let in_motion = Rc::new(Cell::new(false));
     let exporting = Rc::new(Cell::new(false));
+    // The running encoder's cancel flag, so a second Export click stops it.
+    let motion_cancel: MotionCancel = Rc::new(RefCell::new(None));
     let motion_export_name = initial
         .and_then(|path| path.file_stem())
         .and_then(|stem| stem.to_str())
@@ -117,6 +122,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
         let uploading = uploading.clone();
         let export = inspector.export_button.clone();
         let exporting = exporting.clone();
+        let in_motion = in_motion.clone();
         let toolbar = toolbar.clone();
         let canvas = canvas.clone();
         let effect_control = effect_control.clone();
@@ -126,7 +132,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
             // hit-testing tracks the real pixels.
             canvas.sync_view_to_document();
             host.read(|st| {
-                toolbar.set_active_tool(Tool::from_model(st.selected_tool));
+                toolbar.set_active_tool(Tool::rail_from_model(st.selected_tool));
                 sub_bars.sync(Some(st));
                 canvas.set_crop_mode(st.selected_tool == crate::capture::editor::types::Tool::Crop);
                 effect_control.sync(st, &canvas);
@@ -137,8 +143,15 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
             let has_doc = host.has_document();
             inspector.sync_background();
             copy.set_sensitive(has_doc && !host.background_loading());
-            upload.set_sensitive(has_doc && !host.background_loading() && !uploading.get());
-            export.set_sensitive(has_doc && !host.background_loading() && !exporting.get());
+            // One encoder at a time: a Motion render blocks the other action.
+            // Export stays clickable during its own render so it can cancel,
+            // and Static's Save As is unaffected by a still upload.
+            upload.set_sensitive(
+                has_doc && !host.background_loading() && !(exporting.get() || uploading.get()),
+            );
+            export.set_sensitive(
+                has_doc && !host.background_loading() && !(in_motion.get() && uploading.get()),
+            );
             canvas.refresh_cursor();
         })
     };
@@ -192,7 +205,16 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
             }
             match motion.current_frame_image() {
                 Some(frame) => copy_frame_image(&host, frame),
-                None => host.report_error(t("Could not render the Motion frame.")),
+                None => {
+                    // The Motion page covers the canvas toast, so the failure
+                    // also goes to a system notification.
+                    let message = t("Could not render the Motion frame.");
+                    crate::utils::notify::desktop_notification_important(
+                        &t("Copy failed"),
+                        &message,
+                    );
+                    host.report_error(message);
+                }
             }
         }
     });
@@ -200,31 +222,60 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
         let host = canvas.host.clone();
         let window = window.clone();
         let button = inspector.upload_button.clone();
+        let inspector = inspector.clone();
         let uploading = uploading.clone();
+        let exporting = exporting.clone();
         let motion = motion.clone();
         let in_motion = in_motion.clone();
         let name = motion_export_name.clone();
+        let sync_for_upload: Rc<dyn Fn()> = sync_all.clone();
         move |_| {
             if !in_motion.get() {
                 upload_image(&window, &host, &button, &uploading);
                 return;
             }
-            upload_motion_video(&window, &host, &motion, &button, &uploading, &name);
+            upload_motion_video(
+                &window,
+                &host,
+                &motion,
+                &inspector,
+                &button,
+                &uploading,
+                &exporting,
+                &name,
+                sync_for_upload.clone(),
+            );
         }
     });
     inspector.export_button.connect_clicked({
         let host = canvas.host.clone();
         let window = window.clone();
+        let inspector = inspector.clone();
+        let canvas = canvas.clone();
         let motion = motion.clone();
         let in_motion = in_motion.clone();
         let exporting = exporting.clone();
+        let uploading = uploading.clone();
+        let cancel = motion_cancel.clone();
         let name = motion_export_name.clone();
+        let sync_for_export: Rc<dyn Fn()> = sync_all.clone();
         move |_| {
             if in_motion.get() {
-                let sync_all: Rc<dyn Fn()> = sync_all.clone();
-                save_motion_video_dialog(&window, &host, &motion, &exporting, &name, sync_all);
+                // A click while the encoder runs cancels it; the button keeps
+                // its label so the progress reads where the action was.
+                if exporting.get() {
+                    if let Some(cancel) = cancel.borrow().as_ref() {
+                        cancel.set(true);
+                    }
+                    return;
+                }
+                let sync_all: Rc<dyn Fn()> = sync_for_export.clone();
+                save_motion_video_dialog(
+                    &window, &host, &motion, &inspector, &exporting, &uploading, &cancel, &name,
+                    sync_all,
+                );
             } else {
-                save_as_dialog(&window, &host);
+                save_as_dialog(&window, &host, canvas.source_path());
             }
         }
     });
@@ -382,9 +433,23 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
         move |_| canvas.choose_image(&window)
     });
 
-    install_keys(&window, &canvas, &sub_bars, &workspace_stack, &mode_confirm);
+    install_keys(
+        &window,
+        &canvas,
+        &sub_bars,
+        &workspace_stack,
+        &mode_confirm,
+        &motion,
+        &inspector.copy_button,
+        &inspector.export_button,
+        &exporting,
+    );
 
     window.present();
+
+    if crate::config::load_config().annotate_always_on_top {
+        keep_above(&window);
+    }
 
     if let Some(path) = initial {
         canvas.load(path);
@@ -444,24 +509,62 @@ fn build_utility_strip(window: &ApplicationWindow, scale: f64) -> GtkBox {
     strip
 }
 
-/// Save As through the platform dialog; the filter set is the formats the
-/// encoder writes (PNG, JPEG, WebP). The dialog handles overwrite prompts.
-fn save_as_dialog(window: &ApplicationWindow, host: &Rc<super::annotate::EditorHost>) {
+/// Export the annotated image. Settings > Annotate decides whether a file the
+/// editor opened is overwritten in place and whether the editor closes after a
+/// successful export; otherwise the platform dialog asks where to save.
+fn save_as_dialog(
+    window: &ApplicationWindow,
+    host: &Rc<super::annotate::EditorHost>,
+    source: Option<std::path::PathBuf>,
+) {
     if !host.has_document() || host.background_loading() {
         return;
     }
     let retry_window = window.downgrade();
     let retry_host = Rc::downgrade(host);
+    let retry_source = source.clone();
     if !gate_image_output(window, host, move || {
         if let (Some(window), Some(host)) = (retry_window.upgrade(), retry_host.upgrade()) {
-            save_as_dialog(&window, &host);
+            save_as_dialog(&window, &host, retry_source.clone());
         }
     }) {
         return;
     }
+    let config = crate::config::load_config().sanitized();
+    let close_after_export = config.annotate_close_after_export;
+    let on_saved = {
+        let window = window.downgrade();
+        move || -> Box<dyn Fn()> {
+            let window = window.clone();
+            Box::new(move || {
+                if close_after_export {
+                    if let Some(window) = window.upgrade() {
+                        window.close();
+                    }
+                }
+            })
+        }
+    };
+    let kept_source = source.filter(|path| path.is_file() && !is_temporary_capture(path));
+    if config.annotate_overwrite_original_image {
+        if let Some(path) = kept_source.as_deref() {
+            host.save_as(window, path, on_saved());
+            return;
+        }
+    }
+
     let dialog = gtk4::FileDialog::new();
     dialog.set_title(&t("Save annotated image"));
-    dialog.set_initial_name(Some("annotated.png"));
+    let folder = kept_source
+        .as_deref()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| screenshot_folder(&config));
+    dialog.set_initial_folder(Some(&gtk4::gio::File::for_path(folder)));
+    dialog.set_initial_name(Some(&export_name(
+        kept_source.as_deref(),
+        &config.screenshot_format,
+    )));
     let filters = gtk4::gio::ListStore::new::<gtk4::FileFilter>();
     let images = gtk4::FileFilter::new();
     images.set_name(Some(&t("Images")));
@@ -476,30 +579,98 @@ fn save_as_dialog(window: &ApplicationWindow, host: &Rc<super::annotate::EditorH
     dialog.save(Some(window), gtk4::gio::Cancellable::NONE, move |result| {
         if let Ok(file) = result {
             if let Some(path) = file.path() {
-                host.save_as(&parent, &path);
+                host.save_as(&parent, &path, on_saved());
             }
         }
     });
 }
 
+/// The screenshot folder Settings names, or Pictures when it names none.
+fn screenshot_folder(config: &crate::config::AppConfig) -> std::path::PathBuf {
+    let configured = config.screenshot_export_location.trim();
+    if !configured.is_empty() {
+        return std::path::PathBuf::from(configured);
+    }
+    dirs::picture_dir()
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(std::env::temp_dir)
+}
+
+/// `<name>-annotated.<ext>` for an opened file, else `annotated.<ext>`, with the
+/// extension from Settings > Screenshots > Format.
+fn export_name(source: Option<&Path>, format: &str) -> String {
+    let extension = match format.trim().to_ascii_uppercase().as_str() {
+        "JPEG" | "JPG" => "jpg",
+        "WEBP" => "webp",
+        _ => "png",
+    };
+    let stem = source
+        .and_then(Path::file_stem)
+        .and_then(|stem| stem.to_str())
+        .filter(|stem| !stem.trim().is_empty());
+    match stem {
+        Some(stem) => format!("{stem}-annotated.{extension}"),
+        None => format!("annotated.{extension}"),
+    }
+}
+
+/// A capture the shell wrote to `%TEMP%\ApexShot` because Settings does not keep
+/// screenshots; overwriting it would not keep anything either.
+fn is_temporary_capture(path: &Path) -> bool {
+    // The shell names this folder in its long, forward-slash form while
+    // `temp_dir` can return the 8.3 short form, so compare resolved paths.
+    let Some(parent) = path.parent() else {
+        return false;
+    };
+    let temporary = std::env::temp_dir().join("ApexShot");
+    match (
+        std::fs::canonicalize(parent),
+        std::fs::canonicalize(temporary),
+    ) {
+        (Ok(parent), Ok(temporary)) => parent == temporary,
+        _ => false,
+    }
+}
+
+/// The dock's scrolling content holds the Motion and appearance controls.
+/// Disabling it keeps the document that the encoder captured its backdrop
+/// from, while the bottom action row stays live so Export can cancel.
+fn set_motion_controls_sensitive(inspector: &inspector::Inspector, sensitive: bool) {
+    let mut child = inspector.root.first_child();
+    while let Some(widget) = child {
+        if widget.is::<gtk4::ScrolledWindow>() {
+            widget.set_sensitive(sensitive);
+            return;
+        }
+        child = widget.next_sibling();
+    }
+}
+
 /// Export the whole Motion composition as an MP4. The gate matches Motion's
 /// video export entitlement; the encoder renders a frame per main-loop tick
 /// so the dialog and window stay usable while it works.
+#[allow(clippy::too_many_arguments)]
 fn save_motion_video_dialog(
     window: &ApplicationWindow,
     host: &Rc<super::annotate::EditorHost>,
     motion: &Rc<motion::MotionMode>,
+    inspector: &Rc<inspector::Inspector>,
     exporting: &Rc<Cell<bool>>,
+    uploading: &Rc<Cell<bool>>,
+    cancel: &MotionCancel,
     name: &str,
     sync_all: Rc<dyn Fn()>,
 ) {
-    if exporting.get() || !host.has_document() || host.background_loading() {
+    if exporting.get() || uploading.get() || !host.has_document() || host.background_loading() {
         return;
     }
     let retry_window = window.downgrade();
     let retry_host = Rc::downgrade(host);
     let retry_motion = Rc::downgrade(motion);
+    let retry_inspector = inspector.clone();
     let retry_exporting = exporting.clone();
+    let retry_uploading = uploading.clone();
+    let retry_cancel = cancel.clone();
     let retry_name = name.to_string();
     let retry_sync = sync_all.clone();
     let retry_host_for_cache = Rc::downgrade(host);
@@ -519,7 +690,10 @@ fn save_motion_video_dialog(
                     &window,
                     &host,
                     &motion,
+                    &retry_inspector,
                     &retry_exporting,
+                    &retry_uploading,
+                    &retry_cancel,
                     &retry_name,
                     retry_sync.clone(),
                 );
@@ -547,40 +721,89 @@ fn save_motion_video_dialog(
 
     let motion = motion.clone();
     let host = host.clone();
+    let inspector = inspector.clone();
     let exporting = exporting.clone();
+    let cancel = cancel.clone();
     let sync_all = sync_all.clone();
     dialog.save(Some(window), gtk4::gio::Cancellable::NONE, move |result| {
         if let Ok(file) = result {
             if let Some(path) = file.path() {
                 let path = with_mp4_extension(path);
                 exporting.set(true);
+                set_motion_controls_sensitive(&inspector, false);
+                let original_label = inspector
+                    .export_button
+                    .label()
+                    .map(|label| label.to_string())
+                    .unwrap_or_else(|| t("Export"));
+                inspector
+                    .export_button
+                    .set_label(&tfmt("Exporting {percent}%", &[("percent", "0")]));
                 sync_all();
-                let result = motion.export_video(path, {
-                    let exporting = exporting.clone();
-                    let sync_all = sync_all.clone();
-                    let host = host.clone();
-                    move |result| {
-                        exporting.set(false);
-                        sync_all();
-                        match result {
-                            Ok(path) => {
-                                let mut config = crate::config::load_config();
-                                if config.remember_video_export_dir(&path) {
-                                    let _ = crate::config::save_config(&config);
-                                }
-                                crate::utils::notify::desktop_notification(
-                                    &t("Export complete"),
-                                    &path.display().to_string(),
-                                );
-                            }
-                            Err(error) => host.report_error(error),
+                let result = motion.export_video(
+                    path,
+                    {
+                        let export_button = inspector.export_button.clone();
+                        move |done, total| {
+                            let percent = done.saturating_mul(100) / total.max(1);
+                            let percent = percent.to_string();
+                            let args = [("percent", percent.as_str())];
+                            export_button.set_label(&tfmt("Exporting {percent}%", &args));
                         }
+                    },
+                    {
+                        let exporting = exporting.clone();
+                        let sync_all = sync_all.clone();
+                        let host = host.clone();
+                        let inspector = inspector.clone();
+                        let cancel = cancel.clone();
+                        let original_label = original_label.clone();
+                        move |result| {
+                            exporting.set(false);
+                            set_motion_controls_sensitive(&inspector, true);
+                            inspector.export_button.set_label(&original_label);
+                            *cancel.borrow_mut() = None;
+                            sync_all();
+                            match result {
+                                Ok(path) => {
+                                    let mut config = crate::config::load_config();
+                                    if config.remember_video_export_dir(&path) {
+                                        let _ = crate::config::save_config(&config);
+                                    }
+                                    crate::utils::notify::desktop_notification(
+                                        &t("Export complete"),
+                                        &path.display().to_string(),
+                                    );
+                                }
+                                // Cancelling is the user's choice, not a failure.
+                                Err(error) if error == t("Export cancelled") => {}
+                                Err(error) => {
+                                    // The Motion page hides the canvas toast, so
+                                    // the export failure also goes to the desktop.
+                                    crate::utils::notify::desktop_notification_important(
+                                        &t("Export failed"),
+                                        &error,
+                                    );
+                                    host.report_error(error);
+                                }
+                            }
+                        }
+                    },
+                );
+                match result {
+                    Ok(flag) => *cancel.borrow_mut() = Some(flag),
+                    Err(error) => {
+                        exporting.set(false);
+                        set_motion_controls_sensitive(&inspector, true);
+                        inspector.export_button.set_label(&original_label);
+                        *cancel.borrow_mut() = None;
+                        sync_all();
+                        crate::utils::notify::desktop_notification_important(
+                            &t("Export failed"),
+                            &error,
+                        );
+                        host.report_error(error);
                     }
-                });
-                if let Err(error) = result {
-                    exporting.set(false);
-                    sync_all();
-                    host.report_error(error);
                 }
             }
         }
@@ -608,13 +831,62 @@ fn gate_image_output(
     let Some(capabilities) = host.read(|st| st.studio_capabilities()) else {
         return false;
     };
+    let retry: Rc<dyn Fn()> = Rc::new(retry);
     let retry_host = Rc::downgrade(host);
-    crate::studio_upsell::gate(window, capabilities, move || {
+    let gate_retry = retry.clone();
+    if !crate::studio_upsell::gate(window, capabilities, move || {
         if let Some(host) = retry_host.upgrade() {
             host.invalidate_studio_cache();
         }
-        retry();
-    })
+        gate_retry();
+    }) {
+        return false;
+    }
+    upscale_ready(host, retry)
+}
+
+thread_local! {
+    static ENHANCING: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Neural enhancement takes seconds on a large source, and the image outputs
+/// render on the main loop. Run it on a worker first and retry the output,
+/// which then renders from the cached result without blocking the window.
+fn upscale_ready(host: &Rc<super::annotate::EditorHost>, retry: Rc<dyn Fn()>) -> bool {
+    let Some((mode, base)) = host.read(|st| st.pending_upscale()).flatten() else {
+        return true;
+    };
+    if ENHANCING.with(Cell::get) {
+        return false;
+    }
+    ENHANCING.with(|busy| busy.set(true));
+    host.report_error(t("Enhancing the image…"));
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ =
+            sender.send(crate::capture::editor::upscale::enhance_cached(&base, mode).map(|_| ()));
+    });
+    let host = Rc::downgrade(host);
+    gtk4::glib::timeout_add_local(std::time::Duration::from_millis(16), move || {
+        let result = match receiver.try_recv() {
+            Ok(result) => result,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return gtk4::glib::ControlFlow::Continue,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                Err("The upscaling preview worker stopped unexpectedly.".to_string())
+            }
+        };
+        ENHANCING.with(|busy| busy.set(false));
+        match result {
+            Ok(()) => retry(),
+            Err(error) => {
+                if let Some(host) = host.upgrade() {
+                    host.report_error(t(&error));
+                }
+            }
+        }
+        gtk4::glib::ControlFlow::Break
+    });
+    false
 }
 
 fn copy_image(window: &ApplicationWindow, host: &Rc<super::annotate::EditorHost>) {
@@ -672,8 +944,15 @@ fn upload_image(
     let Some(config) = configured_cloud() else {
         return;
     };
-    let Some(snapshot) = host.upload_snapshot() else {
-        return;
+    let snapshot = match host.upload_snapshot() {
+        Ok(snapshot) => snapshot,
+        Err(message) => {
+            // A render failure must not look like a no-op: report it the way
+            // Copy reports its own flatten failure.
+            crate::utils::notify::desktop_notification_important(&t("Upload failed"), &message);
+            host.report_error(message);
+            return;
+        }
     };
     upload_rendered_image(window, button, uploading, config, snapshot);
 }
@@ -691,23 +970,30 @@ fn configured_cloud() -> Option<crate::config::AppConfig> {
 /// Upload the Motion composition as an MP4. Rendering happens first, one
 /// frame per main-loop tick; the finished file goes through the same Cloud
 /// request and share-URL clipboard as a still.
+#[allow(clippy::too_many_arguments)]
 fn upload_motion_video(
     window: &ApplicationWindow,
     host: &Rc<super::annotate::EditorHost>,
     motion: &Rc<motion::MotionMode>,
+    inspector: &Rc<inspector::Inspector>,
     button: &gtk4::Button,
     uploading: &Rc<Cell<bool>>,
+    exporting: &Rc<Cell<bool>>,
     name: &str,
+    sync_all: Rc<dyn Fn()>,
 ) {
-    if uploading.get() || !host.has_document() || host.background_loading() {
+    if uploading.get() || exporting.get() || !host.has_document() || host.background_loading() {
         return;
     }
     let retry_window = window.downgrade();
     let retry_host = Rc::downgrade(host);
     let retry_motion = Rc::downgrade(motion);
+    let retry_inspector = inspector.clone();
     let retry_button = button.downgrade();
     let retry_uploading = uploading.clone();
+    let retry_exporting = exporting.clone();
     let retry_name = name.to_string();
+    let retry_sync = sync_all.clone();
     let retry_host_for_cache = Rc::downgrade(host);
     if !crate::studio_upsell::gate(
         window,
@@ -726,9 +1012,12 @@ fn upload_motion_video(
                     &window,
                     &host,
                     &motion,
+                    &retry_inspector,
                     &button,
                     &retry_uploading,
+                    &retry_exporting,
                     &retry_name,
+                    retry_sync.clone(),
                 );
             }
         },
@@ -741,42 +1030,67 @@ fn upload_motion_video(
     };
     let directory = upload_temp_dir();
     if let Err(error) = std::fs::create_dir_all(&directory) {
-        host.report_error(format!("Could not prepare the Motion upload: {error}"));
+        let message = format!("Could not prepare the Motion upload: {error}");
+        crate::utils::notify::desktop_notification_important(&t("Upload failed"), &message);
+        host.report_error(message);
         return;
     }
     let path = directory.join(name);
     let cleanup = directory.clone();
     uploading.set(true);
     button.set_sensitive(false);
-    let result = motion.export_video(path, {
+    set_motion_controls_sensitive(inspector, false);
+    sync_all();
+    let result = motion.export_video(path, |_, _| {}, {
         let window = window.downgrade();
         let button = button.downgrade();
         let uploading = uploading.clone();
         let host = host.clone();
-        move |result| match result {
-            Ok(path) => {
-                if let (Some(window), Some(button)) = (window.upgrade(), button.upgrade()) {
-                    upload_path(&window, &button, &uploading, config, path, Some(cleanup));
-                } else {
+        let inspector = inspector.clone();
+        let sync_all = sync_all.clone();
+        move |result| {
+            set_motion_controls_sensitive(&inspector, true);
+            match result {
+                Ok(path) => {
+                    if let (Some(window), Some(button)) = (window.upgrade(), button.upgrade()) {
+                        upload_path(
+                            &window,
+                            &button,
+                            &uploading,
+                            config,
+                            path,
+                            Some(cleanup),
+                            Some(sync_all),
+                        );
+                    } else {
+                        uploading.set(false);
+                        let _ = std::fs::remove_dir_all(&cleanup);
+                        sync_all();
+                    }
+                }
+                Err(error) => {
                     uploading.set(false);
+                    if let Some(button) = button.upgrade() {
+                        button.set_sensitive(true);
+                    }
                     let _ = std::fs::remove_dir_all(&cleanup);
+                    sync_all();
+                    crate::utils::notify::desktop_notification_important(
+                        &t("Upload failed"),
+                        &error,
+                    );
+                    host.report_error(error);
                 }
-            }
-            Err(error) => {
-                uploading.set(false);
-                if let Some(button) = button.upgrade() {
-                    button.set_sensitive(true);
-                }
-                let _ = std::fs::remove_dir_all(&cleanup);
-                crate::utils::notify::desktop_notification_important(&t("Upload failed"), &error);
-                host.report_error(error);
             }
         }
     });
     if let Err(error) = result {
+        set_motion_controls_sensitive(inspector, true);
         uploading.set(false);
         button.set_sensitive(true);
         let _ = std::fs::remove_dir_all(&directory);
+        sync_all();
+        crate::utils::notify::desktop_notification_important(&t("Upload failed"), &error);
         host.report_error(error);
     }
 }
@@ -802,6 +1116,7 @@ fn upload_path(
     config: crate::config::AppConfig,
     path: std::path::PathBuf,
     cleanup: Option<std::path::PathBuf>,
+    on_finish: Option<Rc<dyn Fn()>>,
 ) {
     uploading.set(true);
     button.set_sensitive(false);
@@ -816,7 +1131,7 @@ fn upload_path(
         }
         let _ = sender.send(result);
     });
-    poll_upload(window, button, uploading, receiver);
+    poll_upload(window, button, uploading, receiver, on_finish);
 }
 
 fn poll_upload(
@@ -824,6 +1139,7 @@ fn poll_upload(
     button: &gtk4::Button,
     uploading: &Rc<Cell<bool>>,
     receiver: std::sync::mpsc::Receiver<Result<String, crate::cloud::upload::UploadError>>,
+    on_finish: Option<Rc<dyn Fn()>>,
 ) {
     let window = window.downgrade();
     let button = button.downgrade();
@@ -834,6 +1150,9 @@ fn poll_upload(
                 uploading.set(false);
                 if let Some(button) = button.upgrade() {
                     button.set_sensitive(true);
+                }
+                if let Some(on_finish) = &on_finish {
+                    on_finish();
                 }
                 match result {
                     Ok(share_url) => {
@@ -856,6 +1175,9 @@ fn poll_upload(
                 uploading.set(false);
                 if let Some(button) = button.upgrade() {
                     button.set_sensitive(true);
+                }
+                if let Some(on_finish) = &on_finish {
+                    on_finish();
                 }
                 gtk4::glib::ControlFlow::Break
             }
@@ -898,15 +1220,20 @@ fn upload_rendered_image(
         let _ = std::fs::remove_dir_all(&directory);
         let _ = sender.send(result);
     });
-    poll_upload(window, button, uploading, receiver);
+    poll_upload(window, button, uploading, receiver, None);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn install_keys(
     window: &ApplicationWindow,
     canvas: &Rc<canvas::Canvas>,
     sub_bars: &Rc<super::sub_bar::SubBars>,
     workspace: &gtk4::Stack,
     mode_confirm: &Rc<mode_confirm::ModeConfirm>,
+    motion: &Rc<motion::MotionMode>,
+    copy_button: &gtk4::Button,
+    export_button: &gtk4::Button,
+    exporting: &Rc<Cell<bool>>,
 ) {
     // Space held = pan mode. Capture phase so it wins over the canvas, but a
     // focused text entry still gets its literal space character.
@@ -920,7 +1247,13 @@ fn install_keys(
         let mode_confirm = mode_confirm.clone();
         move |controller, key, _, _| {
             if mode_confirm.visible() {
-                return Propagation::Stop;
+                if key == gdk::Key::Escape {
+                    mode_confirm.cancel();
+                    return Propagation::Stop;
+                }
+                // Tab, Enter and Space belong to the card's buttons, so every
+                // other key must reach them instead of stopping here.
+                return Propagation::Proceed;
             }
             if workspace.visible_child_name().as_deref() == Some("motion") {
                 return Propagation::Proceed;
@@ -970,6 +1303,10 @@ fn install_keys(
         let window = window.clone();
         let workspace = workspace.clone();
         let mode_confirm = mode_confirm.clone();
+        let motion = motion.clone();
+        let copy_button = copy_button.clone();
+        let exporting = exporting.clone();
+        let export_button = export_button.clone();
         move |controller, key, _, modifiers| {
             if mode_confirm.visible() {
                 if key == gdk::Key::Escape {
@@ -978,7 +1315,65 @@ fn install_keys(
                 return Propagation::Stop;
             }
             if workspace.visible_child_name().as_deref() == Some("motion") {
-                return Propagation::Proceed;
+                let ctrl = modifiers.contains(gdk::ModifierType::CONTROL_MASK);
+                let shift = modifiers.contains(gdk::ModifierType::SHIFT_MASK);
+                // A focused text field keeps its own undo, redo and copy keys
+                // while Motion is open.
+                let text_focused = gtk4::prelude::RootExt::focus(&window).is_some_and(|w| {
+                    w.is::<gtk4::Text>() || w.is::<gtk4::Entry>() || w.is::<gtk4::TextView>()
+                });
+                if text_focused
+                    && ctrl
+                    && matches!(
+                        key,
+                        gdk::Key::z
+                            | gdk::Key::Z
+                            | gdk::Key::y
+                            | gdk::Key::Y
+                            | gdk::Key::c
+                            | gdk::Key::C
+                    )
+                {
+                    return Propagation::Proceed;
+                }
+                return match key {
+                    gdk::Key::Escape => {
+                        window.close();
+                        Propagation::Stop
+                    }
+                    gdk::Key::s | gdk::Key::S if ctrl => {
+                        // The Export button owns Motion's gate, dialog and
+                        // progress; while it runs, a click there means cancel,
+                        // which a save shortcut must not trigger.
+                        if !exporting.get() {
+                            export_button.emit_clicked();
+                        }
+                        Propagation::Stop
+                    }
+                    gdk::Key::c | gdk::Key::C if ctrl => {
+                        // The Copy button already runs Motion's Studio gate
+                        // and frame render; the shortcut takes that path.
+                        copy_button.emit_clicked();
+                        Propagation::Stop
+                    }
+                    gdk::Key::z | gdk::Key::Z if ctrl && shift => {
+                        motion.timeline.redo();
+                        Propagation::Stop
+                    }
+                    gdk::Key::z | gdk::Key::Z if ctrl => {
+                        motion.timeline.undo();
+                        Propagation::Stop
+                    }
+                    gdk::Key::y | gdk::Key::Y if ctrl => {
+                        motion.timeline.redo();
+                        Propagation::Stop
+                    }
+                    gdk::Key::w | gdk::Key::W if ctrl => {
+                        window.close();
+                        Propagation::Stop
+                    }
+                    _ => Propagation::Proceed,
+                };
             }
             let ctrl = modifiers.contains(gdk::ModifierType::CONTROL_MASK);
             // A focused editable owns its keys: entries keep characters and
@@ -1008,7 +1403,7 @@ fn install_keys(
                     Propagation::Stop
                 }
                 gdk::Key::s | gdk::Key::S if ctrl => {
-                    save_as_dialog(&window, &canvas.host);
+                    save_as_dialog(&window, &canvas.host, canvas.source_path());
                     Propagation::Stop
                 }
                 gdk::Key::c | gdk::Key::C if ctrl => {
@@ -1054,4 +1449,103 @@ fn install_keys(
         }
     });
     window.add_controller(keys);
+}
+
+/// Settings > Annotate > Always on top. GTK 4 has no keep-above request, so mark
+/// the editor's own top-level window topmost once Windows has created it.
+fn keep_above(window: &ApplicationWindow) {
+    let window = window.downgrade();
+    gtk4::glib::idle_add_local_once(move || {
+        let Some(window) = window.upgrade() else {
+            return;
+        };
+        let title = window
+            .title()
+            .map(|title| title.to_string())
+            .unwrap_or_default();
+        set_topmost_by_title(&title);
+    });
+}
+
+#[cfg(windows)]
+fn set_topmost_by_title(title: &str) {
+    use windows_sys::Win32::Foundation::{HWND, LPARAM};
+    use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumThreadWindows, GetWindowTextW, IsWindowVisible, SetWindowPos, HWND_TOPMOST,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    };
+
+    struct Search {
+        title: Vec<u16>,
+        found: Vec<HWND>,
+    }
+
+    unsafe extern "system" fn visit(hwnd: HWND, data: LPARAM) -> i32 {
+        let search = unsafe { &mut *(data as *mut Search) };
+        if unsafe { IsWindowVisible(hwnd) } == 0 {
+            return 1;
+        }
+        let mut buffer = [0u16; 512];
+        let length = unsafe { GetWindowTextW(hwnd, buffer.as_mut_ptr(), buffer.len() as i32) };
+        if length > 0 && buffer[..length as usize] == search.title[..] {
+            search.found.push(hwnd);
+        }
+        1
+    }
+
+    let mut search = Search {
+        title: title.encode_utf16().collect(),
+        found: Vec::new(),
+    };
+    unsafe {
+        EnumThreadWindows(
+            GetCurrentThreadId(),
+            Some(visit),
+            &mut search as *mut Search as LPARAM,
+        );
+        for hwnd in search.found {
+            SetWindowPos(
+                hwnd,
+                HWND_TOPMOST,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            );
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn set_topmost_by_title(_title: &str) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn temporary_capture_matches_the_shells_path_form() {
+        let folder = std::env::temp_dir().join("ApexShot");
+        std::fs::create_dir_all(&folder).unwrap();
+        let file = folder.join(format!(
+            "apexshot-temporary-capture-test-{}.png",
+            std::process::id()
+        ));
+        std::fs::write(&file, b"capture").unwrap();
+        // The capture shell passes the expanded long path with forward slashes,
+        // while `temp_dir` can return the short 8.3 form of the same folder.
+        let resolved = std::fs::canonicalize(&file).unwrap();
+        let shell_form = resolved
+            .to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .replace('\\', "/");
+        let matched = is_temporary_capture(Path::new(&shell_form));
+        let kept = is_temporary_capture(Path::new(r"C:\Users\Public\Pictures\shot.png"));
+        let _ = std::fs::remove_file(&file);
+        let _ = std::fs::remove_dir(&folder);
+        assert!(matched, "{shell_form} is a temporary capture");
+        assert!(!kept);
+    }
 }

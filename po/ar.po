@@ -3338,11 +3338,6 @@ msgid "Image export width; select a preset to change the aspect ratio"
 msgstr "عرض تصدير الصورة؛ اختر إعدادًا مسبقًا لتغيير نسبة العرض إلى الارتفاع"
 
 msgid ""
-"Image presets change the aspect ratio, not a fixed pixel size. W/H shows the export size. Click the selected preset again to reset."
-msgstr ""
-"تغيّر إعدادات الصورة المسبقة نسبة العرض إلى الارتفاع، وليس حجمًا ثابتًا بالبكسل. يعرض W/H حجم التصدير. انقر على الإعداد المسبق المحدد مرة أخرى لإعادة الضبط."
-
-msgid ""
 "Increase Scene Shadows opacity to see the effect and change its placement."
 msgstr "زد عتامة Scene Shadows لرؤية التأثير وتغيير موضعه."
 
@@ -4371,8 +4366,8 @@ msgstr "تم نسخ رابط المشاركة إلى الحافظة: {url}"
 msgid "The Motion encoder is not running."
 msgstr "مشفّر Motion لا يعمل."
 
-msgid "These annotate preferences are not applied by the Windows image editor yet."
-msgstr "محرر الصور في Windows لا يطبّق تفضيلات التعليقات هذه بعد."
+msgid "The Windows image editor names each color when you point at its swatch."
+msgstr "يعرض محرر الصور في Windows اسم كل لون عند الإشارة إلى عينته."
 
 msgid "Upload"
 msgstr "رفع"
@@ -4804,3 +4799,43 @@ msgstr "لا يحتوي هذا التسجيل على صوت."
 
 msgid "Hide cursor here"
 msgstr "إخفاء المؤشر هنا"
+
+msgid "Exporting {percent}%"
+msgstr "جارٍ التصدير {percent}%"
+
+msgid "Export cancelled"
+msgstr "تم إلغاء التصدير"
+
+
+msgid "Could not render the image."
+msgstr "تعذّر عرض الصورة."
+
+msgid "Compare enhancement"
+msgstr "مقارنة التحسين"
+
+msgid "Drag the divider across the image."
+msgstr "اسحب الفاصل عبر الصورة."
+
+msgid "Enhancing the image…"
+msgstr "جارٍ تحسين الصورة…"
+
+msgid "Free preview. Exporting with enhancement needs Studio."
+msgstr "معاينة مجانية. يتطلب التصدير مع التحسين Studio."
+
+msgid "Sharpens small screenshots on this device, up to 1 megapixel. Missing detail cannot always be recovered."
+msgstr "يزيد حدة لقطات الشاشة الصغيرة على هذا الجهاز، حتى 1 ميغابكسل. لا يمكن دائمًا استعادة التفاصيل المفقودة."
+
+msgid "Source"
+msgstr "المصدر"
+
+msgid "Use Neural 2×"
+msgstr "استخدام Neural 2×"
+
+msgid "16:9 image aspect ratio; banners may be cropped on some devices."
+msgstr "نسبة أبعاد الصورة 16:9؛ قد يتم اقتصاص البانرات على بعض الأجهزة."
+
+msgid "Exports at {width} × {height} px."
+msgstr "يُصدَّر بحجم {width} × {height} بكسل."
+
+msgid "Ratio presets change the aspect ratio; platform presets also export at the size that platform asks for. W/H shows the export size. Click the selected preset again to reset."
+msgstr "تغيّر إعدادات النسبة نسبة الأبعاد فقط؛ أما إعدادات المنصات فتصدّر أيضًا بالحجم الذي تطلبه المنصة. يعرض W/H حجم التصدير. انقر على الإعداد المحدد مرة أخرى لإعادة التعيين."

@@ -3374,11 +3374,6 @@ msgstr ""
 "Ширина экспорта изображения; выберите предустановку, чтобы изменить соотношение сторон"
 
 msgid ""
-"Image presets change the aspect ratio, not a fixed pixel size. W/H shows the export size. Click the selected preset again to reset."
-msgstr ""
-"Пресеты изображения меняют соотношение сторон, а не фиксированный размер в пикселях. W/H показывает размер экспорта. Нажмите выбранный пресет ещё раз, чтобы сбросить."
-
-msgid ""
 "Increase Scene Shadows opacity to see the effect and change its placement."
 msgstr ""
 "Увеличьте непрозрачность Scene Shadows, чтобы увидеть эффект и изменить размещение."
@@ -4427,8 +4422,8 @@ msgstr "Ссылка для общего доступа скопирована �
 msgid "The Motion encoder is not running."
 msgstr "Кодировщик Motion не запущен."
 
-msgid "These annotate preferences are not applied by the Windows image editor yet."
-msgstr "Редактор изображений Windows пока не применяет эти настройки аннотаций."
+msgid "The Windows image editor names each color when you point at its swatch."
+msgstr "Редактор изображений Windows называет каждый цвет при наведении на его образец."
 
 msgid "Upload"
 msgstr "Загрузить"
@@ -4860,3 +4855,43 @@ msgstr "В этой записи нет звука."
 
 msgid "Hide cursor here"
 msgstr "Скрыть курсор здесь"
+
+msgid "Exporting {percent}%"
+msgstr "Экспорт {percent} %"
+
+msgid "Export cancelled"
+msgstr "Экспорт отменён"
+
+
+msgid "Could not render the image."
+msgstr "Не удалось отрисовать изображение."
+
+msgid "Compare enhancement"
+msgstr "Сравнить улучшение"
+
+msgid "Drag the divider across the image."
+msgstr "Перетащите разделитель по изображению."
+
+msgid "Enhancing the image…"
+msgstr "Улучшение изображения…"
+
+msgid "Free preview. Exporting with enhancement needs Studio."
+msgstr "Бесплатный предпросмотр. Для экспорта с улучшением нужен Studio."
+
+msgid "Sharpens small screenshots on this device, up to 1 megapixel. Missing detail cannot always be recovered."
+msgstr "Повышает чёткость небольших скриншотов на этом устройстве, до 1 мегапикселя. Утраченные детали не всегда удаётся восстановить."
+
+msgid "Source"
+msgstr "Исходник"
+
+msgid "Use Neural 2×"
+msgstr "Использовать Neural 2×"
+
+msgid "16:9 image aspect ratio; banners may be cropped on some devices."
+msgstr "Соотношение сторон 16:9; на некоторых устройствах баннеры могут обрезаться."
+
+msgid "Exports at {width} × {height} px."
+msgstr "Экспортируется в размере {width} × {height} пикс."
+
+msgid "Ratio presets change the aspect ratio; platform presets also export at the size that platform asks for. W/H shows the export size. Click the selected preset again to reset."
+msgstr "Пресеты пропорций меняют соотношение сторон; пресеты платформ также экспортируют в размере, который требует платформа. W/H показывает размер экспорта. Нажмите на выбранный пресет ещё раз, чтобы сбросить его."

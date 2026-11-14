@@ -3391,11 +3391,6 @@ msgstr ""
 "Exportbreite für Bilder; wähle eine Voreinstellung, um das Seitenverhältnis zu ändern"
 
 msgid ""
-"Image presets change the aspect ratio, not a fixed pixel size. W/H shows the export size. Click the selected preset again to reset."
-msgstr ""
-"Bild-Voreinstellungen ändern das Seitenverhältnis, nicht eine feste Pixelgröße. W/H zeigt die Exportgröße. Klicke die ausgewählte Voreinstellung erneut an, um zurückzusetzen."
-
-msgid ""
 "Increase Scene Shadows opacity to see the effect and change its placement."
 msgstr ""
 "Erhöhe die Deckkraft von Scene Shadows, um den Effekt zu sehen und die Platzierung zu ändern."
@@ -4447,8 +4442,8 @@ msgstr "Freigabelink in die Zwischenablage kopiert: {url}"
 msgid "The Motion encoder is not running."
 msgstr "Der Motion-Encoder läuft nicht."
 
-msgid "These annotate preferences are not applied by the Windows image editor yet."
-msgstr "Diese Anmerkungs-Einstellungen werden vom Windows-Bildeditor noch nicht angewendet."
+msgid "The Windows image editor names each color when you point at its swatch."
+msgstr "Der Windows-Bildeditor nennt jede Farbe, wenn Sie auf ihr Farbfeld zeigen."
 
 msgid "Upload"
 msgstr "Hochladen"
@@ -4880,3 +4875,43 @@ msgstr "Diese Aufnahme hat keinen Ton."
 
 msgid "Hide cursor here"
 msgstr "Zeiger hier ausblenden"
+
+msgid "Exporting {percent}%"
+msgstr "Exportiere {percent} %"
+
+msgid "Export cancelled"
+msgstr "Export abgebrochen"
+
+
+msgid "Could not render the image."
+msgstr "Das Bild konnte nicht gerendert werden."
+
+msgid "Compare enhancement"
+msgstr "Verbesserung vergleichen"
+
+msgid "Drag the divider across the image."
+msgstr "Ziehe den Trenner über das Bild."
+
+msgid "Enhancing the image…"
+msgstr "Bild wird verbessert…"
+
+msgid "Free preview. Exporting with enhancement needs Studio."
+msgstr "Kostenlose Vorschau. Für den Export mit Verbesserung brauchst du Studio."
+
+msgid "Sharpens small screenshots on this device, up to 1 megapixel. Missing detail cannot always be recovered."
+msgstr "Schärft kleine Screenshots auf diesem Gerät, bis zu 1 Megapixel. Fehlende Details lassen sich nicht immer wiederherstellen."
+
+msgid "Source"
+msgstr "Quelle"
+
+msgid "Use Neural 2×"
+msgstr "Neural 2× verwenden"
+
+msgid "16:9 image aspect ratio; banners may be cropped on some devices."
+msgstr "Seitenverhältnis 16:9; Banner können auf manchen Geräten beschnitten werden."
+
+msgid "Exports at {width} × {height} px."
+msgstr "Wird mit {width} × {height} px exportiert."
+
+msgid "Ratio presets change the aspect ratio; platform presets also export at the size that platform asks for. W/H shows the export size. Click the selected preset again to reset."
+msgstr "Seitenverhältnis-Voreinstellungen ändern das Seitenverhältnis; Plattform-Voreinstellungen exportieren zusätzlich in der Größe, die die Plattform verlangt. W/H zeigt die Exportgröße. Klicke die ausgewählte Voreinstellung erneut an, um zurückzusetzen."

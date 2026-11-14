@@ -1,8 +1,10 @@
 use super::super::image_transform::StaticImageTransform;
 use super::super::text_detect::TextDetector;
 use super::super::types::AnnotationAction;
+use super::background::{Appearance, Fill};
 use super::EditorState;
 use image::RgbaImage;
+use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
@@ -15,6 +17,31 @@ pub(crate) struct DocumentSnapshot {
     static_image_transform: StaticImageTransform,
     scene_shadow: crate::recording::editor::model::MotionSceneShadow,
     frame_style: super::super::types::FrameStyle,
+    background: Appearance,
+}
+
+/// Two fills are the same edit when they paint the same source. Both the
+/// image and the custom painter are shared handles, so their identity is the
+/// only cheap test: a freshly built painter is a new fill.
+fn same_fill(left: &Fill, right: &Fill) -> bool {
+    match (left, right) {
+        (Fill::None, Fill::None) => true,
+        (Fill::Image(left), Fill::Image(right)) => Arc::ptr_eq(left, right),
+        (Fill::Custom(left), Fill::Custom(right)) => Rc::ptr_eq(left, right),
+        _ => false,
+    }
+}
+
+/// The revision is a paint cache key, not document content, so it is left
+/// out: a repaint of an unchanged appearance is not a history step.
+fn same_background(left: &Appearance, right: &Appearance) -> bool {
+    same_fill(&left.fill, &right.fill)
+        && left.padding == right.padding
+        && left.blur == right.blur
+        && left.radius == right.radius
+        && left.noise == right.noise
+        && left.frame_aspect == right.frame_aspect
+        && left.frame_style == right.frame_style
 }
 
 impl DocumentSnapshot {
@@ -25,6 +52,7 @@ impl DocumentSnapshot {
             && self.static_image_transform == other.static_image_transform
             && self.scene_shadow == other.scene_shadow
             && self.frame_style == other.frame_style
+            && same_background(&self.background, &other.background)
     }
 }
 
@@ -65,6 +93,7 @@ impl EditorState {
             static_image_transform: self.static_image_transform,
             scene_shadow: self.scene_shadow.clone(),
             frame_style: self.background.frame_style,
+            background: self.background.clone(),
         }
     }
 
@@ -140,8 +169,13 @@ impl EditorState {
         self.next_number = snapshot.next_number;
         self.static_image_transform = snapshot.static_image_transform;
         self.scene_shadow = snapshot.scene_shadow;
-        if self.background.frame_style != snapshot.frame_style {
-            self.background.frame_style = snapshot.frame_style;
+        let revision = self.background.revision;
+        let background_changed = !same_background(&self.background, &snapshot.background);
+        self.background = snapshot.background;
+        self.background.revision = revision;
+        if background_changed {
+            // The revision is the paint cache key, so bumping it drops the
+            // rasterized fill the same way every live background edit does.
             self.background.changed();
         }
         self.selected_action_index = None;
@@ -236,12 +270,17 @@ impl EditorState {
             if let HistoryKind::Annotation(action) = &transaction.kind {
                 self.redo_actions.push(action.clone());
             }
+            let live_radius = self.background.radius;
             self.restore_document_snapshot(transaction.before.clone());
             if let HistoryKind::FrameStyle {
                 before_radius,
                 after_radius,
             } = &transaction.kind
             {
+                // A style step owns the radius it moved; the radius the
+                // document carried into this undo stays put, and the check
+                // below reverts only the style's own change.
+                self.background.radius = live_radius;
                 if before_radius != after_radius && self.background.radius == *after_radius {
                     self.background.radius = *before_radius;
                     self.background.changed();
@@ -297,12 +336,16 @@ impl EditorState {
             if matches!(&transaction.kind, HistoryKind::Annotation(_)) {
                 self.redo_actions.pop();
             }
+            let live_radius = self.background.radius;
             self.restore_document_snapshot(transaction.after.clone());
             if let HistoryKind::FrameStyle {
                 before_radius,
                 after_radius,
             } = &transaction.kind
             {
+                // Same rule as undo: only the radius the style itself moved
+                // is replayed; the live one otherwise stays.
+                self.background.radius = live_radius;
                 if before_radius != after_radius && self.background.radius == *before_radius {
                     self.background.radius = *after_radius;
                     self.background.changed();
@@ -338,5 +381,28 @@ impl EditorState {
 
     pub(crate) fn take_text_detection_restart(&mut self) -> bool {
         std::mem::take(&mut self.text_detection_restart_pending)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use image::{Rgba, RgbaImage};
+
+    use super::EditorState;
+
+    #[test]
+    fn background_padding_undoes_with_the_edit_that_changed_it() {
+        let mut state = EditorState::new(RgbaImage::from_pixel(120, 80, Rgba([30, 60, 90, 255])));
+        assert_eq!(state.background.padding, 0.0);
+        // The background sliders bracket a drag with these two calls.
+        state.begin_history_interaction();
+        state.background.set_padding(24.0);
+        state.background.changed();
+        state.finish_history_interaction();
+        assert_eq!(state.background.padding, 24.0);
+        assert!(state.undo_without_rebuild());
+        assert_eq!(state.background.padding, 0.0);
+        assert!(state.redo_without_rebuild());
+        assert_eq!(state.background.padding, 24.0);
     }
 }

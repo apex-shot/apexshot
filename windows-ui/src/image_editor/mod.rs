@@ -33,6 +33,7 @@ mod text_controls;
 mod timeline;
 mod toolbar;
 mod ui_support;
+mod upscale_compare;
 mod watermark;
 mod window;
 

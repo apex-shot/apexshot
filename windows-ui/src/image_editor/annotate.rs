@@ -39,7 +39,8 @@ use crate::capture::editor::state::{
 use crate::capture::editor::text_detect::spawn_text_detection;
 use crate::capture::editor::types::{
     cursor_name_for_select_handle, tool_shortcut_target, AnnotationAction, ArrowStyle, CropHandle,
-    FontSettings, FontStyle, MoveHandle, Point, TextAlignment, TextDecoration, Tool, ViewTransform,
+    DrawColor, FontSettings, FontStyle, MoveHandle, Point, TextAlignment, TextDecoration, Tool,
+    ViewTransform,
 };
 
 fn crop_cursor(st: &EditorState, point: Point, scale: f64) -> &'static str {
@@ -72,6 +73,8 @@ const ARROW_CLICK_NOOP_DISTANCE: f64 = 3.0;
 /// A new box or circle needs a deliberate drag on screen; anything shorter is
 /// a click that jittered, and committing it would leave a dot behind.
 const MIN_SHAPE_DRAG_DISTANCE: f64 = 16.0;
+/// Longest edge of the background raster painted during a live appearance drag.
+const LIVE_BACKGROUND_EDGE: u32 = 768;
 const PREVIEW_CARD_MAX_EDGE: u32 = 1600;
 static BACKGROUND_DECODE_LOCK: Mutex<()> = Mutex::new(());
 
@@ -201,6 +204,10 @@ pub struct EditorHost {
     /// Prepared Cairo surface for the working image, keyed by its revision.
     surface_cache: RefCell<Option<(u64, ImageSurface)>>,
     card_cache: RefCell<Option<CachedCard>>,
+    /// The card at the working image's own resolution, for the video encoder.
+    /// Kept apart from `card_cache` so a preview-sized card is never painted
+    /// into an export frame.
+    export_card_cache: RefCell<Option<CachedCard>>,
     /// Built on the first paint of a pen/highlighter drag; dropped when the
     /// drag ends. Only used while no card transform is active.
     annotation_cache: RefCell<Option<CachedAnnotations>>,
@@ -254,6 +261,7 @@ impl EditorHost {
             on_error,
             surface_cache: RefCell::new(None),
             card_cache: RefCell::new(None),
+            export_card_cache: RefCell::new(None),
             annotation_cache: RefCell::new(None),
             shadow_cache: RefCell::new(None),
             background_cache: RefCell::new(None),
@@ -292,16 +300,49 @@ impl EditorHost {
     /// kicks off OCR for the text-aware highlighter.
     pub fn load_document(self: &Rc<Self>, image: RgbaImage, area: &DrawingArea) {
         self.load_document_headless(image);
+        // Settings > Annotate shapes what new marks look like.
+        let config = crate::config::load_config().sanitized();
+        if let Some(state) = self.editor.borrow_mut().as_mut() {
+            apply_annotate_preferences(state, &config);
+        }
         let _ = area;
+    }
+
+    /// Bring back the annotation objects an exported image was saved with,
+    /// over the pre-annotation image `load_document` just opened.
+    pub fn restore_session(&self, session: &crate::annotations::AnnotationFile) {
+        self.mutate_effects(|st| {
+            st.actions = session
+                .annotations
+                .iter()
+                .map(crate::annotations::serializable_to_action)
+                .collect();
+            st.next_number = st
+                .actions
+                .iter()
+                .filter_map(|action| match action {
+                    AnnotationAction::Number { number, .. } => Some(*number),
+                    _ => None,
+                })
+                .max()
+                .unwrap_or(0)
+                + 1;
+            st.static_image_transform = session.static_image_transform.sanitized();
+            true
+        });
     }
 
     /// Document swap without widget coupling (tests use this directly).
     fn load_document_headless(&self, image: RgbaImage) {
         let mut state = EditorState::new(image);
+        // Tests never read the user's saved colours.
+        #[cfg(not(test))]
+        state.load_tool_colors(&crate::config::load_config().annotate_tool_colors);
         self.start_detection(&mut state);
         *self.editor.borrow_mut() = Some(state);
         *self.surface_cache.borrow_mut() = None;
         *self.card_cache.borrow_mut() = None;
+        *self.export_card_cache.borrow_mut() = None;
         *self.annotation_cache.borrow_mut() = None;
         *self.shadow_cache.borrow_mut() = None;
         *self.background_cache.borrow_mut() = None;
@@ -634,6 +675,9 @@ impl EditorHost {
                             st.background.changed();
                         });
                     }
+                    // A failed load is not an edit: closing the interaction
+                    // drops its snapshot without recording a step.
+                    host.with_state(|st| st.finish_history_interaction());
                     if let Some(failure) = on_failure.take() {
                         failure();
                     }
@@ -680,11 +724,18 @@ impl EditorHost {
             self.background_previous.borrow_mut().take();
         }
         self.mutate(|st| {
+            // The first frame of a load opens the step and the final image
+            // closes it, so a preview followed by the sharp image undoes as
+            // one edit.
+            st.begin_history_interaction();
             st.background
                 .set_fill(crate::capture::editor::state::background::Fill::Image(
                     image,
                 ));
             st.background.changed();
+            if !preview {
+                st.finish_history_interaction();
+            }
         });
         if preview {
             glib::ControlFlow::Continue
@@ -737,6 +788,22 @@ impl EditorHost {
         });
     }
 
+    /// Remember `color` for the armed tool and save it so the next editor
+    /// session opens that tool with it. Saving waits for the pick to settle,
+    /// so dragging the custom picker writes the config once.
+    pub fn remember_tool_color(&self, color: DrawColor) {
+        let Some((key, hex)) = self
+            .with_state(|st| st.remember_tool_color(color))
+            .flatten()
+        else {
+            return;
+        };
+        #[cfg(not(test))]
+        save_tool_color_later(key, hex);
+        #[cfg(test)]
+        let _ = (key, hex);
+    }
+
     /// Arm a tool. Valid in-flight text commits first so switching never
     /// drops it; the model's `selected_tool` is the chrome's authority.
     pub fn set_tool(&self, tool: Tool) {
@@ -748,6 +815,15 @@ impl EditorHost {
     }
 
     pub fn activate_tool(&self, tool: Tool) {
+        let leaving_crop = self
+            .read(|st| st.selected_tool == Tool::Crop && tool == Tool::Crop)
+            .unwrap_or(false);
+        if leaving_crop {
+            // Re-clicking Crop leaves crop mode and discards the uncommitted
+            // rect the same way Escape does.
+            self.cancel_crop();
+            return;
+        }
         let tool = self
             .read(|st| {
                 if st.selected_tool == tool && matches!(tool, Tool::Number | Tool::Highlighter) {
@@ -790,7 +866,7 @@ impl EditorHost {
     /// Paint the document inside the already-transformed image rect. `t` is
     /// the view transform the canvas computed for this frame.
     pub fn paint_document(&self, context: &gtk4::cairo::Context, t: ViewTransform) {
-        self.paint_document_inner(context, t, None, MotionPaintPart::Complete, false);
+        self.paint_document_inner(context, t, None, MotionPaintPart::Complete, false, false);
     }
 
     pub(super) fn motion_thumbnail(&self) -> Option<ImageSurface> {
@@ -845,6 +921,7 @@ impl EditorHost {
             Some((motion, anchor)),
             MotionPaintPart::Complete,
             live,
+            false,
         );
     }
 
@@ -854,9 +931,12 @@ impl EditorHost {
         t: ViewTransform,
         live: bool,
     ) {
-        self.paint_document_inner(context, t, None, MotionPaintPart::Background, live);
+        self.paint_document_inner(context, t, None, MotionPaintPart::Background, live, false);
     }
 
+    /// `export` paints the video encoder's frame: the card comes from the
+    /// working image at its own resolution and with the export resampling,
+    /// and the shadow uses the parked mask instead of the interactive one.
     pub(super) fn paint_motion_foreground(
         &self,
         context: &gtk4::cairo::Context,
@@ -864,6 +944,7 @@ impl EditorHost {
         motion: crate::recording::editor::model::MotionTransform,
         anchor: (f64, f64),
         live: bool,
+        export: bool,
     ) {
         self.paint_document_inner(
             context,
@@ -871,6 +952,7 @@ impl EditorHost {
             Some((motion, anchor)),
             MotionPaintPart::Foreground,
             live,
+            export,
         );
     }
 
@@ -881,6 +963,7 @@ impl EditorHost {
         motion_pose: Option<(crate::recording::editor::model::MotionTransform, (f64, f64))>,
         part: MotionPaintPart,
         live: bool,
+        export: bool,
     ) {
         #[cfg(test)]
         if part != MotionPaintPart::Base {
@@ -1029,8 +1112,9 @@ impl EditorHost {
                 pose,
                 &st.scene_shadow,
             ) {
-                let interactive =
-                    appearance_drag || part == MotionPaintPart::Foreground || (motion && live);
+                let interactive = appearance_drag
+                    || (part == MotionPaintPart::Foreground && !export)
+                    || (motion && live);
                 // During a light/opacity drag, move a cached unoffset silhouette
                 // instead of blurring the same card again for every pointer event.
                 let mut mask_geometry = shadow;
@@ -1117,7 +1201,15 @@ impl EditorHost {
             style.paint_underlay(context);
             let _ = context.restore();
             if !pose.is_identity() {
-                let cached = self.card_cache.borrow();
+                // The encoder's card is built from the full working image once
+                // and then reused for every frame; the preview keeps its
+                // capped-size card so playback stays cheap.
+                let cache = if export {
+                    &self.export_card_cache
+                } else {
+                    &self.card_cache
+                };
+                let cached = cache.borrow();
                 let card = cached
                     .as_ref()
                     .filter(|(revision, actions, radius, _)| {
@@ -1128,12 +1220,15 @@ impl EditorHost {
                     .map(|(_, _, _, surface)| surface.clone());
                 drop(cached);
                 let card = card.or_else(|| {
-                    let (width, height) =
-                        preview_card_size(st.working_image.width(), st.working_image.height());
+                    let (width, height) = if export {
+                        (st.working_image.width(), st.working_image.height())
+                    } else {
+                        preview_card_size(st.working_image.width(), st.working_image.height())
+                    };
                     let surface = st
                         .card_surface_from_source(&surface, layout.radius, width, height)
                         .ok()?;
-                    *self.card_cache.borrow_mut() = Some((
+                    *cache.borrow_mut() = Some((
                         st.working_image_revision,
                         st.actions.clone(),
                         layout.radius,
@@ -1152,7 +1247,9 @@ impl EditorHost {
                         f64::from(st.working_image.width()),
                         f64::from(st.working_image.height()),
                         pose,
-                        if live {
+                        if export {
+                            crate::capture::editor::transform_render::Quality::Export
+                        } else if live {
                             crate::capture::editor::transform_render::Quality::Live
                         } else {
                             crate::capture::editor::transform_render::Quality::Preview
@@ -1344,7 +1441,14 @@ impl EditorHost {
                         canvas_offset_y: 0.0,
                         ..t
                     };
-                    self.paint_document_inner(&base, local, None, MotionPaintPart::Base, false);
+                    self.paint_document_inner(
+                        &base,
+                        local,
+                        None,
+                        MotionPaintPart::Base,
+                        false,
+                        false,
+                    );
                 }
                 surface.flush();
                 #[cfg(test)]
@@ -1443,6 +1547,15 @@ impl EditorHost {
         // small zoom changes reuse the cache; never above 4096.
         let edge = ((layout.width.max(layout.height) * t.canvas_scale / 256.0).ceil() * 256.0)
             .clamp(256.0, 4096.0) as u32;
+        // An appearance slider changes the fill on every pointer event, and
+        // re-blurring a full-size raster each time made the drag lag. While
+        // live, a small raster stands in (the blur hides its resolution); the
+        // release misses the cache on size and repaints at full quality.
+        let edge = if live {
+            edge.min(LIVE_BACKGROUND_EDGE)
+        } else {
+            edge
+        };
         let key = (
             st.background.revision,
             st.working_image.width(),
@@ -1997,7 +2110,15 @@ impl EditorHost {
                 let Some(host) = host.upgrade() else {
                     return;
                 };
-                let refocus = host.with_state(finish_text_drag);
+                let refocus = host.with_state(|st| {
+                    // A click that never became a drag arms an arrow handle on
+                    // press but emits no drag end, so clear the stale handle
+                    // drag here.
+                    if st.drag_start_view.is_none() {
+                        st.arrow_control_dragging = None;
+                    }
+                    finish_text_drag(st)
+                });
                 if let Some(area) = area.upgrade() {
                     if refocus == Some(true) {
                         area.grab_focus();
@@ -2068,18 +2189,19 @@ impl EditorHost {
                 let now = glib::monotonic_time();
                 if now - host.last_redraw.get() >= DRAG_REDRAW_INTERVAL_US {
                     host.last_redraw.set(now);
-                    let effect_selected = host
+                    let live_bars = host
                         .read(|st| {
-                            matches!(
-                                st.selected_action(),
-                                Some(
-                                    AnnotationAction::Obfuscate { .. }
-                                        | AnnotationAction::Focus { .. }
+                            st.selected_tool == Tool::Crop
+                                || matches!(
+                                    st.selected_action(),
+                                    Some(
+                                        AnnotationAction::Obfuscate { .. }
+                                            | AnnotationAction::Focus { .. }
+                                    )
                                 )
-                            )
                         })
                         .unwrap_or(false);
-                    if effect_selected {
+                    if live_bars {
                         host.changed();
                     } else {
                         area.queue_draw();
@@ -3004,21 +3126,29 @@ impl EditorHost {
 
     /// The flattened document for a Cloud upload. Commits inline text first
     /// and refuses while the background image is still loading, exactly like
-    /// Copy and Save As.
-    pub fn upload_snapshot(&self) -> Option<image::RgbaImage> {
+    /// Copy and Save As. A failed flatten carries its render error text so
+    /// the caller can report it instead of silently doing nothing.
+    pub fn upload_snapshot(&self) -> Result<image::RgbaImage, String> {
         if self.background_loading() {
-            self.report_error(crate::i18n::t(
+            return Err(crate::i18n::t(
                 "Wait for the background image to finish loading.",
             ));
-            return None;
         }
         self.commit_text_if_active();
-        self.with_state(|st| st.to_final_image().ok()).flatten()
+        match self.with_state(|st| st.to_final_image().map_err(|error| error.to_string())) {
+            Some(result) => result,
+            None => Err(crate::i18n::t("Could not render the image.")),
+        }
     }
 
     /// Save the flattened document with the platform file dialog handling
-    /// overwrite confirmation; never touches the loaded source path.
-    pub fn save_as(&self, parent: &impl IsA<gtk4::Window>, path: &std::path::Path) {
+    /// overwrite confirmation; `on_saved` runs once the file is written.
+    pub fn save_as(
+        &self,
+        parent: &impl IsA<gtk4::Window>,
+        path: &std::path::Path,
+        on_saved: Box<dyn Fn()>,
+    ) {
         if self.background_loading() {
             self.report_error(crate::i18n::t(
                 "Wait for the background image to finish loading.",
@@ -3035,20 +3165,32 @@ impl EditorHost {
             );
             return;
         };
-        self.save_snapshot(path, snapshot);
+        let session = self.read(EditableSession::capture);
+        self.save_snapshot(path, snapshot, session, on_saved);
         let _ = parent;
     }
 
-    fn save_snapshot(&self, path: &std::path::Path, snapshot: image::RgbaImage) {
+    fn save_snapshot(
+        &self,
+        path: &std::path::Path,
+        snapshot: image::RgbaImage,
+        session: Option<EditableSession>,
+        on_saved: Box<dyn Fn()>,
+    ) {
         let path = path.to_path_buf();
         let report = self.on_error.clone();
         let reported_path = path.clone();
         let (sender, receiver) =
             mpsc::channel::<Result<(), crate::capture::editor::types::EditorError>>();
         std::thread::spawn(move || {
-            let _ = sender.send(crate::capture::editor::io_ops::save_image_snapshot(
-                &path, snapshot,
-            ));
+            let saved = crate::capture::editor::io_ops::save_image_snapshot(&path, snapshot);
+            // The sidecar hashes the written file, so it follows the save.
+            if let (Ok(()), Some(session)) = (&saved, session) {
+                if let Err(error) = session.persist(&path) {
+                    eprintln!("[image-editor] Could not save the editable annotations: {error}");
+                }
+            }
+            let _ = sender.send(saved);
         });
         glib::timeout_add_local(Duration::from_millis(50), move || {
             match receiver.try_recv() {
@@ -3057,6 +3199,7 @@ impl EditorHost {
                         &crate::i18n::t("Export complete"),
                         &reported_path.display().to_string(),
                     );
+                    on_saved();
                     glib::ControlFlow::Break
                 }
                 Ok(Err(error)) => {
@@ -3072,6 +3215,108 @@ impl EditorHost {
             }
         });
     }
+}
+
+#[cfg(not(test))]
+thread_local! {
+    static PENDING_TOOL_COLORS: RefCell<(std::collections::BTreeMap<String, String>, Option<glib::SourceId>)> =
+        const { RefCell::new((std::collections::BTreeMap::new(), None)) };
+}
+
+/// Queue one tool colour for the config and write every queued colour once
+/// no new pick has arrived for a moment.
+#[cfg(not(test))]
+fn save_tool_color_later(key: &'static str, hex: String) {
+    PENDING_TOOL_COLORS.with(|pending| {
+        let mut pending = pending.borrow_mut();
+        pending.0.insert(key.to_string(), hex);
+        if let Some(source) = pending.1.take() {
+            source.remove();
+        }
+        pending.1 = Some(glib::timeout_add_local_once(
+            Duration::from_millis(300),
+            || {
+                let colors = PENDING_TOOL_COLORS.with(|pending| {
+                    let mut pending = pending.borrow_mut();
+                    pending.1 = None;
+                    std::mem::take(&mut pending.0)
+                });
+                let mut config = crate::config::load_config();
+                let before = config.annotate_tool_colors.clone();
+                config.annotate_tool_colors.extend(colors);
+                if config.annotate_tool_colors != before {
+                    if let Err(error) = crate::config::save_config(&config) {
+                        eprintln!("[image-editor] Could not save the tool colour: {error}");
+                    }
+                }
+            },
+        ));
+    });
+}
+
+/// The path a re-edit sidecar is keyed by: the canonical form, so the Save
+/// dialog's path and the one the file is reopened from name the same file.
+pub(crate) fn session_key(path: &std::path::Path) -> std::path::PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// What an exported image needs to reopen with editable annotations: the
+/// pre-annotation image and the annotation objects drawn over it.
+struct EditableSession {
+    actions: Vec<AnnotationAction>,
+    base_image: Arc<RgbaImage>,
+    static_image_transform: crate::capture::editor::image_transform::StaticImageTransform,
+    source_upscale: crate::capture::editor::upscale::SourceUpscale,
+}
+
+impl EditableSession {
+    fn capture(st: &EditorState) -> Self {
+        Self {
+            actions: st.actions.clone(),
+            base_image: Arc::clone(&st.base_image),
+            static_image_transform: st.static_image_transform,
+            source_upscale: st.source_upscale,
+        }
+    }
+
+    /// Write the sidecar for the exported file, or drop a stale one when
+    /// nothing is left to re-edit. The background composition is not part of
+    /// the Windows record yet, so the file carries the default background.
+    fn persist(
+        &self,
+        exported: &std::path::Path,
+    ) -> Result<(), crate::annotations::AnnotationError> {
+        let key = session_key(exported);
+        if self.actions.is_empty() && self.static_image_transform.is_identity() {
+            return crate::annotations::delete_annotations(&key);
+        }
+        crate::annotations::save_annotations(
+            &key,
+            self.base_image.width(),
+            self.base_image.height(),
+            &self.actions,
+            &self.base_image,
+            &crate::capture::editor::types::BackgroundStyle::None,
+            0.0,
+            crate::annotations::ShadowProfileSettings::default(),
+            None,
+            0.0,
+            false,
+            crate::capture::editor::types::BackgroundAlignment::Center,
+            18.0,
+            crate::capture::editor::types::CropAspectRatio::Original,
+            self.static_image_transform,
+            self.source_upscale,
+        )
+    }
+}
+
+/// Copy the Settings window's Annotate drawing preferences onto a document.
+pub(crate) fn apply_annotate_preferences(st: &mut EditorState, config: &crate::config::AppConfig) {
+    st.inverse_arrow_direction = config.annotate_inverse_arrow;
+    st.smooth_drawing_enabled = config.annotate_smooth_drawing;
+    st.draw_object_shadow = config.annotate_draw_shadow;
+    st.auto_expand_canvas = config.annotate_auto_expand;
 }
 
 /// Report a failed copy or export on both surfaces: the canvas toast for the
@@ -3382,6 +3627,94 @@ mod tests {
     }
 
     #[test]
+    fn an_exported_image_reopens_with_its_annotations_as_objects() {
+        let dir = std::env::temp_dir().join(format!("apexshot-reedit-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let exported = dir.join("annotated.png");
+        let base = test_image(40, 30);
+        let boxed = AnnotationAction::Box {
+            rect: crate::capture::editor::types::Rect {
+                x: 4,
+                y: 5,
+                width: 20,
+                height: 10,
+            },
+            color: crate::capture::editor::types::DrawColor::new(0.0, 0.2, 1.0, 1.0),
+            stroke_size: 3.0,
+            shadow: false,
+        };
+        let mut state = EditorState::new(base.clone());
+        state.actions.push(boxed.clone());
+        let session = EditableSession::capture(&state);
+        let flat = RgbaImage::from_pixel(60, 50, image::Rgba([9, 9, 9, 255]));
+        crate::capture::editor::io_ops::save_image_snapshot(&exported, flat).unwrap();
+        session.persist(&exported).unwrap();
+
+        let key = session_key(&exported);
+        let file = crate::annotations::load_annotations(&key).unwrap().unwrap();
+        let original = crate::annotations::load_original_image(&key)
+            .unwrap()
+            .unwrap();
+        assert_eq!(original, base);
+
+        let restored = crate::test_support::with_gtk(move || {
+            let h = host();
+            h.load_document_headless(original);
+            h.restore_session(&file);
+            h.read(|st| (st.actions.clone(), st.next_number)).unwrap()
+        });
+        if let Some((actions, next_number)) = restored {
+            assert_eq!(actions, vec![boxed.clone()]);
+            assert_eq!(next_number, 1);
+        }
+
+        // A flat re-export drops the sidecar instead of leaving it stale.
+        EditableSession::capture(&EditorState::new(base))
+            .persist(&exported)
+            .unwrap();
+        assert!(crate::annotations::load_annotations(&key)
+            .unwrap()
+            .is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn annotate_preferences_reach_the_document() {
+        let mut state = EditorState::new(test_image(8, 8));
+        let config = crate::config::AppConfig {
+            annotate_inverse_arrow: true,
+            annotate_smooth_drawing: true,
+            annotate_draw_shadow: true,
+            annotate_auto_expand: true,
+            ..Default::default()
+        };
+        apply_annotate_preferences(&mut state, &config);
+        assert!(state.inverse_arrow_direction);
+        assert!(state.smooth_drawing_enabled);
+        assert!(state.draw_object_shadow);
+        assert!(state.auto_expand_canvas);
+    }
+
+    #[test]
+    fn re_arming_crop_leaves_crop_mode_and_discards_the_rect() {
+        let h = host();
+        let mut state = EditorState::new(RgbaImage::new(200, 100));
+        state.set_tool_without_rebuild(Tool::Crop);
+        state.crop_rect = Some(crate::capture::editor::types::Rect {
+            x: 10,
+            y: 10,
+            width: 50,
+            height: 40,
+        });
+        *h.editor.borrow_mut() = Some(state);
+
+        h.activate_tool(Tool::Crop);
+
+        assert_eq!(h.read(|st| st.selected_tool), Some(Tool::Select));
+        assert_eq!(h.read(|st| st.crop_rect), Some(None));
+    }
+
+    #[test]
     fn drag_annotation_cache_matches_direct_paint() {
         let host = host();
         let mut state = EditorState::new(RgbaImage::from_pixel(
@@ -3457,7 +3790,7 @@ mod tests {
         let render = |part: MotionPaintPart| {
             let mut surface = ImageSurface::create(gtk4::cairo::Format::ARgb32, 260, 200).unwrap();
             let context = gtk4::cairo::Context::new(&surface).unwrap();
-            host.paint_document_inner(&context, t, None, part, false);
+            host.paint_document_inner(&context, t, None, part, false, false);
             drop(context);
             surface.flush();
             let data = surface.data().unwrap().to_vec();
@@ -3534,7 +3867,7 @@ mod tests {
             });
             let mut surface = ImageSurface::create(gtk4::cairo::Format::ARgb32, 160, 120).unwrap();
             let context = gtk4::cairo::Context::new(&surface).unwrap();
-            host.paint_document_inner(&context, t, None, MotionPaintPart::Complete, false);
+            host.paint_document_inner(&context, t, None, MotionPaintPart::Complete, false, false);
             drop(context);
             surface.flush();
             let data = surface.data().unwrap().to_vec();
