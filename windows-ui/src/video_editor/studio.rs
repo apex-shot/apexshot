@@ -115,6 +115,7 @@ mod tests {
             crf: 23,
             audio: Vec::new(),
             effects: Default::default(),
+            cursor_hide_clips: Vec::new(),
         }
     }
 

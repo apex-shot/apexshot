@@ -2336,6 +2336,7 @@ fn export_model(
         zooms: footage.zooms,
         zoom_camera: footage.zoom_camera,
         effects: footage.effects,
+        cursor_hide_clips: footage.cursor_hide_clips,
         cursor: stage.cursor.settings(),
         sidecar,
         webcam: stage.webcam.export(),

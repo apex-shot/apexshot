@@ -31,7 +31,7 @@ use crate::capture::editor::window::icon_names;
 use crate::i18n::t;
 use crate::recording::editor::auto_zoom;
 use crate::recording::editor::ffmpeg;
-use crate::recording::editor::model::CursorSettings;
+use crate::recording::editor::model::{CursorHideClip, CursorSettings};
 
 use super::history::EditHistory;
 
@@ -2109,6 +2109,21 @@ impl Data {
         !arrived
     }
 
+    /// How much of the cursor the hide track leaves visible at `time`: 0
+    /// while a hide clip that is not muted covers it, 1 otherwise. This is the
+    /// shared editor's coverage rule, applied on the composition clock.
+    fn cursor_hide_alpha(&self, time: f64) -> f64 {
+        if self
+            .hide_clips
+            .iter()
+            .any(|clip| !clip.hidden && time >= clip.start && time <= clip.end)
+        {
+            0.0
+        } else {
+            1.0
+        }
+    }
+
     fn hover_time(&self, track: EffectTrack) -> Option<f64> {
         match track {
             EffectTrack::Zoom => self.hover_zoom,
@@ -3401,6 +3416,9 @@ pub(super) struct ExportFootage {
     pub zooms: Vec<ZoomClip>,
     pub zoom_camera: super::zoom::ZoomCameraSettings,
     pub effects: super::project::EffectsSettings,
+    /// The hide clips, in composition time, so the exporter drops the cursor
+    /// where the preview does.
+    pub cursor_hide_clips: Vec<CursorHideClip>,
 }
 
 type PreviewFrameSink = Rc<RefCell<Option<Rc<dyn Fn(PreviewFrame)>>>>;
@@ -3472,6 +3490,7 @@ impl Timeline {
         let data = self.data.borrow();
         self.cursor.set_cuts(&data.cuts);
         self.cursor.set_end(data.trim_end);
+        self.cursor.set_hide_alpha(data.cursor_hide_alpha(data.playhead));
         self.cursor.set_caption_settings(data.effects.captions);
         let placement = data.placement();
         let add_zoom = data.add_zoom_tool();
@@ -3574,6 +3593,15 @@ impl Timeline {
             zooms: data.zoom_clips.clone(),
             zoom_camera: data.zoom_camera,
             effects: data.effects.clone(),
+            cursor_hide_clips: data
+                .hide_clips
+                .iter()
+                .map(|clip| CursorHideClip {
+                    start: clip.start,
+                    end: clip.end,
+                    hidden: clip.hidden,
+                })
+                .collect(),
         })
     }
 

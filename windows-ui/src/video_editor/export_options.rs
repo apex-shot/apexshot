@@ -522,6 +522,7 @@ mod tests {
                     crf: 20,
                     audio: Vec::new(),
                     effects: Default::default(),
+                    cursor_hide_clips: Vec::new(),
                 };
                 let chosen = Rc::new(Cell::new(None));
                 show(
