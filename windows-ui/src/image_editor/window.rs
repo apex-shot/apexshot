@@ -126,7 +126,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
             // hit-testing tracks the real pixels.
             canvas.sync_view_to_document();
             host.read(|st| {
-                toolbar.set_active_tool(Tool::from_model(st.selected_tool));
+                toolbar.set_active_tool(Tool::rail_from_model(st.selected_tool));
                 sub_bars.sync(Some(st));
                 canvas.set_crop_mode(st.selected_tool == crate::capture::editor::types::Tool::Crop);
                 effect_control.sync(st, &canvas);

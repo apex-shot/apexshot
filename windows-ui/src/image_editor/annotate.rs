@@ -758,6 +758,15 @@ impl EditorHost {
     }
 
     pub fn activate_tool(&self, tool: Tool) {
+        let leaving_crop = self
+            .read(|st| st.selected_tool == Tool::Crop && tool == Tool::Crop)
+            .unwrap_or(false);
+        if leaving_crop {
+            // Re-clicking Crop leaves crop mode and discards the uncommitted
+            // rect the same way Escape does.
+            self.cancel_crop();
+            return;
+        }
         let tool = self
             .read(|st| {
                 if st.selected_tool == tool && matches!(tool, Tool::Number | Tool::Highlighter) {
@@ -2007,7 +2016,15 @@ impl EditorHost {
                 let Some(host) = host.upgrade() else {
                     return;
                 };
-                let refocus = host.with_state(finish_text_drag);
+                let refocus = host.with_state(|st| {
+                    // A click that never became a drag arms an arrow handle on
+                    // press but emits no drag end, so clear the stale handle
+                    // drag here.
+                    if st.drag_start_view.is_none() {
+                        st.arrow_control_dragging = None;
+                    }
+                    finish_text_drag(st)
+                });
                 if let Some(area) = area.upgrade() {
                     if refocus == Some(true) {
                         area.grab_focus();
@@ -2078,18 +2095,19 @@ impl EditorHost {
                 let now = glib::monotonic_time();
                 if now - host.last_redraw.get() >= DRAG_REDRAW_INTERVAL_US {
                     host.last_redraw.set(now);
-                    let effect_selected = host
+                    let live_bars = host
                         .read(|st| {
-                            matches!(
-                                st.selected_action(),
-                                Some(
-                                    AnnotationAction::Obfuscate { .. }
-                                        | AnnotationAction::Focus { .. }
+                            st.selected_tool == Tool::Crop
+                                || matches!(
+                                    st.selected_action(),
+                                    Some(
+                                        AnnotationAction::Obfuscate { .. }
+                                            | AnnotationAction::Focus { .. }
+                                    )
                                 )
-                            )
                         })
                         .unwrap_or(false);
-                    if effect_selected {
+                    if live_bars {
                         host.changed();
                     } else {
                         area.queue_draw();
@@ -3392,6 +3410,25 @@ mod tests {
 
     fn host() -> Rc<EditorHost> {
         EditorHost::new(Rc::new(|| {}), Rc::new(|_| {}), Rc::new(|| (0.0, 0.0)))
+    }
+
+    #[test]
+    fn re_arming_crop_leaves_crop_mode_and_discards_the_rect() {
+        let h = host();
+        let mut state = EditorState::new(RgbaImage::new(200, 100));
+        state.set_tool_without_rebuild(Tool::Crop);
+        state.crop_rect = Some(crate::capture::editor::types::Rect {
+            x: 10,
+            y: 10,
+            width: 50,
+            height: 40,
+        });
+        *h.editor.borrow_mut() = Some(state);
+
+        h.activate_tool(Tool::Crop);
+
+        assert_eq!(h.read(|st| st.selected_tool), Some(Tool::Select));
+        assert_eq!(h.read(|st| st.crop_rect), Some(None));
     }
 
     #[test]
