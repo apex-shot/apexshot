@@ -3383,6 +3383,9 @@ pub(super) struct Timeline {
     zoom_scale: Scale,
     repaint: Rc<dyn Fn()>,
     frame_sink: PreviewFrameSink,
+    /// The instant the first frame of a playback reached the stage. The
+    /// preview writes it; the transport holds the playhead until it is set.
+    first_frame: Rc<Cell<Option<Instant>>>,
     zoom_listener: ChangeListener,
     webcam_listener: ChangeListener,
     effects_listener: ChangeListener,
@@ -3417,6 +3420,12 @@ impl Timeline {
     pub fn set_frame_sink(&self, sink: Rc<dyn Fn(PreviewFrame)>) {
         *self.frame_sink.borrow_mut() = Some(sink.clone());
         sink(self.current_frame());
+    }
+
+    /// The clock the preview reports its first presented frame to. The
+    /// playhead holds until that frame is on screen, then runs from it.
+    pub fn first_frame_clock(&self) -> Rc<Cell<Option<Instant>>> {
+        self.first_frame.clone()
     }
 
     /// What the stage should show right now. The 50 ms tick reads it every
@@ -5426,6 +5435,10 @@ pub(super) fn build(
     // the preview the source frame under the playhead, and the stage the
     // composition's current length for its export estimate.
     let frame_sink: PreviewFrameSink = Rc::new(RefCell::new(None));
+    // The instant the first frame of the current playback reached the stage.
+    // The preview writes it; the playhead holds until it is set, so the clock
+    // runs from the picture instead of from the press.
+    let first_frame: Rc<Cell<Option<Instant>>> = Rc::new(Cell::new(None));
     gtk4::glib::timeout_add_local(Duration::from_millis(50), {
         let data = data.clone();
         let cursor = cursor.clone();
@@ -5444,6 +5457,10 @@ pub(super) fn build(
         // The wall clock the last tick ran at. The timer fires late, so the
         // step is measured instead of assumed to be its 50 ms period.
         let last_tick = Rc::new(Cell::new(None::<Instant>));
+        // Whether this playback has been seen by the tick yet, so the clock is
+        // cleared once per press rather than on every held tick.
+        let playback_started = Rc::new(Cell::new(false));
+        let first_frame = first_frame.clone();
         move || {
             let (playing, changed, preview) = {
                 let mut data = data.borrow_mut();
@@ -5452,16 +5469,32 @@ pub(super) fn build(
                 let was_playing = data.playing;
                 if was_playing {
                     let now = Instant::now();
-                    let step = last_tick.get().map_or(0.05, |previous| {
-                        now.duration_since(previous).as_secs_f64().min(0.25)
-                    });
-                    last_tick.set(Some(now));
+                    if !playback_started.get() {
+                        // A new playback holds its playhead until the first
+                        // frame of the request is on screen, so the picture,
+                        // the playhead and the sound start together.
+                        playback_started.set(true);
+                        first_frame.set(None);
+                        last_tick.set(None);
+                    }
+                    let step = match first_frame.get() {
+                        Some(started) => {
+                            let step = last_tick.get().map_or_else(
+                                || now.duration_since(started).as_secs_f64(),
+                                |previous| now.duration_since(previous).as_secs_f64(),
+                            );
+                            last_tick.set(Some(now));
+                            step.min(0.25)
+                        }
+                        None => 0.0,
+                    };
                     data.playhead += step;
                     if data.playhead >= data.total_duration() {
                         data.playhead = 0.0;
                         data.playing = false;
                     }
                 } else {
+                    playback_started.set(false);
                     last_tick.set(None);
                 }
                 let composition_time = data.playhead;
@@ -5571,6 +5604,7 @@ pub(super) fn build(
         zoom_scale,
         repaint,
         frame_sink,
+        first_frame,
         zoom_listener,
         webcam_listener,
         effects_listener,
