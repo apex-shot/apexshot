@@ -1562,6 +1562,69 @@ button.image-editor-inline-button:disabled {
     background: rgba(17, 24, 39, 0.09);
 }
 
+/* Export quality's compare action: a full-width row with the split glyph,
+ * its label, and a chevron for the sheet it opens. */
+button.image-editor-upscale-compare {
+    min-height: 40px;
+    padding: 0 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
+    background-image: none;
+    box-shadow: none;
+    outline: none;
+    color: rgba(255, 255, 255, 0.90);
+}
+
+button.image-editor-upscale-compare:hover {
+    border-color: rgba(255, 255, 255, 0.16);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+button.image-editor-upscale-compare:active {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+button.image-editor-upscale-compare:disabled {
+    opacity: 0.4;
+}
+
+.image-editor-upscale-compare-icon {
+    color: #ff670d;
+}
+
+.image-editor-upscale-compare-label {
+    color: inherit;
+    font-weight: 500;
+}
+
+.image-editor-upscale-compare-chevron {
+    color: rgba(255, 255, 255, 0.40);
+}
+
+button.image-editor-upscale-compare:hover .image-editor-upscale-compare-chevron {
+    color: rgba(255, 255, 255, 0.80);
+}
+
+.editor-theme-light button.image-editor-upscale-compare {
+    border-color: rgba(17, 24, 39, 0.10);
+    background: #ffffff;
+    color: rgba(17, 24, 39, 0.90);
+}
+
+.editor-theme-light button.image-editor-upscale-compare:hover {
+    border-color: rgba(17, 24, 39, 0.20);
+    background: rgba(17, 24, 39, 0.03);
+}
+
+.editor-theme-light .image-editor-upscale-compare-chevron {
+    color: rgba(17, 24, 39, 0.40);
+}
+
+.editor-theme-light button.image-editor-upscale-compare:hover .image-editor-upscale-compare-chevron {
+    color: rgba(17, 24, 39, 0.80);
+}
+
 /* Watermark's Remove is the flat sidebar action: no fill, no border, a quiet
  * label that only washes on hover, so it reads below the picker instead of
  * competing with it. */
@@ -2186,65 +2249,22 @@ button.image-editor-confirm-continue:active {
     font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
 }
 
+/* A neutral dim, so the editor's own greys carry no blue cast. */
+.image-editor-confirm-scrim.image-editor-upscale-scrim {
+    background: rgba(0, 0, 0, 0.60);
+}
+
+/* The editor's palette: #141414 for surfaces and #0f0f0f for the recessed
+ * stage, as the canvas and the toolbar use. Flat, no shadow. */
 .image-editor-upscale-card {
-    background: #19191b;
-    border: 1px solid rgba(255, 255, 255, 0.10);
-    border-radius: 14px;
-    box-shadow: 0 28px 72px rgba(0, 0, 0, 0.50);
-}
-
-.image-editor-upscale-card.editor-theme-light {
-    background: #ffffff;
-    border-color: rgba(17, 24, 39, 0.10);
-    box-shadow: 0 28px 72px rgba(17, 24, 39, 0.20);
-}
-
-.image-editor-upscale-header {
-    padding: 14px 14px 14px 20px;
-}
-
-.image-editor-upscale-title {
-    color: rgba(255, 255, 255, 0.95);
-    font-size: 15px;
-    font-weight: 600;
-}
-
-.image-editor-upscale-meta-line {
-    color: rgba(255, 255, 255, 0.50);
-    font-size: 12px;
-    font-feature-settings: "tnum";
-}
-
-.image-editor-upscale-free {
-    padding: 3px 10px;
-    border-radius: 999px;
-    background: rgba(255, 103, 13, 0.14);
-    color: #ff9250;
-    font-size: 11px;
-    font-weight: 600;
-}
-
-button.image-editor-upscale-close {
-    min-width: 30px;
-    min-height: 30px;
-    padding: 0;
-    border: none;
-    border-radius: 999px;
-    background: transparent;
-    background-image: none;
+    background: #141414;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
     box-shadow: none;
-    color: rgba(255, 255, 255, 0.60);
-}
-
-button.image-editor-upscale-close:hover {
-    background: rgba(255, 255, 255, 0.08);
-    color: #ffffff;
 }
 
 .image-editor-upscale-stage {
-    background: #0e0e10;
-    border-top: 1px solid rgba(255, 255, 255, 0.07);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    background: #0f0f0f;
 }
 
 .image-editor-upscale-scroll,
@@ -2253,80 +2273,241 @@ button.image-editor-upscale-close:hover {
 }
 
 .image-editor-upscale-message {
-    color: rgba(255, 255, 255, 0.62);
-    font-size: 13px;
+    color: rgba(255, 255, 255, 0.56);
 }
 
 .image-editor-upscale-card spinner {
-    color: #ff670d;
+    color: rgba(255, 255, 255, 0.72);
 }
 
-.image-editor-upscale-footer {
-    padding: 12px 16px;
+/* Side panel */
+
+.image-editor-upscale-panel {
+    padding: 20px;
+    background: #141414;
+    border-left: 1px solid rgba(255, 255, 255, 0.07);
 }
 
+.image-editor-upscale-title {
+    color: rgba(255, 255, 255, 0.95);
+    font-weight: 600;
+}
+
+.image-editor-upscale-hint {
+    color: rgba(255, 255, 255, 0.50);
+}
+
+button.image-editor-upscale-close {
+    min-width: 28px;
+    min-height: 28px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: rgba(255, 255, 255, 0.56);
+}
+
+button.image-editor-upscale-close:hover {
+    background: rgba(255, 255, 255, 0.07);
+    color: #ffffff;
+}
+
+.image-editor-upscale-eyebrow {
+    color: rgba(255, 255, 255, 0.50);
+    font-weight: 600;
+}
+
+/* Output size choices: bordered rows with a radio mark. GTK names a toggle
+ * button's node `button`, so these select on `button`, not `togglebutton`. */
+button.image-editor-upscale-option {
+    padding: 10px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    background: transparent;
+    background-image: none;
+    box-shadow: none;
+    outline: none;
+}
+
+button.image-editor-upscale-option:hover {
+    border-color: rgba(255, 255, 255, 0.16);
+    background: rgba(255, 255, 255, 0.02);
+}
+
+button.image-editor-upscale-option:checked,
+button.image-editor-upscale-option:checked:hover {
+    border-color: #ff670d;
+    background: rgba(255, 255, 255, 0.03);
+}
+
+button.image-editor-upscale-option:disabled {
+    opacity: 0.4;
+}
+
+.image-editor-upscale-radio {
+    min-width: 12px;
+    min-height: 12px;
+    border: 2px solid rgba(255, 255, 255, 0.28);
+    border-radius: 999px;
+    background: transparent;
+}
+
+button.image-editor-upscale-option:checked .image-editor-upscale-radio {
+    min-width: 6px;
+    min-height: 6px;
+    border: 5px solid #ff670d;
+    background: #ffffff;
+}
+
+.image-editor-upscale-option-title {
+    color: rgba(255, 255, 255, 0.92);
+    font-weight: 600;
+}
+
+.image-editor-upscale-option-detail {
+    color: rgba(255, 255, 255, 0.50);
+    font-feature-settings: "tnum";
+}
+
+.image-editor-upscale-source {
+    margin-top: 12px;
+    padding: 0 2px;
+}
+
+.image-editor-upscale-source-name {
+    color: rgba(255, 255, 255, 0.50);
+}
+
+.image-editor-upscale-source-value {
+    color: rgba(255, 255, 255, 0.78);
+    font-feature-settings: "tnum";
+}
+
+/* Zoom: one tray of equal segments across the panel. */
 .image-editor-upscale-seg {
-    margin-right: 4px;
     padding: 2px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 8px;
-    background: rgba(255, 255, 255, 0.06);
+    background: #0f0f0f;
 }
 
-togglebutton.image-editor-upscale-seg-button {
-    min-width: 40px;
-    min-height: 26px;
+button.image-editor-upscale-seg-button {
+    min-height: 28px;
     padding: 0 10px;
     border: none;
     border-radius: 6px;
     background: transparent;
     background-image: none;
     box-shadow: none;
-    color: rgba(255, 255, 255, 0.58);
-    font-size: 12px;
+    outline: none;
+    color: rgba(255, 255, 255, 0.60);
     font-weight: 500;
 }
 
-togglebutton.image-editor-upscale-seg-button label {
+button.image-editor-upscale-seg-button label {
     color: inherit;
-    font-size: 12px;
     font-weight: 500;
 }
 
-togglebutton.image-editor-upscale-seg-button:hover {
+button.image-editor-upscale-seg-button:hover {
     color: rgba(255, 255, 255, 0.92);
 }
 
-togglebutton.image-editor-upscale-seg-button:checked,
-togglebutton.image-editor-upscale-seg-button:checked:hover {
-    background: rgba(255, 255, 255, 0.12);
+button.image-editor-upscale-seg-button:checked,
+button.image-editor-upscale-seg-button:checked:hover {
+    background: rgba(255, 255, 255, 0.10);
     color: #ffffff;
 }
 
-togglebutton.image-editor-upscale-seg-button:disabled {
+button.image-editor-upscale-seg-button:disabled {
     color: rgba(255, 255, 255, 0.24);
 }
 
-.image-editor-upscale-card button.image-editor-confirm-continue:disabled {
-    background: rgba(255, 255, 255, 0.08);
-    color: rgba(255, 255, 255, 0.35);
+.image-editor-upscale-note {
+    margin-bottom: 14px;
+    color: rgba(255, 255, 255, 0.50);
 }
 
-.image-editor-upscale-card.editor-theme-light .image-editor-upscale-title {
+.image-editor-upscale-card button.image-editor-confirm-cancel,
+.image-editor-upscale-card button.image-editor-confirm-continue {
+    min-height: 32px;
+    padding: 0 12px;
+    border-radius: 8px;
+    font-weight: 600;
+    box-shadow: none;
+}
+
+.image-editor-upscale-card button.image-editor-confirm-cancel {
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: transparent;
+    color: rgba(255, 255, 255, 0.88);
+}
+
+.image-editor-upscale-card button.image-editor-confirm-cancel:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: #ffffff;
+}
+
+.image-editor-upscale-card button.image-editor-confirm-continue {
+    border: 1px solid #ff670d;
+}
+
+.image-editor-upscale-card button.image-editor-confirm-continue:hover {
+    border-color: #ff7c2f;
+}
+
+.image-editor-upscale-card button.image-editor-confirm-continue:active {
+    border-color: #e85b06;
+}
+
+.image-editor-upscale-card button.image-editor-confirm-continue:disabled {
+    border-color: transparent;
+    background: rgba(255, 255, 255, 0.07);
+    color: rgba(255, 255, 255, 0.32);
+}
+
+/* Light theme */
+
+.image-editor-upscale-card.editor-theme-light {
+    background: #ffffff;
+    border-color: rgba(17, 24, 39, 0.12);
+}
+
+.image-editor-upscale-card.editor-theme-light .image-editor-upscale-stage {
+    background: #f6f7fb;
+}
+
+.image-editor-upscale-card.editor-theme-light .image-editor-upscale-panel {
+    background: #ffffff;
+    border-left-color: rgba(17, 24, 39, 0.08);
+}
+
+.image-editor-upscale-card.editor-theme-light .image-editor-upscale-title,
+.image-editor-upscale-card.editor-theme-light .image-editor-upscale-option-title {
     color: #1d2129;
 }
 
-.image-editor-upscale-card.editor-theme-light .image-editor-upscale-meta-line,
+.image-editor-upscale-card.editor-theme-light .image-editor-upscale-hint,
+.image-editor-upscale-card.editor-theme-light .image-editor-upscale-eyebrow,
+.image-editor-upscale-card.editor-theme-light .image-editor-upscale-option-detail,
+.image-editor-upscale-card.editor-theme-light .image-editor-upscale-source-name,
+.image-editor-upscale-card.editor-theme-light .image-editor-upscale-note,
 .image-editor-upscale-card.editor-theme-light .image-editor-upscale-message {
-    color: rgba(17, 24, 39, 0.58);
+    color: rgba(17, 24, 39, 0.56);
 }
 
-.image-editor-upscale-card.editor-theme-light .image-editor-upscale-free {
-    background: rgba(255, 103, 13, 0.12);
-    color: #c2410c;
+.image-editor-upscale-card.editor-theme-light .image-editor-upscale-source-value {
+    color: rgba(17, 24, 39, 0.82);
+}
+
+.image-editor-upscale-card.editor-theme-light spinner {
+    color: rgba(17, 24, 39, 0.56);
 }
 
 .image-editor-upscale-card.editor-theme-light button.image-editor-upscale-close {
-    color: rgba(17, 24, 39, 0.55);
+    color: rgba(17, 24, 39, 0.52);
 }
 
 .image-editor-upscale-card.editor-theme-light button.image-editor-upscale-close:hover {
@@ -2334,44 +2515,65 @@ togglebutton.image-editor-upscale-seg-button:disabled {
     color: #1d2129;
 }
 
-.image-editor-upscale-card.editor-theme-light .image-editor-upscale-stage {
-    background: #eef0f5;
-    border-color: rgba(17, 24, 39, 0.08);
+.image-editor-upscale-card.editor-theme-light button.image-editor-upscale-option {
+    border-color: rgba(17, 24, 39, 0.10);
+}
+
+.image-editor-upscale-card.editor-theme-light button.image-editor-upscale-option:hover {
+    border-color: rgba(17, 24, 39, 0.20);
+    background: rgba(17, 24, 39, 0.02);
+}
+
+.image-editor-upscale-card.editor-theme-light button.image-editor-upscale-option:checked,
+.image-editor-upscale-card.editor-theme-light button.image-editor-upscale-option:checked:hover {
+    border-color: #ff670d;
+    background: rgba(17, 24, 39, 0.02);
+}
+
+.image-editor-upscale-card.editor-theme-light .image-editor-upscale-radio {
+    border-color: rgba(17, 24, 39, 0.28);
+}
+
+.image-editor-upscale-card.editor-theme-light button.image-editor-upscale-option:checked .image-editor-upscale-radio {
+    border-color: #ff670d;
 }
 
 .image-editor-upscale-card.editor-theme-light .image-editor-upscale-seg {
-    background: rgba(17, 24, 39, 0.06);
+    border-color: rgba(17, 24, 39, 0.08);
+    background: rgba(17, 24, 39, 0.04);
 }
 
-.image-editor-upscale-card.editor-theme-light togglebutton.image-editor-upscale-seg-button {
+.image-editor-upscale-card.editor-theme-light button.image-editor-upscale-seg-button {
     color: rgba(17, 24, 39, 0.56);
 }
 
-.image-editor-upscale-card.editor-theme-light togglebutton.image-editor-upscale-seg-button:hover {
+.image-editor-upscale-card.editor-theme-light button.image-editor-upscale-seg-button:hover {
     color: rgba(17, 24, 39, 0.90);
 }
 
-.image-editor-upscale-card.editor-theme-light togglebutton.image-editor-upscale-seg-button:checked,
-.image-editor-upscale-card.editor-theme-light togglebutton.image-editor-upscale-seg-button:checked:hover {
+.image-editor-upscale-card.editor-theme-light button.image-editor-upscale-seg-button:checked,
+.image-editor-upscale-card.editor-theme-light button.image-editor-upscale-seg-button:checked:hover {
     background: #ffffff;
     color: #1d2129;
-    box-shadow: 0 1px 2px rgba(17, 24, 39, 0.12);
+    box-shadow: inset 0 0 0 1px rgba(17, 24, 39, 0.10);
 }
 
-.image-editor-upscale-card.editor-theme-light togglebutton.image-editor-upscale-seg-button:disabled {
+.image-editor-upscale-card.editor-theme-light button.image-editor-upscale-seg-button:disabled {
     color: rgba(17, 24, 39, 0.24);
 }
 
 .image-editor-upscale-card.editor-theme-light button.image-editor-confirm-cancel {
-    color: rgba(17, 24, 39, 0.78);
+    border-color: rgba(17, 24, 39, 0.14);
+    color: rgba(17, 24, 39, 0.82);
 }
 
 .image-editor-upscale-card.editor-theme-light button.image-editor-confirm-cancel:hover {
-    background: rgba(17, 24, 39, 0.06);
+    background: rgba(17, 24, 39, 0.04);
     color: #1d2129;
 }
 
 .image-editor-upscale-card.editor-theme-light button.image-editor-confirm-continue:disabled {
+    border-color: transparent;
     background: rgba(17, 24, 39, 0.06);
-    color: rgba(17, 24, 39, 0.35);
+    color: rgba(17, 24, 39, 0.32);
 }

@@ -30,6 +30,8 @@ use super::ui_support::px;
 const STAGE_MARGIN: f64 = 24.0;
 /// How close to the divider, in screen pixels at 100%, the resize cursor shows.
 const DIVIDER_REACH: f64 = 14.0;
+/// Corner radius of the export's frame on the stage, at 100% scale.
+const IMAGE_CORNER: f64 = 6.0;
 
 thread_local! {
     static OPEN: Cell<bool> = const { Cell::new(false) };
@@ -84,9 +86,10 @@ impl Stage {
         let image_height = f64::from(comparison.after.height());
         let margin = self.margin();
         let scale = match self.zoom.get() {
+            // Fit fills the stage, enlarging a small export so the
+            // difference is visible without reaching for a zoom.
             Zoom::Fit => ((width - 2.0 * margin) / image_width)
                 .min((height - 2.0 * margin) / image_height)
-                .min(1.0 / device)
                 .max(0.01),
             Zoom::Actual => 1.0 / device,
             Zoom::Double => 2.0 / device,
@@ -145,11 +148,14 @@ impl Stage {
             ..
         } = placement;
 
-        // The grid marks transparency in the export only, so it stays under
-        // the image instead of filling the whole stage.
+        // The export sits in a softly rounded frame. The grid marks
+        // transparency in the export only, so it stays under the image
+        // instead of filling the whole stage.
+        let corner = (IMAGE_CORNER * s).min(width / 2.0).min(height / 2.0);
         context.save().ok();
-        context.rectangle(x, y, width, height);
+        render::rounded_rect_path(context, x, y, width, height, corner);
         context.clip();
+        context.save().ok();
         context.translate(x, y);
         render::draw_canvas_checkerboard_background(
             context,
@@ -166,7 +172,7 @@ impl Stage {
         } else {
             Filter::Good
         };
-        let split = x + self.divider.get() * width;
+        let split = (x + self.divider.get() * width).round();
         paint_half(
             context,
             &comparison.before,
@@ -182,51 +188,52 @@ impl Stage {
             filter,
         );
 
+        // A flat white rule with a one-pixel keyline either side, so it
+        // reads over light and dark pixels alike. It stays inside the frame.
+        let rule = (2.0 * s).round().max(2.0);
+        context.set_source_rgba(0.0, 0.0, 0.0, 0.24);
+        context.rectangle(split - rule / 2.0 - 1.0, y, rule + 2.0, height);
+        context.fill().ok();
+        context.set_source_rgb(1.0, 1.0, 1.0);
+        context.rectangle(split - rule / 2.0, y, rule, height);
+        context.fill().ok();
+        context.restore().ok();
+
         if self.dark {
             context.set_source_rgba(1.0, 1.0, 1.0, 0.10);
         } else {
             context.set_source_rgba(0.07, 0.09, 0.15, 0.14);
         }
         context.set_line_width(1.0);
-        context.rectangle(x - 0.5, y - 0.5, width + 1.0, height + 1.0);
+        render::rounded_rect_path(
+            context,
+            x - 0.5,
+            y - 0.5,
+            width + 1.0,
+            height + 1.0,
+            corner + 0.5,
+        );
         context.stroke().ok();
 
         let (visible_left, visible_top, visible_right, visible_bottom) = self.visible(area);
         let top = y.max(visible_top);
         let bottom = (y + height).min(visible_bottom);
 
-        context.set_line_cap(LineCap::Butt);
-        context.set_source_rgba(0.0, 0.0, 0.0, 0.30);
-        context.set_line_width(4.0 * s);
-        context.move_to(split, y);
-        context.line_to(split, y + height);
-        context.stroke().ok();
-        context.set_source_rgb(1.0, 1.0, 1.0);
-        context.set_line_width(2.0 * s);
-        context.move_to(split, y);
-        context.line_to(split, y + height);
-        context.stroke().ok();
-
-        let middle = (top + bottom) / 2.0;
-        let radius = 15.0 * s;
-        context.set_source_rgba(0.0, 0.0, 0.0, 0.28);
-        context.arc(
-            split,
-            middle + 1.5 * s,
-            radius + 1.5 * s,
-            0.0,
-            std::f64::consts::TAU,
-        );
-        context.fill().ok();
+        // The handle: a flat white disc with a hairline edge, no shadow.
+        let middle = ((top + bottom) / 2.0).round();
+        let radius = 13.0 * s;
         context.set_source_rgb(1.0, 1.0, 1.0);
         context.arc(split, middle, radius, 0.0, std::f64::consts::TAU);
-        context.fill().ok();
+        context.fill_preserve().ok();
+        context.set_source_rgba(0.0, 0.0, 0.0, 0.16);
+        context.set_line_width(1.0);
+        context.stroke().ok();
         // Outward chevrons: the handle moves either way.
-        context.set_source_rgb(0.11, 0.13, 0.16);
-        context.set_line_width(1.8 * s);
+        context.set_source_rgb(0.23, 0.25, 0.29);
+        context.set_line_width(1.6 * s);
         context.set_line_cap(LineCap::Round);
         context.set_line_join(LineJoin::Round);
-        let (gap, reach, rise) = (2.5 * s, 4.0 * s, 4.5 * s);
+        let (gap, reach, rise) = (2.5 * s, 3.5 * s, 4.0 * s);
         context.move_to(split - gap, middle - rise);
         context.line_to(split - gap - reach, middle);
         context.line_to(split - gap, middle + rise);
@@ -238,18 +245,18 @@ impl Stage {
 
         // Each side's tag rides its own half and steps aside when the
         // divider would cover it.
-        let inset = 10.0 * s;
-        let tag_top = top + inset;
-        let left_edge = x.max(visible_left) + inset;
-        let right_edge = (x + width).min(visible_right) - inset;
+        let inset = 12.0 * s;
+        let tag_top = (top + inset).round();
+        let left_edge = (x.max(visible_left) + inset).round();
+        let right_edge = ((x + width).min(visible_right) - inset).round();
         let before = Tag::new(context, &t("Standard"), s);
         if split - left_edge > before.width + inset {
-            before.paint(context, left_edge, tag_top, false, s);
+            before.paint(context, left_edge, tag_top, s);
         }
         let after = Tag::new(context, &mode_label(self.mode.get()), s);
         let after_x = right_edge - after.width;
         if after_x - split > inset {
-            after.paint(context, after_x, tag_top, true, s);
+            after.paint(context, after_x, tag_top, s);
         }
     }
 }
@@ -275,8 +282,8 @@ fn paint_half(
     context.restore().ok();
 }
 
-/// A pill naming one side of the divider, drawn on the stage so it follows
-/// the image when it scrolls.
+/// A small label naming one side of the divider, drawn on the stage so it
+/// follows the image when it scrolls. Both sides share one neutral style.
 struct Tag {
     layout: pango::Layout,
     width: f64,
@@ -284,32 +291,31 @@ struct Tag {
 }
 
 impl Tag {
+    const PAD_X: f64 = 8.0;
+    const PAD_Y: f64 = 3.0;
+
     fn new(context: &Context, text: &str, s: f64) -> Self {
         let layout = pangocairo::functions::create_layout(context);
         let mut font = pango::FontDescription::new();
         font.set_family("Inter,Noto Sans,Segoe UI");
-        font.set_weight(pango::Weight::Semibold);
+        font.set_weight(pango::Weight::Medium);
         font.set_absolute_size(11.0 * s * f64::from(pango::SCALE));
         layout.set_font_description(Some(&font));
         layout.set_text(text);
         let (text_width, text_height) = layout.pixel_size();
         Self {
             layout,
-            width: f64::from(text_width) + 18.0 * s,
-            height: f64::from(text_height) + 8.0 * s,
+            width: (f64::from(text_width) + 2.0 * Self::PAD_X * s).round(),
+            height: (f64::from(text_height) + 2.0 * Self::PAD_Y * s).round(),
         }
     }
 
-    fn paint(&self, context: &Context, x: f64, y: f64, accent: bool, s: f64) {
-        render::rounded_rect_path(context, x, y, self.width, self.height, self.height / 2.0);
-        if accent {
-            context.set_source_rgb(1.0, 0.404, 0.051);
-        } else {
-            context.set_source_rgba(0.0, 0.0, 0.0, 0.64);
-        }
+    fn paint(&self, context: &Context, x: f64, y: f64, s: f64) {
+        render::rounded_rect_path(context, x, y, self.width, self.height, 5.0 * s);
+        context.set_source_rgba(0.07, 0.07, 0.08, 0.78);
         context.fill().ok();
-        context.set_source_rgb(1.0, 1.0, 1.0);
-        context.move_to(x + 9.0 * s, y + 4.0 * s);
+        context.set_source_rgba(1.0, 1.0, 1.0, 0.94);
+        context.move_to((x + Self::PAD_X * s).round(), (y + Self::PAD_Y * s).round());
         pangocairo::functions::show_layout(context, &self.layout);
     }
 }
@@ -344,22 +350,21 @@ pub(super) fn show(
     let (source_width, source_height) = host
         .read(|st| st.working_image.dimensions())
         .unwrap_or((0, 0));
-    let describe = move |mode: SourceUpscale| {
+    let size_of = move |mode: SourceUpscale| {
         let factor = mode.factor();
-        format!(
-            "{source_width} × {source_height} → {} × {} px",
-            source_width * factor,
-            source_height * factor
-        )
+        format!("{} × {} px", source_width * factor, source_height * factor)
     };
 
     let scrim = GtkBox::new(Orientation::Vertical, 0);
     scrim.add_css_class("image-editor-confirm-scrim");
+    scrim.add_css_class("image-editor-upscale-scrim");
     scrim.set_hexpand(true);
     scrim.set_vexpand(true);
     scrim.set_can_target(true);
 
-    let card = GtkBox::new(Orientation::Vertical, 0);
+    // The comparison fills the card's left side; the decision lives in a
+    // narrow panel on the right.
+    let card = GtkBox::new(Orientation::Horizontal, 0);
     card.add_css_class("image-editor-upscale-card");
     card.add_css_class(if dark {
         "editor-theme-dark"
@@ -368,46 +373,15 @@ pub(super) fn show(
     });
     card.set_overflow(Overflow::Hidden);
     card.set_can_target(true);
-    let width = (f64::from(window.width()) * 0.86)
-        .clamp(f64::from(px(640.0, scale)), f64::from(px(1120.0, scale)));
-    let height = (f64::from(window.height()) * 0.86)
-        .clamp(f64::from(px(480.0, scale)), f64::from(px(820.0, scale)));
+    // A compact sheet: big enough to judge detail, small enough that the
+    // editor stays in view around it.
+    let width = (f64::from(window.width()) * 0.66)
+        .clamp(f64::from(px(680.0, scale)), f64::from(px(940.0, scale)));
+    let height = (f64::from(window.height()) * 0.70)
+        .clamp(f64::from(px(440.0, scale)), f64::from(px(600.0, scale)));
     card.set_size_request(width as i32, height as i32);
 
-    // Header: what is being compared, at what size, and the way out.
-    let header = GtkBox::new(Orientation::Horizontal, px(10.0, scale));
-    header.add_css_class("image-editor-upscale-header");
-    let titles = GtkBox::new(Orientation::Vertical, px(2.0, scale));
-    titles.set_hexpand(true);
-    titles.set_valign(Align::Center);
-    let title = Label::new(Some(&t("Compare enhancement")));
-    title.add_css_class("image-editor-upscale-title");
-    title.set_xalign(0.0);
-    let meta = Label::new(Some(&describe(initial)));
-    meta.add_css_class("image-editor-upscale-meta-line");
-    meta.set_xalign(0.0);
-    titles.append(&title);
-    titles.append(&meta);
-    header.append(&titles);
-    if !crate::studio_entitlement::studio_unlocked() {
-        let free = Label::new(Some(&t("Free preview")));
-        free.add_css_class("image-editor-upscale-free");
-        free.set_valign(Align::Center);
-        free.set_tooltip_text(Some(&t("Exporting with enhancement needs Studio.")));
-        header.append(&free);
-    }
-    let close_button = Button::new();
-    close_button.add_css_class("image-editor-upscale-close");
-    close_button.set_has_frame(false);
-    close_button.set_focusable(false);
-    close_button.set_valign(Align::Center);
-    close_button.set_tooltip_text(Some(&t("Close")));
-    let close_icon = Image::from_icon_name("window-close-symbolic");
-    close_icon.set_pixel_size(px(14.0, scale));
-    close_button.set_child(Some(&close_icon));
-    header.append(&close_button);
-
-    // Stage: the export, edge to edge between the header and footer.
+    // Stage: the export, filling everything left of the panel.
     let drawing = DrawingArea::new();
     drawing.set_hexpand(true);
     drawing.set_vexpand(true);
@@ -441,12 +415,45 @@ pub(super) fn show(
     stage_box.append(&stage_overlay);
     stage_overlay.set_vexpand(true);
 
-    // Footer: the comparison's settings on the left, the decision on the right.
-    let footer = GtkBox::new(Orientation::Horizontal, px(8.0, scale));
-    footer.add_css_class("image-editor-upscale-footer");
-    let (modes, mode_tabs) = segmented(&["2×", "4×"], mode_index(initial));
-    mode_tabs[0].set_tooltip_text(Some(&t("Neural 2×")));
-    mode_tabs[1].set_tooltip_text(Some(&t("Neural 4×")));
+    // Panel: title, output size, zoom, then the decision at the bottom.
+    let panel = GtkBox::new(Orientation::Vertical, 0);
+    panel.add_css_class("image-editor-upscale-panel");
+    panel.set_size_request(px(272.0, scale), -1);
+    panel.set_hexpand(false);
+
+    let head = GtkBox::new(Orientation::Horizontal, px(8.0, scale));
+    let titles = GtkBox::new(Orientation::Vertical, px(4.0, scale));
+    titles.set_hexpand(true);
+    let title = Label::new(Some(&t("Compare enhancement")));
+    title.add_css_class("image-editor-upscale-title");
+    title.set_xalign(0.0);
+    let hint = Label::new(Some(&t("Drag the divider across the image.")));
+    hint.add_css_class("image-editor-upscale-hint");
+    hint.set_xalign(0.0);
+    hint.set_wrap(true);
+    titles.append(&title);
+    titles.append(&hint);
+    let close_button = Button::new();
+    close_button.add_css_class("image-editor-upscale-close");
+    close_button.set_has_frame(false);
+    close_button.set_focusable(false);
+    close_button.set_valign(Align::Start);
+    close_button.set_tooltip_text(Some(&t("Close")));
+    let close_icon = Image::from_icon_name("window-close-symbolic");
+    close_icon.set_pixel_size(px(14.0, scale));
+    close_button.set_child(Some(&close_icon));
+    head.append(&titles);
+    head.append(&close_button);
+    panel.append(&head);
+
+    panel.append(&eyebrow(&t("Output size"), scale));
+    let options = GtkBox::new(Orientation::Vertical, px(8.0, scale));
+    let mode_tabs = [
+        option(&t("Neural 2×"), &size_of(SourceUpscale::Neural2x), scale),
+        option(&t("Neural 4×"), &size_of(SourceUpscale::Neural4x), scale),
+    ];
+    mode_tabs[1].set_group(Some(&mode_tabs[0]));
+    mode_tabs[mode_index(initial)].set_active(true);
     if let Some(reason) = host
         .read(|st| st.upscale_unavailable_reason(SourceUpscale::Neural4x))
         .flatten()
@@ -454,26 +461,58 @@ pub(super) fn show(
         mode_tabs[1].set_sensitive(false);
         mode_tabs[1].set_tooltip_text(Some(&t(&reason)));
     }
+    for tab in &mode_tabs {
+        options.append(tab);
+    }
+    panel.append(&options);
+
+    let source_row = GtkBox::new(Orientation::Horizontal, px(8.0, scale));
+    source_row.add_css_class("image-editor-upscale-source");
+    let source_name = Label::new(Some(&t("Source")));
+    source_name.add_css_class("image-editor-upscale-source-name");
+    source_name.set_xalign(0.0);
+    source_name.set_hexpand(true);
+    let source_value = Label::new(Some(&format!("{source_width} × {source_height} px")));
+    source_value.add_css_class("image-editor-upscale-source-value");
+    source_row.append(&source_name);
+    source_row.append(&source_value);
+    panel.append(&source_row);
+
+    panel.append(&eyebrow(&t("Zoom"), scale));
     let (zooms, zoom_tabs) = segmented(&["Fit", "100%", "200%"], 0);
-    zooms.set_tooltip_text(Some(&t("Zoom")));
-    let spacer = GtkBox::new(Orientation::Horizontal, 0);
-    spacer.set_hexpand(true);
+    panel.append(&zooms);
+
+    let filler = GtkBox::new(Orientation::Vertical, 0);
+    filler.set_vexpand(true);
+    panel.append(&filler);
+
+    if !crate::studio_entitlement::studio_unlocked() {
+        let note = Label::new(Some(&t(
+            "Free preview. Exporting with enhancement needs Studio.",
+        )));
+        note.add_css_class("image-editor-upscale-note");
+        note.set_xalign(0.0);
+        note.set_wrap(true);
+        panel.append(&note);
+    }
+
     let cancel = Button::with_label(&t("Cancel"));
     cancel.add_css_class("image-editor-confirm-cancel");
     cancel.set_has_frame(false);
+    cancel.set_hexpand(true);
     let apply = Button::with_label(&t("Use Neural 2×"));
     apply.add_css_class("image-editor-confirm-continue");
     apply.set_has_frame(false);
+    apply.set_hexpand(true);
     apply.set_sensitive(false);
-    footer.append(&modes);
-    footer.append(&zooms);
-    footer.append(&spacer);
-    footer.append(&cancel);
-    footer.append(&apply);
+    let actions = GtkBox::new(Orientation::Horizontal, px(8.0, scale));
+    actions.set_homogeneous(true);
+    actions.append(&cancel);
+    actions.append(&apply);
+    panel.append(&actions);
 
-    card.append(&header);
     card.append(&stage_box);
-    card.append(&footer);
+    card.append(&panel);
 
     // Equal gaps on every side keep the card at its requested size in the
     // middle of the window.
@@ -619,7 +658,6 @@ pub(super) fn show(
     let request: Rc<dyn Fn()> = {
         let host = host.clone();
         let stage = stage.clone();
-        let meta = meta.clone();
         let status = status.clone();
         let message = message.clone();
         let spinner = spinner.clone();
@@ -633,7 +671,6 @@ pub(super) fn show(
         Rc::new(move || {
             let selected = stage.mode.get();
             let index = mode_index(selected);
-            meta.set_text(&describe(selected));
             apply.set_label(&t(if index == 1 {
                 "Use Neural 4×"
             } else {
@@ -780,6 +817,42 @@ pub(super) fn show(
 
     overlay.add_overlay(&scrim);
     request();
+}
+
+/// A small section heading in the panel.
+fn eyebrow(text: &str, scale: f64) -> Label {
+    let label = Label::new(Some(text));
+    label.add_css_class("image-editor-upscale-eyebrow");
+    label.set_xalign(0.0);
+    label.set_margin_top(px(22.0, scale));
+    label.set_margin_bottom(px(8.0, scale));
+    label
+}
+
+/// One output size: a radio mark, the mode's name, and the size it exports at.
+fn option(name: &str, detail: &str, scale: f64) -> ToggleButton {
+    let button = ToggleButton::new();
+    button.add_css_class("image-editor-upscale-option");
+    button.set_has_frame(false);
+    button.set_focusable(false);
+    let row = GtkBox::new(Orientation::Horizontal, px(12.0, scale));
+    let mark = GtkBox::new(Orientation::Horizontal, 0);
+    mark.add_css_class("image-editor-upscale-radio");
+    mark.set_valign(Align::Center);
+    mark.set_halign(Align::Center);
+    let texts = GtkBox::new(Orientation::Vertical, px(2.0, scale));
+    let title = Label::new(Some(name));
+    title.add_css_class("image-editor-upscale-option-title");
+    title.set_xalign(0.0);
+    let size = Label::new(Some(detail));
+    size.add_css_class("image-editor-upscale-option-detail");
+    size.set_xalign(0.0);
+    texts.append(&title);
+    texts.append(&size);
+    row.append(&mark);
+    row.append(&texts);
+    button.set_child(Some(&row));
+    button
 }
 
 /// A compact segmented control: grouped toggles in one tray.

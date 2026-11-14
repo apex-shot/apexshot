@@ -129,17 +129,6 @@ fn disclosure_row_with_badge(title: &str, body: &GtkBox, scale: f64, studio: boo
     card
 }
 
-/// A flat control row with a subtle fill and no frame.
-fn inline_button(label: &str, scale: f64) -> Button {
-    let button = Button::with_label(label);
-    button.add_css_class("image-editor-inline-button");
-    button.set_has_frame(false);
-    button.set_halign(Align::Fill);
-    button.set_hexpand(true);
-    button.set_size_request(-1, px(30.0, scale));
-    button
-}
-
 /// One tile registered in a selection namespace: its ring flag and the shape
 /// that paints it.
 type TileEntry = (Rc<Cell<bool>>, DrawingArea);
@@ -290,8 +279,26 @@ pub(super) fn export_quality(
     notice.set_visible(false);
     card.append(&notice);
 
-    let compare = inline_button(&t("Compare before / after"), scale);
+    // An action row: what it shows, then a chevron for the sheet it opens.
+    let compare = Button::new();
     compare.add_css_class("image-editor-upscale-compare");
+    compare.set_has_frame(false);
+    compare.set_hexpand(true);
+    let compare_row = GtkBox::new(Orientation::Horizontal, px(10.0, scale));
+    let compare_icon = Image::from_icon_name(icon_names::custom::SQUARE_SPLIT_HORIZONTAL_SYMBOLIC);
+    compare_icon.set_pixel_size(px(16.0, scale));
+    compare_icon.add_css_class("image-editor-upscale-compare-icon");
+    let compare_label = Label::new(Some(&t("Compare before / after")));
+    compare_label.add_css_class("image-editor-upscale-compare-label");
+    compare_label.set_xalign(0.0);
+    compare_label.set_hexpand(true);
+    let compare_chevron = Image::from_icon_name(icon_names::shipped::CHEVRON_RIGHT_REGULAR);
+    compare_chevron.set_pixel_size(px(12.0, scale));
+    compare_chevron.add_css_class("image-editor-upscale-compare-chevron");
+    compare_row.append(&compare_icon);
+    compare_row.append(&compare_label);
+    compare_row.append(&compare_chevron);
+    compare.set_child(Some(&compare_row));
     compare.set_tooltip_text(Some(&t(
         "Preview neural enhancement without a Studio license",
     )));

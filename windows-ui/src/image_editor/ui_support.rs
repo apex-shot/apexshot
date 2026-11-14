@@ -163,15 +163,23 @@ const IMAGE_EDITOR_TYPE_CSS: &str = r#"
             font-size: 12px;
         }
         .image-editor-upscale-title {
-            font-size: 16px;
+            font-size: 15px;
         }
-        .image-editor-upscale-meta-line,
         .image-editor-upscale-message,
-        togglebutton.image-editor-upscale-seg-button,
-        togglebutton.image-editor-upscale-seg-button label {
+        .image-editor-upscale-compare-label,
+        .image-editor-upscale-option-title,
+        button.image-editor-upscale-seg-button,
+        button.image-editor-upscale-seg-button label,
+        .image-editor-upscale-card button.image-editor-confirm-cancel,
+        .image-editor-upscale-card button.image-editor-confirm-continue {
             font-size: 13px;
         }
-        .image-editor-upscale-free {
+        .image-editor-upscale-hint,
+        .image-editor-upscale-eyebrow,
+        .image-editor-upscale-option-detail,
+        .image-editor-upscale-source-name,
+        .image-editor-upscale-source-value,
+        .image-editor-upscale-note {
             font-size: 12px;
         }
         "#;
