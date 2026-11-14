@@ -4758,3 +4758,6 @@ msgstr "导出时间"
 
 msgid "Resolution"
 msgstr "分辨率"
+
+msgid "This recording has no audio."
+msgstr "此录制没有音频。"

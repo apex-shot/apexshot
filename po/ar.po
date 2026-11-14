@@ -4795,3 +4795,6 @@ msgstr "وقت التصدير"
 
 msgid "Resolution"
 msgstr "الدقة"
+
+msgid "This recording has no audio."
+msgstr "لا يحتوي هذا التسجيل على صوت."

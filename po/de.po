@@ -4871,3 +4871,6 @@ msgstr "Exportdauer"
 
 msgid "Resolution"
 msgstr "Auflösung"
+
+msgid "This recording has no audio."
+msgstr "Diese Aufnahme hat keinen Ton."
