@@ -375,10 +375,15 @@ impl TextControls {
         });
 
         let typing = Rc::new(Cell::new(false));
+        // The title the open typing step belongs to. Picking another title's
+        // clip does not move focus out of the text box, so the step must also
+        // close when the typing lands on a different title.
+        let typing_title = Rc::new(Cell::new(None::<usize>));
         self.text_view.buffer().connect_changed({
             let timeline = Rc::downgrade(timeline);
             let syncing = syncing.clone();
             let typing = typing.clone();
+            let typing_title = typing_title.clone();
             move |buffer| {
                 if syncing.get() {
                     return;
@@ -387,12 +392,19 @@ impl TextControls {
                     .text(&buffer.start_iter(), &buffer.end_iter(), false)
                     .to_string();
                 if let Some(timeline) = timeline.upgrade() {
-                    // Typing is one undo step: the edit opens on the first
-                    // change and closes on focus-out or Enter, so the history
-                    // does not walk back through every keystroke.
+                    // Typing is one undo step per title: the edit opens on the
+                    // first change and closes on focus-out, Enter, or a switch
+                    // to another title, so the history does not walk back
+                    // through every keystroke.
+                    let title = timeline.motion_state().selected_text;
+                    if typing.get() && typing_title.get() != title {
+                        timeline.finish_edit();
+                        typing.set(false);
+                    }
                     if !typing.replace(true) {
                         timeline.begin_edit();
                     }
+                    typing_title.set(title);
                     timeline.edit_motion(|state| state.set_selected_text_value(text), false);
                 }
             }
