@@ -74,10 +74,7 @@ fn load_model(bytes: &[u8]) -> Result<Model, String> {
     let model = model
         .into_optimized()
         .map_err(|error| error.to_string())?;
-    model
-        .into_runnable()
-        .map(Arc::new)
-        .map_err(|error| error.to_string())
+    model.into_runnable().map_err(|error| error.to_string())
 }
 
 pub fn enhance(image: &RgbaImage, mode: SourceUpscale) -> Result<RgbaImage, String> {
