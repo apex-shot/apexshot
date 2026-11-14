@@ -179,9 +179,10 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
             let fps = timeline.plan_fps();
             let duration = timeline.composition_duration();
             let key = format!(
-                "{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{}|{}|{}",
+                "{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{}|{}|{}",
                 footage.source,
                 footage.cuts,
+                footage.segment_starts,
                 footage.segment_speeds,
                 footage.effects,
                 sound_sources.borrow().as_ref(),
@@ -193,11 +194,12 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
             let plan_stage = stage.clone();
             let plan_sources = sound_sources.clone();
             sound.update(frame.playing, frame.composition_time, key, move || {
-                let spans = super::export::frame_plan(
+                let spans = super::export::frame_plan_with_starts(
                     footage.trim_start,
                     footage.trim_end,
                     &footage.cuts,
                     &footage.segment_speeds,
+                    &footage.segment_starts,
                     fps,
                 );
                 let sidecar = footage
@@ -2274,6 +2276,7 @@ fn export_model(
         trim_start: footage.trim_start,
         trim_end: footage.trim_end,
         cuts: footage.cuts,
+        segment_starts: footage.segment_starts,
         segment_speeds: footage.segment_speeds,
         freeze_tail: footage.freeze_tail,
         zooms: footage.zooms,

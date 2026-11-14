@@ -96,6 +96,9 @@ pub(super) struct ExportModel {
     pub trim_start: f64,
     pub trim_end: f64,
     pub cuts: Vec<f64>,
+    /// Composition start of each cut piece, as the timeline holds it. Pieces
+    /// may be pulled apart or reordered, so the plan follows these starts.
+    pub segment_starts: Vec<f64>,
     /// One speed per kept source interval, in composition order; a missing or
     /// malformed entry plays at 1x.
     pub segment_speeds: Vec<f64>,
@@ -124,8 +127,9 @@ pub(super) struct ExportModel {
 }
 
 /// One contiguous kept span of footage, rendered back to back. `speed` is how
-/// fast its source runs against composition time; 0 holds the last frame of
-/// the footage for the span's whole length.
+/// fast its source runs against composition time; 0 repeats `source_start` for
+/// the span's whole length, which covers a freeze tail and the dead air between
+/// moved pieces.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct SourceSpan {
     pub composition_start: f64,
@@ -154,12 +158,31 @@ fn interval_speed(speeds: &[f64], index: usize) -> f64 {
 /// Split the trimmed footage at the cuts, rounding frame counts on the shared
 /// grid so the spans join without a gap, a repeat, or frame drift. Each kept
 /// interval plays at its own speed, and its output length is rounded against
-/// the running total so a long sped export does not drift.
+/// the running total so a long sped export does not drift. Pieces stay in
+/// source order: use `frame_plan_with_starts` when the timeline may have
+/// moved them.
 pub(super) fn frame_plan(
     trim_start: f64,
     trim_end: f64,
     cuts: &[f64],
     speeds: &[f64],
+    fps: f64,
+) -> Vec<SourceSpan> {
+    frame_plan_with_starts(trim_start, trim_end, cuts, speeds, &[], fps)
+}
+
+/// The plan the timeline's composition asks for: pieces ordered by their
+/// composition start, with a held span covering any gap between them. A piece
+/// whose start is later than the end of the piece before it leaves dead air,
+/// which the preview shows as a frozen frame; the export repeats the previous
+/// piece's last source frame (the first piece's first frame at the head) for the
+/// same length, so the file keeps the timeline's timing.
+pub(super) fn frame_plan_with_starts(
+    trim_start: f64,
+    trim_end: f64,
+    cuts: &[f64],
+    speeds: &[f64],
+    starts: &[f64],
     fps: f64,
 ) -> Vec<SourceSpan> {
     let start = trim_start.max(0.0);
@@ -173,26 +196,28 @@ pub(super) fn frame_plan(
     }
     // Every seek and every sample sits on the recording's frame grid: the trim
     // edge and the cuts each snap to the nearest frame, so a seam is exactly
-    // one frame step and never repeats or skips footage.
+    // one frame step and never repeats or skips footage. The unrounded cut
+    // time travels beside its frame so the gap check compares composition
+    // seconds, as the timeline does, instead of two rounded frame counts.
     let origin = (start * fps).round() / fps;
-    let mut cut_frames: Vec<u64> = cuts
+    let mut edges: Vec<(u64, f64)> = cuts
         .iter()
         .copied()
         .filter(|cut| cut.is_finite() && *cut > start + 1e-9 && *cut < end - 1e-9)
-        .map(|cut| ((cut - origin) * fps).round() as u64)
-        .filter(|frame| *frame > 0 && *frame < total)
+        .map(|cut| (((cut - origin) * fps).round() as u64, cut))
+        .filter(|(frame, _)| *frame > 0 && *frame < total)
         .collect();
-    cut_frames.sort_unstable();
-    cut_frames.dedup();
-    let boundaries: Vec<u64> = std::iter::once(0)
-        .chain(cut_frames)
-        .chain(std::iter::once(total))
-        .collect();
-    let mut spans = Vec::with_capacity(boundaries.len());
+    edges.sort_by_key(|(frame, _)| *frame);
+    edges.dedup_by_key(|(frame, _)| *frame);
+    let mut boundaries: Vec<(u64, f64)> = Vec::with_capacity(edges.len() + 2);
+    boundaries.push((0, start));
+    boundaries.extend(edges);
+    boundaries.push((total, end));
+    let mut pieces: Vec<(f64, f64, SourceSpan)> = Vec::with_capacity(boundaries.len());
     let mut elapsed = 0.0f64;
     let mut composition_frames = 0u64;
     for (index, pair) in boundaries.windows(2).enumerate() {
-        let frames = pair[1] - pair[0];
+        let frames = pair[1].0 - pair[0].0;
         if frames == 0 {
             continue;
         }
@@ -200,19 +225,74 @@ pub(super) fn frame_plan(
         elapsed += frames as f64 / speed;
         let boundary = elapsed.round() as u64;
         let output_frames = boundary.saturating_sub(composition_frames);
-        if output_frames == 0 {
-            continue;
-        }
-        spans.push(SourceSpan {
-            composition_start: composition_frames as f64 / fps,
-            source_start: origin + pair[0] as f64 / fps,
-            source_end: origin + pair[1] as f64 / fps,
-            speed,
-            frames: output_frames,
+        let composition_start = composition_frames as f64 / fps;
+        let explicit_start = starts.get(index).copied().filter(|start| start.is_finite());
+        let piece_start = explicit_start.map_or(composition_start, |start| start.max(0.0));
+        // A piece the timeline placed carries its own unrounded length, so the
+        // next piece that touches it does not read as a gap. A piece with no
+        // start keeps the length the frame grid gives it.
+        let length = explicit_start.map_or(output_frames as f64 / fps, |_| {
+            (pair[1].1 - pair[0].1).max(0.0) / speed
         });
+        pieces.push((
+            piece_start,
+            length,
+            SourceSpan {
+                composition_start,
+                source_start: origin + pair[0].0 as f64 / fps,
+                source_end: origin + pair[1].0 as f64 / fps,
+                speed,
+                frames: output_frames,
+            },
+        ));
         composition_frames = boundary;
     }
+    pieces.sort_by(|left, right| left.0.total_cmp(&right.0));
+    let mut spans = Vec::with_capacity(pieces.len() * 2);
+    let mut placed_frames = 0u64;
+    let mut previous: Option<SourceSpan> = None;
+    let mut timeline_end = 0.0f64;
+    for (piece_start, length, mut piece) in pieces {
+        // A start past the previous piece's end is dead air the timeline draws
+        // as a gap. Half a frame of slack keeps two pieces that touch from
+        // opening one when the plan and the timeline round apart.
+        if piece_start - timeline_end > 0.5 / fps {
+            let start_frames = (piece_start * fps).round() as u64;
+            let gap = start_frames.saturating_sub(placed_frames);
+            if gap > 0 {
+                let source = previous.map_or(piece.source_start, |previous| {
+                    held_source_frame(previous, fps)
+                });
+                spans.push(SourceSpan {
+                    composition_start: placed_frames as f64 / fps,
+                    source_start: source,
+                    source_end: source,
+                    speed: 0.0,
+                    frames: gap,
+                });
+                placed_frames += gap;
+            }
+        }
+        if piece.frames > 0 {
+            piece.composition_start = placed_frames as f64 / fps;
+            placed_frames += piece.frames;
+            previous = Some(piece);
+            spans.push(piece);
+        }
+        timeline_end = piece_start + length;
+    }
     spans
+}
+
+/// The source frame a held span repeats: the last frame the piece before it
+/// showed, which sits on the recording's frame grid. A held piece already
+/// stands on one frame.
+fn held_source_frame(span: SourceSpan, fps: f64) -> f64 {
+    if span.speed.is_finite() && span.speed > 0.0 {
+        (span.source_end - 1.0 / fps).max(span.source_start)
+    } else {
+        span.source_start
+    }
 }
 
 pub(super) fn total_frames(spans: &[SourceSpan]) -> u64 {
@@ -623,11 +703,12 @@ fn plan_render(model: &ExportModel, settings: ExportSettings) -> Result<RenderPl
         .or_else(|| ffmpeg::probe_frame_rate(&model.source))
         .filter(|fps| fps.is_finite() && *fps > 0.0)
         .unwrap_or(DEFAULT_FPS);
-    let mut spans = frame_plan(
+    let mut spans = frame_plan_with_starts(
         model.trim_start,
         model.trim_end,
         &model.cuts,
         &model.segment_speeds,
+        &model.segment_starts,
         fps,
     );
     if model.freeze_tail.is_finite() && model.freeze_tail > 0.0 {
@@ -2812,6 +2893,63 @@ mod tests {
     }
 
     #[test]
+    fn pieces_in_source_order_plan_exactly_as_before() {
+        let fps = 30.0;
+        let cuts = [1.017, 2.53];
+        let speeds = [1.0, 1.5, 2.0];
+        // The starts the timeline normalizes for these pieces: each is the
+        // previous start plus that piece's unrounded length.
+        let starts = [0.0, 1.017, 1.017 + (2.53 - 1.017) / 1.5];
+        assert_eq!(
+            frame_plan_with_starts(0.0, 3.0, &cuts, &speeds, &starts, fps),
+            frame_plan(0.0, 3.0, &cuts, &speeds, fps)
+        );
+    }
+
+    #[test]
+    fn a_gap_before_a_piece_adds_held_frames() {
+        let fps = 30.0;
+        let gapless = frame_plan(0.0, 4.0, &[2.0], &[], fps);
+        let spans = frame_plan_with_starts(0.0, 4.0, &[2.0], &[], &[0.0, 4.0], fps);
+        assert_eq!(spans.len(), 3);
+        assert_eq!(total_frames(&spans), total_frames(&gapless) + (2.0 * fps) as u64);
+        let held = spans[1];
+        assert_eq!(held.speed, 0.0);
+        assert_eq!(held.frames, 60);
+        assert_eq!(held.source_start, held.source_end);
+        assert!((held.source_start - (2.0 - 1.0 / fps)).abs() < 1e-9);
+        assert!((spans[2].composition_start - 4.0).abs() < 1e-9);
+        assert_eq!(frame_source_time(&spans, 60, fps), Some(held.source_start));
+        assert_eq!(frame_source_time(&spans, 119, fps), Some(held.source_start));
+        assert!((frame_source_time(&spans, 120, fps).unwrap() - 2.0).abs() < 1e-9);
+        assert_eq!(frame_source_time(&spans, 180, fps), None);
+    }
+
+    #[test]
+    fn pieces_are_ordered_by_their_start() {
+        let fps = 30.0;
+        let spans = frame_plan_with_starts(0.0, 4.0, &[2.0], &[], &[2.0, 0.0], fps);
+        assert_eq!(spans.len(), 2);
+        assert_eq!(total_frames(&spans), 120);
+        assert!((spans[0].source_start - 2.0).abs() < 1e-9);
+        assert!((spans[1].source_start - 0.0).abs() < 1e-9);
+        assert!((spans[0].composition_start - 0.0).abs() < 1e-9);
+        assert!((spans[1].composition_start - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_leading_gap_holds_the_first_pieces_first_frame() {
+        let fps = 30.0;
+        let spans = frame_plan_with_starts(0.0, 4.0, &[2.0], &[], &[1.0, 3.0], fps);
+        assert_eq!(spans.len(), 3);
+        assert_eq!(spans[0].speed, 0.0);
+        assert_eq!(spans[0].frames, 30);
+        assert_eq!(spans[0].source_start, 0.0);
+        assert!((spans[1].composition_start - 1.0).abs() < 1e-9);
+        assert_eq!(total_frames(&spans), 150);
+    }
+
+    #[test]
     fn a_cut_between_frames_lands_on_the_nearest_frame_boundary() {
         let fps = 30.0;
         let spans = frame_plan(0.0, 2.0, &[1.05], &[], fps);
@@ -2919,6 +3057,7 @@ mod tests {
             trim_start: 0.0,
             trim_end: 2.0,
             cuts: Vec::new(),
+            segment_starts: Vec::new(),
             segment_speeds: vec![2.0],
             freeze_tail: 1.0,
             zooms: Vec::new(),
@@ -2963,6 +3102,7 @@ mod tests {
             trim_start: 0.0,
             trim_end: 2.0,
             cuts: Vec::new(),
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: f64::NAN,
             zooms: Vec::new(),
@@ -3095,6 +3235,7 @@ mod tests {
                 trim_start: 0.0,
                 trim_end: 1.0,
                 cuts: Vec::new(),
+                segment_starts: Vec::new(),
                 segment_speeds: vec![speed],
                 freeze_tail: 0.0,
                 zooms: Vec::new(),
@@ -3332,6 +3473,7 @@ mod tests {
             trim_start: 0.0,
             trim_end: 3.0,
             cuts: Vec::new(),
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: Vec::new(),
@@ -3384,6 +3526,7 @@ mod tests {
             trim_start: 0.0,
             trim_end: 3.0,
             cuts: Vec::new(),
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: Vec::new(),
@@ -3476,6 +3619,7 @@ mod tests {
             trim_start: 0.0,
             trim_end: 6.0,
             cuts: vec![2.0],
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: vec![crate::video_editor::timeline::ZoomClip {
@@ -3581,6 +3725,7 @@ mod tests {
             trim_start: 0.0,
             trim_end: 2.0,
             cuts: vec![],
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: vec![ZoomClip {
@@ -3695,6 +3840,7 @@ mod tests {
             trim_start: 0.0,
             trim_end: 0.5,
             cuts: vec![0.25],
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: Vec::new(),
@@ -3879,6 +4025,7 @@ mod tests {
             trim_start,
             trim_end,
             cuts,
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: Vec::new(),
@@ -4013,6 +4160,7 @@ mod tests {
             trim_start,
             trim_end,
             cuts: Vec::new(),
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms,
@@ -4082,6 +4230,7 @@ mod tests {
             trim_start,
             trim_end,
             cuts,
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: vec![crate::video_editor::timeline::ZoomClip {
@@ -4150,6 +4299,7 @@ mod tests {
             trim_start: 0.0,
             trim_end: 60.0,
             cuts: Vec::new(),
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: Vec::new(),
@@ -4723,6 +4873,7 @@ mod tests {
                 trim_start: 0.0,
                 trim_end: 10.0,
                 cuts: Vec::new(),
+                segment_starts: Vec::new(),
                 segment_speeds: Vec::new(),
                 freeze_tail: 0.0,
                 zooms,
@@ -5021,6 +5172,7 @@ mod webcam_export_tests {
             trim_start: 0.0,
             trim_end: 1.5,
             cuts: Vec::new(),
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms,
@@ -5923,6 +6075,7 @@ mod webcam_export_tests {
             trim_start: 2.0,
             trim_end: 4.5,
             cuts: Vec::new(),
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: Vec::new(),
@@ -6083,6 +6236,7 @@ mod webcam_export_tests {
             trim_start: 0.0,
             trim_end: 1.5,
             cuts: Vec::new(),
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: Vec::new(),
@@ -6238,6 +6392,7 @@ mod webcam_export_tests {
                 trim_start: 0.0,
                 trim_end: 2.8,
                 cuts: Vec::new(),
+                segment_starts: Vec::new(),
                 segment_speeds: Vec::new(),
                 freeze_tail: 0.0,
                 zooms: Vec::new(),
@@ -6602,6 +6757,7 @@ mod webcam_export_tests {
                 trim_start: 0.0,
                 trim_end: 1.5,
                 cuts: Vec::new(),
+                segment_starts: Vec::new(),
                 segment_speeds: Vec::new(),
                 freeze_tail: 0.0,
                 zooms: Vec::new(),
@@ -6775,6 +6931,7 @@ mod webcam_export_tests {
                 trim_start: 0.0,
                 trim_end: 2.5,
                 cuts: Vec::new(),
+                segment_starts: Vec::new(),
                 segment_speeds: Vec::new(),
                 freeze_tail: 0.0,
                 zooms: Vec::new(),
@@ -6885,6 +7042,7 @@ mod webcam_export_tests {
             trim_start: 0.0,
             trim_end: 1.0,
             cuts: Vec::new(),
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: Vec::new(),
@@ -6955,6 +7113,7 @@ mod webcam_export_tests {
             trim_start: 0.0,
             trim_end: 1.0,
             cuts: Vec::new(),
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: Vec::new(),
@@ -7047,6 +7206,7 @@ mod webcam_export_tests {
             trim_start: 0.0,
             trim_end: 2.0,
             cuts: Vec::new(),
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: vec![crate::video_editor::timeline::ZoomClip {
@@ -7190,6 +7350,7 @@ mod webcam_export_tests {
                 trim_start: 0.0,
                 trim_end: 1.5,
                 cuts: Vec::new(),
+                segment_starts: Vec::new(),
                 segment_speeds: Vec::new(),
                 freeze_tail: 0.0,
                 zooms: Vec::new(),
@@ -7396,6 +7557,7 @@ mod webcam_export_tests {
                 trim_start: 0.0,
                 trim_end: 1.5,
                 cuts: Vec::new(),
+                segment_starts: Vec::new(),
                 segment_speeds: Vec::new(),
                 freeze_tail: 0.0,
                 zooms: Vec::new(),

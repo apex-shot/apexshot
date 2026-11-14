@@ -51,6 +51,7 @@ mod tests {
             trim_start: 0.0,
             trim_end: 10.0,
             cuts: vec![],
+            segment_starts: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: vec![ZoomClip {
