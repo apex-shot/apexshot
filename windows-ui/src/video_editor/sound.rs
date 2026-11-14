@@ -270,9 +270,12 @@ pub(super) struct SoundRange {
     pub segment: usize,
 }
 
-/// The ranges of a frame plan. Held spans (speed <= 0) contribute no range.
-/// Adjacent spans of the same segment and speed merge; spans of different
-/// segments never merge, because each piece carries its own sound.
+/// The ranges of a frame plan. A held span is dead air between moved pieces:
+/// it becomes a range with an empty source trim, which the chain pads to the
+/// span's length, so the sound after the gap keeps its place. A hold at the
+/// end needs no range, because the track is padded to the composition's length
+/// anyway. Adjacent spans of the same segment and speed merge; spans of
+/// different segments never merge, because each piece carries its own sound.
 pub(super) fn sound_ranges(
     spans: &[super::export::SourceSpan],
     fps: f64,
@@ -281,8 +284,20 @@ pub(super) fn sound_ranges(
     cuts: &[f64],
 ) -> Vec<SoundRange> {
     let mut ranges: Vec<SoundRange> = Vec::new();
-    for span in spans {
+    for (index, span) in spans.iter().enumerate() {
         if !span.speed.is_finite() || span.speed <= 0.0 {
+            let resumes = spans[index + 1..]
+                .iter()
+                .any(|later| later.speed.is_finite() && later.speed > 0.0);
+            if resumes && span.frames > 0 {
+                ranges.push(SoundRange {
+                    start: span.source_start,
+                    end: span.source_start,
+                    speed: 1.0,
+                    duration: span.frames as f64 / fps,
+                    segment: segment_of(span.source_start, fps, trim_start, trim_end, cuts),
+                });
+            }
             continue;
         }
         let range = SoundRange {
@@ -294,7 +309,9 @@ pub(super) fn sound_ranges(
         };
         match ranges.last_mut() {
             Some(last)
-                if last.segment == range.segment
+                if last.end > last.start
+                    && range.end > range.start
+                    && last.segment == range.segment
                     && last.speed == range.speed
                     && (range.start - last.end).abs() < 0.5 / fps =>
             {
@@ -1117,6 +1134,30 @@ mod tests {
             graph.graph.contains(",apad,atrim=end=2.000000[mic]"),
             "{}",
             graph.graph
+        );
+    }
+
+    #[test]
+    fn a_gap_between_pieces_keeps_silence_in_the_sound() {
+        let spans = [
+            span(0.0, 0.0, 2.0, 1.0, 60),
+            span(2.0, 1.966_667, 1.966_667, 0.0, 60),
+            span(4.0, 2.0, 4.0, 1.0, 60),
+        ];
+        let ranges = sound_ranges(&spans, 30.0, 0.0, 4.0, &[2.0]);
+        assert_eq!(ranges.len(), 3, "{ranges:?}");
+        assert_eq!(ranges[0], piece(0.0, 2.0, 1.0, 2.0, 0));
+        assert_eq!(ranges[1].start, ranges[1].end, "{ranges:?}");
+        assert!((ranges[1].duration - 2.0).abs() < 1e-9, "{ranges:?}");
+        assert_eq!(ranges[2], piece(2.0, 4.0, 1.0, 2.0, 1));
+
+        let played = ranges_from(&ranges, 3.0);
+        assert_eq!(played.len(), 2, "{played:?}");
+        assert!((played[0].duration - 1.0).abs() < 1e-9, "{played:?}");
+        assert!(
+            range_chain(played[0], 0.0).contains("apad,atrim=end=1.000000"),
+            "{}",
+            range_chain(played[0], 0.0)
         );
     }
 
