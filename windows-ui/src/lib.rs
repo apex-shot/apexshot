@@ -8,6 +8,25 @@
 //! handful of Linux APIs those pages expect.
 
 pub mod app_identity;
+
+/// Re-editable annotation sidecars: the files and format the Linux editor
+/// writes, so an exported image reopens with its annotations as objects on
+/// either platform.
+#[allow(clippy::too_many_arguments, clippy::wrong_self_convention, dead_code)]
+pub mod annotations {
+    #[path = "../../../src/annotations/schema.rs"]
+    #[rustfmt::skip]
+    mod schema;
+    #[path = "../../../src/annotations/storage.rs"]
+    #[rustfmt::skip]
+    mod storage;
+
+    pub use schema::{AnnotationFile, ShadowProfileSettings};
+    pub use storage::{
+        delete_annotations, load_annotations, load_original_image, save_annotations,
+        serializable_to_action, AnnotationError,
+    };
+}
 pub mod capture;
 pub mod capture_overlay;
 pub mod cloud;

@@ -49,6 +49,10 @@ pub mod editor {
     #[rustfmt::skip]
     pub mod image_transform;
 
+    /// The Cast light layer's on-disk shape the still-image sidecar shares
+    /// with the Motion project file.
+    pub mod motion_project;
+
     pub(crate) mod shadow_render;
     /// The "Made with ApexShot" mark painted over unlicensed Studio previews.
     pub(crate) mod studio_watermark;
