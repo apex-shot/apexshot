@@ -557,13 +557,16 @@ fn export_name(source: Option<&Path>, format: &str) -> String {
 /// A capture the shell wrote to `%TEMP%\ApexShot` because Settings does not keep
 /// screenshots; overwriting it would not keep anything either.
 fn is_temporary_capture(path: &Path) -> bool {
+    // The shell names this folder in its long, forward-slash form while
+    // `temp_dir` can return the 8.3 short form, so compare resolved paths.
+    let Some(parent) = path.parent() else {
+        return false;
+    };
     let temporary = std::env::temp_dir().join("ApexShot");
-    path.parent().is_some_and(|parent| {
-        parent
-            .to_string_lossy()
-            .trim_end_matches(['\\', '/'])
-            .eq_ignore_ascii_case(temporary.to_string_lossy().trim_end_matches(['\\', '/']))
-    })
+    match (std::fs::canonicalize(parent), std::fs::canonicalize(temporary)) {
+        (Ok(parent), Ok(temporary)) => parent == temporary,
+        _ => false,
+    }
 }
 
 /// Export the whole Motion composition as an MP4. The gate matches Motion's
@@ -1209,3 +1212,32 @@ fn set_topmost_by_title(title: &str) {
 
 #[cfg(not(windows))]
 fn set_topmost_by_title(_title: &str) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn temporary_capture_matches_the_shells_path_form() {
+        let folder = std::env::temp_dir().join("ApexShot");
+        std::fs::create_dir_all(&folder).unwrap();
+        let file = folder.join(format!(
+            "apexshot-temporary-capture-test-{}.png",
+            std::process::id()
+        ));
+        std::fs::write(&file, b"capture").unwrap();
+        // The capture shell passes the expanded long path with forward slashes,
+        // while `temp_dir` can return the short 8.3 form of the same folder.
+        let resolved = std::fs::canonicalize(&file).unwrap();
+        let shell_form = resolved
+            .to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .replace('\\', "/");
+        let matched = is_temporary_capture(Path::new(&shell_form));
+        let kept = is_temporary_capture(Path::new(r"C:\Users\Public\Pictures\shot.png"));
+        let _ = std::fs::remove_file(&file);
+        let _ = std::fs::remove_dir(&folder);
+        assert!(matched, "{shell_form} is a temporary capture");
+        assert!(!kept);
+    }
+}
