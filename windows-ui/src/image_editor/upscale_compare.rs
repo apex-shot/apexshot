@@ -570,7 +570,7 @@ pub(super) fn show(
 
     for (index, tab) in mode_tabs.iter().enumerate() {
         tab.connect_toggled({
-            let request = Rc::downgrade(&request);
+            let request = request.clone();
             let mode = mode.clone();
             move |button| {
                 if !button.is_active() {
@@ -581,9 +581,7 @@ pub(super) fn show(
                 } else {
                     SourceUpscale::Neural2x
                 });
-                if let Some(request) = request.upgrade() {
-                    request();
-                }
+                request();
             }
         });
     }
