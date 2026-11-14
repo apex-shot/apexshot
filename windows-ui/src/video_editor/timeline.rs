@@ -27,11 +27,12 @@ use gtk4::{
     Scrollbar,
 };
 
+use super::export::CursorHideClip;
 use crate::capture::editor::window::icon_names;
 use crate::i18n::t;
 use crate::recording::editor::auto_zoom;
 use crate::recording::editor::ffmpeg;
-use crate::recording::editor::model::{CursorHideClip, CursorSettings};
+use crate::recording::editor::model::CursorSettings;
 
 use super::history::EditHistory;
 
@@ -2453,10 +2454,7 @@ impl Data {
     /// own; a volume slider reports continuously, and each one names its own
     /// burst so two different sliders moved in quick succession stay two
     /// steps.
-    fn effects_sweep_key(
-        &self,
-        after: &super::project::EffectsSettings,
-    ) -> Option<&'static str> {
+    fn effects_sweep_key(&self, after: &super::project::EffectsSettings) -> Option<&'static str> {
         let before = &self.effects;
         if before.click_sound != after.click_sound
             || before.captions != after.captions
@@ -3525,7 +3523,8 @@ impl Timeline {
         let data = self.data.borrow();
         self.cursor.set_cuts(&data.cuts);
         self.cursor.set_end(data.trim_end);
-        self.cursor.set_hide_alpha(data.cursor_hide_alpha(data.playhead));
+        self.cursor
+            .set_hide_alpha(data.cursor_hide_alpha(data.playhead));
         self.cursor.set_caption_settings(data.effects.captions);
         let placement = data.placement();
         let add_zoom = data.add_zoom_tool();

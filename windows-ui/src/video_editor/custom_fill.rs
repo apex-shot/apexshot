@@ -1556,12 +1556,7 @@ fn paint_fill(context: &gtk4::cairo::Context, width: i32, height: i32, value: &F
 /// Paint a fill in the serialisable shape the background stores. The stage
 /// calls this through its painter; the panel's own previews keep using
 /// [`paint_fill`] with the local value.
-pub(crate) fn paint_spec(
-    context: &gtk4::cairo::Context,
-    width: i32,
-    height: i32,
-    spec: &FillSpec,
-) {
+pub(crate) fn paint_spec(context: &gtk4::cairo::Context, width: i32, height: i32, spec: &FillSpec) {
     paint_fill(context, width, height, &FillValue::from_spec(spec));
 }
 

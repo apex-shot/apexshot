@@ -519,7 +519,12 @@ impl Framer {
             .par_chunks_mut(out_w * 4)
             .zip(layer.par_chunks(out_w * 4))
             .for_each(|(row, over)| {
-                for (pixel, source) in row.chunks_exact_mut(4).zip(over.chunks_exact(4)) {
+                for (pixel, source) in row
+                    .as_chunks_mut::<4>()
+                    .0
+                    .iter_mut()
+                    .zip(over.as_chunks::<4>().0)
+                {
                     let alpha = u32::from(source[3]);
                     if alpha == 0 {
                         continue;

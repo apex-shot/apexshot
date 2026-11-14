@@ -2413,18 +2413,20 @@ impl WebcamModel {
     ) {
         // The preview's own motion blur trail reads these, so keep them even
         // when the split has nothing to place.
-        self.state.zoom_frame_rate.set(
-            if zoom.frame_rate.is_finite() && zoom.frame_rate > 0.0 {
+        self.state
+            .zoom_frame_rate
+            .set(if zoom.frame_rate.is_finite() && zoom.frame_rate > 0.0 {
                 zoom.frame_rate
             } else {
                 30.0
-            },
-        );
-        self.state.zoom_motion_blur.set(if zoom.motion_blur.is_finite() {
-            zoom.motion_blur.clamp(0.0, 1.0)
-        } else {
-            0.0
-        });
+            });
+        self.state
+            .zoom_motion_blur
+            .set(if zoom.motion_blur.is_finite() {
+                zoom.motion_blur.clamp(0.0, 1.0)
+            } else {
+                0.0
+            });
         self.state.zoom_lead_in.set(zoom.lead_in_seconds());
         {
             let mut clips = self.state.zoom_clips.borrow_mut();
@@ -2854,8 +2856,9 @@ impl WebcamModel {
         let weight = 1.0 / samples.len().max(1) as f64;
         // Samples are averaged in an additive group so overlapping copies of
         // an opaque camera add up to one camera instead of fading it out.
-        let grouped = samples.len() > 1 && context.push_group().is_ok();
+        let grouped = samples.len() > 1;
         if grouped {
+            context.push_group();
             context.set_operator(Operator::Add);
         }
         for sample in samples {

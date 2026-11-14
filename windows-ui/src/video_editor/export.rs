@@ -30,7 +30,6 @@ use super::zoom::{self, TimeMapping, ViewRect, ZoomCameraCache};
 use crate::recording::editor::cursor_sprite;
 use crate::recording::editor::ffmpeg;
 use crate::recording::editor::model::ClickEffect;
-use crate::recording::editor::model::CursorHideClip;
 use crate::recording::editor::model::CursorSettings;
 use crate::recording::editor::sidecar::{CursorMotion, PointerSidecar};
 use gtk4::cairo::{Context, Format, ImageSurface};
@@ -939,6 +938,21 @@ fn render_with_workers(
 /// How much of the cursor the hide track leaves visible at `timeline_t`: 0
 /// while a hide clip that is not muted covers it, 1 otherwise. The shared
 /// editor's cursor export multiplies the cursor alpha by the same coverage.
+/// One span of the cursor's Hide track, in composition seconds. A muted
+/// clip stays on the timeline but no longer hides the cursor.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct CursorHideClip {
+    pub start: f64,
+    pub end: f64,
+    pub hidden: bool,
+}
+
+impl CursorHideClip {
+    pub(super) fn contains(&self, t: f64) -> bool {
+        t >= self.start && t <= self.end
+    }
+}
+
 fn cursor_hide_alpha(clips: &[CursorHideClip], timeline_t: f64) -> f64 {
     if clips
         .iter()
@@ -2953,10 +2967,10 @@ struct CursorScratch {
 #[cfg(test)]
 mod tests {
     use super::{
-        clip_cursor_box, cursor_hide_alpha, decoder_command, frame_plan, frame_source_time, h264_level, output_size,
-        plan_render, rate, render, render_with_workers, retry_on_software, split_ranges,
-        start_export, start_export_with_settings, total_frames, zoom, Codec, Encoder, End,
-        ExportModel, ExportSettings, ExportUpdate, SourceSpan,
+        clip_cursor_box, cursor_hide_alpha, decoder_command, frame_plan, frame_plan_with_starts,
+        frame_source_time, h264_level, output_size, plan_render, rate, render, render_with_workers,
+        retry_on_software, split_ranges, start_export, start_export_with_settings, total_frames,
+        zoom, Codec, Encoder, End, ExportModel, ExportSettings, ExportUpdate, SourceSpan,
     };
     use crate::recording::editor::ffmpeg;
     use crate::recording::editor::model::{CursorRotationMode, CursorSettings};
@@ -2966,7 +2980,7 @@ mod tests {
 
     #[test]
     fn a_hide_clip_takes_the_cursor_out_of_the_export() {
-        use crate::recording::editor::model::CursorHideClip;
+        use super::CursorHideClip;
         let clips = [
             CursorHideClip {
                 start: 1.0,
@@ -3124,7 +3138,10 @@ mod tests {
         let gapless = frame_plan(0.0, 4.0, &[2.0], &[], fps);
         let spans = frame_plan_with_starts(0.0, 4.0, &[2.0], &[], &[0.0, 4.0], fps);
         assert_eq!(spans.len(), 3);
-        assert_eq!(total_frames(&spans), total_frames(&gapless) + (2.0 * fps) as u64);
+        assert_eq!(
+            total_frames(&spans),
+            total_frames(&gapless) + (2.0 * fps) as u64
+        );
         let held = spans[1];
         assert_eq!(held.speed, 0.0);
         assert_eq!(held.frames, 60);
@@ -4823,9 +4840,16 @@ mod tests {
                 &mut CursorScratch::default(),
             );
             assert_ne!(fast, base, "{effect:?} drew nothing");
-            let (x, y, w, h) =
-                cursor_box(size, view, &sidecar, settings, 0.21, size, f64::from(size.0))
-                    .expect("the cursor is on screen");
+            let (x, y, w, h) = cursor_box(
+                size,
+                view,
+                &sidecar,
+                settings,
+                0.21,
+                size,
+                f64::from(size.0),
+            )
+            .expect("the cursor is on screen");
             let (x0, y0) = ((x & !1) as usize, (y & !1) as usize);
             let x1 = (((x + w + 1) & !1).min(size.0 & !1)) as usize;
             let y1 = (((y + h + 1) & !1).min(size.1 & !1)) as usize;

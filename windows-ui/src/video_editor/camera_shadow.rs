@@ -727,8 +727,8 @@ mod tests {
     #[test]
     fn the_preview_surface_bakes_the_camera_alpha_into_the_shadow() {
         let mask = test_mask();
-        let full = preview_surface(&mask, 1.0).unwrap();
-        let half = preview_surface(&mask, 0.5).unwrap();
+        let mut full = preview_surface(&mask, 1.0).unwrap();
+        let mut half = preview_surface(&mask, 0.5).unwrap();
         let index = mask
             .cast
             .iter()
@@ -736,19 +736,19 @@ mod tests {
             .position(|(index, cast)| *cast > 0.1 && mask.coverage[index] < 0.1)
             .expect("a cast texel outside the camera");
         let offset = (index / mask.width) * full.stride() as usize + (index % mask.width) * 4 + 3;
-        let read = |surface: &ImageSurface| {
+        let read = |surface: &mut ImageSurface| {
             surface.flush();
             let data = surface.data().unwrap();
             data[offset] as f64 / 255.0
         };
         let o = f64::from(mask.cast[index]) * (1.0 - f64::from(mask.coverage[index]));
         let expected = 1.0 - (1.0 - 0.5 * o).sqrt();
-        let half_alpha = read(&half);
+        let half_alpha = read(&mut half);
         assert!(
             (half_alpha - expected).abs() < 0.01,
             "half {half_alpha} expected {expected}"
         );
-        assert!(half_alpha < read(&full));
+        assert!(half_alpha < read(&mut full));
     }
 
     #[test]

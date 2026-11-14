@@ -560,7 +560,8 @@ mod tests {
                     );
                 }
                 surface.flush();
-                surface.data().unwrap().iter().any(|byte| *byte != 0)
+                let painted = surface.data().unwrap().iter().any(|byte| *byte != 0);
+                painted
             };
             let cursor = rippling_cursor();
             let showing = paints(&cursor);

@@ -42,10 +42,7 @@ pub(super) fn capabilities(model: &ExportModel) -> StudioCapabilities {
 /// Studio requirements measured against the timeline's real composition
 /// length: the gaps between moved pieces and the held tail both count, so a
 /// zoom is judged by when it actually renders.
-pub(super) fn capabilities_at(
-    model: &ExportModel,
-    composition_seconds: f64,
-) -> StudioCapabilities {
+pub(super) fn capabilities_at(model: &ExportModel, composition_seconds: f64) -> StudioCapabilities {
     let duration = composition_seconds.max(0.0);
     let settings = model.zoom_camera.clamped();
     let defaults = ZoomCameraSettings::default();

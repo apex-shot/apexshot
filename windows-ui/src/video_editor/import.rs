@@ -234,7 +234,10 @@ mod tests {
         assert_eq!(radius_from_manifest(&manifest_with_output(text_size)), None);
 
         let fractional = serde_json::json!({ "width": 1920.5, "height": 1080 });
-        assert_eq!(radius_from_manifest(&manifest_with_output(fractional)), None);
+        assert_eq!(
+            radius_from_manifest(&manifest_with_output(fractional)),
+            None
+        );
     }
 
     #[test]

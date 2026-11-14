@@ -681,10 +681,7 @@ fn update_cursor_look(
 
 /// Make a cursor slider's whole drag one undo step: the step is taken when the
 /// drag starts and recorded when it ends.
-fn cursor_look_slider(
-    timeline: &super::timeline::Timeline,
-    slider: FilledSlider,
-) -> FilledSlider {
+fn cursor_look_slider(timeline: &super::timeline::Timeline, slider: FilledSlider) -> FilledSlider {
     slider.on_interaction(
         {
             let timeline = timeline.clone();
@@ -1600,12 +1597,8 @@ fn build_typing_suggestions(
             for &(start, end) in &suggestions {
                 let card = GtkBox::new(Orientation::Vertical, (6.0 * scale).round() as i32);
                 card.add_css_class("recording-editor-zoom-classic");
-                let shown_start = timeline
-                    .composition_time_for_source(start)
-                    .unwrap_or(start);
-                let shown_end = timeline
-                    .composition_time_for_source(end)
-                    .unwrap_or(end);
+                let shown_start = timeline.composition_time_for_source(start).unwrap_or(start);
+                let shown_end = timeline.composition_time_for_source(end).unwrap_or(end);
                 let range = Label::new(Some(&format!(
                     "{} · {shown_start:.1}s – {shown_end:.1}s",
                     t("Typing")
@@ -3588,6 +3581,7 @@ fn sync_silence_switch(silence: &Switch, has_audio: &dyn Fn() -> Option<bool>) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_webcam_camera(
     scale: f64,
     mirror: bool,
@@ -5687,13 +5681,8 @@ mod tests {
                 background.clone(),
                 std::rc::Rc::new(std::cell::Cell::new(None)),
             );
-            let (panel, _, padding, radius) = super::build_background_panel(
-                1.0,
-                &window,
-                background.clone(),
-                &column,
-                &timeline,
-            );
+            let (panel, _, padding, radius) =
+                super::build_background_panel(1.0, &window, background.clone(), &column, &timeline);
 
             background.apply(Some("wallpaper-004.jpg"), 48.0, 6.0, None);
             assert_eq!(padding.value.get(), 48.0);
@@ -6173,7 +6162,7 @@ mod tests {
                     &layouts,
                     frame_aspect,
                     WebcamContextActions::idle(),
-                    Rc::new(|| None),
+                    std::rc::Rc::new(|| None),
                 );
                 window.set_child(Some(&context.root));
                 for card in WebcamLayoutCard::ALL {

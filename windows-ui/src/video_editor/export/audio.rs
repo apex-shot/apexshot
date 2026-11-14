@@ -647,6 +647,7 @@ mod tests {
             trim_end: 4.0,
             cuts: Vec::new(),
             segment_starts: Vec::new(),
+            cursor_hide_clips: Vec::new(),
             segment_speeds: Vec::new(),
             freeze_tail: 0.0,
             zooms: Vec::new(),

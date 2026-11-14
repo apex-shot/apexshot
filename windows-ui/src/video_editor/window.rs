@@ -102,7 +102,9 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     );
     // The stage reports the first frame of each playback to the transport, so
     // the playhead and the sound start with the picture.
-    stage.preview.report_first_frame_to(timeline.first_frame_clock());
+    stage
+        .preview
+        .report_first_frame_to(timeline.first_frame_clock());
     // The chip's tier is part of the document: the timeline writes it into the
     // project file and restores it on load, through this one shared cell.
     timeline.set_quality_handle(stage.quality.clone());
@@ -134,7 +136,9 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
             stage.source_seconds.set(frame.source_seconds);
             stage.webcam.set_composition_time(frame.composition_time);
             stage.webcam.request(frame.source_seconds);
-            stage.preview.show_time(frame.source_seconds, frame.composition_time, frame.playing);
+            stage
+                .preview
+                .show_time(frame.source_seconds, frame.composition_time, frame.playing);
             stage
                 .estimate
                 .set_composition_seconds(frame.composition_seconds);
