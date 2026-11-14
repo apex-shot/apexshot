@@ -2464,6 +2464,22 @@ fn wire_export(
                         choose_export_path(&window, &source, begin);
                         return;
                     }
+                    // A clipboard export has to outlive the paste, so it is
+                    // never deleted on completion; drop day-old files instead
+                    // so repeated copies do not fill the cache.
+                    let cutoff = std::time::SystemTime::now()
+                        .checked_sub(std::time::Duration::from_secs(24 * 60 * 60));
+                    if let (Some(cutoff), Ok(entries)) = (cutoff, std::fs::read_dir(&folder)) {
+                        for entry in entries.flatten() {
+                            let Ok(modified) = entry.metadata().and_then(|meta| meta.modified())
+                            else {
+                                continue;
+                            };
+                            if modified < cutoff {
+                                let _ = std::fs::remove_file(entry.path());
+                            }
+                        }
+                    }
                     let id = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap_or_default()

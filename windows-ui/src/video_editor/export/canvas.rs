@@ -478,6 +478,63 @@ impl Framer {
                 );
             });
     }
+
+    /// Write one canvas frame for a moving card: the zoomed background with
+    /// the card's whole trail (`layer`, premultiplied RGBA at the export size)
+    /// over it, so its leading and trailing edges smear across the background
+    /// as they do in the preview.
+    pub(super) fn compose_card_layer(
+        &mut self,
+        card: CardFrame,
+        layer: &[u8],
+        converter: &Nv12Converter,
+        out: &mut [u8],
+    ) {
+        let (out_w, out_h) = self.out;
+        let base = out_w * out_h;
+        if layer.len() != base * 4 || out.len() != base * 3 / 2 {
+            return;
+        }
+        // The same background the sharp card's own pass draws, kept in RGBA so
+        // the layer's premultiplied edges blend against the fill.
+        self.scratch.resize(base * 4, 0);
+        if card.background_zoom > 1.0 + 1e-6 {
+            let w = out_w as f64;
+            let h = out_h as f64;
+            let px = card.pivot.0.clamp(0.0, 1.0) * w;
+            let py = card.pivot.1.clamp(0.0, 1.0) * h;
+            let z = card.background_zoom;
+            let view = (px - px / z, py - py / z, w / z, h / z);
+            crop_scale_into(
+                &self.background_rgba,
+                (out_w as u32, out_h as u32),
+                view,
+                (out_w as u32, out_h as u32),
+                &mut self.scratch,
+            );
+        } else {
+            self.scratch.copy_from_slice(&self.background_rgba);
+        }
+        self.scratch
+            .par_chunks_mut(out_w * 4)
+            .zip(layer.par_chunks(out_w * 4))
+            .for_each(|(row, over)| {
+                for (pixel, source) in row.chunks_exact_mut(4).zip(over.chunks_exact(4)) {
+                    let alpha = u32::from(source[3]);
+                    if alpha == 0 {
+                        continue;
+                    }
+                    let keep = 255 - alpha;
+                    for channel in 0..3 {
+                        pixel[channel] = (u32::from(source[channel])
+                            + u32::from(pixel[channel]) * keep / 255)
+                            as u8;
+                    }
+                    pixel[3] = 255;
+                }
+            });
+        converter.convert_into(&self.scratch, (out_w as u32, out_h as u32), out);
+    }
 }
 
 /// Coverage of a quarter circle of `radius` centred on the corner's inner
@@ -627,6 +684,28 @@ impl FramedSink {
         };
         let mut canvas = self.sink.buffer(self.pending)?;
         framer.compose_card(&frame, card, outer, converter, &mut canvas);
+        self.spare.push(frame);
+        overlay(&mut canvas)?;
+        self.submit_output(canvas)
+    }
+
+    /// Submit a frame whose moving card was blurred whole over the canvas:
+    /// `layer` is the card's trail, premultiplied RGBA at the export size.
+    pub(super) fn submit_card_layer_with(
+        &mut self,
+        frame: Vec<u8>,
+        card: CardFrame,
+        layer: &[u8],
+        converter: &Nv12Converter,
+        overlay: impl FnOnce(&mut [u8]) -> Result<(), End>,
+    ) -> Result<(), End> {
+        let Some(framer) = self.framer.as_mut() else {
+            let mut frame = frame;
+            overlay(&mut frame)?;
+            return self.submit_output(frame);
+        };
+        let mut canvas = self.sink.buffer(self.pending)?;
+        framer.compose_card_layer(card, layer, converter, &mut canvas);
         self.spare.push(frame);
         overlay(&mut canvas)?;
         self.submit_output(canvas)

@@ -337,13 +337,25 @@ pub(super) enum ExportUpdate {
 
 pub(super) struct ExportHandle {
     pub receiver: Receiver<ExportUpdate>,
+    /// Stops the workers; a worker failure sets it too, so the other workers
+    /// stop as well.
     cancel: Arc<AtomicBool>,
+    /// Set only by the user's Stop, so a failed hardware attempt can still be
+    /// retried on the CPU without undoing that request.
+    user_cancel: Arc<AtomicBool>,
 }
 
 impl ExportHandle {
     pub fn cancel(&self) {
+        self.user_cancel.store(true, Ordering::Relaxed);
         self.cancel.store(true, Ordering::Relaxed);
     }
+}
+
+/// Whether a failed hardware attempt may run again on the CPU: only when the
+/// encoder failed and the user has not asked to stop.
+fn retry_on_software(result: &Result<(), End>, user_cancel: bool) -> bool {
+    matches!(result, Err(End::Failed(_))) && !user_cancel
 }
 
 #[cfg(test)]
@@ -371,44 +383,68 @@ pub(super) fn start_export_with_settings(
     }
     let (sender, receiver) = mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));
+    let user_cancel = Arc::new(AtomicBool::new(false));
     if let Err(error) =
         crate::studio_entitlement::ensure_export_allowed(super::studio::capabilities(&model))
     {
         let _ = sender.send(ExportUpdate::Failed(error.to_string()));
-        return ExportHandle { receiver, cancel };
+        return ExportHandle {
+            receiver,
+            cancel,
+            user_cancel,
+        };
     }
     let thread_cancel = cancel.clone();
+    let thread_user_cancel = user_cancel.clone();
     std::thread::spawn(move || {
         let encoder = Encoder::fastest_for(settings.codec);
         let mut result = render(&model, &output, &sender, &thread_cancel, encoder, settings);
-        if !encoder.is_software() {
+        if !encoder.is_software()
+            && retry_on_software(&result, thread_user_cancel.load(Ordering::Relaxed))
+        {
             if let Err(End::Failed(message)) = &result {
                 eprintln!(
                     "[export] {} failed ({message}); retrying with {}",
                     encoder.codec(),
                     Encoder::software(settings.codec).codec()
                 );
-                result = render(
-                    &model,
-                    &output,
-                    &sender,
-                    &thread_cancel,
-                    Encoder::software(settings.codec),
-                    settings,
-                );
             }
+            // The failed attempt stopped its workers through the shared flag;
+            // the retry needs it clear. A Stop that lands in between still
+            // wins, so the retry stops at its first check.
+            thread_cancel.store(false, Ordering::Relaxed);
+            if thread_user_cancel.load(Ordering::Relaxed) {
+                thread_cancel.store(true, Ordering::Relaxed);
+            }
+            result = render(
+                &model,
+                &output,
+                &sender,
+                &thread_cancel,
+                Encoder::software(settings.codec),
+                settings,
+            );
         }
         match result {
-            Ok(()) if thread_cancel.load(Ordering::Relaxed) => {
+            Ok(()) if thread_user_cancel.load(Ordering::Relaxed) => {
                 let _ = std::fs::remove_file(&output);
                 let _ = sender.send(ExportUpdate::Cancelled);
             }
             Ok(()) => {
-                let sound = audio::add(&model, settings, &output).err();
-                if let Some(error) = &sound {
-                    eprintln!("[export] the sound was not added: {error}");
+                let sound = audio::add(&model, settings, &output, &thread_cancel).err();
+                // The frame loop has finished, but the sound is still muxed:
+                // a Stop that arrived during it must still cancel the export.
+                if thread_cancel.load(Ordering::Relaxed)
+                    || thread_user_cancel.load(Ordering::Relaxed)
+                {
+                    let _ = std::fs::remove_file(&output);
+                    let _ = sender.send(ExportUpdate::Cancelled);
+                } else {
+                    if let Some(error) = &sound {
+                        eprintln!("[export] the sound was not added: {error}");
+                    }
+                    let _ = sender.send(ExportUpdate::Finished(output, sound));
                 }
-                let _ = sender.send(ExportUpdate::Finished(output, sound));
             }
             Err(End::Cancelled) => {
                 let _ = std::fs::remove_file(&output);
@@ -420,7 +456,11 @@ pub(super) fn start_export_with_settings(
             }
         }
     });
-    ExportHandle { receiver, cancel }
+    ExportHandle {
+        receiver,
+        cancel,
+        user_cancel,
+    }
 }
 
 /// The encoders an export can use: per codec, the GPU's own encoder when the
@@ -1468,6 +1508,7 @@ fn render_range(
                             draw_cursor_nv12(
                                 &mut nv12,
                                 plan.output,
+                                Some(placed),
                                 zoom::card_view(whole, placed, source),
                                 sidecar,
                                 model.source.as_path(),
@@ -1535,6 +1576,7 @@ fn render_range(
                                 draw_cursor_nv12(
                                     &mut nv12,
                                     size,
+                                    None,
                                     view,
                                     sidecar,
                                     model.source.as_path(),
@@ -1584,8 +1626,6 @@ fn render_range(
                 let whole = (0.0, 0.0, f64::from(out.0), f64::from(out.1));
                 let outer_view = zoom::card_view(whole, rect, source);
                 outer_rgba.resize(out.0 as usize * out.1 as usize * 4, 0);
-                // A second blur pass over the whole canvas costs seconds per
-                // frame while the card sweeps; the video rect keeps its blur.
                 crop_scale_into(
                     &decoded,
                     model.source_size,
@@ -1604,6 +1644,40 @@ fn render_range(
                     ),
                 }
             });
+            // A moving card is blurred whole over the canvas, as the preview
+            // blurs it: the layer carries the card's smeared edges, so it
+            // replaces the sharp card instead of only blurring the video rect.
+            let card_trail: Option<Vec<u8>> = match (card, previous_value) {
+                (Some((rect, _)), Some(previous)) if model.zoom_camera.motion_blur > 0.0 => {
+                    card_for(previous)
+                        .and_then(|(before, _)| {
+                            super::motion_blur::CardTrail::new(
+                                rect,
+                                before,
+                                (f64::from(plan.output.0), f64::from(plan.output.1)),
+                                plan.output,
+                                fps,
+                                model.zoom_camera.motion_blur,
+                                f64::from(sink.radius_fraction()),
+                            )
+                        })
+                        .map(|trail| {
+                            let mut layer =
+                                vec![0u8; plan.output.0 as usize * plan.output.1 as usize * 4];
+                            trail.render(
+                                &decoded,
+                                model.source_size,
+                                plan.output,
+                                &mut layer,
+                                16,
+                                4.0,
+                                4,
+                            );
+                            layer
+                        })
+                }
+                _ => None,
+            };
             let base: &[u8] = if cropped { &scaled } else { &decoded };
 
             let mut warped = None;
@@ -1840,11 +1914,18 @@ fn render_range(
                 )
                 .map_err(End::Failed)
             };
-            let submitted = match card_frame {
-                Some(card_frame) => {
+            let submitted = match (card_frame, card_trail) {
+                (Some(card_frame), Some(layer)) => sink.submit_card_layer_with(
+                    nv12,
+                    card_frame,
+                    &layer,
+                    &converter,
+                    overlay_camera,
+                ),
+                (Some(card_frame), None) => {
                     sink.submit_card_with(nv12, card_frame, &outer_nv12, &converter, overlay_camera)
                 }
-                None => sink.submit_with(nv12, overlay_camera),
+                (None, _) => sink.submit_with(nv12, overlay_camera),
             };
             if let Err(error) = submitted {
                 let _ = decoder.kill();
@@ -2682,11 +2763,13 @@ fn draw_cursor(
 /// Draw the cursor onto an NV12 frame: only the cursor's box, widened to
 /// even edges for the 4:2:0 chroma, is converted to RGBA, drawn by
 /// `draw_cursor`, and converted back, so a GPU-scaled frame never makes the
-/// whole-frame round trip.
+/// whole-frame round trip. `clip` bounds the box to the video card when the
+/// stage draws over a canvas.
 #[allow(clippy::too_many_arguments)]
 fn draw_cursor_nv12(
     nv12: &mut [u8],
     size: (u32, u32),
+    clip: Option<zoom::StageRect>,
     view: ViewRect,
     sidecar: &PointerSidecar,
     source_path: &Path,
@@ -2702,10 +2785,22 @@ fn draw_cursor_nv12(
     else {
         return;
     };
-    let x0 = x & !1;
-    let y0 = y & !1;
-    let x1 = ((x + width + 1) & !1).min(size.0 & !1);
-    let y1 = ((y + height + 1) & !1).min(size.1 & !1);
+    let mut x0 = x & !1;
+    let mut y0 = y & !1;
+    let mut x1 = ((x + width + 1) & !1).min(size.0 & !1);
+    let mut y1 = ((y + height + 1) & !1).min(size.1 & !1);
+    // The stage draws the cursor over the whole output, which is larger than
+    // the video card when the export has a canvas; the card's rect bounds it
+    // there so the sprite never paints on the padding, as the preview clips it.
+    if let Some(rect) = clip {
+        let Some(clipped) = clip_cursor_box((x0, y0, x1, y1), rect) else {
+            return;
+        };
+        x0 = clipped.0;
+        y0 = clipped.1;
+        x1 = clipped.2;
+        y1 = clipped.3;
+    }
     if x1 <= x0 || y1 <= y0 {
         return;
     }
@@ -2780,6 +2875,31 @@ fn draw_cursor_nv12(
     }
 }
 
+/// The first even column or row at or after `value`, so a clipped box keeps
+/// its chroma pairs aligned.
+fn even_up(value: f64) -> u32 {
+    let value = value.ceil().max(0.0) as u32;
+    value + (value & 1)
+}
+
+/// The last even column or row at or before `value`.
+fn even_down(value: f64) -> u32 {
+    (value.floor().max(0.0) as u32) & !1
+}
+
+/// Restrict an even-aligned box (x0, y0, x1, y1) to a card rect, keeping both
+/// edges on chroma pairs. None when the box and the card do not overlap.
+fn clip_cursor_box(
+    (x0, y0, x1, y1): (u32, u32, u32, u32),
+    rect: zoom::StageRect,
+) -> Option<(u32, u32, u32, u32)> {
+    let x0 = x0.max(even_up(rect.0));
+    let y0 = y0.max(even_up(rect.1));
+    let x1 = x1.min(even_down(rect.0 + rect.2));
+    let y1 = y1.min(even_down(rect.1 + rect.3));
+    (x1 > x0 && y1 > y0).then_some((x0, y0, x1, y1))
+}
+
 /// Buffers `draw_cursor_nv12` reuses from frame to frame.
 #[derive(Default)]
 struct CursorScratch {
@@ -2792,10 +2912,10 @@ struct CursorScratch {
 #[cfg(test)]
 mod tests {
     use super::{
-        decoder_command, frame_plan, frame_source_time, h264_level, output_size, plan_render, rate,
-        render, render_with_workers, split_ranges, start_export, start_export_with_settings,
-        total_frames, zoom, Codec, Encoder, End, ExportModel, ExportSettings, ExportUpdate,
-        SourceSpan,
+        clip_cursor_box, decoder_command, frame_plan, frame_source_time, h264_level, output_size,
+        plan_render, rate, render, render_with_workers, retry_on_software, split_ranges,
+        start_export, start_export_with_settings, total_frames, zoom, Codec, Encoder, End,
+        ExportModel, ExportSettings, ExportUpdate, SourceSpan,
     };
     use crate::recording::editor::ffmpeg;
     use crate::recording::editor::model::{CursorRotationMode, CursorSettings};
@@ -2829,6 +2949,33 @@ mod tests {
         let without = args(false);
         assert!(!without.iter().any(|arg| arg == "-hwaccel"));
         assert_eq!(with.len(), without.len() + 2);
+    }
+
+    #[test]
+    fn a_failed_hardware_attempt_retries_unless_the_user_stopped() {
+        let failure: Result<(), End> = Err(End::Failed("the encoder failed".to_string()));
+        assert!(retry_on_software(&failure, false));
+        assert!(!retry_on_software(&failure, true));
+        assert!(!retry_on_software(&Ok(()), false));
+        assert!(!retry_on_software(&Err(End::Cancelled), false));
+    }
+
+    #[test]
+    fn the_stage_cursor_box_is_clipped_to_the_card() {
+        let bounds = (10, 20, 210, 180);
+        // The card is inset by padding: the box loses its outside columns and
+        // rows, and the kept edges stay on even pixels.
+        assert_eq!(
+            clip_cursor_box(bounds, (101.0, 41.0, 80.0, 60.0)),
+            Some((102, 42, 180, 100))
+        );
+        // A box that does not reach the card draws nothing.
+        assert_eq!(clip_cursor_box(bounds, (400.0, 400.0, 80.0, 60.0)), None);
+        // A box inside the card keeps its own even edges.
+        assert_eq!(
+            clip_cursor_box(bounds, (0.0, 0.0, 320.0, 180.0)),
+            Some(bounds)
+        );
     }
 
     #[test]
@@ -4581,6 +4728,7 @@ mod tests {
             draw_cursor_nv12(
                 &mut fast,
                 size,
+                None,
                 view,
                 &sidecar,
                 std::path::Path::new(""),

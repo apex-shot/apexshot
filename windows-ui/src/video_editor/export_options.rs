@@ -55,11 +55,11 @@ pub(super) fn show(
     let dark = crate::settings::windowing::prefers_dark_glass_theme();
     let themed_icon = |dark_icon, light_icon| if dark { dark_icon } else { light_icon };
     let settings = Rc::new(Cell::new(ExportSettings::default()));
-    let quality = Rc::new(Cell::new(
-        (0..QUALITIES.len())
-            .min_by_key(|index| QUALITIES[*index].0.abs_diff(model.crf))
-            .unwrap_or(1),
-    ));
+    let project_crf = model.crf;
+    let initial_quality = (0..QUALITIES.len())
+        .min_by_key(|index| QUALITIES[*index].0.abs_diff(project_crf))
+        .unwrap_or(1);
+    let quality = Rc::new(Cell::new(initial_quality));
     let scrim = GtkBox::new(Orientation::Vertical, 0);
     scrim.add_css_class("video-export-scrim");
     scrim.set_hexpand(true);
@@ -271,7 +271,12 @@ pub(super) fn show(
     card.append(&summary);
     card.append(&actions);
 
-    let seconds = (model.trim_end - model.trim_start).max(0.0);
+    // The estimate must describe the export's real length: cuts, speeds, and
+    // the freeze tail all change it.
+    let trim = (model.trim_start, model.trim_end);
+    let cuts = model.cuts.clone();
+    let speeds = model.segment_speeds.clone();
+    let freeze_tail = model.freeze_tail;
     let update: Rc<dyn Fn()> = Rc::new({
         let settings = settings.clone();
         let quality = quality.clone();
@@ -286,7 +291,13 @@ pub(super) fn show(
             });
             codec_note.set_visible(selected.codec == Codec::Hevc);
             description.set_text(&t(QUALITIES[quality.get()].2));
-            let crf = QUALITIES[quality.get()].0;
+            let crf = effective_crf(project_crf, initial_quality, quality.get());
+            let spans = super::export::frame_plan(trim.0, trim.1, &cuts, &speeds, fps);
+            let mut frames = super::export::total_frames(&spans);
+            if !spans.is_empty() && freeze_tail.is_finite() && freeze_tail > 0.0 {
+                frames += (freeze_tail * fps).round() as u64;
+            }
+            let seconds = frames as f64 / fps;
             let (bps, spread) = match selected.codec {
                 Codec::H264 => (
                     rate::h264_bits_per_second(crf, output, fps),
@@ -354,7 +365,8 @@ pub(super) fn show(
             let quality = quality.clone();
             move |_| {
                 dismiss();
-                then(settings.get(), QUALITIES[quality.get()].0, clipboard);
+                let crf = effective_crf(project_crf, initial_quality, quality.get());
+                then(settings.get(), crf, clipboard);
             }
         });
     }
@@ -446,6 +458,17 @@ fn fps_text(fps: f64) -> String {
     }
 }
 
+/// The CRF an export writes: the project's own value while the quality segment
+/// still shows its tier, so opening the dialog never changes a project's
+/// quality; a tier the user picked uses that tier's CRF.
+fn effective_crf(project: u32, initial: usize, chosen: usize) -> u32 {
+    if chosen == initial {
+        project
+    } else {
+        QUALITIES[chosen.min(QUALITIES.len() - 1)].0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -461,6 +484,16 @@ mod tests {
             child = widget.next_sibling();
         }
         widgets
+    }
+
+    #[test]
+    fn an_unchanged_quality_segment_keeps_the_projects_own_crf() {
+        let initial = 1;
+        assert_eq!(effective_crf(20, initial, initial), 20);
+        assert_eq!(effective_crf(23, initial, initial), 23);
+        assert_eq!(effective_crf(20, initial, 0), QUALITIES[0].0);
+        assert_eq!(effective_crf(20, initial, 2), QUALITIES[2].0);
+        assert_eq!(effective_crf(20, initial, 3), QUALITIES[3].0);
     }
 
     #[test]
@@ -555,7 +588,9 @@ mod tests {
                 assert_eq!(settings.fps, Some(60));
                 assert_eq!(settings.codec, Codec::Hevc);
                 assert!(!settings.hardware);
-                assert_eq!(crf, 24);
+                // The quality segment still shows the project's own tier, so
+                // its CRF is the one the export keeps.
+                assert_eq!(crf, model.crf);
                 assert_eq!(copied, clipboard);
                 assert!(editor.is_sensitive());
 
