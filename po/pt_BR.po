@@ -3379,11 +3379,6 @@ msgstr ""
 "Largura de exportação da imagem; selecione uma predefinição para alterar a proporção da tela"
 
 msgid ""
-"Image presets change the aspect ratio, not a fixed pixel size. W/H shows the export size. Click the selected preset again to reset."
-msgstr ""
-"As predefinições de imagem alteram a proporção da tela, não um tamanho fixo em pixels. W/H mostra o tamanho de exportação. Clique novamente na predefinição selecionada para redefinir."
-
-msgid ""
 "Increase Scene Shadows opacity to see the effect and change its placement."
 msgstr ""
 "Aumente a opacidade do Scene Shadows para ver o efeito e alterar seu posicionamento."
@@ -4861,3 +4856,12 @@ msgstr "Tempo de exportação"
 
 msgid "Resolution"
 msgstr "Resolução"
+
+msgid "16:9 image aspect ratio; banners may be cropped on some devices."
+msgstr "Proporção de imagem 16:9; banners podem ser cortados em alguns dispositivos."
+
+msgid "Exports at {width} × {height} px."
+msgstr "Exporta em {width} × {height} px."
+
+msgid "Ratio presets change the aspect ratio; platform presets also export at the size that platform asks for. W/H shows the export size. Click the selected preset again to reset."
+msgstr "Predefinições de proporção mudam a proporção; as de plataforma também exportam no tamanho que a plataforma pede. W/H mostra o tamanho da exportação. Clique de novo na predefinição selecionada para redefinir."
