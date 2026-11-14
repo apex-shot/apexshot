@@ -5,9 +5,10 @@
 //! first paint already looks like a finished edit. A configured default preset
 //! replaces that bundled look with the one the user saved, and a recording that
 //! captured a region or a window then opens with rounded corners sized to what
-//! it recorded; a full-screen recording opens square, because the corners are a
-//! record of the capture and outrank a saved look. Only a project that has just
-//! been created is seeded; a saved project keeps whatever it stored.
+//! it recorded; any other recording keeps the radius the opening look carries,
+//! because only a capture that asks for corners outranks a saved look. Only a
+//! project that has just been created is seeded; a saved project keeps whatever
+//! it stored.
 
 use super::presets::{self, Preset};
 use crate::recording::editor::sidecar::PointerSidecar;
@@ -53,36 +54,37 @@ pub(super) fn seed_with_preset(
     if let Some(preset) = preset {
         presets::apply_to(file, preset);
     }
-    file.background_radius = manifest_radius(&file.source_path);
+    // Only a capture that asks for corners overrides the preset's radius. A
+    // recording with no such request keeps the preset's value, so a default
+    // preset with rounded corners reaches every new recording.
+    if let Some(radius) = manifest_radius(&file.source_path) {
+        file.background_radius = radius;
+    }
 }
 
-fn manifest_radius(source: &Path) -> f64 {
+fn manifest_radius(source: &Path) -> Option<f64> {
     let mut path = PointerSidecar::resolved_sidecar_path(source).into_os_string();
     path.push(".recording.json");
-    std::fs::read_to_string(PathBuf::from(path))
-        .ok()
-        .as_deref()
-        .map(radius_from_manifest)
-        .unwrap_or(0.0)
+    let text = std::fs::read_to_string(PathBuf::from(path)).ok()?;
+    radius_from_manifest(&text)
 }
 
 /// The corner radius a recording's manifest asks for, in the Background panel's
 /// radius units, which are expressed against a 400px long edge.
 ///
-/// Only a region or window capture gets corners: its recorded output is smaller
-/// than the screen, so the frame around it is what the corners are for. The
-/// radius is a fixed pixel size at the recorded output, so a small capture gets
-/// more units than a large one. A screen capture, an unknown target, a manifest
-/// that cannot be read and one without usable output dimensions all open square.
-fn radius_from_manifest(text: &str) -> f64 {
-    let Ok(manifest) = serde_json::from_str::<serde_json::Value>(text) else {
-        return 0.0;
-    };
+/// Only a region or window capture asks for corners: its recorded output is
+/// smaller than the screen, so the frame around it is what the corners are for.
+/// The radius is a fixed pixel size at the recorded output, so a small capture
+/// gets more units than a large one. A screen capture, an unknown target, a
+/// manifest that cannot be read and one without usable output dimensions all
+/// ask for none, which leaves whatever radius the opening look already has.
+fn radius_from_manifest(text: &str) -> Option<f64> {
+    let manifest = serde_json::from_str::<serde_json::Value>(text).ok()?;
     if !matches!(
         manifest.get("target").and_then(|target| target.as_str()),
         Some("area" | "window")
     ) {
-        return 0.0;
+        return None;
     }
     let output = manifest.get("output");
     let dimension = |key: &str| {
@@ -92,11 +94,9 @@ fn radius_from_manifest(text: &str) -> f64 {
             .and_then(|value| u32::try_from(value).ok())
             .filter(|value| *value >= 2)
     };
-    let Some((width, height)) = dimension("width").zip(dimension("height")) else {
-        return 0.0;
-    };
+    let (width, height) = dimension("width").zip(dimension("height"))?;
     let long_edge = f64::from(width.max(height));
-    IMPORT_CORNER_RADIUS_PX * super::background::PADDING_REFERENCE / long_edge
+    Some(IMPORT_CORNER_RADIUS_PX * super::background::PADDING_REFERENCE / long_edge)
 }
 
 #[cfg(test)]
@@ -184,8 +184,8 @@ mod tests {
     #[test]
     fn a_window_or_area_capture_opens_with_corners() {
         for target in ["window", "area"] {
-            let landscape = radius_from_manifest(&manifest(target, 1920, 1080));
-            let portrait = radius_from_manifest(&manifest(target, 1080, 1920));
+            let landscape = radius_from_manifest(&manifest(target, 1920, 1080)).unwrap();
+            let portrait = radius_from_manifest(&manifest(target, 1080, 1920)).unwrap();
             assert!((landscape - radius_units(1920.0)).abs() < 1e-9);
             assert!((portrait - radius_units(1920.0)).abs() < 1e-9);
         }
@@ -193,48 +193,48 @@ mod tests {
 
     #[test]
     fn an_encoded_resolution_gets_its_own_corner_units() {
-        let radius = radius_from_manifest(&manifest("window", 1280, 720));
+        let radius = radius_from_manifest(&manifest("window", 1280, 720)).unwrap();
         assert!((radius - 5.0).abs() < 1e-9);
     }
 
     #[test]
-    fn a_screen_capture_opens_square() {
-        assert_eq!(radius_from_manifest(&manifest("screen", 1920, 1080)), 0.0);
+    fn a_screen_capture_asks_for_no_corners() {
+        assert_eq!(radius_from_manifest(&manifest("screen", 1920, 1080)), None);
     }
 
     #[test]
-    fn an_unreadable_manifest_opens_square() {
-        assert_eq!(radius_from_manifest("{not json"), 0.0);
-        assert_eq!(radius_from_manifest(""), 0.0);
-        assert_eq!(radius_from_manifest("null"), 0.0);
+    fn an_unreadable_manifest_asks_for_no_corners() {
+        assert_eq!(radius_from_manifest("{not json"), None);
+        assert_eq!(radius_from_manifest(""), None);
+        assert_eq!(radius_from_manifest("null"), None);
     }
 
     #[test]
-    fn an_unknown_or_missing_target_opens_square() {
-        assert_eq!(radius_from_manifest(&manifest("camera", 1920, 1080)), 0.0);
+    fn an_unknown_or_missing_target_asks_for_no_corners() {
+        assert_eq!(radius_from_manifest(&manifest("camera", 1920, 1080)), None);
         let mut value: serde_json::Value =
             serde_json::from_str(&manifest("window", 1920, 1080)).unwrap();
         value.as_object_mut().unwrap().remove("target");
-        assert_eq!(radius_from_manifest(&value.to_string()), 0.0);
+        assert_eq!(radius_from_manifest(&value.to_string()), None);
     }
 
     #[test]
-    fn a_manifest_without_usable_output_opens_square() {
+    fn a_manifest_without_usable_output_asks_for_no_corners() {
         let mut missing: serde_json::Value =
             serde_json::from_str(&manifest("window", 1920, 1080)).unwrap();
         missing.as_object_mut().unwrap().remove("output");
-        assert_eq!(radius_from_manifest(&missing.to_string()), 0.0);
-        assert_eq!(radius_from_manifest(&manifest("window", 1, 1080)), 0.0);
-        assert_eq!(radius_from_manifest(&manifest("window", 1920, 0)), 0.0);
+        assert_eq!(radius_from_manifest(&missing.to_string()), None);
+        assert_eq!(radius_from_manifest(&manifest("window", 1, 1080)), None);
+        assert_eq!(radius_from_manifest(&manifest("window", 1920, 0)), None);
 
         let null = manifest_with_output(serde_json::Value::Null);
-        assert_eq!(radius_from_manifest(&null), 0.0);
+        assert_eq!(radius_from_manifest(&null), None);
 
         let text_size = serde_json::json!({ "width": "1920", "height": "1080" });
-        assert_eq!(radius_from_manifest(&manifest_with_output(text_size)), 0.0);
+        assert_eq!(radius_from_manifest(&manifest_with_output(text_size)), None);
 
         let fractional = serde_json::json!({ "width": 1920.5, "height": 1080 });
-        assert_eq!(radius_from_manifest(&manifest_with_output(fractional)), 0.0);
+        assert_eq!(radius_from_manifest(&manifest_with_output(fractional)), None);
     }
 
     #[test]
@@ -351,6 +351,39 @@ mod tests {
 
         assert_eq!(file.background_padding, 60.0);
         assert!((file.background_radius - radius_units(1920.0)).abs() < 1e-9);
+
+        let _ = std::fs::remove_file(&manifest_path);
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn a_capture_that_asks_for_no_corners_keeps_the_preset_radius() {
+        let directory = std::env::temp_dir().join(format!(
+            "apexshot-windows-import-screen-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("recording.mp4");
+        std::fs::write(&source, b"not really a video").unwrap();
+
+        let mut manifest_path = PointerSidecar::resolved_sidecar_path(&source).into_os_string();
+        manifest_path.push(".recording.json");
+        let manifest_path = PathBuf::from(manifest_path);
+        if let Some(parent) = manifest_path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&manifest_path, manifest("screen", 1920, 1080)).unwrap();
+
+        let mut file = project();
+        file.source_path = source;
+        seed_with_preset(&mut file, Some(&preset(60.0)));
+
+        assert_eq!(file.background_padding, 60.0);
+        assert_eq!(
+            file.background_radius, 9.0,
+            "a screen capture asks for no corners, so the preset's radius stays"
+        );
 
         let _ = std::fs::remove_file(&manifest_path);
         let _ = std::fs::remove_dir_all(&directory);

@@ -63,7 +63,8 @@ pub(super) fn build_tools_column(
     pages.set_hexpand(false);
     pages.set_vexpand(true);
     pages.set_size_request((TOOL_COLUMN_WIDTH as f64 * scale).round() as i32, -1);
-    let (background_panel, _, _, _) = build_background_panel(scale, window, background, &column);
+    let (background_panel, _, _, _) =
+        build_background_panel(scale, window, background, &column, timeline);
     pages.add_named(&background_panel, Some("background"));
     pages.add_named(
         &build_cursor_panel(scale, cursor, cursor_repaint, timeline.clone()),
@@ -229,6 +230,7 @@ fn build_background_panel(
     window: &ApplicationWindow,
     background: Background,
     column: &GtkBox,
+    timeline: &super::timeline::Timeline,
 ) -> (GtkBox, GtkBox, FilledSlider, FilledSlider) {
     let body = panel_body();
     body.set_vexpand(false);
@@ -264,7 +266,7 @@ fn build_background_panel(
     source_pages.set_valign(Align::Start);
     source_pages.set_hexpand(true);
     let (wallpaper_page, wallpaper_scroll) =
-        build_wallpaper_page(scale, choice_buttons.clone(), background.clone());
+        build_wallpaper_page(scale, choice_buttons.clone(), background.clone(), timeline);
     wallpaper_page.set_visible(true);
     let select_custom = {
         let choices = choice_buttons.clone();
@@ -279,7 +281,7 @@ fn build_background_panel(
     let custom_page =
         super::custom_fill::build_custom_page(scale, column, &background, select_custom);
     custom_page.widget.set_visible(false);
-    let (image_page, reset_image) = build_image_page(scale, window, &background);
+    let (image_page, reset_image) = build_image_page(scale, window, &background, timeline);
     image_page.set_visible(false);
     source_pages.append(&wallpaper_page);
     source_pages.append(&custom_page.widget);
@@ -373,7 +375,7 @@ fn build_background_panel(
     let frame_section = webcam_section(scale, &t("Frame"), true);
     let padding_slider = value_slider_control(
         &t("Padding"),
-        0.0,
+        background::MIN_PADDING,
         80.0,
         background.padding(),
         1.0,
@@ -401,6 +403,35 @@ fn build_background_panel(
     frame_section.body.append(&radius_slider.widget());
     body.append(&frame_section.root);
 
+    // One drag is one undo step: the look is taken when the drag starts and
+    // recorded when it ends, so the values in between do not each add a step.
+    for (slider, before) in [
+        (
+            &padding_slider,
+            Rc::new(RefCell::new(None::<super::timeline::Look>)),
+        ),
+        (
+            &radius_slider,
+            Rc::new(RefCell::new(None::<super::timeline::Look>)),
+        ),
+    ] {
+        slider.on_interaction(
+            {
+                let timeline = timeline.clone();
+                let before = before.clone();
+                Rc::new(move || *before.borrow_mut() = timeline.look_before_change())
+            },
+            {
+                let timeline = timeline.clone();
+                let before = before.clone();
+                Rc::new(move || {
+                    let before = before.borrow_mut().take();
+                    timeline.record_look_change(before);
+                })
+            },
+        );
+    }
+
     {
         let state = background.state();
         let choices = choice_buttons.clone();
@@ -425,6 +456,7 @@ fn build_wallpaper_page(
     scale: f64,
     choices: Rc<RefCell<Vec<ToggleButton>>>,
     background: Background,
+    timeline: &super::timeline::Timeline,
 ) -> (GtkBox, ScrolledWindow) {
     let page = GtkBox::new(Orientation::Vertical, 0);
     page.set_hexpand(true);
@@ -479,9 +511,12 @@ fn build_wallpaper_page(
         let selected = file_name.to_owned();
         card.connect_clicked({
             let background = background.clone();
+            let timeline = timeline.clone();
             move |card| {
                 if card.is_active() {
+                    let before = timeline.look_before_change();
                     background.select(Some(&selected));
+                    timeline.record_look_change(before);
                 }
             }
         });
@@ -507,6 +542,7 @@ fn build_image_page(
     scale: f64,
     window: &ApplicationWindow,
     background: &Background,
+    timeline: &super::timeline::Timeline,
 ) -> (GtkBox, Rc<dyn Fn()>) {
     let page = GtkBox::new(Orientation::Vertical, 8);
     page.set_hexpand(true);
@@ -542,10 +578,12 @@ fn build_image_page(
         let label = label.clone();
         let icon = icon.clone();
         let background = background.clone();
+        let timeline = timeline.clone();
         Rc::new(move || {
             let label = label.clone();
             let icon = icon.clone();
             let background = background.clone();
+            let timeline = timeline.clone();
             let scale = scale;
             choose_background_image(&window, move |picked| {
                 let pixbuf = super::background::load_picture(&picked);
@@ -559,9 +597,11 @@ fn build_image_page(
                 icon.set_from_pixbuf(Some(&thumbnail_pixbuf(&pixbuf, scale)));
                 // The stage paints the picture itself from here: the same slot the
                 // Custom tab uses, so a picture and a color never both apply.
+                let before = timeline.look_before_change();
                 background.set_custom_fill(Some(Rc::new(move |context, width, height| {
                     super::background::paint_cover(context, width, height, &pixbuf);
                 })));
+                timeline.record_look_change(before);
             });
         })
     };
@@ -5411,8 +5451,24 @@ mod tests {
             let window = gtk4::ApplicationWindow::new(&app);
             let background = super::Background::default();
             let column = gtk4::Box::new(Orientation::Vertical, 0);
-            let (panel, _, padding, radius) =
-                super::build_background_panel(1.0, &window, background.clone(), &column);
+            let canvas = gtk4::AspectFrame::new(0.5, 0.5, 1.0, false);
+            let timeline = super::super::timeline::build(
+                &window,
+                &canvas,
+                1.0,
+                false,
+                super::super::cursor::CursorModel::new(),
+                super::super::webcam::WebcamModel::new(std::rc::Rc::new(|| {})),
+                background.clone(),
+                std::rc::Rc::new(std::cell::Cell::new(None)),
+            );
+            let (panel, _, padding, radius) = super::build_background_panel(
+                1.0,
+                &window,
+                background.clone(),
+                &column,
+                &timeline,
+            );
 
             background.apply(Some("wallpaper-004.jpg"), 48.0, 6.0);
             assert_eq!(padding.value.get(), 48.0);

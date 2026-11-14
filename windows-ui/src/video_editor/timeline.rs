@@ -411,12 +411,22 @@ struct EditSnapshot {
 
 /// The stage and the cursor look a preset writes. They live beside the edit
 /// list, so a step that applies a preset carries them to take back or replay
-/// with the document.
+/// with the document. The panel also hands this back when it records a stage
+/// change of its own as one undo step.
 #[derive(Clone, PartialEq)]
-struct Look {
+pub(crate) struct Look {
     stage: (Option<String>, f64, f64),
     stage_aspect: Option<String>,
     cursor: super::presets::CursorFile,
+}
+
+/// What the background listener saw last, so a frame change made straight
+/// through the model can record the look it started from. `restoring` keeps an
+/// undo, redo, preset or document swap from recording the look it puts back as
+/// a new step.
+struct LookWatch {
+    last: Option<Look>,
+    restoring: bool,
 }
 
 impl ZoomClip {
@@ -3265,6 +3275,10 @@ pub(super) struct Timeline {
     /// and its only listener holds the project sync handle, so the panel never
     /// keeps the timeline or its document alive.
     background: super::background::Background,
+    /// The look the background listener saw last. The panel records its own
+    /// stage edits when the interaction ends; this is what lets the listener
+    /// record a frame change, which has no interaction of its own.
+    look_watch: Rc<RefCell<LookWatch>>,
     /// The saved edit list: what was last written, and whether the editor has
     /// repainted since, which is when it may need writing again.
     project: super::project::ProjectSync,
@@ -4181,6 +4195,24 @@ impl Timeline {
         super::presets::from_project(&file, cursor, name)
     }
 
+    /// Whether `preset` is still the look the open project carries.
+    ///
+    /// The preset popover has no history listener, so it asks this when it
+    /// opens: an undo, a document swap or a later edit that moved the look
+    /// must drop the row's applied highlight. The camera is left out because a
+    /// preset only restyles a layer the recording already has, so a recording
+    /// with a camera keeps it even when the preset carries none.
+    pub fn look_matches(&self, preset: &super::presets::Preset) -> bool {
+        let Ok(current) = self.captured_look(&preset.name) else {
+            return false;
+        };
+        current.stage == preset.stage
+            && current.cursor == preset.cursor
+            && current.captions == preset.captions
+            && current.click_sound == preset.click_sound
+            && (current.click_sound_volume - preset.click_sound_volume).abs() <= f64::EPSILON
+    }
+
     /// Put a saved look on the open project as one undo step.
     ///
     /// The camera's styling, the captions and the click sound go through the
@@ -4231,15 +4263,43 @@ impl Timeline {
         self.publish_frame();
     }
 
+    /// The stage and cursor as they stand now, so a direct stage change the
+    /// panel makes can be recorded as one step when the interaction ends.
+    pub(crate) fn look_before_change(&self) -> Option<Look> {
+        self.data.borrow().live_look()
+    }
+
+    /// Record a direct stage change as one undo step. `before` is the look
+    /// [`Timeline::look_before_change`] returned before the change; the rest of
+    /// the document is unchanged by these edits, so it is captured as it stands
+    /// now.
+    pub(crate) fn record_look_change(&self, before: Option<Look>) {
+        let Some(before) = before else {
+            return;
+        };
+        let mut data = self.data.borrow_mut();
+        let mut snapshot = data.snapshot();
+        snapshot.look = Some(before);
+        data.record_edit(snapshot);
+        let last = data.live_look();
+        drop(data);
+        self.look_watch.borrow_mut().last = last;
+    }
+
     /// Put a look's stage and cursor on the open project and tell the panels
     /// that show them. The background's listeners mark the project changed,
     /// and the cursor's change is marked here.
     fn apply_look(&self, look: &Look) {
         let (selection, padding, radius) = &look.stage;
+        // A look being put back is not an edit: the listener must not record
+        // the restore as a new step of its own.
+        self.look_watch.borrow_mut().restoring = true;
         self.background
             .apply(selection.as_deref(), *padding, *radius);
         self.background.set_aspect(look.stage_aspect.clone());
         self.cursor.set_settings(look.cursor.settings());
+        self.look_watch.borrow_mut().restoring = false;
+        self.look_watch.borrow_mut().last = self.data.borrow().live_look();
         if let Some(listener) = self.cursor_listener.borrow().as_ref() {
             listener();
         }
@@ -4383,6 +4443,9 @@ impl Timeline {
         if let Some(listener) = self.cursor_listener.borrow().as_ref() {
             listener();
         }
+        // The incoming stage is a document swap, not an edit: the listener
+        // must not record it as a step on the new recording.
+        self.look_watch.borrow_mut().restoring = true;
         match &incoming {
             Some(file) => {
                 self.background.apply(
@@ -4401,6 +4464,8 @@ impl Timeline {
                 self.background.set_aspect(None);
             }
         }
+        self.look_watch.borrow_mut().restoring = false;
+        self.look_watch.borrow_mut().last = self.data.borrow().live_look();
         if let Some(file) = imported {
             self.project.sync(Some(file), true);
         }
@@ -4450,6 +4515,27 @@ impl Timeline {
 /// panel's starting look when the document brought none.
 fn incoming_cursor(file: Option<&super::project::EditorProjectFile>) -> CursorSettings {
     file.map(|file| file.cursor.settings()).unwrap_or_default()
+}
+
+/// Record a frame change the panel made straight through the model as one undo
+/// step. The listener hears every stage change, so only a change of the frame
+/// records here; the panel records its own padding, radius, wallpaper and fill
+/// edits when the interaction ends.
+fn record_frame_change(data: &Rc<RefCell<Data>>, watch: &Rc<RefCell<LookWatch>>) {
+    let next = data.borrow().live_look();
+    let before = watch.borrow().last.clone();
+    let frame_changed = before.as_ref().map(|look| &look.stage_aspect)
+        != next.as_ref().map(|look| &look.stage_aspect);
+    let restoring = watch.borrow().restoring;
+    if frame_changed && !restoring {
+        if let Some(before) = before {
+            let mut data = data.borrow_mut();
+            let mut snapshot = data.snapshot();
+            snapshot.look = Some(before);
+            data.record_edit(snapshot);
+        }
+    }
+    watch.borrow_mut().last = next;
 }
 
 /// A snapshot with this session's cursor look in it.
@@ -4509,9 +4595,18 @@ pub(super) fn build(
     }
     let camera_cache = Rc::new(RefCell::new(super::zoom::ZoomCameraCache::default()));
     let project = super::project::ProjectSync::default();
+    let look_watch = Rc::new(RefCell::new(LookWatch {
+        last: data.borrow().live_look(),
+        restoring: false,
+    }));
     {
         let project = project.clone();
-        background.connect(Rc::new(move || project.mark_changed()));
+        let data = data.clone();
+        let look_watch = look_watch.clone();
+        background.connect(Rc::new(move || {
+            project.mark_changed();
+            record_frame_change(&data, &look_watch);
+        }));
     }
 
     let dock = GtkBox::new(Orientation::Vertical, 0);
@@ -5438,6 +5533,7 @@ pub(super) fn build(
         cursor_listener,
         typing_epoch: Rc::new(Cell::new(0)),
         background,
+        look_watch,
         project,
     };
     bind_layout_lane(&layout_track, data, timeline.clone(), sync_play_icon, scale);
