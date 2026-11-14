@@ -279,7 +279,7 @@ fn build_background_panel(
     let custom_page =
         super::custom_fill::build_custom_page(scale, column, &background, select_custom);
     custom_page.widget.set_visible(false);
-    let (image_page, reset_image) = build_image_page(scale, window, &background);
+    let (image_page, sync_image) = build_image_page(scale, window, &background);
     image_page.set_visible(false);
     source_pages.append(&wallpaper_page);
     source_pages.append(&custom_page.widget);
@@ -357,13 +357,13 @@ fn build_background_panel(
     let wallpaper_scroll_for_none = wallpaper_scroll.clone();
     let background_for_none = background.clone();
     let sync_none_for_click = sync_none.clone();
-    let reset_image_for_none = reset_image.clone();
+    let sync_image_for_none = sync_image.clone();
     none.connect_clicked(move |_| {
         for card in choices_for_none.borrow().iter() {
             card.set_active(false);
         }
         clear_custom();
-        reset_image_for_none();
+        sync_image_for_none();
         background_for_none.select(None);
         sync_none_for_click();
         let adjustment = wallpaper_scroll_for_none.vadjustment();
@@ -406,6 +406,8 @@ fn build_background_panel(
         let choices = choice_buttons.clone();
         let padding = padding_slider.clone();
         let radius = radius_slider.clone();
+        let sync_custom = custom_page.sync.clone();
+        let sync_image = sync_image.clone();
         background.connect(Rc::new(move || {
             padding.set_value(state.padding());
             radius.set_value(state.radius());
@@ -414,6 +416,11 @@ fn build_background_panel(
             for (card, file_name) in cards.iter().zip(background::WALLPAPERS) {
                 card.set_active(selection.as_deref() == Some(file_name));
             }
+            // The Custom and Image rows are views of the same model: an open,
+            // a preset or an undo must move them with the stage rather than
+            // leave the last document's fill selected.
+            sync_custom();
+            sync_image();
         }));
     }
 
@@ -528,13 +535,43 @@ fn build_image_page(
     picker.set_child(Some(&inner));
     page.append(&picker);
 
-    let reset: Rc<dyn Fn()> = {
+    // The row is a view of the model: every stage change resets it to the
+    // picture the project holds, or to the empty prompt. The last path avoids
+    // decoding the same file on every slider tick.
+    let shown: Rc<RefCell<Option<PathBuf>>> = Rc::new(RefCell::new(None));
+    let sync: Rc<dyn Fn()> = {
+        let state = background.state();
         let label = label.clone();
         let icon = icon.clone();
+        let shown = shown.clone();
         Rc::new(move || {
-            label.set_text(&t("Select image…"));
-            icon.set_icon_name(Some(icon_names::custom::IMAGE_ALT_SYMBOLIC));
-            icon.set_pixel_size((15.0 * scale).round() as i32);
+            let path = match state.fill_spec() {
+                Some(background::FillSpec::Image { path }) => Some(path),
+                _ => None,
+            };
+            if *shown.borrow() == path {
+                return;
+            }
+            *shown.borrow_mut() = path.clone();
+            match path {
+                Some(path) => {
+                    label.set_text(&path.file_name().map_or_else(
+                        || t("Background image"),
+                        |name| name.to_string_lossy().to_string(),
+                    ));
+                    if let Some(pixbuf) = super::background::load_picture(&path) {
+                        icon.set_from_pixbuf(Some(&thumbnail_pixbuf(&pixbuf, scale)));
+                    } else {
+                        icon.set_icon_name(Some(icon_names::custom::IMAGE_ALT_SYMBOLIC));
+                        icon.set_pixel_size((15.0 * scale).round() as i32);
+                    }
+                }
+                None => {
+                    label.set_text(&t("Select image…"));
+                    icon.set_icon_name(Some(icon_names::custom::IMAGE_ALT_SYMBOLIC));
+                    icon.set_pixel_size((15.0 * scale).round() as i32);
+                }
+            }
         })
     };
     let choose = {
@@ -542,16 +579,19 @@ fn build_image_page(
         let label = label.clone();
         let icon = icon.clone();
         let background = background.clone();
+        let shown = shown.clone();
         Rc::new(move || {
             let label = label.clone();
             let icon = icon.clone();
             let background = background.clone();
+            let shown = shown.clone();
             let scale = scale;
             choose_background_image(&window, move |picked| {
                 let pixbuf = super::background::load_picture(&picked);
                 let Some(pixbuf) = pixbuf else {
                     return;
                 };
+                *shown.borrow_mut() = Some(picked.clone());
                 label.set_text(&picked.file_name().map_or_else(
                     || t("Background image"),
                     |name| name.to_string_lossy().to_string(),
@@ -559,14 +599,12 @@ fn build_image_page(
                 icon.set_from_pixbuf(Some(&thumbnail_pixbuf(&pixbuf, scale)));
                 // The stage paints the picture itself from here: the same slot the
                 // Custom tab uses, so a picture and a color never both apply.
-                background.set_custom_fill(Some(Rc::new(move |context, width, height| {
-                    super::background::paint_cover(context, width, height, &pixbuf);
-                })));
+                background.set_custom_fill(Some(background::FillSpec::Image { path: picked }));
             });
         })
     };
     picker.connect_clicked(move |_| choose());
-    (page, reset)
+    (page, sync)
 }
 
 /// The row's own preview of the picked picture, small enough to sit where the
@@ -5414,7 +5452,7 @@ mod tests {
             let (panel, _, padding, radius) =
                 super::build_background_panel(1.0, &window, background.clone(), &column);
 
-            background.apply(Some("wallpaper-004.jpg"), 48.0, 6.0);
+            background.apply(Some("wallpaper-004.jpg"), 48.0, 6.0, None);
             assert_eq!(padding.value.get(), 48.0);
             assert_eq!(radius.value.get(), 6.0);
             assert_eq!(active_wallpaper_cards(&panel), 1);
@@ -5428,6 +5466,7 @@ mod tests {
                 None,
                 super::background::DEFAULT_PADDING,
                 super::background::DEFAULT_RADIUS,
+                None,
             );
             assert_eq!(padding.value.get(), super::background::DEFAULT_PADDING);
             assert_eq!(radius.value.get(), super::background::DEFAULT_RADIUS);

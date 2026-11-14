@@ -994,6 +994,7 @@ mod tests {
         source.background = StageFile {
             selection: Some("wallpaper-019.jpg".to_owned()),
             aspect: None,
+            fill: None,
         };
         source.background_padding = 66.0;
         source.background_radius = 9.0;
