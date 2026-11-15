@@ -4839,3 +4839,15 @@ msgstr "يُصدَّر بحجم {width} × {height} بكسل."
 
 msgid "Ratio presets change the aspect ratio; platform presets also export at the size that platform asks for. W/H shows the export size. Click the selected preset again to reset."
 msgstr "تغيّر إعدادات النسبة نسبة الأبعاد فقط؛ أما إعدادات المنصات فتصدّر أيضًا بالحجم الذي تطلبه المنصة. يعرض W/H حجم التصدير. انقر على الإعداد المحدد مرة أخرى لإعادة التعيين."
+
+msgid "This image is large, so enhancing it takes a while on this device. {percent}% done, about {left} left. You can close the preview to stop."
+msgstr "هذه الصورة كبيرة، لذا يستغرق تحسينها بعض الوقت على هذا الجهاز. اكتمل {percent}%، ويتبقى نحو {left}. يمكنك إغلاق المعاينة للإيقاف."
+
+msgid "Enhancing… {percent}%, about {left} left"
+msgstr "جارٍ التحسين… {percent}%، يتبقى نحو {left}"
+
+msgid "{minutes} min"
+msgstr "{minutes} دقيقة"
+
+msgid "{seconds} s"
+msgstr "{seconds} ث"

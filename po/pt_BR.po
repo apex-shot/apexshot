@@ -4905,3 +4905,15 @@ msgstr "Exporta em {width} × {height} px."
 
 msgid "Ratio presets change the aspect ratio; platform presets also export at the size that platform asks for. W/H shows the export size. Click the selected preset again to reset."
 msgstr "Predefinições de proporção mudam a proporção; as de plataforma também exportam no tamanho que a plataforma pede. W/H mostra o tamanho da exportação. Clique de novo na predefinição selecionada para redefinir."
+
+msgid "This image is large, so enhancing it takes a while on this device. {percent}% done, about {left} left. You can close the preview to stop."
+msgstr "Esta imagem é grande, então aprimorá-la leva um tempo neste dispositivo. {percent}% concluído, faltam cerca de {left}. Você pode fechar a prévia para parar."
+
+msgid "Enhancing… {percent}%, about {left} left"
+msgstr "Aprimorando… {percent}%, faltam cerca de {left}"
+
+msgid "{minutes} min"
+msgstr "{minutes} min"
+
+msgid "{seconds} s"
+msgstr "{seconds} s"

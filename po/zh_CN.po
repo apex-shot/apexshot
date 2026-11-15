@@ -4803,3 +4803,15 @@ msgstr "以 {width} × {height} 像素导出。"
 
 msgid "Ratio presets change the aspect ratio; platform presets also export at the size that platform asks for. W/H shows the export size. Click the selected preset again to reset."
 msgstr "比例预设会改变宽高比；平台预设还会按该平台要求的尺寸导出。W/H 显示导出尺寸。再次点击已选预设即可重置。"
+
+msgid "This image is large, so enhancing it takes a while on this device. {percent}% done, about {left} left. You can close the preview to stop."
+msgstr "此图像较大，在此设备上增强需要一些时间。已完成 {percent}%，剩余约 {left}。关闭预览即可停止。"
+
+msgid "Enhancing… {percent}%, about {left} left"
+msgstr "正在增强… {percent}%，剩余约 {left}"
+
+msgid "{minutes} min"
+msgstr "{minutes} 分钟"
+
+msgid "{seconds} s"
+msgstr "{seconds} 秒"
