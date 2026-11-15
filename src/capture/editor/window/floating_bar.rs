@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use gtk4::{
     glib, prelude::*, Align, Box as GtkBox, Button, DrawingArea, Image, Label, Orientation,
-    Popover, ScrolledWindow,
+    Popover, PositionType, ScrolledWindow,
 };
 
 use crate::capture::editor::ui_support::{DockedBarInset, EDITOR_TOP_CHROME_HEIGHT};
@@ -158,6 +158,8 @@ pub(super) fn build_pill(tooltip: &str) -> Pill {
     let popover = Popover::new();
     popover.set_has_arrow(false);
     popover.set_autohide(true);
+    popover.set_position(PositionType::Bottom);
+    popover.set_offset(0, 8);
     popover.add_css_class("editor-popover");
     popover.set_parent(&button);
     let list = GtkBox::new(Orientation::Vertical, 0);
@@ -175,27 +177,30 @@ pub(super) fn build_pill(tooltip: &str) -> Pill {
 /// Popover row: label on the left, tick on the right, revealed when selected.
 pub(super) fn build_option_row(label: &str, check_class: &str) -> Button {
     let row = GtkBox::new(Orientation::Horizontal, 8);
-    row.set_margin_start(8);
-    row.set_margin_end(8);
-    row.set_margin_top(4);
-    row.set_margin_bottom(4);
+    row.set_margin_start(0);
+    row.set_margin_end(0);
+    row.set_margin_top(0);
+    row.set_margin_bottom(0);
 
     let text = Label::new(Some(label));
     text.set_hexpand(true);
     text.set_xalign(0.0);
 
-    let check = Label::new(Some("✓"));
+    let check = Image::from_icon_name(icon_names::custom::CHECK_SYMBOLIC);
+    check.set_pixel_size(12);
     check.set_visible(false);
     check.add_css_class(check_class);
 
     row.append(&text);
     row.append(&check);
 
-    Button::builder()
+    let option = Button::builder()
         .has_frame(false)
         .css_classes(["editor-popover-list-item", "flat"])
         .child(&row)
-        .build()
+        .build();
+    option.set_size_request(-1, 32);
+    option
 }
 
 /// Wire every option row in `list`, handing the row index and its button to `on_click`.
@@ -524,6 +529,53 @@ mod tests {
             set_bar_shown(&root, true);
             assert!(entry.is_sensitive());
             window.close();
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
+    }
+
+    #[test]
+    fn option_rows_carry_a_trailing_bundled_check_that_selection_reveals() {
+        use super::{build_option_row, sync_option_selection};
+        use gtk4::prelude::*;
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let list = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+            for label in ["One", "Two"] {
+                let row = build_option_row(label, "editor-crop-ratio-check");
+                row.add_css_class("editor-crop-ratio-option");
+                list.append(&row);
+            }
+            let check_of = |index: usize| {
+                let mut child = list.first_child();
+                for _ in 0..index {
+                    child = child.and_then(|widget| widget.next_sibling());
+                }
+                let button = child
+                    .and_then(|widget| widget.downcast::<gtk4::Button>().ok())
+                    .expect("an option button");
+                button
+                    .child()
+                    .and_then(|child| child.downcast::<gtk4::Box>().ok())
+                    .and_then(|row| row.last_child())
+                    .and_then(|check| check.downcast::<gtk4::Image>().ok())
+                    .expect("the row's trailing child must be the bundled check image")
+            };
+            for index in 0..2 {
+                let check = check_of(index);
+                assert_eq!(
+                    check.icon_name().as_deref(),
+                    Some(super::icon_names::custom::CHECK_SYMBOLIC)
+                );
+                assert_eq!(check.pixel_size(), 12);
+                assert!(!check.get_visible());
+            }
+            sync_option_selection(&list, 1, "editor-crop-ratio-option-active");
+            assert!(!check_of(0).get_visible());
+            assert!(check_of(1).get_visible());
+            sync_option_selection(&list, 0, "editor-crop-ratio-option-active");
+            assert!(check_of(0).get_visible());
+            assert!(!check_of(1).get_visible());
         }) else {
             eprintln!("skipping: GTK unavailable");
             return;

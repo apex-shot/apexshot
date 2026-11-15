@@ -86,6 +86,7 @@ fn menu_popover(menu_class: &str) -> Popover {
     popover.set_has_arrow(false);
     popover.set_autohide(true);
     popover.set_position(gtk4::PositionType::Bottom);
+    popover.set_offset(0, 8);
     popover.add_css_class("editor-subbar-popover");
     popover.add_css_class(menu_class);
     popover

@@ -1,0 +1,382 @@
+.editor-root popover.editor-popover,
+.editor-root popover.editor-subbar-popover,
+.editor-root popover.recording-editor-dropdown-popover,
+.editor-root popover.recording-editor-stage-aspect,
+.editor-root popover.recording-editor-clip-menu-popover {
+    background: transparent;
+    background-image: none;
+    border: none;
+    outline: none;
+    box-shadow: none;
+    padding: 0;
+    margin: 0;
+}
+
+.editor-root popover.editor-popover > arrow,
+.editor-root popover.editor-subbar-popover > arrow,
+.editor-root popover.recording-editor-dropdown-popover > arrow,
+.editor-root popover.recording-editor-stage-aspect > arrow,
+.editor-root popover.recording-editor-clip-menu-popover > arrow {
+    background: transparent;
+    background-image: none;
+    border: none;
+    outline: none;
+    box-shadow: none;
+    padding: 0;
+    margin: 0;
+    min-width: 0;
+    min-height: 0;
+}
+
+popover.editor-popover > contents,
+popover.editor-subbar-popover > contents,
+popover.recording-editor-dropdown-popover > contents,
+popover.recording-editor-stage-aspect > contents,
+popover.recording-editor-clip-menu-popover > contents {
+    min-width: 0;
+    min-height: 0;
+    margin: 0;
+    padding: 4px;
+    background-color: #252526;
+    background-image: none;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 10px;
+    outline: none;
+    box-shadow: none;
+    color: rgba(255, 255, 255, 0.90);
+}
+
+popover.editor-popover .editor-popover-list,
+popover.editor-subbar-popover .editor-stroke-menu,
+popover.editor-subbar-popover .editor-subbar-menu,
+popover.recording-editor-dropdown-popover .recording-editor-dropdown-list,
+popover.recording-editor-dropdown-popover .recording-editor-aspect-list,
+popover.recording-editor-stage-aspect .recording-editor-stage-aspect-list,
+popover.recording-editor-clip-menu-popover .recording-editor-clip-menu {
+    padding: 0;
+    background: transparent;
+    background-image: none;
+    border: none;
+    outline: none;
+    box-shadow: none;
+    border-radius: 0;
+}
+
+popover.editor-popover button.editor-popover-list-item,
+popover.recording-editor-dropdown-popover button.recording-editor-dropdown-item,
+popover.recording-editor-stage-aspect button.recording-editor-stage-aspect-item,
+popover.recording-editor-clip-menu-popover button.recording-editor-clip-menu-row {
+    min-height: 32px;
+    padding: 0 8px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    background-image: none;
+    box-shadow: none;
+    font-size: 14px;
+    font-weight: 400;
+    color: rgba(255, 255, 255, 0.90);
+}
+
+popover.editor-popover button.editor-popover-list-item:hover,
+popover.recording-editor-dropdown-popover button.recording-editor-dropdown-item:hover,
+popover.recording-editor-stage-aspect button.recording-editor-stage-aspect-item:hover,
+popover.recording-editor-clip-menu-popover button.recording-editor-clip-menu-row:hover {
+    background-color: rgba(255, 255, 255, 0.07);
+    color: #ffffff;
+}
+
+popover.editor-popover button.editor-popover-list-item:active,
+popover.recording-editor-dropdown-popover button.recording-editor-dropdown-item:active,
+popover.recording-editor-stage-aspect button.recording-editor-stage-aspect-item:active,
+popover.recording-editor-clip-menu-popover button.recording-editor-clip-menu-row:active {
+    background-color: rgba(255, 255, 255, 0.10);
+    color: #ffffff;
+}
+
+popover.editor-subbar-popover button.editor-subbar-option {
+    min-width: 0;
+    min-height: 32px;
+    padding: 0 8px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    background-image: none;
+    box-shadow: none;
+    font-size: 14px;
+    font-weight: 400;
+    color: rgba(255, 255, 255, 0.90);
+}
+
+popover.editor-subbar-popover button.editor-subbar-option.selected {
+    background: transparent;
+    box-shadow: none;
+    color: #ffffff;
+}
+
+popover.editor-subbar-popover button.editor-subbar-option:hover {
+    background: rgba(255, 255, 255, 0.07);
+    color: #ffffff;
+}
+
+popover.editor-subbar-popover button.editor-subbar-option:active {
+    background: rgba(255, 255, 255, 0.10);
+    color: #ffffff;
+}
+
+popover.editor-subbar-popover button.editor-stroke-option {
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    background-image: none;
+    box-shadow: none;
+}
+
+popover.editor-subbar-popover button.editor-stroke-option:hover,
+popover.editor-subbar-popover button.editor-stroke-option:active {
+    background: rgba(255, 255, 255, 0.09);
+    color: #ffffff;
+}
+
+popover.editor-subbar-popover button.editor-stroke-option.selected,
+popover.editor-subbar-popover button.editor-stroke-option.selected:hover {
+    background: transparent;
+    box-shadow: none;
+    color: #ff8b4a;
+}
+
+popover.editor-popover button.editor-popover-list-item:focus-visible,
+popover.editor-subbar-popover button.editor-subbar-option:focus-visible,
+popover.editor-subbar-popover button.editor-stroke-option:focus-visible,
+popover.recording-editor-dropdown-popover button.recording-editor-dropdown-item:focus-visible,
+popover.recording-editor-stage-aspect button.recording-editor-stage-aspect-item:focus-visible,
+popover.recording-editor-clip-menu-popover button.recording-editor-clip-menu-row:focus-visible {
+    outline: 1px solid rgba(255, 255, 255, 0.35);
+    outline-offset: -1px;
+}
+
+popover.editor-popover button.editor-popover-list-item label,
+popover.editor-popover button.editor-popover-list-item image,
+popover.editor-subbar-popover button.editor-subbar-option label,
+popover.editor-subbar-popover button.editor-subbar-option image,
+popover.recording-editor-dropdown-popover button.recording-editor-dropdown-item label,
+popover.recording-editor-dropdown-popover button.recording-editor-dropdown-item image,
+popover.recording-editor-stage-aspect button.recording-editor-stage-aspect-item label,
+popover.recording-editor-stage-aspect button.recording-editor-stage-aspect-item image,
+popover.recording-editor-clip-menu-popover button.recording-editor-clip-menu-row label,
+popover.recording-editor-clip-menu-popover button.recording-editor-clip-menu-row image {
+    color: inherit;
+    font-size: inherit;
+    font-weight: inherit;
+}
+
+popover.recording-editor-dropdown-popover button.recording-editor-aspect-item image.recording-editor-aspect-item-icon {
+    color: rgba(255, 255, 255, 0.55);
+}
+
+popover.editor-popover .editor-popover-list .editor-crop-ratio-check,
+popover.editor-popover .editor-popover-list .editor-text-inspector-check,
+popover.editor-subbar-popover .editor-subbar-menu .editor-subbar-check,
+popover.recording-editor-dropdown-popover button image.editor-menu-check {
+    color: rgba(255, 255, 255, 0.85);
+}
+
+popover.editor-popover .editor-popover-separator,
+popover.recording-editor-clip-menu-popover .recording-editor-clip-menu-separator {
+    margin: 4px 6px;
+    background: rgba(255, 255, 255, 0.10);
+}
+
+popover.recording-editor-clip-menu-popover button.recording-editor-clip-menu-row-danger,
+popover.recording-editor-clip-menu-popover button.recording-editor-clip-menu-row-danger label,
+popover.recording-editor-clip-menu-popover button.recording-editor-clip-menu-row-danger image {
+    color: #F87171;
+}
+
+popover.recording-editor-clip-menu-popover button.recording-editor-clip-menu-row-danger:hover {
+    background: alpha(#F87171, 0.14);
+    color: #FCA5A5;
+}
+
+popover.editor-popover button.editor-popover-list-item:disabled,
+popover.recording-editor-dropdown-popover button.recording-editor-dropdown-item:disabled,
+popover.recording-editor-stage-aspect button.recording-editor-stage-aspect-item:disabled,
+popover.recording-editor-clip-menu-popover button.recording-editor-clip-menu-row:disabled {
+    color: rgba(255, 255, 255, 0.35);
+}
+
+popover.editor-subbar-popover button.editor-subbar-option:disabled,
+popover.editor-subbar-popover button.editor-stroke-option:disabled {
+    color: rgba(255, 255, 255, 0.35);
+}
+
+popover.editor-popover button.editor-popover-list-item:disabled image,
+popover.editor-subbar-popover button.editor-subbar-option:disabled image,
+popover.editor-subbar-popover button.editor-stroke-option:disabled image,
+popover.recording-editor-dropdown-popover button.recording-editor-dropdown-item:disabled image,
+popover.recording-editor-stage-aspect button.recording-editor-stage-aspect-item:disabled image,
+popover.recording-editor-clip-menu-popover button.recording-editor-clip-menu-row:disabled image {
+    color: inherit;
+}
+
+popover.recording-editor-dropdown-popover button.recording-editor-dropdown-item:disabled .editor-menu-check,
+popover.recording-editor-dropdown-popover button.recording-editor-aspect-item:disabled image.recording-editor-aspect-item-icon {
+    color: inherit;
+}
+
+popover.recording-editor-clip-menu-popover button.recording-editor-clip-menu-row-danger:disabled,
+popover.recording-editor-clip-menu-popover button.recording-editor-clip-menu-row-danger:disabled label,
+popover.recording-editor-clip-menu-popover button.recording-editor-clip-menu-row-danger:disabled image {
+    color: alpha(#F87171, 0.40);
+}
+
+.editor-root.editor-theme-light popover.editor-popover > contents,
+.editor-root.editor-theme-light popover.editor-subbar-popover > contents,
+.editor-root.editor-theme-light popover.recording-editor-dropdown-popover > contents,
+.editor-root.editor-theme-light popover.recording-editor-stage-aspect > contents,
+.editor-root.editor-theme-light popover.recording-editor-clip-menu-popover > contents {
+    background-color: #f2f3f4;
+    border-color: rgba(17, 24, 39, 0.14);
+    color: rgba(29, 33, 41, 0.90);
+}
+
+.editor-root.editor-theme-light popover.editor-popover button.editor-popover-list-item,
+.editor-root.editor-theme-light popover.recording-editor-dropdown-popover button.recording-editor-dropdown-item,
+.editor-root.editor-theme-light popover.recording-editor-stage-aspect button.recording-editor-stage-aspect-item,
+.editor-root.editor-theme-light popover.recording-editor-clip-menu-popover button.recording-editor-clip-menu-row {
+    color: rgba(29, 33, 41, 0.90);
+}
+
+.editor-root.editor-theme-light popover.editor-popover button.editor-popover-list-item:hover,
+.editor-root.editor-theme-light popover.recording-editor-dropdown-popover button.recording-editor-dropdown-item:hover,
+.editor-root.editor-theme-light popover.recording-editor-stage-aspect button.recording-editor-stage-aspect-item:hover,
+.editor-root.editor-theme-light popover.recording-editor-clip-menu-popover button.recording-editor-clip-menu-row:hover {
+    background-color: rgba(17, 24, 39, 0.05);
+    color: #111827;
+}
+
+.editor-root.editor-theme-light popover.editor-popover button.editor-popover-list-item:active,
+.editor-root.editor-theme-light popover.recording-editor-dropdown-popover button.recording-editor-dropdown-item:active,
+.editor-root.editor-theme-light popover.recording-editor-stage-aspect button.recording-editor-stage-aspect-item:active,
+.editor-root.editor-theme-light popover.recording-editor-clip-menu-popover button.recording-editor-clip-menu-row:active {
+    background-color: rgba(17, 24, 39, 0.10);
+    color: #111827;
+}
+
+.editor-root.editor-theme-light popover.editor-subbar-popover button.editor-subbar-option {
+    color: rgba(29, 33, 41, 0.90);
+}
+
+.editor-root.editor-theme-light popover.editor-subbar-popover button.editor-subbar-option.selected {
+    background: transparent;
+    box-shadow: none;
+    color: #111827;
+}
+
+.editor-root.editor-theme-light popover.editor-subbar-popover button.editor-subbar-option:hover {
+    background: rgba(17, 24, 39, 0.05);
+    color: #111827;
+}
+
+.editor-root.editor-theme-light popover.editor-subbar-popover button.editor-subbar-option:active {
+    background: rgba(17, 24, 39, 0.10);
+    color: #111827;
+}
+
+.editor-root.editor-theme-light popover.editor-subbar-popover button.editor-stroke-option:hover,
+.editor-root.editor-theme-light popover.editor-subbar-popover button.editor-stroke-option:active {
+    background: rgba(17, 24, 39, 0.07);
+    color: #1d2129;
+}
+
+.editor-root.editor-theme-light popover.editor-subbar-popover button.editor-stroke-option.selected,
+.editor-root.editor-theme-light popover.editor-subbar-popover button.editor-stroke-option.selected:hover {
+    background: transparent;
+    box-shadow: none;
+    color: #b84500;
+}
+
+.editor-root.editor-theme-light popover.editor-popover button.editor-popover-list-item:focus-visible,
+.editor-root.editor-theme-light popover.editor-subbar-popover button.editor-subbar-option:focus-visible,
+.editor-root.editor-theme-light popover.editor-subbar-popover button.editor-stroke-option:focus-visible,
+.editor-root.editor-theme-light popover.recording-editor-dropdown-popover button.recording-editor-dropdown-item:focus-visible,
+.editor-root.editor-theme-light popover.recording-editor-stage-aspect button.recording-editor-stage-aspect-item:focus-visible,
+.editor-root.editor-theme-light popover.recording-editor-clip-menu-popover button.recording-editor-clip-menu-row:focus-visible {
+    outline-color: rgba(17, 24, 39, 0.35);
+}
+
+.editor-root.editor-theme-light popover.editor-popover .editor-popover-list .editor-crop-ratio-check,
+.editor-root.editor-theme-light popover.editor-popover .editor-popover-list .editor-text-inspector-check,
+.editor-root.editor-theme-light popover.editor-subbar-popover .editor-subbar-menu .editor-subbar-check,
+.editor-root.editor-theme-light popover.recording-editor-dropdown-popover button image.editor-menu-check {
+    color: #111827;
+}
+
+.editor-root.editor-theme-light popover.recording-editor-dropdown-popover button.recording-editor-aspect-item image.recording-editor-aspect-item-icon {
+    color: rgba(29, 33, 41, 0.55);
+}
+
+.editor-root.editor-theme-light popover.editor-popover .editor-popover-separator,
+.editor-root.editor-theme-light popover.recording-editor-clip-menu-popover .recording-editor-clip-menu-separator {
+    background: rgba(17, 24, 39, 0.10);
+}
+
+.editor-root.editor-theme-light popover.recording-editor-clip-menu-popover button.recording-editor-clip-menu-row-danger,
+.editor-root.editor-theme-light popover.recording-editor-clip-menu-popover button.recording-editor-clip-menu-row-danger label,
+.editor-root.editor-theme-light popover.recording-editor-clip-menu-popover button.recording-editor-clip-menu-row-danger image {
+    color: #b3261e;
+}
+
+.editor-root.editor-theme-light popover.recording-editor-clip-menu-popover button.recording-editor-clip-menu-row-danger:hover {
+    background: alpha(#b3261e, 0.12);
+    color: #8a2822;
+}
+
+.editor-root.editor-theme-light popover.editor-popover button.editor-popover-list-item:disabled,
+.editor-root.editor-theme-light popover.recording-editor-dropdown-popover button.recording-editor-dropdown-item:disabled,
+.editor-root.editor-theme-light popover.recording-editor-stage-aspect button.recording-editor-stage-aspect-item:disabled,
+.editor-root.editor-theme-light popover.recording-editor-clip-menu-popover button.recording-editor-clip-menu-row:disabled {
+    color: rgba(29, 33, 41, 0.35);
+}
+
+.editor-root.editor-theme-light popover.editor-subbar-popover button.editor-subbar-option:disabled,
+.editor-root.editor-theme-light popover.editor-subbar-popover button.editor-stroke-option:disabled {
+    color: rgba(29, 33, 41, 0.35);
+}
+
+.editor-root.editor-theme-light popover.editor-popover button.editor-popover-list-item:disabled image,
+.editor-root.editor-theme-light popover.editor-subbar-popover button.editor-subbar-option:disabled image,
+.editor-root.editor-theme-light popover.editor-subbar-popover button.editor-stroke-option:disabled image,
+.editor-root.editor-theme-light popover.recording-editor-dropdown-popover button.recording-editor-dropdown-item:disabled image,
+.editor-root.editor-theme-light popover.recording-editor-stage-aspect button.recording-editor-stage-aspect-item:disabled image,
+.editor-root.editor-theme-light popover.recording-editor-clip-menu-popover button.recording-editor-clip-menu-row:disabled image {
+    color: inherit;
+}
+
+.editor-root.editor-theme-light popover.recording-editor-dropdown-popover button.recording-editor-dropdown-item:disabled .editor-menu-check,
+.editor-root.editor-theme-light popover.recording-editor-dropdown-popover button.recording-editor-aspect-item:disabled image.recording-editor-aspect-item-icon {
+    color: inherit;
+}
+
+.editor-root.editor-theme-light popover.recording-editor-clip-menu-popover button.recording-editor-clip-menu-row-danger:disabled,
+.editor-root.editor-theme-light popover.recording-editor-clip-menu-popover button.recording-editor-clip-menu-row-danger:disabled label,
+.editor-root.editor-theme-light popover.recording-editor-clip-menu-popover button.recording-editor-clip-menu-row-danger:disabled image {
+    color: alpha(#b3261e, 0.40);
+}
+
+.editor-root .editor-sub-bar button.editor-subbar-button.selected {
+    background: rgba(255, 255, 255, 0.10);
+    box-shadow: none;
+    color: #ffffff;
+}
+
+.editor-root.editor-theme-light popover.editor-subbar-popover > contents {
+    background-color: #eef0f5;
+    border: none;
+}
+
+.editor-root.editor-theme-light .editor-sub-bar button.editor-subbar-button.selected {
+    background: rgba(17, 24, 39, 0.10);
+    box-shadow: none;
+    color: #111827;
+}

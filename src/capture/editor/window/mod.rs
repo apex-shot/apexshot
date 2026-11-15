@@ -2,7 +2,7 @@ use gdk4x11::X11Surface;
 use gtk4::gdk;
 use gtk4::{
     glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, CheckButton,
-    DrawingArea, DropTarget, Entry, Label, Orientation, Overlay, Popover, Stack,
+    DrawingArea, DropTarget, Entry, Image, Label, Orientation, Overlay, Popover, Stack,
 };
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -936,7 +936,8 @@ fn setup_editor_window_full(
         let label_widget = Label::new(Some(&t(style.display_name())));
         label_widget.set_hexpand(true);
         label_widget.set_xalign(0.0);
-        let check_icon = Label::new(Some("✓"));
+        let check_icon = Image::from_icon_name(icon_names::custom::CHECK_SYMBOLIC);
+        check_icon.set_pixel_size(12);
         check_icon.set_visible(style == ArrowStyle::Standard);
         check_icon.add_css_class("editor-arrow-inspector-check");
 
@@ -977,7 +978,8 @@ fn setup_editor_window_full(
         let label_widget = Label::new(Some(&t(label)));
         label_widget.set_hexpand(true);
         label_widget.set_xalign(0.0);
-        let check_icon = Label::new(Some("✓"));
+        let check_icon = Image::from_icon_name(icon_names::custom::CHECK_SYMBOLIC);
+        check_icon.set_pixel_size(12);
         check_icon.set_visible(weight == PenWeight::Medium);
         check_icon.add_css_class("editor-arrow-inspector-check");
 
@@ -1018,7 +1020,8 @@ fn setup_editor_window_full(
     let detect_text_label = Label::new(Some(&t("Detect text")));
     detect_text_label.set_hexpand(true);
     detect_text_label.set_xalign(0.0);
-    let detect_text_check = Label::new(Some("✓"));
+    let detect_text_check = Image::from_icon_name(icon_names::custom::CHECK_SYMBOLIC);
+    detect_text_check.set_pixel_size(12);
     detect_text_check.add_css_class("editor-arrow-inspector-check");
     detect_text_row.append(&detect_text_label);
     detect_text_row.append(&detect_text_check);
@@ -1046,7 +1049,8 @@ fn setup_editor_window_full(
             let label_widget = Label::new(Some(&t(weight.label())));
             label_widget.set_hexpand(true);
             label_widget.set_xalign(0.0);
-            let check_icon = Label::new(Some("✓"));
+            let check_icon = Image::from_icon_name(icon_names::custom::CHECK_SYMBOLIC);
+            check_icon.set_pixel_size(12);
             check_icon.set_visible(weight == PenWeight::Medium);
             check_icon.add_css_class("editor-arrow-inspector-check");
 
@@ -1088,7 +1092,8 @@ fn setup_editor_window_full(
         let label_widget = Label::new(Some(&t(label)));
         label_widget.set_hexpand(true);
         label_widget.set_xalign(0.0);
-        let check_icon = Label::new(Some("✓"));
+        let check_icon = Image::from_icon_name(icon_names::custom::CHECK_SYMBOLIC);
+        check_icon.set_pixel_size(12);
         check_icon.set_visible(weight == PenWeight::Medium);
         check_icon.add_css_class("editor-arrow-inspector-check");
 
@@ -1132,7 +1137,8 @@ fn setup_editor_window_full(
         label.set_hexpand(true);
         label.set_xalign(0.0);
 
-        let check_icon = Label::new(Some("✓"));
+        let check_icon = Image::from_icon_name(icon_names::custom::CHECK_SYMBOLIC);
+        check_icon.set_pixel_size(12);
         check_icon.set_visible(style == super::numbering_style::NumberingStyle::default());
         check_icon.add_css_class("editor-number-style-check");
 
@@ -1188,7 +1194,8 @@ fn setup_editor_window_full(
         label.set_hexpand(true);
         label.set_xalign(0.0);
 
-        let check_icon = Label::new(Some("✓"));
+        let check_icon = Image::from_icon_name(icon_names::custom::CHECK_SYMBOLIC);
+        check_icon.set_pixel_size(12);
         check_icon.set_visible(size == super::numbering_style::NumberSize::default());
         check_icon.add_css_class("editor-number-size-check");
 
@@ -1930,6 +1937,7 @@ fn setup_editor_window_full(
             let drawing_area_b = drawing_area_c.clone();
             let label_b = text_size_label_c.clone();
             let list_b = inspector_list_c.clone();
+            let toolbar_list_b = toolbar_text_size_list.clone();
             btn.connect_clicked(move |b| {
                 if let Some(popover) = b.ancestor(Popover::static_type()) {
                     popover.downcast::<Popover>().unwrap().popdown();
@@ -1945,6 +1953,10 @@ fn setup_editor_window_full(
                 drop(st);
                 sync_text_option_selection(
                     &list_b,
+                    TEXT_SIZE_OPTIONS.iter().position(|c| *c == size),
+                );
+                sync_text_option_selection(
+                    &toolbar_list_b,
                     TEXT_SIZE_OPTIONS.iter().position(|c| *c == size),
                 );
                 if has_active_text {
@@ -1973,6 +1985,7 @@ fn setup_editor_window_full(
             let drawing_area_b = drawing_area_c.clone();
             let label_b = font_family_label_c.clone();
             let list_b = inspector_list_c.clone();
+            let toolbar_list_b = toolbar_font_family_list.clone();
             btn.connect_clicked(move |b| {
                 if let Some(popover) = b.ancestor(Popover::static_type()) {
                     popover.downcast::<Popover>().unwrap().popdown();
@@ -1991,12 +2004,80 @@ fn setup_editor_window_full(
                         .iter()
                         .position(|c| *c == family_str.as_str()),
                 );
+                sync_text_option_selection(
+                    &toolbar_list_b,
+                    TEXT_FONT_FAMILIES
+                        .iter()
+                        .position(|c| *c == family_str.as_str()),
+                );
                 if has_active_text {
                     drawing_area_b.grab_focus();
                 }
                 drawing_area_b.queue_draw();
             });
         }
+    }
+
+    {
+        let (size_index, family_index) = {
+            let st = state.lock().unwrap();
+            (
+                TEXT_SIZE_OPTIONS
+                    .iter()
+                    .position(|candidate| *candidate as f64 == st.text_size),
+                TEXT_FONT_FAMILIES
+                    .iter()
+                    .position(|candidate| *candidate == st.text_font_family.as_str()),
+            )
+        };
+        sync_text_option_selection(&toolbar_text_size_list, size_index);
+        sync_text_option_selection(&toolbar_font_family_list, family_index);
+    }
+
+    if let Some(popover) = toolbar_text_size_list
+        .ancestor(Popover::static_type())
+        .and_then(|widget| widget.downcast::<Popover>().ok())
+    {
+        let list = toolbar_text_size_list.downgrade();
+        let state = state.clone();
+        popover.connect_map(move |_| {
+            let Some(list) = list.upgrade() else {
+                return;
+            };
+            let size = {
+                let st = state.lock().unwrap();
+                st.selected_text_action_size().unwrap_or(st.text_size)
+            };
+            sync_text_option_selection(
+                &list,
+                TEXT_SIZE_OPTIONS
+                    .iter()
+                    .position(|candidate| *candidate as f64 == size),
+            );
+        });
+    }
+    if let Some(popover) = toolbar_font_family_list
+        .ancestor(Popover::static_type())
+        .and_then(|widget| widget.downcast::<Popover>().ok())
+    {
+        let list = toolbar_font_family_list.downgrade();
+        let state = state.clone();
+        popover.connect_map(move |_| {
+            let Some(list) = list.upgrade() else {
+                return;
+            };
+            let family = {
+                let st = state.lock().unwrap();
+                st.selected_text_font_family()
+                    .unwrap_or_else(|| st.text_font_family.clone())
+            };
+            sync_text_option_selection(
+                &list,
+                TEXT_FONT_FAMILIES
+                    .iter()
+                    .position(|candidate| *candidate == family.as_str()),
+            );
+        });
     }
 
     let sync_inspector_thickness_controls: Rc<dyn Fn()> = Rc::new({
@@ -2171,16 +2252,17 @@ fn setup_editor_window_full(
     for size in TEXT_SIZE_OPTIONS {
         let label = format!("{}pt", size);
         let btn_box = GtkBox::new(Orientation::Horizontal, 8);
-        btn_box.set_margin_start(8);
-        btn_box.set_margin_end(8);
-        btn_box.set_margin_top(4);
-        btn_box.set_margin_bottom(4);
+        btn_box.set_margin_start(0);
+        btn_box.set_margin_end(0);
+        btn_box.set_margin_top(0);
+        btn_box.set_margin_bottom(0);
 
         let label_widget = Label::new(Some(&label));
         label_widget.set_hexpand(true);
         label_widget.set_xalign(0.0);
 
-        let check_icon = Label::new(Some("✓"));
+        let check_icon = Image::from_icon_name(icon_names::custom::CHECK_SYMBOLIC);
+        check_icon.set_pixel_size(12);
         check_icon.set_visible(size == selected_text_size);
         check_icon.add_css_class("editor-text-inspector-check");
 
@@ -2196,12 +2278,14 @@ fn setup_editor_window_full(
             ])
             .child(&btn_box)
             .build();
+        btn.set_size_request(-1, 32);
         if size == selected_text_size {
             btn.add_css_class("editor-text-inspector-option-active");
         }
         let state = state.clone();
         let text_size_label = text_size_label.clone();
         let text_size_list_sync = text_size_list.clone();
+        let toolbar_size_list_sync = toolbar_text_size_list.clone();
         let drawing_area = drawing_area.clone();
         btn.connect_clicked(move |b| {
             if let Some(popover) = b.ancestor(Popover::static_type()) {
@@ -2221,6 +2305,12 @@ fn setup_editor_window_full(
                     .iter()
                     .position(|candidate| *candidate == size),
             );
+            sync_text_option_selection(
+                &toolbar_size_list_sync,
+                TEXT_SIZE_OPTIONS
+                    .iter()
+                    .position(|candidate| *candidate == size),
+            );
             if has_active_text {
                 drawing_area.grab_focus();
             }
@@ -2234,16 +2324,17 @@ fn setup_editor_window_full(
     }
     for family in TEXT_FONT_FAMILIES {
         let btn_box = GtkBox::new(Orientation::Horizontal, 8);
-        btn_box.set_margin_start(8);
-        btn_box.set_margin_end(8);
-        btn_box.set_margin_top(4);
-        btn_box.set_margin_bottom(4);
+        btn_box.set_margin_start(0);
+        btn_box.set_margin_end(0);
+        btn_box.set_margin_top(0);
+        btn_box.set_margin_bottom(0);
 
         let label_widget = Label::new(Some(family));
         label_widget.set_hexpand(true);
         label_widget.set_xalign(0.0);
 
-        let check_icon = Label::new(Some("✓"));
+        let check_icon = Image::from_icon_name(icon_names::custom::CHECK_SYMBOLIC);
+        check_icon.set_pixel_size(12);
         check_icon.set_visible(family == selected_font_family);
         check_icon.add_css_class("editor-text-inspector-check");
 
@@ -2259,12 +2350,14 @@ fn setup_editor_window_full(
             ])
             .child(&btn_box)
             .build();
+        btn.set_size_request(-1, 32);
         if family == selected_font_family {
             btn.add_css_class("editor-text-inspector-option-active");
         }
         let state = state.clone();
         let font_family_label = font_family_label.clone();
         let font_family_list_sync = font_family_list.clone();
+        let toolbar_family_list_sync = toolbar_font_family_list.clone();
         let drawing_area = drawing_area.clone();
         let family_str = family.to_string();
         btn.connect_clicked(move |b| {
@@ -2281,6 +2374,12 @@ fn setup_editor_window_full(
             drop(st);
             sync_text_option_selection(
                 &font_family_list_sync,
+                TEXT_FONT_FAMILIES
+                    .iter()
+                    .position(|candidate| *candidate == family_str.as_str()),
+            );
+            sync_text_option_selection(
+                &toolbar_family_list_sync,
                 TEXT_FONT_FAMILIES
                     .iter()
                     .position(|candidate| *candidate == family_str.as_str()),
@@ -2311,7 +2410,8 @@ fn setup_editor_window_full(
         label_widget.set_hexpand(true);
         label_widget.set_xalign(0.0);
 
-        let check_icon = Label::new(Some("✓"));
+        let check_icon = Image::from_icon_name(icon_names::custom::CHECK_SYMBOLIC);
+        check_icon.set_pixel_size(12);
         check_icon.set_visible(*method == selected_obfuscate_method);
         check_icon.add_css_class("editor-obfuscate-inspector-check");
 
@@ -3574,5 +3674,23 @@ mod tests {
                 && click_production.contains("st.add_number_marker(image_point);"),
             "The Number tool must reselect an existing marker before placing a new one"
         );
+    }
+
+    #[test]
+    fn live_text_option_rows_do_not_double_the_menu_row_inset() {
+        let source = include_str!("mod.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+        for marker in [
+            "for size in TEXT_SIZE_OPTIONS",
+            "for family in TEXT_FONT_FAMILIES",
+        ] {
+            let start = production.find(marker).expect(marker);
+            let body = &production[start..start + 2000];
+            assert!(
+                body.contains("btn_box.set_margin_start(0);")
+                    && body.contains("btn_box.set_margin_end(0);"),
+                "{marker} rows must not double the shared menu row inset"
+            );
+        }
     }
 }

@@ -825,6 +825,7 @@ pub(super) fn build_toolbar_mode_controls(
     text_size_popover.set_has_arrow(false);
     text_size_popover.set_autohide(true);
     text_size_popover.add_css_class("editor-popover");
+    text_size_popover.set_offset(0, 12);
     text_size_popover.set_parent(&text_size_button);
     let text_size_list = GtkBox::new(Orientation::Vertical, 0);
     text_size_list.add_css_class("editor-popover-list");
@@ -837,11 +838,27 @@ pub(super) fn build_toolbar_mode_controls(
 
     for size in [12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72] {
         let label = format!("{}pt", size);
+        let btn_box = GtkBox::new(Orientation::Horizontal, 8);
+        let label_widget = Label::new(Some(&label));
+        label_widget.set_hexpand(true);
+        label_widget.set_xalign(0.0);
+        let check_icon = Image::from_icon_name(icon_names::custom::CHECK_SYMBOLIC);
+        check_icon.set_pixel_size(12);
+        check_icon.set_visible(false);
+        check_icon.add_css_class("editor-text-inspector-check");
+        check_icon.add_css_class("editor-menu-check");
+        btn_box.append(&label_widget);
+        btn_box.append(&check_icon);
         let btn = Button::builder()
-            .label(&label)
             .has_frame(false)
-            .css_classes(["editor-popover-list-item", "flat"])
+            .css_classes([
+                "editor-popover-list-item",
+                "flat",
+                "editor-text-inspector-option",
+            ])
+            .child(&btn_box)
             .build();
+        btn.set_size_request(-1, 32);
         text_size_list.append(&btn);
     }
 
@@ -869,6 +886,7 @@ pub(super) fn build_toolbar_mode_controls(
     font_family_popover.set_has_arrow(false);
     font_family_popover.set_autohide(true);
     font_family_popover.add_css_class("editor-popover");
+    font_family_popover.set_offset(0, 12);
     font_family_popover.set_parent(&font_family_button);
     let font_family_list = GtkBox::new(Orientation::Vertical, 0);
     font_family_list.add_css_class("editor-popover-list");
@@ -880,11 +898,27 @@ pub(super) fn build_toolbar_mode_controls(
     });
 
     for family in ["Sans", "Serif", "Monospace", "Fantasy", "Cursive"] {
+        let btn_box = GtkBox::new(Orientation::Horizontal, 8);
+        let label_widget = Label::new(Some(family));
+        label_widget.set_hexpand(true);
+        label_widget.set_xalign(0.0);
+        let check_icon = Image::from_icon_name(icon_names::custom::CHECK_SYMBOLIC);
+        check_icon.set_pixel_size(12);
+        check_icon.set_visible(false);
+        check_icon.add_css_class("editor-text-inspector-check");
+        check_icon.add_css_class("editor-menu-check");
+        btn_box.append(&label_widget);
+        btn_box.append(&check_icon);
         let btn = Button::builder()
-            .label(family)
             .has_frame(false)
-            .css_classes(["editor-popover-list-item", "flat"])
+            .css_classes([
+                "editor-popover-list-item",
+                "flat",
+                "editor-text-inspector-option",
+            ])
+            .child(&btn_box)
             .build();
+        btn.set_size_request(-1, 32);
         font_family_list.append(&btn);
     }
 

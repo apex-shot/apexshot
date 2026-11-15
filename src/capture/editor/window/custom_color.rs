@@ -159,6 +159,7 @@ impl CustomColor {
         label.add_css_class("editor-custom-opacity-label");
         let opacity = Scale::with_range(Orientation::Horizontal, 0.0, 100.0, 1.0);
         opacity.add_css_class("editor-opacity-slider");
+        opacity.set_has_origin(false);
         opacity.set_hexpand(true);
         opacity.set_valign(Align::Center);
         opacity.set_draw_value(false);
@@ -244,6 +245,7 @@ mod tests {
             });
             let initial = DrawColor::new(1.0, 0.0, 0.0, 0.6);
             editor.open(initial);
+            assert!(!editor.opacity.has_origin());
             assert!(applied.borrow().is_empty());
             let entry = find_class(editor.panel.upcast_ref(), "recording-editor-custom-hex")
                 .unwrap()

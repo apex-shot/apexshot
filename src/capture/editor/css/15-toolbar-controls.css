@@ -91,11 +91,13 @@
                 margin: 0;
             }
 
-            popover.editor-subbar-popover contents {
+            /* Sub-bar menus wear the bar's own surface. The extra class
+               outranks the shared menu sheet, which loads after this one. */
+            .editor-root popover.editor-subbar-popover > contents {
                 padding: 6px;
-                background: #252526;
-                border: 1px solid rgba(255, 255, 255, 0.10);
-                border-radius: 10px;
+                background-color: #0f0f0f;
+                border: none;
+                border-radius: 9px;
             }
 
             .editor-stroke-menu,

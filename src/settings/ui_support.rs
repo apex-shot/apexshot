@@ -13,6 +13,7 @@ const SETTINGS_CSS: &str = concat!(
     include_str!("css/09-noir-gallery.css"),
     include_str!("css/10-history-shell.css"),
     include_str!("css/11-theme-picker.css"),
+    include_str!("css/12-select-menu.css"),
 );
 
 pub fn install_settings_css() {

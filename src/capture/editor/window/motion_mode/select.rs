@@ -45,13 +45,15 @@ impl MotionSelect {
             option.set_has_frame(false);
             option.add_css_class("recording-editor-dropdown-item");
             let row = GtkBox::new(Orientation::Horizontal, 8);
-            let check = Image::from_icon_name("object-select-symbolic");
-            check.set_pixel_size(12);
-            check.set_opacity(0.0);
             let text = Label::new(Some(text));
             text.set_xalign(0.0);
-            row.append(&check);
+            text.set_hexpand(true);
+            let check = Image::from_icon_name(super::super::icon_names::custom::CHECK_SYMBOLIC);
+            check.set_pixel_size(12);
+            check.add_css_class("editor-menu-check");
+            check.set_opacity(0.0);
             row.append(&text);
+            row.append(&check);
             option.set_child(Some(&row));
             list.append(&option);
             checks.push(check);
@@ -138,5 +140,48 @@ impl MotionSelect {
 
     pub(super) fn connect_changed(&self, callback: impl Fn(usize) + 'static) {
         self.changed.borrow_mut().push(Box::new(callback));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn options_carry_a_trailing_bundled_check_shown_for_the_selection() {
+        use gtk4::prelude::*;
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let select = super::MotionSelect::new(&["One", "Two"], 0);
+            let check_of = |index: usize| {
+                select.options[index]
+                    .child()
+                    .and_then(|child| child.downcast::<gtk4::Box>().ok())
+                    .and_then(|row| {
+                        let label = row
+                            .first_child()
+                            .and_then(|label| label.downcast::<gtk4::Label>().ok())
+                            .expect("the option text leads the row");
+                        assert!(label.hexpands(), "the label fills the row");
+                        row.last_child()
+                    })
+                    .and_then(|check| check.downcast::<gtk4::Image>().ok())
+                    .expect("the row's trailing child must be the bundled check image")
+            };
+            for index in 0..2 {
+                let check = check_of(index);
+                assert_eq!(
+                    check.icon_name().as_deref(),
+                    Some(super::super::super::icon_names::custom::CHECK_SYMBOLIC)
+                );
+                assert_eq!(check.pixel_size(), 12);
+                assert_eq!(check.opacity(), if index == 0 { 1.0 } else { 0.0 });
+            }
+            select.set_selected(1);
+            assert_eq!(check_of(0).opacity(), 0.0);
+            assert_eq!(check_of(1).opacity(), 1.0);
+            select.set_option_sensitive(1, false);
+            assert!(!select.options[1].is_sensitive());
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
     }
 }
