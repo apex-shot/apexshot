@@ -112,7 +112,19 @@ pub(super) fn close_editor_popup_with_parent(
     }
 }
 
-fn set_editor_modal_blur(parent: &ApplicationWindow, on: bool) {
+pub(super) fn editor_root(parent: &ApplicationWindow) -> Option<gtk4::Widget> {
+    let shell = parent.child()?;
+    find_widget_with_class(&shell, "recording-editor-root")
+        .or_else(|| find_widget_with_class(&shell, "editor-root"))
+}
+
+pub(super) fn set_editor_root_sensitive(parent: &ApplicationWindow, sensitive: bool) {
+    if let Some(root) = editor_root(parent) {
+        root.set_sensitive(sensitive);
+    }
+}
+
+pub(super) fn set_editor_modal_blur(parent: &ApplicationWindow, on: bool) {
     let Some(shell) = parent.child() else {
         return;
     };

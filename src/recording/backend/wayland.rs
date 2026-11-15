@@ -434,6 +434,16 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
             ffmpeg_cmd.arg("-map").arg("0:v");
             ffmpeg_cmd.arg("-map").arg("1:a");
             ffmpeg_cmd.arg("-c:a").arg("copy");
+            // The pipe carries ADTS AAC. The fragmented MP4 header is written
+            // before the first audio packet, so the AudioSpecificConfig must
+            // come from the bitstream filter; without it the muxer rejects the
+            // first AAC packet and ffmpeg exits.
+            if active_audio
+                .as_ref()
+                .is_some_and(|audio| audio.input_format() == "aac")
+            {
+                ffmpeg_cmd.arg("-bsf:a").arg("aac_adtstoasc");
+            }
         } else {
             // Legacy pulse inputs: ffmpeg captures from PulseAudio directly;
             // on modern GNOME this is provided by pipewire-pulse.
@@ -464,7 +474,11 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
         .arg(fps.to_string());
 
     if final_path.extension().is_some_and(|e| e == "mp4") {
-        ffmpeg_cmd.arg("-movflags").arg("+faststart");
+        ffmpeg_cmd
+            .arg("-movflags")
+            .arg("+frag_keyframe+empty_moov+default_base_moof")
+            .arg("-flush_packets")
+            .arg("1");
     }
 
     eprintln!(
@@ -476,6 +490,16 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
     ffmpeg_cmd.stdin(Stdio::piped());
     ffmpeg_cmd.stdout(Stdio::null());
     ffmpeg_cmd.stderr(Stdio::piped());
+
+    let mut disk_guard = super::disk_space::DiskSpaceGuard::new(&final_path);
+    if disk_guard.refuse_start() {
+        if let Some(mut audio) = active_audio.take() {
+            audio.abort();
+        }
+        return Err(RecordError::GStreamerError(
+            "Not enough free disk space to start recording (512 MB required)".into(),
+        ));
+    }
 
     let mut child = match ffmpeg_cmd.spawn() {
         Ok(child) => child,
@@ -589,6 +613,10 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
                     super::notify_daemon_event("recording_session_paused");
                 }
                 RecordingControlCommand::Resume if paused => {
+                    if disk_guard.low() {
+                        eprintln!("[recording] refusing to resume: disk space is almost full");
+                        break;
+                    }
                     timeline.resume(glib::monotonic_time());
                     println!("Recording resumed");
                     if let Some(audio) = active_audio.as_mut() {
@@ -609,6 +637,11 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
             if let Some(mut audio) = active_audio.take() {
                 audio.abort();
             }
+        }
+
+        if let Some(true) = disk_guard.poll() {
+            eprintln!("[recording] stopping: disk space is almost full");
+            break;
         }
 
         // While paused, spin briefly and check for commands instead
@@ -721,8 +754,20 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
             continue;
         }
 
-        if now.saturating_duration_since(deadline) > frame_interval * 2 {
-            dropped_frames += 1;
+        if last_frame_at_us.is_some_and(|previous| frame_at_us <= previous) {
+            pending_frame_at_us = None;
+            next_frame_at = Some(now + frame_interval);
+            continue;
+        }
+
+        // Lag must never stop progress. When the encoder is more than two
+        // intervals behind, count the backlog slots being skipped but still
+        // write the newest frame below, then re-anchor the schedule from now.
+        // Frame pts come from capture time, so a late write keeps correct timing.
+        let lateness = now.saturating_duration_since(deadline);
+        let lagging = lateness > frame_interval * 2;
+        if lagging {
+            dropped_frames += (lateness.as_secs_f64() / frame_interval.as_secs_f64()) as u64;
             if last_drop_log.elapsed() > std::time::Duration::from_secs(5) {
                 eprintln!(
                     "[recording] encoder lagging; dropped {dropped_frames} backlog frame(s) to stay realtime"
@@ -730,8 +775,6 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
                 dropped_frames = 0;
                 last_drop_log = std::time::Instant::now();
             }
-            next_frame_at = Some(now + frame_interval);
-            continue;
         }
 
         // Debug: APEXSHOT_DUMP_FRAME=/tmp/frame keeps the first fed frame for
@@ -749,11 +792,6 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
             }
         }
 
-        if last_frame_at_us.is_some_and(|previous| frame_at_us <= previous) {
-            pending_frame_at_us = None;
-            next_frame_at = Some(now + frame_interval);
-            continue;
-        }
         let pts_us = timeline.frame_time_us(frame_at_us);
         let frame_header = super::timestamped_video::frame_header(pts_us, pixels.len());
         let initial_header = if frames_written == 0 {
@@ -771,6 +809,7 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
                 active_audio: &mut active_audio,
                 timeline: &mut timeline,
                 notify: super::notify_daemon_event,
+                disk_guard: &mut disk_guard,
             },
         ) {
             Ok(keep_recording) => {
@@ -784,7 +823,11 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
                 if first_written_at.is_none() {
                     first_written_at = Some(std::time::Instant::now());
                 }
-                next_frame_at = Some(deadline + frame_interval);
+                next_frame_at = Some(if lagging {
+                    now + frame_interval
+                } else {
+                    deadline + frame_interval
+                });
                 if frames_written == 1 {
                     let max_rgb = pixels
                         .chunks_exact(4)
@@ -798,6 +841,9 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
                     eprintln!(
                         "[recording] media origin monotonic_us={frame_at_us} pts_us={pts_us}"
                     );
+                    if let Some(audio) = active_audio.as_ref() {
+                        audio.set_start_at_monotonic_us(frame_at_us);
+                    }
                     if max_rgb == 0 {
                         eprintln!(
                             "[recording] First frame is fully black — capture buffer is empty"
@@ -824,7 +870,17 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
 
     let stopped_at = std::time::Instant::now();
     let stopped_at_us = glib::monotonic_time();
+    if let Some(audio) = active_audio.as_ref() {
+        audio.set_end_now();
+    }
     timeline.finish(stopped_at_us);
+
+    if disk_guard.tripped() && stop_action == super::RecordingTerminalAction::Save {
+        crate::utils::notify::desktop_notification(
+            &crate::i18n::t("Recording stopped"),
+            &crate::i18n::t("Disk space is almost full"),
+        );
+    }
 
     // Release the exclusive GNOME ScreenCast session before audio drain or
     // ffmpeg finalization. Those can block for seconds; the compositor must
@@ -873,6 +929,7 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
                         active_audio: &mut active_audio,
                         timeline: &mut timeline,
                         notify: super::notify_daemon_event,
+                        disk_guard: &mut disk_guard,
                     },
                 ) {
                     drop(stdin);
@@ -986,5 +1043,94 @@ mod tests {
             Some(pixels.as_slice())
         );
         assert_eq!(pending_frame_at_us, Some(captured_at_us));
+    }
+
+    #[test]
+    fn mp4_outputs_get_fragmented_durability_flags_only() {
+        let source = include_str!("wayland.rs");
+        let source = source.split("#[cfg(test)]").next().unwrap();
+        let mp4_gate = source
+            .find("final_path.extension().is_some_and(|e| e == \"mp4\")")
+            .expect("MP4-only flag gate");
+        let flags = source
+            .find("+frag_keyframe+empty_moov+default_base_moof")
+            .expect("fragmented movflags");
+        let flush = source.find("-flush_packets").expect("packet flushing");
+        assert!(
+            mp4_gate < flags && flags < flush,
+            "fragment durability flags must be gated on the MP4 extension",
+        );
+        assert!(
+            !source[..mp4_gate].contains("frag_keyframe"),
+            "non-MP4 outputs must not get fragmented-moov flags",
+        );
+        assert!(source.contains("(fps * 2).to_string()"));
+    }
+
+    #[test]
+    fn copied_adts_aac_is_converted_for_the_fragmented_mp4_muxer() {
+        // Regression: with empty_moov the MP4 header is written before any
+        // audio packet, so copied ADTS AAC needs aac_adtstoasc or ffmpeg exits
+        // on the first audio packet and every recording with audio fails.
+        let source = include_str!("wayland.rs");
+        let source = source.split("#[cfg(test)]").next().unwrap();
+        let copy = source
+            .find("ffmpeg_cmd.arg(\"-c:a\").arg(\"copy\");")
+            .expect("GStreamer audio is stream-copied");
+        let bsf = source
+            .find("ffmpeg_cmd.arg(\"-bsf:a\").arg(\"aac_adtstoasc\");")
+            .expect("ADTS to MP4 bitstream filter");
+        assert!(copy < bsf, "the filter belongs to the copied audio stream");
+        assert!(
+            source[copy..bsf].contains("audio.input_format() == \"aac\""),
+            "only ADTS AAC input gets the filter; Ogg/Opus does not",
+        );
+    }
+
+    #[test]
+    fn the_low_disk_guard_runs_before_spawn_and_inside_the_loop() {
+        let source = include_str!("wayland.rs");
+        let source = source.split("#[cfg(test)]").next().unwrap();
+        let refused = source.find("refuse_start()").expect("pre-start refusal");
+        let spawned = source.find("ffmpeg_cmd.spawn()").expect("encoder spawn");
+        assert!(
+            refused < spawned,
+            "the disk check must refuse before the encoder launches",
+        );
+        assert!(source.contains("disk_guard.poll()"));
+        assert!(source.contains("disk_guard.low()"));
+    }
+
+    #[test]
+    fn lagging_capture_still_writes_the_newest_frame() {
+        // Regression: a lag branch that `continue`d before the write skipped
+        // every frame while per-pass work stayed above two intervals, so the
+        // recording froze after the first frame.
+        let source = include_str!("wayland.rs");
+        let source = source.split("#[cfg(test)]").next().unwrap();
+        let lag = source
+            .find("lateness > frame_interval * 2")
+            .expect("lag check");
+        let write = lag
+            + source[lag..]
+                .find("write_ffmpeg_frame_interruptible(")
+                .expect("frame write follows the lag check");
+        assert!(
+            !source[lag..write].contains("continue;"),
+            "the lag branch must fall through to the write, not skip it",
+        );
+        assert!(source.contains(
+            "dropped_frames += (lateness.as_secs_f64() / frame_interval.as_secs_f64()) as u64;"
+        ));
+        assert!(source.contains(
+            "encoder lagging; dropped {dropped_frames} backlog frame(s) to stay realtime"
+        ));
+        let reanchor = source
+            .find("next_frame_at = Some(if lagging {\n                    now + frame_interval\n                } else {\n                    deadline + frame_interval\n                });")
+            .expect("schedule re-anchors from now when lagging");
+        assert!(
+            reanchor > write,
+            "the re-anchor must follow the frame write it belongs to",
+        );
     }
 }

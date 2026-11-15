@@ -11,6 +11,13 @@ use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;
 use x11rb::connection::Connection;
 
+/// Bound on handing EOS to the pipeline. A wedged source streaming thread can
+/// hold the pipeline's stream lock, so a synchronous `send_event` may never
+/// return; the send runs on a blocking thread and is abandoned after this.
+const STOP_EOS_SEND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+/// Bound on the final NULL transition, which can block the same way.
+const TEARDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Best-effort audio for the X11 path: the shared GStreamer audio bin linked
 /// into the video muxer. Audio is a new capability here — any setup failure
 /// falls back to the historical video-only recording instead of failing.
@@ -93,6 +100,14 @@ pub(super) async fn record_x11_with_gstreamer(
         })?;
     }
 
+    let mut disk_guard = super::disk_space::DiskSpaceGuard::new(final_path);
+    if disk_guard.refuse_start() {
+        let _ = pipeline.set_state(gst::State::Null);
+        return Err(RecordError::GStreamerError(
+            "Not enough free disk space to start recording (512 MB required)".into(),
+        ));
+    }
+
     pipeline
         .set_state(gst::State::Playing)
         .map_err(|e| RecordError::GStreamerError(format!("Failed to start pipeline: {}", e)))?;
@@ -105,6 +120,8 @@ pub(super) async fn record_x11_with_gstreamer(
     let mut stop_action = RecordingTerminalAction::Save;
     let mut stopping = false;
     let mut paused = false;
+    let mut eos_received = false;
+    let mut stopped_low_disk = false;
 
     loop {
         tokio::select! {
@@ -121,19 +138,16 @@ pub(super) async fn record_x11_with_gstreamer(
                 match command {
                     RecordingControlCommand::Restart => {
                         stop_action = RecordingTerminalAction::Restart;
-                        pipeline.send_event(gst::event::Eos::new());
                         stopping = true;
                         break;
                     }
                     RecordingControlCommand::StopSave => {
                         stop_action = RecordingTerminalAction::Save;
-                        pipeline.send_event(gst::event::Eos::new());
                         stopping = true;
                         break;
                     }
                     RecordingControlCommand::StopDiscard => {
                         stop_action = RecordingTerminalAction::Discard;
-                        pipeline.send_event(gst::event::Eos::new());
                         stopping = true;
                         break;
                     }
@@ -145,6 +159,15 @@ pub(super) async fn record_x11_with_gstreamer(
                         notify_daemon_event("recording_session_paused");
                     }
                     RecordingControlCommand::Resume if paused => {
+                        if disk_guard.low() {
+                            eprintln!(
+                                "[recording] refusing to resume: disk space is almost full"
+                            );
+                            stopped_low_disk = true;
+                            stop_action = RecordingTerminalAction::Save;
+                            stopping = true;
+                            break;
+                        }
                         pipeline
                             .set_state(gst::State::Playing)
                             .map_err(|e| RecordError::GStreamerError(format!("Failed to resume pipeline: {e}")))?;
@@ -158,7 +181,11 @@ pub(super) async fn record_x11_with_gstreamer(
                 for msg in bus.iter_timed(gst::ClockTime::ZERO) {
                     use gst::MessageView;
                     match msg.view() {
-                        MessageView::Eos(..) => { stopping = true; break; }
+                        MessageView::Eos(..) => {
+                            eos_received = true;
+                            stopping = true;
+                            break;
+                        }
                         MessageView::Error(err) => {
                             let _ = pipeline.set_state(gst::State::Null);
                             return Err(RecordError::GStreamerError(err.error().to_string()));
@@ -167,6 +194,13 @@ pub(super) async fn record_x11_with_gstreamer(
                     }
                 }
                 if stopping { break; }
+                if let Some(true) = disk_guard.poll() {
+                    eprintln!("[recording] stopping: disk space is almost full");
+                    stopped_low_disk = true;
+                    stop_action = RecordingTerminalAction::Save;
+                    stopping = true;
+                    break;
+                }
             }
         }
     }
@@ -174,15 +208,122 @@ pub(super) async fn record_x11_with_gstreamer(
     if paused {
         let _ = pipeline.set_state(gst::State::Playing);
     }
-    pipeline
-        .set_state(gst::State::Null)
-        .map_err(|e| RecordError::GStreamerError(format!("Cleanup failed: {}", e)))?;
+    // EOS is handed to the pipeline off the async task, bounded by a timeout.
+    let mut eos_send_failed = false;
+    if stopping && !eos_received {
+        eos_send_failed = !send_eos_bounded(&pipeline, STOP_EOS_SEND_TIMEOUT).await;
+    }
+    let mut stop_error: Option<String> = None;
+    if eos_send_failed {
+        // Without the EOS the file cannot be finalized, so a Save must fail
+        // rather than report success. Discard and Restart do not keep the file.
+        if stop_action == RecordingTerminalAction::Save {
+            stop_error = Some("Timed out sending end-of-stream to the recording pipeline".into());
+        }
+    } else if stopping && !eos_received && stop_action == RecordingTerminalAction::Save {
+        if let Err(err) = await_pipeline_eos(&bus, std::time::Duration::from_secs(10)).await {
+            stop_error = Some(err);
+        }
+    }
+    let teardown = set_state_null_bounded(&pipeline, TEARDOWN_TIMEOUT).await;
+    if let Some(err) = stop_error {
+        return Err(RecordError::GStreamerError(err));
+    }
+    teardown.map_err(|e| RecordError::GStreamerError(format!("Cleanup failed: {}", e)))?;
+
+    if stopped_low_disk {
+        crate::utils::notify::desktop_notification(
+            &crate::i18n::t("Recording stopped"),
+            &crate::i18n::t("Disk space is almost full"),
+        );
+    }
 
     if stop_action == RecordingTerminalAction::Discard {
         let _ = std::fs::remove_file(final_path);
     }
 
     Ok((final_path.to_path_buf(), stop_action))
+}
+
+async fn await_pipeline_eos(bus: &gst::Bus, timeout: std::time::Duration) -> Result<(), String> {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if std::time::Instant::now() >= deadline {
+            return Err("Timed out waiting for the recording to finish writing".into());
+        }
+        for msg in bus.iter_timed(gst::ClockTime::ZERO) {
+            match msg.view() {
+                gst::MessageView::Eos(..) => return Ok(()),
+                gst::MessageView::Error(err) => return Err(err.error().to_string()),
+                _ => {}
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+}
+
+/// Run `work` on a detached OS thread and wait at most `timeout` for it.
+/// Not `spawn_blocking`: dropping the tokio runtime waits for unfinished
+/// blocking tasks, so a wedged GStreamer call there would still hang the
+/// recorder at exit. A detached thread is simply abandoned.
+async fn run_detached_bounded<T: Send + 'static>(
+    name: &str,
+    timeout: std::time::Duration,
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Option<T> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let spawned = std::thread::Builder::new()
+        .name(name.into())
+        .spawn(move || {
+            let _ = tx.send(work());
+        });
+    if let Err(err) = spawned {
+        eprintln!("[recording] failed to spawn {name}: {err}");
+        return None;
+    }
+    match tokio::time::timeout(timeout, rx).await {
+        Ok(Ok(value)) => Some(value),
+        Ok(Err(_)) => None,
+        Err(_) => {
+            eprintln!(
+                "[recording] {name} did not return within {}s; abandoning it",
+                timeout.as_secs()
+            );
+            None
+        }
+    }
+}
+
+/// Send EOS off the async task, bounded by `timeout`. Returns false when the
+/// send times out; a timed-out send is left on its own thread.
+async fn send_eos_bounded(pipeline: &gst::Pipeline, timeout: std::time::Duration) -> bool {
+    let pipeline = pipeline.clone();
+    run_detached_bounded("apexshot-x11-eos", timeout, move || {
+        pipeline.send_event(gst::event::Eos::new())
+    })
+    .await
+    .is_some()
+}
+
+/// Set the pipeline to NULL off the async task, bounded by `timeout`, so a
+/// wedged pipeline cannot hang the recorder.
+async fn set_state_null_bounded(
+    pipeline: &gst::Pipeline,
+    timeout: std::time::Duration,
+) -> Result<(), String> {
+    let pipeline = pipeline.clone();
+    match run_detached_bounded("apexshot-x11-teardown", timeout, move || {
+        pipeline.set_state(gst::State::Null)
+    })
+    .await
+    {
+        Some(Ok(_)) => Ok(()),
+        Some(Err(err)) => Err(err.to_string()),
+        None => Err(format!(
+            "pipeline did not shut down within {}s",
+            timeout.as_secs()
+        )),
+    }
 }
 
 /// Build a GStreamer pipeline string for X11 capture (preserved from old code).
@@ -256,6 +397,11 @@ fn build_x11_gstreamer_pipeline(
         format!("{} name=mux", profile.muxer)
     } else {
         profile.muxer.to_string()
+    };
+    let muxer = if profile.muxer == "mp4mux" {
+        format!("{muxer} fragment-duration=2000")
+    } else {
+        muxer
     };
 
     Ok(format!(
@@ -372,7 +518,7 @@ mod tests {
              ! videoconvert ! video/x-raw,framerate=30/1,format=I420,colorimetry=bt709 ! videorate \
              ! videoscale ! video/x-raw,width=768,height=480,pixel-aspect-ratio=1/1 \
              ! queue ! x264enc speed-preset=veryfast pass=qual quantizer=15 key-int-max=60 \
-             ! h264parse ! mp4mux ! filesink location=\"/tmp/apexshot-test.mp4\""
+             ! h264parse ! mp4mux fragment-duration=2000 ! filesink location=\"/tmp/apexshot-test.mp4\""
         );
     }
 
@@ -497,6 +643,103 @@ mod tests {
             .expect("videoscale segment in pipeline");
         assert!(videorate < scale);
         assert!(!pipeline.contains("1/1 ! video/x-raw,framerate"));
+    }
+
+    #[test]
+    fn x11_pipeline_fragments_only_the_mp4_muxer() {
+        let config = x11_config(None);
+
+        for encoder in ["x264enc", "openh264enc"] {
+            let pipeline = build(&config, profile_by_encoder(encoder), Some((1920, 1200)));
+            assert!(
+                pipeline.contains("mp4mux fragment-duration=2000"),
+                "{encoder} MP4 pipeline missing its fragment cadence: {pipeline}"
+            );
+        }
+
+        for encoder in ["vp9enc", "vp8enc", "theoraenc"] {
+            let pipeline = build(&config, profile_by_encoder(encoder), Some((1920, 1200)));
+            assert!(
+                !pipeline.contains("fragment-duration"),
+                "{encoder} pipeline must not carry MP4 fragment flags: {pipeline}"
+            );
+        }
+    }
+
+    #[test]
+    fn x11_stop_waits_for_the_bus_eos_before_teardown() {
+        let source = include_str!("x11.rs");
+        let source = source.split("#[cfg(test)]").next().unwrap();
+        let resume = source
+            .find("if paused {\n        let _ = pipeline.set_state(gst::State::Playing);\n    }")
+            .expect("paused pipelines resume before awaiting EOS");
+        let awaited = source.find("await_pipeline_eos").expect("bounded EOS wait");
+        assert!(
+            resume < awaited,
+            "a paused pipeline must resume before the EOS wait",
+        );
+        assert!(
+            source.contains("!eos_received && stop_action == RecordingTerminalAction::Save"),
+            "only a Save stop that did not already consume the bus EOS waits again",
+        );
+    }
+
+    #[test]
+    fn x11_select_loop_never_sends_eos_inline() {
+        let source = include_str!("x11.rs");
+        let source = source.split("#[cfg(test)]").next().unwrap();
+        let loop_start = source
+            .find("    loop {\n        tokio::select! {")
+            .expect("select loop");
+        let loop_end = loop_start
+            + source[loop_start..]
+                .find("\n    if paused {\n")
+                .expect("loop exit before the resume");
+        let select_loop = &source[loop_start..loop_end];
+        assert!(
+            !select_loop.contains("pipeline.send_event("),
+            "the select loop must only record a stop; a synchronous send_event can block the async task",
+        );
+        assert!(
+            source.contains("send_eos_bounded(&pipeline"),
+            "the stop path sends EOS through the bounded helper",
+        );
+
+        let helper = source
+            .find("async fn send_eos_bounded")
+            .expect("bounded EOS helper");
+        let helper_body = &source[helper..];
+        let helper_body = &helper_body[..helper_body.find("\n}\n").expect("helper end")];
+        assert!(helper_body.contains("run_detached_bounded("));
+
+        // The bounded runner must not use spawn_blocking: the runtime's drop
+        // waits for unfinished blocking tasks, so a wedged call would still
+        // hang the recorder at exit.
+        let runner = source
+            .find("async fn run_detached_bounded")
+            .expect("detached bounded runner");
+        let runner_body = &source[runner..];
+        let runner_body = &runner_body[..runner_body.find("\n}\n").expect("runner end")];
+        assert!(runner_body.contains("std::thread::Builder::new()"));
+        assert!(runner_body.contains("tokio::time::timeout"));
+        assert!(!runner_body.contains("spawn_blocking"));
+    }
+
+    #[test]
+    fn a_bus_eos_consumed_in_the_loop_is_not_waited_on_twice() {
+        let source = include_str!("x11.rs");
+        let source = source.split("#[cfg(test)]").next().unwrap();
+        let eos_arm = source
+            .find("MessageView::Eos(..) => {")
+            .expect("bus EOS arm");
+        assert!(
+            source[eos_arm..].contains("eos_received = true"),
+            "a consumed bus EOS must be recorded",
+        );
+        assert!(
+            source.contains("tokio::time::sleep(std::time::Duration::from_millis(50)).await"),
+            "the EOS wait must yield on the async tick rather than block",
+        );
     }
 
     #[test]

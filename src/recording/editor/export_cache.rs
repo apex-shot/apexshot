@@ -71,6 +71,7 @@ struct RenderKey {
     sidecar: Option<PointerSidecar>,
     metadata: MediaMetadata,
     dependencies: Vec<FileFingerprint>,
+    settings: super::export_settings::ExportSettings,
 }
 
 #[derive(Debug, Clone)]
@@ -118,6 +119,7 @@ impl RenderKey {
                 frame_rate: state.metadata.frame_rate,
             },
             dependencies,
+            settings: state.export_settings,
         })
     }
 }
@@ -378,6 +380,102 @@ mod tests {
             duration_seconds: None,
         });
         assert!(RenderKey::capture(&state).is_none());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn render_cache_invalidates_on_export_settings_changes() {
+        use crate::recording::editor::export_settings::{
+            Codec, ExportSettings, HardwarePreference,
+        };
+
+        let dir = scratch_dir();
+        fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("source.mp4");
+        fs::write(&source, b"source").unwrap();
+        let mut state = state_for(&source);
+        let original = RenderKey::capture(&state).unwrap();
+
+        for settings in [
+            ExportSettings {
+                resolution: Some(720),
+                ..Default::default()
+            },
+            ExportSettings {
+                fps: Some(30),
+                ..Default::default()
+            },
+            ExportSettings {
+                codec: Codec::H264,
+                ..Default::default()
+            },
+            ExportSettings {
+                codec: Codec::Hevc,
+                ..Default::default()
+            },
+            ExportSettings {
+                crf: Some(24),
+                ..Default::default()
+            },
+            ExportSettings {
+                hardware: HardwarePreference::Software,
+                ..Default::default()
+            },
+        ] {
+            state.export_settings = settings;
+            assert_ne!(
+                RenderKey::capture(&state).unwrap(),
+                original,
+                "{settings:?}"
+            );
+            state.export_settings = ExportSettings::default();
+            assert_eq!(RenderKey::capture(&state).unwrap(), original);
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn render_cache_ignores_export_progress() {
+        use crate::recording::editor::export_settings::ExportProgress;
+        use std::sync::Arc;
+
+        let dir = scratch_dir();
+        fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("source.mp4");
+        fs::write(&source, b"source").unwrap();
+        let mut state = state_for(&source);
+        let original = RenderKey::capture(&state).unwrap();
+        state.export_progress = Some(Arc::new(ExportProgress::new(1_000_000)));
+        state
+            .export_progress
+            .as_ref()
+            .unwrap()
+            .note_encoded(0, 500_000);
+        assert_eq!(RenderKey::capture(&state).unwrap(), original);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn export_settings_and_progress_never_dirty_or_serialize_a_project() {
+        use crate::recording::editor::export_settings::{Codec, ExportProgress, ExportSettings};
+        use std::sync::Arc;
+
+        let dir = scratch_dir();
+        fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("source.mp4");
+        fs::write(&source, b"source").unwrap();
+        let mut state = state_for(&source);
+        let saved = state.to_project();
+        state.export_settings = ExportSettings {
+            resolution: Some(1080),
+            fps: Some(24),
+            codec: Codec::Hevc,
+            crf: Some(30),
+            hardware: super::super::export_settings::HardwarePreference::Auto,
+        };
+        state.export_progress = Some(Arc::new(ExportProgress::new(1_000_000)));
+        assert_eq!(state.to_project(), saved);
+        assert!(!state.session_is_dirty(Some(&saved)));
         fs::remove_dir_all(dir).unwrap();
     }
 

@@ -4,6 +4,12 @@ pub(crate) mod custom_wallpaper_popover;
 #[allow(dead_code)]
 mod dialogs;
 #[allow(dead_code)]
+mod export_card;
+#[allow(dead_code)]
+mod export_flow;
+#[allow(dead_code)]
+mod export_options;
+#[allow(dead_code)]
 mod footer;
 #[allow(dead_code)]
 mod inspector;
@@ -165,6 +171,7 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
         InitialVideo::None => Some(MediaFile::new()),
     }));
     let exporting = Rc::new(Cell::new(false));
+    let export_flow_active: export_flow::FlowActive = Rc::new(Cell::new(false));
     let export_cancellation = Arc::new(AtomicBool::new(false));
     let close_after_export = Rc::new(Cell::new(false));
     let (title_bar, title_label, upload_btn, export_btn) = build_window_controls(
@@ -172,6 +179,7 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
         state.clone(),
         exporting.clone(),
         export_cancellation.clone(),
+        export_flow_active.clone(),
     );
     root.append(&title_bar);
 
@@ -285,7 +293,11 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
         let filmstrip = filmstrip.clone();
         let window = window.clone();
         let ping = ping.clone();
+        let export_flow_active = export_flow_active.clone();
         move |_, value, _, _| {
+            if export_flow_active.get() {
+                return false;
+            }
             let Ok(file) = value.get::<gio::File>() else {
                 return false;
             };
@@ -337,6 +349,9 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
     if root.has_css_class("editor-theme-light") {
         shell.add_css_class("editor-theme-light");
     }
+    if root.has_css_class("editor-reduced-transparency") {
+        shell.add_css_class("editor-reduced-transparency");
+    }
     let scrim = GtkBox::new(Orientation::Vertical, 0);
     scrim.add_css_class("recording-editor-modal-scrim");
     scrim.set_halign(Align::Fill);
@@ -358,7 +373,11 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
         close_after_export,
     );
     sweep_popovers_on_deactivate(&window);
-    window.add_controller(build_zoom_history_keys(state.clone(), ping.clone()));
+    window.add_controller(build_zoom_history_keys(
+        state.clone(),
+        ping.clone(),
+        export_flow_active.clone(),
+    ));
     window.present();
     crate::update_ui::present_if_needed(&shell);
 }
@@ -398,9 +417,13 @@ fn zoom_history_key(key: gdk::Key, modifiers: gdk::ModifierType) -> Option<ZoomH
 fn build_zoom_history_keys(
     state: Arc<Mutex<VideoEditState>>,
     ping: Rc<dyn Fn()>,
+    export_flow_active: export_flow::FlowActive,
 ) -> EventControllerKey {
     let keys = EventControllerKey::new();
     keys.connect_key_pressed(move |_, key, _, modifiers| {
+        if export_flow_active.get() {
+            return glib::Propagation::Stop;
+        }
         let Some(action) = zoom_history_key(key, modifiers) else {
             return glib::Propagation::Proceed;
         };
@@ -468,7 +491,7 @@ fn popdown_popovers(root: &impl IsA<Widget>) {
     let mut stack = vec![root.clone().upcast::<Widget>()];
     while let Some(widget) = stack.pop() {
         if let Ok(popover) = widget.clone().downcast::<Popover>() {
-            if popover.is_visible() {
+            if popover.is_visible() && !popover.has_css_class("recording-editor-export-popover") {
                 popover.popdown();
             }
         }
@@ -694,6 +717,7 @@ fn build_window_controls(
     state: Arc<Mutex<VideoEditState>>,
     exporting: Rc<Cell<bool>>,
     export_cancellation: Arc<AtomicBool>,
+    export_flow_active: export_flow::FlowActive,
 ) -> (GtkBox, Label, Button, Button) {
     const TRAFFIC_LIGHTS_WIDTH: i32 = 100;
     let bar = GtkBox::new(Orientation::Horizontal, 8);
@@ -722,9 +746,15 @@ fn build_window_controls(
         state.clone(),
         exporting.clone(),
         export_cancellation.clone(),
+        export_flow_active.clone(),
     );
-    let (upload, upload_spinner) =
-        footer::build_upload_action(window, state, exporting, export_cancellation);
+    let (upload, upload_spinner) = footer::build_upload_action(
+        window,
+        state,
+        exporting,
+        export_cancellation,
+        export_flow_active,
+    );
     let actions = GtkBox::new(Orientation::Horizontal, 8);
     actions.add_css_class("recording-editor-title-actions");
     actions.set_valign(Align::Center);

@@ -156,6 +156,9 @@ pub struct VideoEditState {
     /// Horizontal pan at fit zoom, in composition seconds. Does not change
     /// pixels-per-second; the clip stays the same size and the track scrolls.
     pub timeline_scroll_seconds: f64,
+    pub export_settings: crate::recording::editor::export_settings::ExportSettings,
+    pub export_progress:
+        Option<std::sync::Arc<crate::recording::editor::export_settings::ExportProgress>>,
 }
 
 pub(super) fn seed_project_media(metadata: &VideoMetadata) -> Vec<ProjectMedia> {

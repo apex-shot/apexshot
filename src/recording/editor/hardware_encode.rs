@@ -19,6 +19,7 @@
 //! and only after the probe succeeds. Every other case keeps libx264, so the
 //! default export is byte-for-byte what it was before this module existed.
 
+use super::export_settings::{Codec, HardwarePreference};
 use std::process::Command;
 use std::sync::OnceLock;
 
@@ -111,6 +112,53 @@ pub fn hardware_video_args(encoder: HardwareEncoder, qp: u32) -> Vec<String> {
     }
 }
 
+pub(crate) fn hardware_ffmpeg_name(encoder: HardwareEncoder, codec: Codec) -> &'static str {
+    match (encoder, codec) {
+        (HardwareEncoder::Nvenc, Codec::Hevc) => "hevc_nvenc",
+        (HardwareEncoder::Vaapi, Codec::Hevc) => "hevc_vaapi",
+        (HardwareEncoder::Nvenc, _) => "h264_nvenc",
+        (HardwareEncoder::Vaapi, _) => "h264_vaapi",
+    }
+}
+
+pub(crate) fn hardware_video_args_for(
+    encoder: HardwareEncoder,
+    codec: Codec,
+    qp: u32,
+) -> Vec<String> {
+    match (encoder, codec) {
+        (HardwareEncoder::Nvenc, Codec::Hevc) => vec![
+            "-c:v".into(),
+            hardware_ffmpeg_name(encoder, codec).into(),
+            "-preset".into(),
+            "p5".into(),
+            "-tune".into(),
+            "hq".into(),
+            "-rc".into(),
+            "constqp".into(),
+            "-qp".into(),
+            qp.to_string(),
+            "-profile:v".into(),
+            "main".into(),
+            "-tag:v".into(),
+            "hvc1".into(),
+        ],
+        (HardwareEncoder::Vaapi, Codec::Hevc) => vec![
+            "-c:v".into(),
+            hardware_ffmpeg_name(encoder, codec).into(),
+            "-rc_mode".into(),
+            "CQP".into(),
+            "-qp".into(),
+            qp.to_string(),
+            "-profile".into(),
+            "main".into(),
+            "-tag:v".into(),
+            "hvc1".into(),
+        ],
+        (encoder, _) => hardware_video_args(encoder, qp),
+    }
+}
+
 /// Output-side options an encoder needs before its frames are usable. NVENC
 /// needs none; VA-API needs its render device selected.
 pub fn hardware_input_args(encoder: HardwareEncoder) -> Vec<String> {
@@ -180,14 +228,115 @@ fn encoder_works(encoder: HardwareEncoder) -> bool {
         None
     };
 
-    Command::new("ffmpeg")
-        .args(probe_args(encoder, device, 25))
+    run_probe(&probe_args(encoder, device, 25))
+}
+
+fn encoder_works_for(encoder: HardwareEncoder, codec: Codec) -> bool {
+    let device = if encoder.needs_hwupload() {
+        let Some(device) = vaapi_device() else {
+            return false;
+        };
+        Some(device)
+    } else {
+        None
+    };
+
+    run_probe(&probe_args_for(encoder, codec, device, 25))
+}
+
+fn run_probe(args: &[String]) -> bool {
+    let Ok(mut child) = Command::new("ffmpeg")
+        .args(args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
+        .spawn()
+    else {
+        return false;
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
+    }
+}
+
+fn probe_args_for(
+    encoder: HardwareEncoder,
+    codec: Codec,
+    device: Option<&str>,
+    qp: u32,
+) -> Vec<String> {
+    let mut args = probe_args(encoder, device, qp);
+    let video_args = hardware_video_args_for(encoder, codec, qp);
+    let start = args
+        .iter()
+        .position(|arg| arg == "-c:v")
+        .expect("the probe names its encoder");
+    let end = args
+        .iter()
+        .rposition(|arg| arg == "-f")
+        .expect("the probe names its null sink");
+    args.splice(start..end, video_args);
+    args
+}
+
+pub(crate) fn detect_hardware_encoder_for(codec: Codec) -> Option<HardwareEncoder> {
+    match codec {
+        Codec::Hevc => {
+            static DETECTED_HEVC: OnceLock<Option<HardwareEncoder>> = OnceLock::new();
+            *DETECTED_HEVC.get_or_init(|| {
+                PROBE_ORDER
+                    .into_iter()
+                    .find(|encoder| encoder_works_for(*encoder, Codec::Hevc))
+            })
+        }
+        _ => detect_hardware_encoder(),
+    }
+}
+
+pub(crate) fn export_encoder(
+    codec: Codec,
+    preference: HardwarePreference,
+) -> Option<HardwareEncoder> {
+    match preference {
+        HardwarePreference::Software => None,
+        HardwarePreference::Environment => match codec {
+            Codec::Hevc => None,
+            _ => selected_export_encoder(),
+        },
+        HardwarePreference::Auto => detect_hardware_encoder_for(codec),
+    }
+}
+
+pub(crate) fn software_encoder_available(codec: Codec) -> bool {
+    let name = match codec {
+        Codec::Hevc => "libx265",
+        _ => "libx264",
+    };
+    crate::recording::backend::ffmpeg_encoder_available(name)
+}
+
+pub(crate) fn codec_export_available(codec: Codec, preference: HardwarePreference) -> bool {
+    match preference {
+        HardwarePreference::Software => software_encoder_available(codec),
+        HardwarePreference::Environment => match codec {
+            Codec::Hevc => software_encoder_available(codec),
+            _ => selected_export_encoder().is_some() || software_encoder_available(codec),
+        },
+        HardwarePreference::Auto => {
+            software_encoder_available(codec) || detect_hardware_encoder_for(codec).is_some()
+        }
+    }
 }
 
 pub(crate) fn recording_uses_nvenc() -> bool {
