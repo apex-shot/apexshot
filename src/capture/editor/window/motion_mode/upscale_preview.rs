@@ -1251,6 +1251,7 @@ mod tests {
     }
 
     use super::{wire_sheet_lifecycle, EventControllerKey, GtkBox, Orientation, Overlay, OPEN};
+    use gtk4::prelude::*;
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
     use std::sync::atomic::Ordering;
