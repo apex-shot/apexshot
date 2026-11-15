@@ -12,6 +12,7 @@ const RECORDING_EDITOR_CSS: &str = concat!(
     include_str!("ui_support_css/08.css"),
     include_str!("ui_support_css/09.css"),
     include_str!("ui_support_css/10.css"),
+    include_str!("../../capture/editor/css/16-menus.css"),
 );
 
 pub fn install_recording_editor_css() {
@@ -159,5 +160,29 @@ mod tests {
             !bogus_errors.is_empty(),
             "parsing-error signal is not firing; the CSS check is vacuous"
         );
+    }
+
+    #[test]
+    fn the_shared_menu_stylesheet_is_the_last_include() {
+        let source = include_str!("ui_support.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        let last_include = production_source
+            .rfind("include_str!")
+            .expect("the sheet is built from includes");
+        assert!(
+            production_source[last_include..]
+                .starts_with("include_str!(\"../../capture/editor/css/16-menus.css\")"),
+            "the shared menu stylesheet must load last so its additive overrides win"
+        );
+        for selector in [
+            "popover.recording-editor-dropdown-popover > contents",
+            "popover.recording-editor-stage-aspect > contents",
+            "popover.recording-editor-clip-menu-popover > contents",
+        ] {
+            assert!(
+                super::RECORDING_EDITOR_CSS.contains(selector),
+                "the recording sheet must carry the shared menu rules for {selector}"
+            );
+        }
     }
 }

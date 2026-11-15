@@ -1,140 +1,170 @@
-//! Floating arrow bar: arrow style.
+//! Floating arrow bar: colour, visual arrow styles, reverse, stroke presets.
 //!
 //! Like the highlighter bar this one never anchors to an element — the arrow is
 //! painted with a drag, and a diagonal bounding box is no place to hang
 //! controls. It stays docked in the chrome band above the canvas (see
 //! [`super::floating_bar::dock_position`]) while the tool is armed or the
 //! Select tool holds an arrow, and it shows that arrow's own style so an
-//! existing arrow can be restyled from the same place. Thickness is not here:
-//! it rides the toolbar's stroke-size slider.
+//! existing arrow can be restyled from the same place.
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-use gtk4::{glib, prelude::*, Align, Box as GtkBox, DrawingArea, Label, Orientation};
+use gtk4::{glib, prelude::*, Box as GtkBox, Button, DrawingArea};
 
 use crate::capture::editor::{
-    state::EditorState, types::AnnotationAction, types::ArrowStyle, types::Tool,
-    ui_support::DockedBarInset,
+    state::EditorState, types::AnnotationAction, types::Tool, ui_support::DockedBarInset,
 };
 use crate::i18n::t;
 
-use super::floating_bar::{
-    build_option_row, build_pill, dock_position, dock_reserve, popdown_for, queue_draw,
-    set_bar_shown, set_dock_reserve, sync_option_selection, wire_option_rows, DockRefs,
-};
-
-const STYLE_ROW_CLASS: &str = "editor-arrow-style-option";
-const STYLE_ACTIVE_CLASS: &str = "editor-arrow-style-option-active";
+use super::color_control::ColorControl;
+use super::floating_bar::{dock_position, dock_reserve, set_bar_shown, set_dock_reserve, DockRefs};
+use super::picker_placement::PickerPlacementContext;
+use super::toolbar_controls::{sub_bar, ArrowControl, MenuTracker, StrokeControl};
 
 pub(super) struct ArrowBar {
     pub(super) root: GtkBox,
-    style_label: Label,
-    style_list: GtkBox,
+    bar: GtkBox,
+    colour: Rc<ColorControl>,
+    style: Rc<ArrowControl>,
+    reverse: Button,
+    weight: Rc<StrokeControl>,
 }
 
 pub(super) fn build_arrow_bar(
     state: &Arc<Mutex<EditorState>>,
     drawing_area: &DrawingArea,
+    apply_color: Rc<dyn Fn(crate::capture::editor::types::DrawColor)>,
+    placement: Option<Rc<PickerPlacementContext>>,
+    menus: &MenuTracker,
 ) -> ArrowBar {
-    let root = GtkBox::new(Orientation::Horizontal, 8);
-    root.add_css_class("editor-text-floating-bar");
-    root.add_css_class("editor-arrow-floating-bar");
-    root.set_halign(Align::Start);
-    root.set_valign(Align::Start);
-    set_bar_shown(&root, false);
+    let bar = sub_bar("editor-arrow-floating-bar");
 
-    let style_pill = build_pill("Arrow style");
-    for style in ArrowStyle::ALL {
-        let row = build_option_row(&t(style.display_name()), "editor-arrow-style-check");
-        row.add_css_class(STYLE_ROW_CLASS);
-        style_pill.list.append(&row);
-    }
-    {
+    let colour = Rc::new(ColorControl::new(state, apply_color, menus, placement));
+    bar.append(&colour.button);
+
+    let style = Rc::new(ArrowControl::new(state, drawing_area, menus));
+    bar.append(&style.button);
+    style.anchor_to(&bar);
+
+    let reverse = Button::with_label(&t("Reverse"));
+    reverse.set_focusable(false);
+    reverse.add_css_class("editor-subbar-button");
+    reverse.add_css_class("editor-arrow-reverse");
+    reverse.connect_clicked({
         let state = state.clone();
         let area = drawing_area.downgrade();
-        wire_option_rows(&style_pill.list, STYLE_ROW_CLASS, move |index, button| {
-            let Some(style) = ArrowStyle::ALL.get(index).copied() else {
-                return;
-            };
-            let changed = {
+        move |_| {
+            {
                 let mut st = state.lock().unwrap();
-                let before = st.arrow_style;
-                st.set_arrow_style(style);
-                let selected_changed = st.set_selected_arrow_style(style);
-                before != style || selected_changed
-            };
-            popdown_for(button);
-            if changed {
-                queue_draw(&area);
+                if !st.reverse_selected_arrow_action() {
+                    st.inverse_arrow_direction = !st.inverse_arrow_direction;
+                }
             }
-        });
-    }
+            super::floating_bar::queue_draw(&area);
+        }
+    });
+    bar.append(&reverse);
 
-    root.append(&style_pill.button);
+    let weight = Rc::new(StrokeControl::new(state, drawing_area, menus, None));
+    bar.append(&weight.button);
+    weight.anchor_to(&bar);
 
+    let root = colour.wrap(&bar);
+    set_bar_shown(&root, false);
     ArrowBar {
         root,
-        style_label: style_pill.label,
-        style_list: style_pill.list,
+        bar,
+        colour,
+        style,
+        reverse,
+        weight,
     }
 }
 
-/// Own the bar's visibility and keep its label in sync with the tool state.
+/// Own the bar's visibility and keep its controls synced with the tool state.
 pub(super) fn install_arrow_bar_tick(
     bar: &ArrowBar,
     drawing_area: &DrawingArea,
     state: &Arc<Mutex<EditorState>>,
     dock_refs: &DockRefs,
     inset: &DockedBarInset,
+    close_popovers: &Rc<dyn Fn(&GtkBox)>,
 ) {
     let root = bar.root.clone();
-    let style_label = bar.style_label.clone();
-    let style_list = bar.style_list.clone();
+    let inner = bar.bar.clone();
+    let colour = bar.colour.clone();
+    let style = bar.style.clone();
+    let reverse = bar.reverse.clone();
+    let weight = bar.weight.clone();
     let state = state.clone();
     let inset = inset.clone();
+    let close_popovers = close_popovers.clone();
     let dock_refs = DockRefs {
         scroller: dock_refs.scroller.clone(),
         drawing_area: dock_refs.drawing_area.clone(),
     };
 
+    let was_shown = Cell::new(false);
+    let last_selection = Cell::new(None::<(Tool, Option<usize>)>);
     drawing_area.add_tick_callback(move |widget, _| {
-        let (show, style) = {
+        let show = {
             let st = state.lock().unwrap();
             let arrow_tool = st.selected_tool == Tool::Arrow;
-            let selected = match st.selected_action() {
-                Some(AnnotationAction::Arrow { style, .. }) if st.selected_tool == Tool::Select => {
-                    Some(*style)
-                }
-                _ => None,
-            };
-            let show = arrow_tool || selected.is_some();
-            (show, selected.unwrap_or(st.arrow_style))
+            let selected = matches!(st.selected_action(), Some(AnnotationAction::Arrow { .. }))
+                && st.selected_tool == Tool::Select;
+            arrow_tool || selected
         };
 
         // Show or hide first: a tick that bails out before revealing would
         // leave the bar transparent for good.
         set_bar_shown(&root, show);
         if !show {
+            if was_shown.replace(false) {
+                close_popovers(&root);
+            }
+            last_selection.set(None);
             set_dock_reserve(&inset, "arrow", 0.0, widget);
             return glib::ControlFlow::Continue;
         }
+        was_shown.set(true);
 
-        style_label.set_label(&t(style.display_name()));
-        sync_option_selection(
-            &style_list,
-            ArrowStyle::ALL
-                .iter()
-                .position(|candidate| *candidate == style)
-                .unwrap_or(0),
-            STYLE_ACTIVE_CLASS,
-        );
+        let context = {
+            let st = state.lock().unwrap();
+            (st.selected_tool, st.selected_action_index)
+        };
+        let previous = last_selection.replace(Some(context));
+        if previous.is_some() && previous != Some(context) {
+            close_popovers(&root);
+        }
+
+        {
+            let st = state.lock().unwrap();
+            colour.sync(&st);
+            style.sync(&st);
+            weight.sync(&st);
+            let reversed = st
+                .selected_arrow_reversed()
+                .unwrap_or(st.inverse_arrow_direction);
+            if reversed {
+                reverse.add_css_class("selected");
+            } else {
+                reverse.remove_css_class("selected");
+            }
+            reverse.update_state(&[gtk4::accessible::State::Pressed(if reversed {
+                gtk4::AccessibleTristate::True
+            } else {
+                gtk4::AccessibleTristate::False
+            })]);
+        }
 
         // Claim the band above the canvas; the layout moves the image down under
         // it, so a press on the bar is never a press the image needed. The claim
         // happens before the bar is measured so the image and the bar move in the
         // same step, and the bar is only placed once GTK knows its size — placing
         // it at 0 would park it half a bar off centre for a frame.
-        let (bar_w, bar_h) = (root.width() as f64, root.height() as f64);
+        let (bar_w, bar_h) = (root.width() as f64, inner.height() as f64);
         set_dock_reserve(&inset, "arrow", dock_reserve(bar_h), widget);
         let (left, top) = dock_position(&dock_refs, bar_w);
         if (root.margin_start() as f64 - left).abs() >= 1.0
@@ -149,49 +179,85 @@ pub(super) fn install_arrow_bar_tick(
 
 #[cfg(test)]
 mod tests {
-    fn production_source() -> &'static str {
-        let source = include_str!("arrow_bar.rs");
-        source.split("#[cfg(test)]").next().unwrap_or(source)
+    use super::*;
+    use crate::capture::editor::types::{ArrowStyle, DrawColor, Point};
+    use image::RgbaImage;
+
+    fn test_state() -> Arc<Mutex<EditorState>> {
+        Arc::new(Mutex::new(EditorState::new(RgbaImage::new(32, 32))))
+    }
+
+    fn noop_colour() -> Rc<dyn Fn(DrawColor)> {
+        Rc::new(|_| {})
     }
 
     #[test]
-    fn arrow_bar_offers_style_for_the_tool_and_a_selected_arrow() {
-        let source = production_source();
-        assert!(
-            source.contains("pub(super) fn build_arrow_bar(")
-                && source.contains("pub(super) fn install_arrow_bar_tick(")
-                && source.contains("st.selected_tool == Tool::Arrow")
-                && source.contains("st.selected_tool == Tool::Select")
-                && source.contains("AnnotationAction::Arrow {")
-                && source.contains("ArrowStyle::ALL"),
-            "The arrow bar replaces the inspector style list while the tool is armed and for a selected arrow"
-        );
+    fn reverse_toggles_the_default_direction_without_a_selection() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let state = test_state();
+            state.lock().unwrap().selected_tool = Tool::Arrow;
+            let area = DrawingArea::new();
+            let menus = MenuTracker::default();
+            let bar = build_arrow_bar(&state, &area, noop_colour(), None, &menus);
+            bar.reverse.emit_clicked();
+            assert!(state.lock().unwrap().inverse_arrow_direction);
+            bar.reverse.emit_clicked();
+            assert!(!state.lock().unwrap().inverse_arrow_direction);
+        }) else {
+            return;
+        };
     }
 
     #[test]
-    fn arrow_bar_carries_style_only_and_reserves_its_own_space() {
-        let source = production_source();
-        assert!(
-            !source.contains("PenWeight") && !source.contains("set_stroke_size"),
-            "Thickness rides the toolbar slider, so the arrow bar must not own a thickness pill"
-        );
-        assert!(
-            source.contains("dock_position(")
-                && source.contains("dock_reserve(bar_h)")
-                && source.contains("0.0, widget);"),
-            "The bar claims the reserved band while docked and hands it back when hidden"
-        );
-    }
-
-    #[test]
-    fn arrow_bar_routes_through_the_state_setters() {
-        let source = production_source();
-        assert!(
-            source.contains("set_arrow_style(style)")
-                && source.contains("set_selected_arrow_style(style)")
-                && source.contains("dock_position(")
-                && source.contains("&dock_refs,"),
-            "Arrow picks must go through the state setters and use the shared docked placement"
-        );
+    fn reverse_swaps_a_selected_arrow_and_undo_restores_it() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let state = test_state();
+            {
+                let mut st = state.lock().unwrap();
+                st.selected_tool = Tool::Select;
+                st.actions.push(AnnotationAction::Arrow {
+                    start: Point { x: 1.0, y: 2.0 },
+                    end: Point { x: 20.0, y: 22.0 },
+                    color: DrawColor::new(1.0, 1.0, 1.0, 1.0),
+                    stroke_size: 4.0,
+                    style: ArrowStyle::Standard,
+                    control_points: None,
+                    shadow: false,
+                    reversed: false,
+                });
+                st.selected_action_index = Some(0);
+            }
+            let area = DrawingArea::new();
+            let menus = MenuTracker::default();
+            let bar = build_arrow_bar(&state, &area, noop_colour(), None, &menus);
+            bar.reverse.emit_clicked();
+            {
+                let st = state.lock().unwrap();
+                let Some(AnnotationAction::Arrow {
+                    start,
+                    end,
+                    reversed,
+                    ..
+                }) = st.selected_action()
+                else {
+                    panic!("arrow selection should survive reversing");
+                };
+                assert!(*reversed);
+                assert_eq!(*start, Point { x: 20.0, y: 22.0 });
+                assert_eq!(*end, Point { x: 1.0, y: 2.0 });
+            }
+            assert!(state.lock().unwrap().undo());
+            let st = state.lock().unwrap();
+            let Some(AnnotationAction::Arrow {
+                start, reversed, ..
+            }) = st.actions.first()
+            else {
+                panic!("undo should restore the original arrow");
+            };
+            assert!(!*reversed);
+            assert_eq!(*start, Point { x: 1.0, y: 2.0 });
+        }) else {
+            return;
+        };
     }
 }

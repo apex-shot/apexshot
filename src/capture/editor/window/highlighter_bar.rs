@@ -1,4 +1,4 @@
-//! Floating highlighter bar: text-aware/freehand mode.
+//! Floating highlighter bar: colour, mode, compact stroke presets.
 //!
 //! The highlighter paints, so unlike the text/number/obfuscate bars this one never
 //! anchors to an element: it stays docked while the tool is armed (or while the
@@ -6,142 +6,207 @@
 //! stroke instead of parking it over the last freehand bounding box. Docking is
 //! image-aware — see [`super::floating_bar::dock_position`] — so the bar sits in
 //! the empty chrome band above the canvas and never swallows a press meant for the
-//! top of the image. Thickness is not here: it rides the toolbar's stroke-size slider.
+//! top of the image.
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-use gtk4::{
-    glib, prelude::*, Align, ApplicationWindow, Box as GtkBox, DrawingArea, Label, Orientation,
-};
+use gtk4::{glib, prelude::*, ApplicationWindow, Box as GtkBox, DrawingArea};
 
 use crate::capture::editor::{
     pen_weight::HighlighterMode, state::EditorState, types::Tool, ui_support::DockedBarInset,
 };
 use crate::i18n::t;
 
+use super::color_control::ColorControl;
 use super::cursor::{set_highlighter_cursor, DEFAULT_HIGHLIGHTER_CURSOR_SIZE};
 use super::floating_bar::{
-    build_option_row, build_pill, dock_position, dock_reserve, popdown_for, queue_draw,
-    set_bar_shown, set_dock_reserve, sync_option_selection, wire_option_rows, DockRefs,
+    dock_position, dock_reserve, queue_draw, set_bar_shown, set_dock_reserve, DockRefs,
 };
+use super::picker_placement::PickerPlacementContext;
+use super::toolbar_controls::{sub_bar, text_pill, MenuTracker, StrokeControl};
 
 /// Alpha the highlighter cursor preview uses (matches the toolbar wiring).
 const CURSOR_ALPHA: f64 = 0.4;
 
-const MODE_ROW_CLASS: &str = "editor-highlighter-mode-option";
-const MODE_ACTIVE_CLASS: &str = "editor-highlighter-mode-option-active";
+/// Mode rows in menu order; index order is the tick index the bar syncs to.
+const HIGHLIGHTER_MODES: [(HighlighterMode, &str); 2] = [
+    (HighlighterMode::TextAware, "Detect text"),
+    (HighlighterMode::Freehand, "Freehand"),
+];
+
+/// The freehand brush cursor for a stroke size picked from the presets.
+fn refresh_freehand_cursor(window: &ApplicationWindow, state: &Arc<Mutex<EditorState>>) {
+    let (size, color) = {
+        let st = state.lock().unwrap();
+        (
+            st.stroke_size,
+            (
+                st.selected_color.r,
+                st.selected_color.g,
+                st.selected_color.b,
+                CURSOR_ALPHA,
+            ),
+        )
+    };
+    set_highlighter_cursor(window, size, color);
+}
 
 pub(super) struct HighlighterBar {
     pub(super) root: GtkBox,
-    mode_label: Label,
-    mode_list: GtkBox,
+    bar: GtkBox,
+    colour: Rc<ColorControl>,
+    set_mode: Rc<dyn Fn(usize)>,
+    weight: Rc<StrokeControl>,
 }
 
 pub(super) fn build_highlighter_bar(
     state: &Arc<Mutex<EditorState>>,
     drawing_area: &DrawingArea,
     window: &ApplicationWindow,
+    apply_color: Rc<dyn Fn(crate::capture::editor::types::DrawColor)>,
+    placement: Option<Rc<PickerPlacementContext>>,
+    menus: &MenuTracker,
 ) -> HighlighterBar {
-    let root = GtkBox::new(Orientation::Horizontal, 8);
-    root.add_css_class("editor-text-floating-bar");
-    root.add_css_class("editor-highlighter-floating-bar");
-    root.set_halign(Align::Start);
-    root.set_valign(Align::Start);
-    set_bar_shown(&root, false);
+    let bar = sub_bar("editor-highlighter-floating-bar");
 
-    let mode_pill = build_pill("Highlight mode");
-    for mode in HIGHLIGHTER_MODES {
-        let row = build_option_row(&highlighter_mode_label(mode), "editor-highlighter-check");
-        row.add_css_class(MODE_ROW_CLASS);
-        mode_pill.list.append(&row);
-    }
-    {
+    let colour = Rc::new(ColorControl::new(state, apply_color, menus, placement));
+    bar.append(&colour.button);
+
+    // Static `t()` literals so the i18n catalog checker registers both messages.
+    let mode_options = [t("Detect text"), t("Freehand")];
+    let mode_labels: Vec<&str> = mode_options.iter().map(String::as_str).collect();
+    let mode = text_pill(menus, &mode_labels, {
         let state = state.clone();
         let area = drawing_area.downgrade();
         let window = window.clone();
-        wire_option_rows(&mode_pill.list, MODE_ROW_CLASS, move |index, button| {
-            let Some(mode) = HIGHLIGHTER_MODES.get(index).copied() else {
+        Rc::new(move |index| {
+            let Some((mode, _)) = HIGHLIGHTER_MODES.get(index).copied() else {
                 return;
             };
             let changed = {
                 let mut st = state.lock().unwrap();
                 let changed = st.set_highlighter_mode_and_check(mode);
-                let (size, color) = highlighter_cursor_params(&st);
+                let size = match st.highlighter_mode {
+                    HighlighterMode::TextAware => DEFAULT_HIGHLIGHTER_CURSOR_SIZE,
+                    HighlighterMode::Freehand => st.stroke_size,
+                };
+                let color = (
+                    st.selected_color.r,
+                    st.selected_color.g,
+                    st.selected_color.b,
+                    CURSOR_ALPHA,
+                );
                 drop(st);
                 set_highlighter_cursor(&window, size, color);
                 changed
             };
-            popdown_for(button);
             if changed {
                 queue_draw(&area);
             }
-        });
-    }
+        })
+    });
+    bar.append(&mode.button);
 
-    root.append(&mode_pill.button);
+    let refresh = Rc::new({
+        let window = window.clone();
+        let state = state.clone();
+        move || refresh_freehand_cursor(&window, &state)
+    });
+    let weight = Rc::new(StrokeControl::new(
+        state,
+        drawing_area,
+        menus,
+        Some(refresh),
+    ));
+    bar.append(&weight.button);
+    weight.anchor_to(&bar);
 
+    let root = colour.wrap(&bar);
+    set_bar_shown(&root, false);
     HighlighterBar {
         root,
-        mode_label: mode_pill.label,
-        mode_list: mode_pill.list,
+        bar,
+        colour,
+        set_mode: mode.set_selected,
+        weight,
     }
 }
 
-/// Mode rows in popover order; index order is the tick index the bar syncs to.
-const HIGHLIGHTER_MODES: [HighlighterMode; 2] =
-    [HighlighterMode::TextAware, HighlighterMode::Freehand];
-
-/// Own the bar's visibility and keep its label in sync with the tool state.
+/// Own the bar's visibility and keep its controls synced with the tool state.
 pub(super) fn install_highlighter_bar_tick(
     bar: &HighlighterBar,
     drawing_area: &DrawingArea,
     state: &Arc<Mutex<EditorState>>,
     dock_refs: &DockRefs,
     inset: &DockedBarInset,
+    close_popovers: &Rc<dyn Fn(&GtkBox)>,
 ) {
     let root = bar.root.clone();
-    let mode_label = bar.mode_label.clone();
-    let mode_list = bar.mode_list.clone();
+    let inner = bar.bar.clone();
+    let colour = bar.colour.clone();
+    let set_mode = bar.set_mode.clone();
+    let weight = bar.weight.clone();
     let state = state.clone();
     let inset = inset.clone();
+    let close_popovers = close_popovers.clone();
     let dock_refs = DockRefs {
         scroller: dock_refs.scroller.clone(),
         drawing_area: dock_refs.drawing_area.clone(),
     };
 
+    let was_shown = Cell::new(false);
+    let last_selection = Cell::new(None::<(Tool, Option<usize>)>);
     drawing_area.add_tick_callback(move |widget, _| {
-        let (show, mode) = {
+        let show = {
             let st = state.lock().unwrap();
             let highlighter_tool = st.selected_tool == Tool::Highlighter;
             let has_stroke =
                 st.selected_tool == Tool::Select && st.selected_highlighter_stroke_size().is_some();
-            (highlighter_tool || has_stroke, st.highlighter_mode)
+            highlighter_tool || has_stroke
         };
 
         // Show or hide first: a tick that bails out before revealing would
         // leave the bar transparent for good.
         set_bar_shown(&root, show);
         if !show {
+            if was_shown.replace(false) {
+                close_popovers(&root);
+            }
+            last_selection.set(None);
             set_dock_reserve(&inset, "highlighter", 0.0, widget);
             return glib::ControlFlow::Continue;
         }
+        was_shown.set(true);
 
-        mode_label.set_label(&highlighter_mode_label(mode));
-        sync_option_selection(
-            &mode_list,
-            HIGHLIGHTER_MODES
+        let context = {
+            let st = state.lock().unwrap();
+            (st.selected_tool, st.selected_action_index)
+        };
+        let previous = last_selection.replace(Some(context));
+        if previous.is_some() && previous != Some(context) {
+            close_popovers(&root);
+        }
+
+        {
+            let st = state.lock().unwrap();
+            colour.sync(&st);
+            if let Some(index) = HIGHLIGHTER_MODES
                 .iter()
-                .position(|candidate| *candidate == mode)
-                .unwrap_or(0),
-            MODE_ACTIVE_CLASS,
-        );
+                .position(|(mode, _)| *mode == st.highlighter_mode)
+            {
+                set_mode(index);
+            }
+            weight.sync(&st);
+        }
 
         // Claim the band above the canvas; the layout moves the image down under
         // it, so a press on the bar is never a press the image needed. The claim
         // happens before the bar is measured so the image and the bar move in the
         // same step, and the bar is only placed once GTK knows its size — placing
         // it at 0 would park it half a bar off centre for a frame.
-        let (bar_w, bar_h) = (root.width() as f64, root.height() as f64);
+        let (bar_w, bar_h) = (root.width() as f64, inner.height() as f64);
         set_dock_reserve(&inset, "highlighter", dock_reserve(bar_h), widget);
         let (left, top) = dock_position(&dock_refs, bar_w);
         if (root.margin_start() as f64 - left).abs() >= 1.0
@@ -152,34 +217,6 @@ pub(super) fn install_highlighter_bar_tick(
         }
         glib::ControlFlow::Continue
     });
-}
-
-/// Brush size and color the cursor preview adopts for the current state.
-///
-/// Text-aware strokes follow the detected text height at draw time, so their cursor
-/// keeps the default brush; freehand strokes paint at the toolbar's stroke size.
-fn highlighter_cursor_params(state: &EditorState) -> (f64, (f64, f64, f64, f64)) {
-    let size = match state.highlighter_mode {
-        HighlighterMode::TextAware => DEFAULT_HIGHLIGHTER_CURSOR_SIZE,
-        HighlighterMode::Freehand => state.stroke_size,
-    };
-    (
-        size,
-        (
-            state.selected_color.r,
-            state.selected_color.g,
-            state.selected_color.b,
-            CURSOR_ALPHA,
-        ),
-    )
-}
-
-/// Static `t()` literals so the i18n catalog checker registers both messages.
-fn highlighter_mode_label(mode: HighlighterMode) -> String {
-    match mode {
-        HighlighterMode::TextAware => t("Text-aware"),
-        HighlighterMode::Freehand => t("Freehand"),
-    }
 }
 
 #[cfg(test)]
@@ -205,11 +242,11 @@ mod tests {
     }
 
     #[test]
-    fn highlighter_bar_keeps_no_thickness_pill() {
+    fn highlighter_bar_owns_the_stroke_presets_now() {
         let source = production_source();
         assert!(
-            !source.contains("PenWeight") && !source.contains("set_highlighter_weight"),
-            "Thickness rides the toolbar slider, so the highlighter bar must not own a thickness pill"
+            source.contains("StrokeControl::new("),
+            "Thickness lives in the docked bar's stroke presets, not the primary rail"
         );
     }
 
@@ -243,7 +280,7 @@ mod tests {
     fn highlighter_bar_labels_are_registered_for_translation() {
         let source = production_source();
         assert!(
-            source.contains("t(\"Text-aware\")") && source.contains("t(\"Freehand\")"),
+            source.contains("t(\"Detect text\")") && source.contains("t(\"Freehand\")"),
             "Mode labels need static t() literals for the i18n catalog checker"
         );
     }

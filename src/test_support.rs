@@ -93,8 +93,18 @@ fn spawn_gtk_thread() -> Result<Sender<Job>, ()> {
             if ready_tx.send(available).is_err() || !available {
                 return;
             }
-            while let Ok(job) = job_rx.recv() {
-                job();
+            // GTK owns the default main context on this thread once it
+            // initializes; pump it between jobs so default-context sources
+            // (idle draws, timeouts) still dispatch while tests run.
+            loop {
+                while gtk4::glib::MainContext::default().iteration(false) {}
+                match job_rx.try_recv() {
+                    Ok(job) => job(),
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                        std::thread::sleep(std::time::Duration::from_millis(2));
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+                }
             }
         })
         .map_err(|_| ())?;

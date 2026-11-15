@@ -14,6 +14,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QPainter>
 #include <QProcess>
 #include <QScreen>
 #include <QStandardPaths>
@@ -468,12 +469,18 @@ QPixmap freezeBackgroundForLogicalRect(const QImage& captureImage,
     if (cropped.isNull()) {
         return QPixmap();
     }
-    if (cropped.size() != selected.size()) {
-        cropped = cropped.scaled(selected.size(),
-                                 Qt::IgnoreAspectRatio,
-                                 Qt::SmoothTransformation);
-    }
     return QPixmap::fromImage(cropped);
+}
+
+void paintFreezeBackground(QPainter& painter,
+                           const QPixmap& background,
+                           const QRect& targetRect,
+                           const QRect& clipRect)
+{
+    painter.save();
+    painter.setClipRect(clipRect, Qt::IntersectClip);
+    painter.drawPixmap(targetRect, background);
+    painter.restore();
 }
 
 }

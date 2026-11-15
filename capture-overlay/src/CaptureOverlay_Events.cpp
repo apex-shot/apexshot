@@ -1150,7 +1150,7 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
             m_captureIntent == CaptureIntent::Scroll
         );
         int newHover = -1;
-        for (int i = 0; i < NUM_TOOLS; ++i) {
+        for (int i = 0; !m_captureMenuAreaMode && i < NUM_TOOLS; ++i) {
             if (layout.toolCells[i].contains(pos)) { newHover = i; break; }
         }
         if (newHover != m_hoveredTool) {
@@ -1408,7 +1408,7 @@ void CaptureOverlay::keyPressEvent(QKeyEvent* event)
 
     switch (event->key()) {
         case Qt::Key_Escape:
-            if (m_windowMode && m_captureMenuAreaMode) {
+            if (m_windowMode && m_captureMenuNavigationEnabled) {
                 releaseKeyboard();
                 releaseMouse();
                 hide();
