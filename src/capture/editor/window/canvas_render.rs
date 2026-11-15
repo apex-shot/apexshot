@@ -1945,22 +1945,28 @@ mod tests {
     /// resample the interactive filter exists to avoid.
     #[test]
     fn an_appearance_burst_keeps_frames_cheap_until_the_tail_expires() {
-        let draws = Rc::new(Cell::new(0));
-        let preview = InteractivePreview::with_tail(
-            Duration::from_millis(20),
-            Rc::new({
-                let draws = draws.clone();
-                move || draws.set(draws.get() + 1)
-            }),
-        );
-        assert!(!preview.active(), "a resting canvas is not interactive");
-        preview.touch();
-        assert!(preview.active(), "an interaction turns the burst on");
-        // The burst has expired on its own, and the one quality repaint it
-        // owes has landed.
-        std::thread::sleep(Duration::from_millis(60));
-        while gtk4::glib::MainContext::default().iteration(false) {}
-        assert!(!preview.active(), "the burst must expire on its own");
-        assert_eq!(draws.get(), 1, "the burst owes exactly one resting repaint");
+        // The burst schedules on the default main context, which the GTK test
+        // thread owns once it exists, so the whole check runs on that thread.
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let draws = Rc::new(Cell::new(0));
+            let preview = InteractivePreview::with_tail(
+                Duration::from_millis(20),
+                Rc::new({
+                    let draws = draws.clone();
+                    move || draws.set(draws.get() + 1)
+                }),
+            );
+            assert!(!preview.active(), "a resting canvas is not interactive");
+            preview.touch();
+            assert!(preview.active(), "an interaction turns the burst on");
+            // The burst has expired on its own, and the one quality repaint it
+            // owes has landed.
+            std::thread::sleep(Duration::from_millis(60));
+            while gtk4::glib::MainContext::default().iteration(false) {}
+            assert!(!preview.active(), "the burst must expire on its own");
+            assert_eq!(draws.get(), 1, "the burst owes exactly one resting repaint");
+        }) else {
+            return;
+        };
     }
 }

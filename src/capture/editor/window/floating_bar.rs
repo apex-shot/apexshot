@@ -84,6 +84,21 @@ pub(super) fn set_bar_shown(root: &GtkBox, shown: bool) {
     if root.can_target() != shown {
         root.set_can_target(shown);
     }
+    if !shown && root.is_sensitive() {
+        if let Some(window) = root
+            .root()
+            .and_then(|root| root.downcast::<gtk4::Window>().ok())
+        {
+            if let Some(focus) = gtk4::prelude::RootExt::focus(&window) {
+                if focus.is_ancestor(root) {
+                    gtk4::prelude::GtkWindowExt::set_focus(&window, Option::<&gtk4::Widget>::None);
+                }
+            }
+        }
+    }
+    if root.is_sensitive() != shown {
+        root.set_sensitive(shown);
+    }
 }
 
 /// Claim (or give back) the canvas space above a docked bar.
@@ -312,6 +327,8 @@ mod tests {
             include_str!("number_bar.rs"),
             include_str!("highlighter_bar.rs"),
             include_str!("arrow_bar.rs"),
+            include_str!("stroke_bar.rs"),
+            include_str!("text_bar.rs"),
         ] {
             let production = bar.split("#[cfg(test)]").next().unwrap_or(bar);
             assert!(
@@ -331,6 +348,8 @@ mod tests {
             ("number_bar.rs", include_str!("number_bar.rs")),
             ("highlighter_bar.rs", include_str!("highlighter_bar.rs")),
             ("arrow_bar.rs", include_str!("arrow_bar.rs")),
+            ("stroke_bar.rs", include_str!("stroke_bar.rs")),
+            ("text_bar.rs", include_str!("text_bar.rs")),
         ] {
             let production = bar.split("#[cfg(test)]").next().unwrap_or(bar);
             let reveal = production
@@ -354,11 +373,13 @@ mod tests {
             ("number_bar.rs", include_str!("number_bar.rs")),
             ("highlighter_bar.rs", include_str!("highlighter_bar.rs")),
             ("arrow_bar.rs", include_str!("arrow_bar.rs")),
+            ("stroke_bar.rs", include_str!("stroke_bar.rs")),
+            ("text_bar.rs", include_str!("text_bar.rs")),
         ] {
             let production = bar.split("#[cfg(test)]").next().unwrap_or(bar);
             assert!(
                 production
-                    .contains("let (bar_w, bar_h) = (root.width() as f64, root.height() as f64);")
+                    .contains("let (bar_w, bar_h) = (root.width() as f64, inner.height() as f64);")
                     && !production.contains("Cell::new(("),
                 "{name}: reserve from the measured bar, not from a remembered guess"
             );
@@ -481,5 +502,31 @@ mod tests {
                 "docked bars stay centered for viewport {viewport:?}"
             );
         }
+    }
+
+    #[test]
+    fn hiding_a_bar_releases_descendant_focus_and_tab_traversal() {
+        use super::set_bar_shown;
+        use gtk4::prelude::*;
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let window = gtk4::Window::new();
+            let root = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+            let entry = gtk4::Entry::new();
+            root.append(&entry);
+            window.set_child(Some(&root));
+            window.present();
+            while gtk4::glib::MainContext::default().iteration(false) {}
+            entry.grab_focus();
+            set_bar_shown(&root, false);
+            assert!(gtk4::prelude::RootExt::focus(&window)
+                .is_none_or(|focus| !focus.is_ancestor(&root)));
+            assert!(!entry.is_sensitive());
+            set_bar_shown(&root, true);
+            assert!(entry.is_sensitive());
+            window.close();
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
     }
 }

@@ -272,6 +272,7 @@ const EDITOR_CSS: &str = concat!(
     include_str!("css/12-background-choices.css"),
     include_str!("css/13-text-modal.css"),
     include_str!("css/14-upscale-preview.css"),
+    include_str!("css/15-toolbar-controls.css"),
 );
 
 pub fn install_editor_css() {
@@ -909,15 +910,21 @@ mod tests {
         assert!(light_surface.contains("color: #1d2129;"));
         assert!(light_surface.contains("border-color: alpha(#111827, 0.10);"));
 
+        assert!(include_str!("window/toolbar_controls.rs")
+            .contains("add_css_class(\"editor-text-floating-bar\")"));
         for source in [
             include_str!("window/arrow_bar.rs"),
             include_str!("window/highlighter_bar.rs"),
             include_str!("window/number_bar.rs"),
             include_str!("window/text_bar.rs"),
+            include_str!("window/stroke_bar.rs"),
             include_str!("window/obfuscate_bar.rs"),
             include_str!("window/focus_bar.rs"),
         ] {
-            assert!(source.contains("add_css_class(\"editor-text-floating-bar\")"));
+            assert!(
+                source.contains("add_css_class(\"editor-text-floating-bar\")")
+                    || source.contains("sub_bar(")
+            );
         }
     }
 

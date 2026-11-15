@@ -195,6 +195,10 @@ pub(super) fn build_toolbar_base(icon_names: ToolbarBaseIconNames<'_>) -> Toolba
         // Square tiles: the row is taller than the button, so pin each tile to
         // the middle and let the fixed min-size define the box.
         btn.set_valign(Align::Center);
+        btn.set_size_request(34, 34);
+        if let Some(image) = btn.child().and_downcast::<Image>() {
+            image.set_pixel_size(16);
+        }
     }
 
     let sep_1 = GtkBox::new(Orientation::Vertical, 0);
@@ -1095,7 +1099,6 @@ pub(super) fn build_toolbar_mode_controls(
     standard_mode_group.append(&primary_tools_group);
     standard_mode_group.append(&obfuscate_method_group);
     standard_mode_group.append(&pen_weight_group);
-    standard_mode_group.append(&size_group);
 
     let toolbar_mode_stack = Stack::new();
     toolbar_mode_stack.add_css_class("editor-toolbar-mode-stack");

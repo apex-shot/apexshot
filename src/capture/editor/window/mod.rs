@@ -203,7 +203,7 @@ fn selected_action_geometry(action: &AnnotationAction) -> String {
 use super::ui_support::{
     arrow_style_toolbar_icon, install_editor_css, prefers_dark_glass_theme,
     prefers_reduced_transparency, recommended_window_size_with_extra_width, set_active_tool_button,
-    tool_icon_widget, toolbar_icon_size, EDITOR_MIN_WINDOW_WIDTH, EDITOR_TOP_CHROME_HEIGHT,
+    tool_icon_widget, toolbar_icon_size, EDITOR_MIN_WINDOW_WIDTH,
 };
 
 const TEXT_SIZE_OPTIONS: [i32; 12] = [12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72];
@@ -309,10 +309,12 @@ mod canvas;
 mod canvas_layout;
 mod canvas_render;
 mod chrome;
+mod color_control;
 pub mod color_picker;
 pub mod colors_panel;
 #[allow(dead_code)]
 mod cursor;
+mod custom_color;
 mod effects;
 mod empty_state;
 mod events;
@@ -328,9 +330,12 @@ pub(crate) mod motion_render;
 mod motion_timeline;
 mod number_bar;
 mod obfuscate_bar;
+mod picker_placement;
 mod static_transform_panel;
+mod stroke_bar;
 mod text_bar;
 mod toolbar;
+mod toolbar_controls;
 
 use background_assets::BackgroundAssetCaches;
 use inspectors::InspectorParts;
@@ -1379,11 +1384,25 @@ fn setup_editor_window_full(
     let open_color_picker: Rc<dyn Fn()> = Rc::new({
         let set_picker_target_for_active_tool = set_picker_target_for_active_tool.clone();
         let color_popover = color_popover.downgrade();
+        let color_status = color_status.clone();
         move || {
             // The Colors panel edits whichever colour the active tool owns, so
             // its popover points the shared picker there before it opens.
             set_picker_target_for_active_tool();
             if let Some(popover) = color_popover.upgrade() {
+                // One popover, many anchors: reparent under the Colors chip
+                // when the bar triggers last owned it.
+                if popover
+                    .parent()
+                    .is_none_or(|parent| parent != *color_status.upcast_ref::<gtk4::Widget>())
+                {
+                    if popover.parent().is_some() {
+                        popover.unparent();
+                    }
+                    popover.set_position(gtk4::PositionType::Bottom);
+                    popover.set_pointing_to(None);
+                    popover.set_parent(&color_status);
+                }
                 popover.popup();
             }
         }
@@ -1637,35 +1656,152 @@ fn setup_editor_window_full(
         &docked_inset,
     );
 
-    // Docked text bar (font + size) below the main toolbar, like the other
-    // tool bars. Shows while Text is armed, with a text selected, or editing.
-    // (Color lives in the toolbar chip next to -/□/×, which opens the picker.)
-    // Clicking an existing text with Text/Select re-selects it, which is how
-    // the bar comes back for an older text.
-    let text_bar = text_bar::build_text_bar(&font_family_group, &text_size_group);
+    // Competing option menus: a bar's menu trigger closes the other bars'
+    // menus and the shared colour popover before opening.
+    let option_menus = toolbar_controls::MenuTracker::default();
+    option_menus.register(&color_popover);
+
+    {
+        let option_menus = option_menus.clone();
+        let escape = gtk4::EventControllerKey::new();
+        escape.set_propagation_phase(gtk4::PropagationPhase::Capture);
+        escape.connect_key_pressed(move |_, key, _, _| {
+            if key == gdk::Key::Escape && option_menus.any_open() {
+                option_menus.close_all();
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        });
+        window.add_controller(escape);
+    }
+
+    let open_drawing_color_picker: Rc<dyn Fn()> = Rc::new({
+        let color_popover = color_popover.clone();
+        let color_status = color_status.clone();
+        let set_picker_target = set_picker_target.clone();
+        let sync_shared_colors_for_active_tool = sync_shared_colors_for_active_tool.clone();
+        let option_menus = option_menus.clone();
+        move || {
+            if color_popover.is_visible() {
+                color_popover.popdown();
+                return;
+            }
+            option_menus.close_all();
+            set_picker_target(color_picker::PickerTarget::Drawing);
+            sync_shared_colors_for_active_tool();
+            if color_popover
+                .parent()
+                .is_none_or(|parent| parent != *color_status.upcast_ref::<gtk4::Widget>())
+            {
+                if color_popover.parent().is_some() {
+                    color_popover.unparent();
+                }
+                color_popover.set_position(gtk4::PositionType::Bottom);
+                color_popover.set_pointing_to(None);
+                color_popover.set_valign(gtk4::Align::Center);
+                color_popover.set_parent(color_status.upcast_ref::<gtk4::Widget>());
+            }
+            color_popover.popup();
+        }
+    });
+
+    let apply_drawing_color: Rc<dyn Fn(DrawColor)> = Rc::new({
+        let state = state.clone();
+        let set_picker_target = set_picker_target.clone();
+        let apply_picker_color_to_editor = apply_picker_color_to_editor.clone();
+        let drawing_area = drawing_area.downgrade();
+        move |color| {
+            set_picker_target(color_picker::PickerTarget::Drawing);
+            {
+                let mut st = state.lock().unwrap();
+                st.set_selected_action_color(color);
+            }
+            apply_picker_color_to_editor(color);
+            if let Some(area) = drawing_area.upgrade() {
+                area.queue_draw();
+            }
+        }
+    });
+    let picker_placement = Rc::new(picker_placement::PickerPlacementContext {
+        drawing_area: drawing_area.downgrade(),
+        overlay: canvas_overlay.downgrade(),
+        scroller: canvas_scroller.downgrade(),
+        state: state.clone(),
+        transform: transform.clone(),
+    });
+    // When a docked bar hides, its menus must not stay open on a dead anchor.
+    let close_popovers_in: Rc<dyn Fn(&GtkBox)> = Rc::new({
+        let color_popover = color_popover.clone();
+        let option_menus = option_menus.clone();
+        move |bar: &GtkBox| {
+            option_menus.close_all();
+            // The popover's parent is the bar trigger that last opened it;
+            // that trigger's own parent is the bar itself.
+            let anchored_here = color_popover
+                .parent()
+                .and_then(|trigger| trigger.parent())
+                .is_some_and(|owner| owner == *bar);
+            if anchored_here {
+                color_popover.popdown();
+            }
+        }
+    });
+
+    // Docked text bar (colour + font + size) below the main toolbar, like the
+    // other tool bars. Shows while Text is armed, with a text selected, or
+    // editing. Clicking an existing text with Text/Select re-selects it, which
+    // is how the bar comes back for an older text.
+    let text_bar = text_bar::build_text_bar(
+        &state,
+        &font_family_group,
+        &text_size_group,
+        apply_drawing_color.clone(),
+        Some(picker_placement.clone()),
+        &option_menus,
+    );
     canvas_overlay.add_overlay(&text_bar.root);
-    text_bar::install_text_bar_tick(&text_bar, &drawing_area, &state, &dock_refs, &docked_inset);
+    text_bar::install_text_bar_tick(
+        &text_bar,
+        &drawing_area,
+        &state,
+        &dock_refs,
+        &docked_inset,
+        &close_popovers_in,
+    );
 
     // Floating number bar (mirrors the pen/highlighter bars): one contextual bar
     // that stays docked above the canvas while the Number tool is armed or the
     // Select tool holds a number marker, so it never covers the drawing.
     // Clicking an existing marker with the Number tool re-selects it, which is
     // how it comes back.
-    let number_bar = number_bar::build_number_bar(&state, &drawing_area);
+    let number_bar = number_bar::build_number_bar(
+        &state,
+        &drawing_area,
+        apply_drawing_color.clone(),
+        Some(picker_placement.clone()),
+        &option_menus,
+    );
     canvas_overlay.add_overlay(&number_bar.root);
     number_bar::install_number_bar_tick(
         &number_bar,
         &drawing_area,
         &state,
-        &transform,
         &dock_refs,
         &docked_inset,
+        &close_popovers_in,
     );
 
-    // Floating highlighter bar: mode (text-aware / freehand). Docked while the tool
-    // is armed, and while the Select tool has a stroke selected, so it never parks
-    // over a long freehand bounding box. Thickness rides the toolbar size slider.
-    let highlighter_bar = highlighter_bar::build_highlighter_bar(&state, &drawing_area, &window);
+    // Floating highlighter bar: colour, mode (detect text / freehand), stroke
+    // presets. Docked while the tool is armed, and while the Select tool has a
+    // stroke selected, so it never parks over a long freehand bounding box.
+    let highlighter_bar = highlighter_bar::build_highlighter_bar(
+        &state,
+        &drawing_area,
+        &window,
+        apply_drawing_color.clone(),
+        Some(picker_placement.clone()),
+        &option_menus,
+    );
     canvas_overlay.add_overlay(&highlighter_bar.root);
     highlighter_bar::install_highlighter_bar_tick(
         &highlighter_bar,
@@ -1673,13 +1809,57 @@ fn setup_editor_window_full(
         &state,
         &dock_refs,
         &docked_inset,
+        &close_popovers_in,
     );
 
-    // Floating arrow bar: style. Docked while the tool is armed, and while the
-    // Select tool has an arrow selected. Thickness rides the toolbar size slider.
-    let arrow_bar = arrow_bar::build_arrow_bar(&state, &drawing_area);
+    // Floating arrow bar: colour, visual style menu, reverse, stroke presets.
+    // Docked while the tool is armed, and while the Select tool has an arrow
+    // selected.
+    let arrow_bar = arrow_bar::build_arrow_bar(
+        &state,
+        &drawing_area,
+        apply_drawing_color.clone(),
+        Some(picker_placement.clone()),
+        &option_menus,
+    );
     canvas_overlay.add_overlay(&arrow_bar.root);
-    arrow_bar::install_arrow_bar_tick(&arrow_bar, &drawing_area, &state, &dock_refs, &docked_inset);
+    arrow_bar::install_arrow_bar_tick(
+        &arrow_bar,
+        &drawing_area,
+        &state,
+        &dock_refs,
+        &docked_inset,
+        &close_popovers_in,
+    );
+
+    // Floating stroke bar: colour + compact stroke presets for the pen, line,
+    // box, and circle tools (and for those annotations under Select).
+    let stroke_bar = stroke_bar::build_stroke_bar(
+        &state,
+        &drawing_area,
+        apply_drawing_color.clone(),
+        Some(picker_placement.clone()),
+        &option_menus,
+        Some(Rc::new({
+            let window = window.clone();
+            let state = state.clone();
+            move || {
+                let st = state.lock().unwrap();
+                if st.selected_tool == Tool::Pen {
+                    cursor::update_pen_cursor(&window, &st);
+                }
+            }
+        })),
+    );
+    canvas_overlay.add_overlay(&stroke_bar.root);
+    stroke_bar::install_stroke_bar_tick(
+        &stroke_bar,
+        &drawing_area,
+        &state,
+        &dock_refs,
+        &docked_inset,
+        &close_popovers_in,
+    );
 
     // Obfuscate method picker in the second toolbar, intensity slider by the rect.
     let obfuscate_bar = obfuscate_bar::build_obfuscate_bar(
@@ -1689,6 +1869,7 @@ fn setup_editor_window_full(
         &obfuscate_method_list,
         &size_slider,
         &rebuild_effects_async,
+        &option_menus,
     );
     canvas_overlay.add_overlay(&obfuscate_bar.method_bar);
     canvas_overlay.add_overlay(&obfuscate_bar.slider_bar);
@@ -1700,56 +1881,32 @@ fn setup_editor_window_full(
         &size_slider,
         &dock_refs,
         &docked_inset,
+        &close_popovers_in,
     );
 
-    // Floating focus bar: intensity slider below the active rect. Anchored to
-    // the rect it edits, like the obfuscate slider — no method pill.
+    // Floating focus bar: a docked "Focus" label like the other option bars,
+    // plus the intensity slider anchored below the active rect.
     let focus_bar =
         focus_bar::build_focus_bar(&state, &drawing_area, &size_slider, &rebuild_effects_async);
+    canvas_overlay.add_overlay(&focus_bar.label_bar);
     canvas_overlay.add_overlay(&focus_bar.slider_bar);
-    focus_bar::install_focus_bar_tick(&focus_bar, &drawing_area, &state, &transform, &size_slider);
+    focus_bar::install_focus_bar_tick(
+        &focus_bar,
+        &drawing_area,
+        &state,
+        &transform,
+        &size_slider,
+        &dock_refs,
+        &docked_inset,
+    );
 
     color_status.set_tooltip_text(Some(&t("Colors")));
     color_status.set_cursor_from_name(Some("pointer"));
-    let color_popover_anchor = GtkBox::new(Orientation::Horizontal, 0);
-    color_popover_anchor.set_size_request(1, 1);
-    color_popover_anchor.set_halign(gtk4::Align::End);
-    color_popover_anchor.set_valign(gtk4::Align::Start);
-    color_popover_anchor.set_margin_end(8);
-    color_popover_anchor.set_margin_top(EDITOR_TOP_CHROME_HEIGHT + 8);
-    color_popover_anchor.set_can_target(false);
-    canvas_with_toolbar.add_overlay(&color_popover_anchor);
-    color_popover.set_position(gtk4::PositionType::Left);
-    color_popover.set_valign(gtk4::Align::Start);
-    color_popover.set_pointing_to(Some(&gdk::Rectangle::new(1, 0, 1, 1)));
-    color_popover.set_parent(&color_popover_anchor);
-    color_popover_anchor.connect_destroy({
-        let color_popover = color_popover.downgrade();
-        move |_| {
-            if let Some(popover) = color_popover.upgrade() {
-                popover.unparent();
-            }
-        }
-    });
     {
-        let color_popover = color_popover.downgrade();
-        let sync_shared_colors_for_active_tool = sync_shared_colors_for_active_tool.clone();
-        let set_picker_target = set_picker_target.clone();
+        let open = open_drawing_color_picker.clone();
         let chip_click = gtk4::GestureClick::new();
         chip_click.connect_pressed(move |_, _, _, _| {
-            let Some(popover) = color_popover.upgrade() else {
-                return;
-            };
-            if popover.is_visible() {
-                popover.popdown();
-            } else {
-                // The toolbar chip is the drawing colour control: it never
-                // edits the Background fill, not even while the Background
-                // tool is the selected one.
-                set_picker_target(color_picker::PickerTarget::Drawing);
-                sync_shared_colors_for_active_tool();
-                popover.popup();
-            }
+            open();
         });
         color_status.add_controller(chip_click);
     }
@@ -2973,26 +3130,24 @@ mod tests {
             .next()
             .unwrap_or(picker_source);
         assert!(
-            production_source.contains("color_popover.set_position(gtk4::PositionType::Left);")
-                && production_source.contains("color_popover.set_valign(gtk4::Align::Start);")
-                && production_source.contains("color_popover.set_parent(&color_popover_anchor);")
-                && production_source.contains("color_popover_anchor.connect_destroy")
-                && production_source.contains("canvas_with_toolbar.add_overlay(&color_popover_anchor);")
-                && production_source.contains("color_popover_anchor.set_halign(gtk4::Align::End);")
-                && production_source.contains("color_popover_anchor.set_margin_end(8);")
-                && production_source.contains("color_popover_anchor.set_margin_top(EDITOR_TOP_CHROME_HEIGHT + 8);")
-                && production_source.contains("color_popover_anchor.set_can_target(false);")
-                && production_source.contains("popover.unparent();")
-                && production_source.contains("if popover.is_visible()")
-                && production_source.contains("popover.popdown();")
+            production_source.contains("open_drawing_color_picker")
+                && production_source.contains("color_popover.unparent();")
+                && production_source.contains(
+                    "color_popover.set_parent(color_status.upcast_ref::<gtk4::Widget>());"
+                )
+                && production_source
+                    .contains("set_picker_target(color_picker::PickerTarget::Drawing);")
                 && production_source.contains("sync_shared_colors_for_active_tool();")
+                && production_source.contains("if color_popover.is_visible()")
+                && production_source.contains("color_popover.popdown();")
                 && picker_production.contains("pub popover: Popover")
-                && picker_production
-                    .contains("build_color_popover(&t(\"Color picker\"), &picker, Some(&eyedropper_btn));")
+                && picker_production.contains(
+                    "build_color_popover(&t(\"Color picker\"), &picker, Some(&eyedropper_btn));"
+                )
                 && picker_production.contains("popover.popdown();")
                 && !production_source.contains("color_floating_card")
                 && !production_source.contains("add_overlay(&color_popover)"),
-            "The toolbar chip should toggle the shared Color-only popover at its original canvas-side position and release its anchor on teardown"
+            "The toolbar chip should toggle the shared Color-only popover anchored under the chip"
         );
     }
 
@@ -3384,13 +3539,17 @@ mod tests {
         let click = include_str!("events/click.rs");
         let click_production = click.split("#[cfg(test)]").next().unwrap_or(click);
         assert!(
-            production.contains("let number_bar = number_bar::build_number_bar(&state, &drawing_area);")
+            production.contains("number_bar::build_number_bar(")
+                && production.contains("stroke_bar::build_stroke_bar(")
+                && production.contains("&option_menus,")
                 && production.contains("canvas_overlay.add_overlay(&number_bar.root);")
+                && production.contains("canvas_overlay.add_overlay(&stroke_bar.root);")
                 && production.contains("canvas_overlay.add_overlay(&highlighter_bar.root);")
                 && production.contains("canvas_overlay.add_overlay(&arrow_bar.root);")
                 && production.contains("canvas_overlay.add_overlay(&text_bar.root);")
                 && production.contains("canvas_overlay.add_overlay(&obfuscate_bar.method_bar);")
                 && production.contains("canvas_overlay.add_overlay(&obfuscate_bar.slider_bar);")
+                && production.contains("canvas_overlay.add_overlay(&focus_bar.label_bar);")
                 && production.contains("canvas_overlay.add_overlay(&focus_bar.slider_bar);")
                 && production.contains("let docked_inset = super::ui_support::DockedBarInset::new();")
                 && production.contains("let dock_refs = floating_bar::DockRefs {")

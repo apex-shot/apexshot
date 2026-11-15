@@ -9,7 +9,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use gtk4::{
-    glib, prelude::*, Align, Box as GtkBox, Button, DrawingArea, Image, Label, Orientation, Scale,
+    glib, prelude::*, Align, Box as GtkBox, Button, DrawingArea, Image, Orientation, Scale,
 };
 
 use crate::capture::editor::{
@@ -21,12 +21,12 @@ use crate::capture::editor::{
 use crate::i18n::t;
 
 use super::floating_bar::{
-    build_option_row, build_pill, dock_position, dock_reserve, move_bar, popdown_for, queue_draw,
-    set_bar_shown, set_dock_reserve, sync_option_selection, wire_option_rows, DockRefs,
+    dock_position, dock_reserve, move_bar, set_bar_shown, set_dock_reserve, sync_option_selection,
+    DockRefs,
 };
+use super::toolbar_controls::{sub_bar, EffectMode, MenuTracker};
 use super::OBFUSCATE_METHOD_OPTIONS;
 
-const METHOD_ROW_CLASS: &str = "editor-obfuscate-inspector-option";
 const METHOD_ACTIVE_CLASS: &str = "editor-obfuscate-inspector-option-active";
 
 /// Clearance between the rect and its floating slider.
@@ -35,33 +35,19 @@ const BAR_GAP: f64 = 12.0;
 pub(super) struct ObfuscateBar {
     pub(super) method_bar: GtkBox,
     pub(super) slider_bar: GtkBox,
-    method_icon: Image,
-    method_label: Label,
-    method_list: GtkBox,
+    method: Rc<EffectMode>,
     slider: Scale,
 }
 
-/// Icon and label for a method; labels stay `t()`-wrapped at the call site so
-/// the i18n catalog checker keeps seeing static literals.
-fn method_visuals(method: ObfuscateMethod) -> (&'static str, &'static str) {
+/// Icon for a method in the legacy toolbar/inspector rows; labels stay
+/// `t()`-wrapped at the call site so the i18n catalog checker keeps seeing
+/// static literals.
+fn method_icon_name(method: ObfuscateMethod) -> &'static str {
     match method {
-        ObfuscateMethod::Pixelate => (super::icon_names::VIEW_GRID, "Pixelate"),
-        ObfuscateMethod::Blur => (super::icon_names::BLUR, "Blur"),
-        ObfuscateMethod::Blackout => (super::icon_names::MEDIA_PLAYBACK_STOP, "Blackout"),
+        ObfuscateMethod::Pixelate => super::icon_names::VIEW_GRID,
+        ObfuscateMethod::Blur => super::icon_names::BLUR,
+        ObfuscateMethod::Blackout => super::icon_names::MEDIA_PLAYBACK_STOP,
     }
-}
-
-fn prepend_method_icon(row: &Button, method: ObfuscateMethod) {
-    let Some(content) = row.child() else {
-        return;
-    };
-    let Ok(content) = content.downcast::<GtkBox>() else {
-        return;
-    };
-    let (icon_name, _) = method_visuals(method);
-    let icon = Image::from_icon_name(icon_name);
-    icon.set_pixel_size(14);
-    content.prepend(&icon);
 }
 
 pub(super) fn build_obfuscate_bar(
@@ -71,62 +57,32 @@ pub(super) fn build_obfuscate_bar(
     inspector_list: &GtkBox,
     toolbar_slider: &Scale,
     rebuild: &Rc<dyn Fn()>,
+    menus: &MenuTracker,
 ) -> ObfuscateBar {
-    let method_pill = build_pill("Obfuscate method");
-    for (method, label) in OBFUSCATE_METHOD_OPTIONS {
-        let row = build_option_row(&t(label), "editor-obfuscate-inspector-check");
-        row.add_css_class(METHOD_ROW_CLASS);
-        prepend_method_icon(&row, method);
-        method_pill.list.append(&row);
-    }
-    // The pill shell is text-only; the method keeps its icon next to the label.
-    let (initial_icon, _) = method_visuals(state.lock().unwrap().obfuscate_method());
-    let method_icon = Image::from_icon_name(initial_icon);
-    method_icon.set_pixel_size(14);
-    if let Some(row) = method_pill.button.child().and_downcast::<GtkBox>() {
-        row.prepend(&method_icon);
-    }
-    {
-        let (icon_name, label) = method_visuals(state.lock().unwrap().obfuscate_method());
-        method_icon.set_icon_name(Some(icon_name));
-        method_pill.label.set_label(&t(label));
-    }
-    {
-        let state = state.clone();
-        let area = drawing_area.downgrade();
-        let method_icon = method_icon.clone();
-        let method_label = method_pill.label.clone();
-        let floating_list = method_pill.list.clone();
-        let inspector_list = inspector_list.clone();
-        let toolbar_button = toolbar_button.clone();
-        let rebuild = rebuild.clone();
-        wire_option_rows(&method_pill.list, METHOD_ROW_CLASS, move |index, button| {
-            let Some((method, _)) = OBFUSCATE_METHOD_OPTIONS.get(index) else {
-                return;
-            };
-            let method = *method;
-            state.lock().unwrap().set_obfuscate_method(method);
-            if let Some(child) = toolbar_button.child() {
-                if let Ok(img) = child.downcast::<Image>() {
-                    img.set_icon_name(Some(method_visuals(method).0));
+    let method = Rc::new(EffectMode::new(
+        state,
+        drawing_area,
+        rebuild,
+        menus,
+        Some(Rc::new({
+            let inspector_list = inspector_list.clone();
+            let toolbar_button = toolbar_button.clone();
+            move |index| {
+                if let Some((method, _)) = OBFUSCATE_METHOD_OPTIONS.get(index) {
+                    if let Some(child) = toolbar_button.child() {
+                        if let Ok(img) = child.downcast::<Image>() {
+                            img.set_icon_name(Some(method_icon_name(*method)));
+                        }
+                    }
                 }
+                sync_option_selection(&inspector_list, index, METHOD_ACTIVE_CLASS);
             }
-            let (icon_name, label) = method_visuals(method);
-            method_icon.set_icon_name(Some(icon_name));
-            method_label.set_label(&t(label));
-            sync_option_selection(&floating_list, index, METHOD_ACTIVE_CLASS);
-            sync_option_selection(&inspector_list, index, METHOD_ACTIVE_CLASS);
-            rebuild();
-            popdown_for(button);
-            queue_draw(&area);
-        });
-    }
+        })),
+    ));
 
-    let method_bar = GtkBox::new(Orientation::Horizontal, 8);
-    method_bar.add_css_class("editor-text-floating-bar");
-    method_bar.set_halign(Align::Start);
-    method_bar.set_valign(Align::Start);
-    method_bar.append(&method_pill.button);
+    let method_bar = sub_bar("editor-obfuscate-method-bar");
+    method_bar.append(&method.button);
+    method.anchor_to(&method_bar);
     set_bar_shown(&method_bar, false);
 
     let slider = Scale::with_range(
@@ -171,9 +127,7 @@ pub(super) fn build_obfuscate_bar(
     ObfuscateBar {
         method_bar,
         slider_bar,
-        method_icon: method_icon.clone(),
-        method_label: method_pill.label,
-        method_list: method_pill.list,
+        method,
         slider: slider.clone(),
     }
 }
@@ -188,17 +142,17 @@ pub(super) fn install_obfuscate_bar_tick(
     toolbar_slider: &Scale,
     dock_refs: &DockRefs,
     inset: &DockedBarInset,
+    close_popovers: &Rc<dyn Fn(&GtkBox)>,
 ) {
     let method_bar = bar.method_bar.clone();
     let slider_bar = bar.slider_bar.clone();
-    let method_icon = bar.method_icon.clone();
-    let method_label = bar.method_label.clone();
-    let method_list = bar.method_list.clone();
+    let method = bar.method.clone();
     let slider = bar.slider.clone();
     let state = state.clone();
     let transform = transform.clone();
     let toolbar_slider = toolbar_slider.clone();
     let inset = inset.clone();
+    let close_popovers = close_popovers.clone();
     let dock_refs = DockRefs {
         scroller: dock_refs.scroller.clone(),
         drawing_area: dock_refs.drawing_area.clone(),
@@ -207,8 +161,9 @@ pub(super) fn install_obfuscate_bar_tick(
     // widths track the last measurement so a max never off-centers a bar.
     let known_slider = Rc::new(Cell::new((220.0f64, 48.0f64)));
 
+    let was_shown = Cell::new(false);
     drawing_area.add_tick_callback(move |widget, _| {
-        let (show_method, rect_opt, method, amount, view) = {
+        let (show_method, rect_opt, method_value, amount, view) = {
             let st = state.lock().unwrap();
             // Live draft first; otherwise the selected rect (reselect) when the
             // Obfuscate or Select tool is active. Prefer the rect's own
@@ -242,35 +197,25 @@ pub(super) fn install_obfuscate_bar_tick(
         };
         set_bar_shown(&method_bar, show_method);
         if !show_method {
+            if was_shown.replace(false) {
+                close_popovers(&method_bar);
+            }
             set_dock_reserve(&inset, "obfuscate", 0.0, widget);
             if slider_bar.is_visible() {
                 slider_bar.set_visible(false);
             }
             return glib::ControlFlow::Continue;
         }
-        // Sync method UI + intensity UI from state.
-        let (icon_name, label, tooltip) = match method {
-            ObfuscateMethod::Pixelate => {
-                let (icon, label) = method_visuals(method);
-                (icon, label, "Pixelate intensity")
-            }
-            ObfuscateMethod::Blur => {
-                let (icon, label) = method_visuals(method);
-                (icon, label, "Blur intensity")
-            }
-            ObfuscateMethod::Blackout => {
-                let (icon, label) = method_visuals(method);
-                (icon, label, "Blackout has no intensity control")
-            }
-        };
-        method_icon.set_icon_name(Some(icon_name));
-        method_label.set_label(&t(label));
-        if let Some(pos) = OBFUSCATE_METHOD_OPTIONS
-            .iter()
-            .position(|(m, _)| *m == method)
+        was_shown.set(true);
         {
-            sync_option_selection(&method_list, pos, METHOD_ACTIVE_CLASS);
+            let st = state.lock().unwrap();
+            method.sync(&st);
         }
+        let tooltip = match method_value {
+            ObfuscateMethod::Pixelate => "Pixelate intensity",
+            ObfuscateMethod::Blur => "Blur intensity",
+            ObfuscateMethod::Blackout => "Blackout has no intensity control",
+        };
         set_dock_reserve(
             &inset,
             "obfuscate",
@@ -283,10 +228,10 @@ pub(super) fn install_obfuscate_bar_tick(
             slider_bar.set_visible(false);
             return glib::ControlFlow::Continue;
         };
-        let has_slider = method.has_slider();
+        let has_slider = method_value.has_slider();
         if has_slider {
             slider.set_sensitive(true);
-            slider.set_tooltip_text(Some(tooltip));
+            slider.set_tooltip_text(Some(&t(tooltip)));
             if (slider.value() - amount).abs() > f64::EPSILON {
                 slider.set_value(amount);
             }
@@ -295,7 +240,7 @@ pub(super) fn install_obfuscate_bar_tick(
                 toolbar_slider.set_range(MIN_OBFUSCATE_AMOUNT, MAX_OBFUSCATE_AMOUNT);
                 toolbar_slider.set_value(amount);
             }
-            toolbar_slider.set_tooltip_text(Some(tooltip));
+            toolbar_slider.set_tooltip_text(Some(&t(tooltip)));
         }
         let area_w = widget.width() as f64;
         let area_h = widget.height() as f64;
@@ -349,9 +294,8 @@ mod tests {
         assert!(
             source.contains("pub(super) fn build_obfuscate_bar(")
                 && source.contains("pub(super) fn install_obfuscate_bar_tick(")
-                && source.contains("build_pill(\"Obfuscate method\")")
-                && source.contains("wire_option_rows(")
-                && source.contains("sync_option_selection(")
+                && source.contains("EffectMode::new(")
+                && source.contains("sub_bar(\"editor-obfuscate-method-bar\")")
                 && source.contains("use super::floating_bar::{"),
             "The obfuscate method picker should reuse the shared floating-bar pill shell"
         );
@@ -378,7 +322,7 @@ mod tests {
         assert!(source.contains("let Some(rect) = rect_opt else"));
         assert!(source.contains("rect.x as f64 * view.scale + view.offset_x"));
         assert!(source.contains("move_bar(&slider_bar, slider_left, slider_top)"));
-        assert!(source.contains("let has_slider = method.has_slider()"));
+        assert!(source.contains("let has_slider = method_value.has_slider()"));
         assert!(!source.contains("dock_reserve(slider_bar"));
     }
 
