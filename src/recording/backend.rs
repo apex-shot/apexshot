@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use tokio::sync::mpsc;
 
 mod crop;
+mod disk_space;
 mod ffmpeg_process;
 mod profile;
 mod session;

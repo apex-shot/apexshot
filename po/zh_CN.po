@@ -4803,3 +4803,54 @@ msgstr "以 {width} × {height} 像素导出。"
 
 msgid "Ratio presets change the aspect ratio; platform presets also export at the size that platform asks for. W/H shows the export size. Click the selected preset again to reset."
 msgstr "比例预设会改变宽高比；平台预设还会按该平台要求的尺寸导出。W/H 显示导出尺寸。再次点击已选预设即可重置。"
+
+msgid "A link to the exported file was copied"
+msgstr "已复制导出文件的链接"
+
+msgid "ApexShot could not reserve a file for the export."
+msgstr "ApexShot 无法为导出预留文件。"
+
+msgid "Checking encoder support…"
+msgstr "正在检查编码器支持…"
+
+msgid "Copy exported file"
+msgstr "复制导出的文件"
+
+msgid "Depends on hardware"
+msgstr "取决于硬件"
+
+msgid "Disk space is almost full"
+msgstr "磁盘空间即将用尽"
+
+msgid "Encode with HEVC"
+msgstr "使用 HEVC 编码"
+
+msgid "Export stopped"
+msgstr "导出已停止"
+
+msgid "Hardware encoding failed; the export restarted on the software encoder"
+msgstr "硬件编码失败；已改用软件编码器重新开始导出"
+
+msgid "Open failed"
+msgstr "打开失败"
+
+msgid "Recording stopped"
+msgstr "录制已停止"
+
+msgid "Retrying on the software encoder…"
+msgstr "正在使用软件编码器重试…"
+
+msgid "Show in Files"
+msgstr "在“文件”中显示"
+
+msgid "The partial file was removed"
+msgstr "已删除不完整的文件"
+
+msgid "The selected codec cannot encode on this machine"
+msgstr "所选编解码器无法在此设备上编码"
+
+msgid "This ffmpeg build has no HEVC encoder"
+msgstr "此 ffmpeg 版本没有 HEVC 编码器"
+
+msgid "Uploaded, but the link could not be copied: {error}"
+msgstr "已上传，但无法复制链接：{error}"

@@ -1,0 +1,431 @@
+            .recording-editor-export-options-card {
+                background: #171717;
+                color: #e8e8e8;
+                border: none;
+                border-radius: 14px;
+                padding: 26px;
+                box-shadow: 0 12px 36px alpha(black, 0.3);
+                font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
+                font-size: 14px;
+            }
+
+            .recording-editor-export-options-card .recording-editor-export-header {
+                margin-bottom: 20px;
+            }
+
+            .recording-editor-export-options-card .recording-editor-export-scroll {
+                margin-bottom: 20px;
+            }
+
+            .recording-editor-export-dialog-title {
+                font-size: 18px;
+                font-weight: 600;
+            }
+
+            .recording-editor-export-muted {
+                color: #858585;
+                font-size: 13px;
+            }
+
+            .recording-editor-export-eyebrow {
+                color: #8a8a8a;
+                font-size: 11px;
+                font-weight: 600;
+                letter-spacing: 0.8px;
+            }
+
+            .recording-editor-export-segments {
+                background: alpha(white, 0.05);
+                border-radius: 9px;
+                padding: 3px;
+            }
+
+            .recording-editor-export-options-card button.recording-editor-export-segment {
+                min-width: 0;
+                min-height: 32px;
+                padding: 0 8px;
+                background: transparent;
+                background-image: none;
+                border: none;
+                border-radius: 7px;
+                box-shadow: none;
+                text-shadow: none;
+                color: #a3a3a3;
+                font-size: 14px;
+                font-weight: 500;
+            }
+
+            .recording-editor-export-options-card button.recording-editor-export-segment.recording-editor-export-segment-tall {
+                min-height: 46px;
+                padding: 5px 8px;
+            }
+
+            .recording-editor-export-options-card button.recording-editor-export-segment:hover {
+                color: #e8e8e8;
+                background: alpha(white, 0.04);
+            }
+
+            .recording-editor-export-options-card button.recording-editor-export-segment:checked {
+                color: #ffffff;
+                background: #3d3d3d;
+                box-shadow: 0 1px 2px alpha(black, 0.35);
+            }
+
+            .recording-editor-export-options-card button.recording-editor-export-segment:disabled {
+                color: rgba(255, 255, 255, 0.30);
+            }
+
+            .recording-editor-export-segment-title {
+                font-weight: 600;
+            }
+
+            .recording-editor-export-segment-sub {
+                font-size: 11px;
+                font-weight: 500;
+                opacity: 0.6;
+            }
+
+            .recording-editor-export-toggle-card {
+                background: alpha(white, 0.04);
+                border: 1px solid alpha(white, 0.06);
+                border-radius: 10px;
+                padding: 12px 14px;
+            }
+
+            .recording-editor-export-toggle-title {
+                font-weight: 500;
+            }
+
+            .recording-editor-export-options-card switch.recording-editor-export-switch {
+                min-width: 36px;
+                min-height: 20px;
+                padding: 0;
+                background: alpha(white, 0.14);
+                background-image: none;
+                border: none;
+                border-radius: 999px;
+                box-shadow: none;
+            }
+
+            .recording-editor-export-options-card switch.recording-editor-export-switch slider {
+                min-width: 16px;
+                min-height: 16px;
+                margin: 2px;
+                background: #ffffff;
+                background-image: none;
+                border: none;
+                border-radius: 999px;
+                box-shadow: 0 1px 2px alpha(black, 0.3);
+            }
+
+            .recording-editor-export-options-card switch.recording-editor-export-switch:checked {
+                background: #ff670d;
+            }
+
+            .recording-editor-export-options-card switch.recording-editor-export-switch:focus-visible {
+                outline: 2px solid #ff7c2f;
+                outline-offset: 2px;
+            }
+
+            .recording-editor-export-summary {
+                border: 1px solid alpha(white, 0.08);
+                border-radius: 10px;
+                padding: 12px 14px;
+            }
+
+            .recording-editor-export-summary-label {
+                color: #8a8a8a;
+                font-size: 13px;
+            }
+
+            .recording-editor-export-summary-value {
+                color: #e8e8e8;
+                font-size: 13px;
+                font-weight: 500;
+                font-feature-settings: "tnum";
+            }
+
+            .recording-editor-export-options-card button.recording-editor-export-action,
+            .recording-editor-export-options-card button.recording-editor-export-close {
+                min-width: 0;
+                min-height: 32px;
+                padding: 0 11px;
+                background: #202020;
+                background-image: none;
+                border: none;
+                border-radius: 5px;
+                box-shadow: none;
+                text-shadow: none;
+                color: #c6c6c6;
+                font-size: 14px;
+                font-weight: 500;
+            }
+
+            .recording-editor-export-options-card button.recording-editor-export-action {
+                min-height: 36px;
+            }
+
+            .recording-editor-export-options-card button.recording-editor-export-action:hover,
+            .recording-editor-export-options-card button.recording-editor-export-close:hover {
+                background: #292929;
+            }
+
+            .recording-editor-export-options-card button.recording-editor-export-close {
+                background: transparent;
+                min-width: 30px;
+                min-height: 30px;
+                padding: 0;
+                color: #999999;
+            }
+
+            .recording-editor-export-options-card button.recording-editor-export-primary {
+                background: #ff670d;
+                color: #ffffff;
+            }
+
+            .recording-editor-export-options-card button.recording-editor-export-primary:hover {
+                background: #ff7c2f;
+            }
+
+            .recording-editor-export-options-card button:focus-visible {
+                outline: 2px solid #ff7c2f;
+                outline-offset: 2px;
+            }
+
+            .recording-editor-export-note {
+                color: rgba(255, 255, 255, 0.46);
+                font-size: 11px;
+            }
+
+            .recording-editor-export-destination {
+                color: rgba(255, 255, 255, 0.62);
+                font-size: 11px;
+            }
+
+            .recording-editor-export-screen {
+                background: @recording-editor-surface;
+                color: #e8e8e8;
+                border-radius: 11px;
+                font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
+                font-size: 14px;
+            }
+
+            .recording-editor-export-screen .recording-editor-export-screen-title {
+                font-size: 15px;
+                font-weight: 600;
+            }
+
+            .recording-editor-export-screen .recording-editor-export-destination {
+                background: alpha(white, 0.05);
+                border-radius: 999px;
+                padding: 4px 12px;
+            }
+
+            .recording-editor-export-screen progressbar {
+                min-height: 3px;
+            }
+
+            .recording-editor-export-screen progressbar trough {
+                background: alpha(white, 0.10);
+                border-radius: 2px;
+            }
+
+            .recording-editor-export-screen progressbar progress {
+                background: #ff670d;
+                border-radius: 2px;
+            }
+
+            .recording-editor-export-screen button.recording-editor-export-stop,
+            .recording-editor-export-screen button.recording-editor-export-action {
+                min-height: 32px;
+                padding: 0 14px;
+                border: none;
+                border-radius: 6px;
+                background: alpha(white, 0.06);
+                background-image: none;
+                box-shadow: none;
+                text-shadow: none;
+                color: rgba(255, 255, 255, 0.88);
+                font-size: 13px;
+                font-weight: 500;
+            }
+
+            .recording-editor-export-screen button.recording-editor-export-stop:hover,
+            .recording-editor-export-screen button.recording-editor-export-action:hover {
+                background: alpha(white, 0.10);
+            }
+
+            .recording-editor-export-screen button.recording-editor-export-stop:disabled {
+                color: rgba(255, 255, 255, 0.30);
+            }
+
+            .recording-editor-export-screen button.recording-editor-export-primary {
+                background: #ff670d;
+                color: #ffffff;
+            }
+
+            .recording-editor-export-screen button.recording-editor-export-primary:hover {
+                background: #ff7c2f;
+            }
+
+            .recording-editor-export-screen button:focus-visible {
+                outline: 2px solid #ff7c2f;
+                outline-offset: 2px;
+            }
+
+            .recording-editor-export-screen .recording-editor-export-error {
+                color: #FCA5A5;
+            }
+
+            .editor-theme-light .recording-editor-export-options-card {
+                background: #ffffff;
+                color: #202020;
+            }
+
+            .editor-theme-light .recording-editor-export-muted {
+                color: #737373;
+            }
+
+            .editor-theme-light .recording-editor-export-eyebrow {
+                color: #737373;
+            }
+
+            .editor-theme-light .recording-editor-export-segments {
+                background: alpha(#111827, 0.06);
+            }
+
+            .editor-theme-light .recording-editor-export-options-card button.recording-editor-export-segment {
+                color: #5c5c5c;
+            }
+
+            .editor-theme-light .recording-editor-export-options-card button.recording-editor-export-segment:hover {
+                color: #202020;
+                background: alpha(#111827, 0.04);
+            }
+
+            .editor-theme-light .recording-editor-export-options-card button.recording-editor-export-segment:checked {
+                color: #17202a;
+                background: #ffffff;
+                box-shadow: 0 1px 3px alpha(black, 0.12);
+            }
+
+            .editor-theme-light .recording-editor-export-options-card button.recording-editor-export-segment:disabled {
+                color: alpha(#1d2129, 0.35);
+            }
+
+            .editor-theme-light .recording-editor-export-toggle-card {
+                background: alpha(#111827, 0.03);
+                border-color: alpha(#111827, 0.08);
+            }
+
+            .editor-theme-light .recording-editor-export-options-card switch.recording-editor-export-switch {
+                background: alpha(#111827, 0.16);
+            }
+
+            .editor-theme-light .recording-editor-export-options-card switch.recording-editor-export-switch:checked {
+                background: #ff670d;
+            }
+
+            .editor-theme-light .recording-editor-export-summary {
+                border-color: alpha(#111827, 0.10);
+            }
+
+            .editor-theme-light .recording-editor-export-summary-label {
+                color: #737373;
+            }
+
+            .editor-theme-light .recording-editor-export-summary-value {
+                color: #202020;
+            }
+
+            .editor-theme-light .recording-editor-export-options-card button.recording-editor-export-action {
+                background: #eeeeee;
+                color: #454545;
+            }
+
+            .editor-theme-light .recording-editor-export-options-card button.recording-editor-export-action:hover {
+                background: #e5e5e5;
+            }
+
+            .editor-theme-light .recording-editor-export-options-card button.recording-editor-export-close {
+                background: transparent;
+                color: #737373;
+            }
+
+            .editor-theme-light .recording-editor-export-options-card button.recording-editor-export-close:hover {
+                background: alpha(#111827, 0.06);
+            }
+
+            .editor-theme-light .recording-editor-export-options-card button.recording-editor-export-primary,
+            .editor-theme-light .recording-editor-export-options-card button.recording-editor-export-primary:hover {
+                background: #ff670d;
+                color: white;
+            }
+
+            .editor-theme-light .recording-editor-export-note {
+                color: alpha(#1d2129, 0.55);
+            }
+
+            .editor-theme-light .recording-editor-export-destination {
+                color: alpha(#1d2129, 0.70);
+            }
+
+            .editor-theme-light .recording-editor-export-screen {
+                background: #f6f6f6;
+                color: #202020;
+            }
+
+            .editor-theme-light .recording-editor-export-screen .recording-editor-export-destination {
+                background: alpha(#111827, 0.05);
+            }
+
+            .editor-theme-light .recording-editor-export-screen .recording-editor-export-muted {
+                color: #737373;
+            }
+
+            .editor-theme-light .recording-editor-export-screen progressbar trough {
+                background: alpha(#111827, 0.10);
+            }
+
+            .editor-theme-light .recording-editor-export-screen button.recording-editor-export-stop,
+            .editor-theme-light .recording-editor-export-screen button.recording-editor-export-action {
+                background: alpha(#111827, 0.06);
+                color: alpha(#1d2129, 0.92);
+            }
+
+            .editor-theme-light .recording-editor-export-screen button.recording-editor-export-stop:hover,
+            .editor-theme-light .recording-editor-export-screen button.recording-editor-export-action:hover {
+                background: alpha(#111827, 0.10);
+            }
+
+            .editor-theme-light .recording-editor-export-screen button.recording-editor-export-stop:disabled {
+                color: alpha(#1d2129, 0.35);
+            }
+
+            .editor-theme-light .recording-editor-export-screen button.recording-editor-export-primary,
+            .editor-theme-light .recording-editor-export-screen button.recording-editor-export-primary:hover {
+                background: #ff670d;
+                color: #ffffff;
+            }
+
+            .editor-theme-light .recording-editor-export-screen .recording-editor-export-error {
+                color: #b3261e;
+            }
+
+            .editor-reduced-transparency .recording-editor-export-options-card button.recording-editor-export-segment:not(:checked) {
+                background: #14141a;
+            }
+
+            .editor-reduced-transparency .recording-editor-export-options-card button.recording-editor-export-action:not(.recording-editor-export-primary) {
+                background: #14141a;
+            }
+
+            .editor-reduced-transparency.editor-theme-light .recording-editor-export-options-card button.recording-editor-export-segment:not(:checked),
+            .editor-reduced-transparency .editor-theme-light .recording-editor-export-options-card button.recording-editor-export-segment:not(:checked) {
+                background: #f4f2ee;
+            }
+
+            .editor-reduced-transparency.editor-theme-light .recording-editor-export-options-card button.recording-editor-export-action:not(.recording-editor-export-primary),
+            .editor-reduced-transparency .editor-theme-light .recording-editor-export-options-card button.recording-editor-export-action:not(.recording-editor-export-primary) {
+                background: #f4f2ee;
+            }

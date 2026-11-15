@@ -4925,3 +4925,54 @@ msgstr "Exporté en {width} × {height} px."
 
 msgid "Ratio presets change the aspect ratio; platform presets also export at the size that platform asks for. W/H shows the export size. Click the selected preset again to reset."
 msgstr "Les préréglages de format changent le rapport d’aspect ; ceux des plateformes exportent aussi à la taille demandée par la plateforme. W/H indique la taille d’exportation. Cliquez de nouveau sur le préréglage sélectionné pour le réinitialiser."
+
+msgid "A link to the exported file was copied"
+msgstr "Un lien vers le fichier exporté a été copié"
+
+msgid "ApexShot could not reserve a file for the export."
+msgstr "ApexShot n'a pas pu réserver de fichier pour l'exportation."
+
+msgid "Checking encoder support…"
+msgstr "Vérification de la prise en charge de l'encodeur…"
+
+msgid "Copy exported file"
+msgstr "Copier le fichier exporté"
+
+msgid "Depends on hardware"
+msgstr "Dépend du matériel"
+
+msgid "Disk space is almost full"
+msgstr "L'espace disque est presque plein"
+
+msgid "Encode with HEVC"
+msgstr "Encoder en HEVC"
+
+msgid "Export stopped"
+msgstr "Exportation arrêtée"
+
+msgid "Hardware encoding failed; the export restarted on the software encoder"
+msgstr "L'encodage matériel a échoué ; l'exportation a redémarré avec l'encodeur logiciel"
+
+msgid "Open failed"
+msgstr "Échec de l'ouverture"
+
+msgid "Recording stopped"
+msgstr "Enregistrement arrêté"
+
+msgid "Retrying on the software encoder…"
+msgstr "Nouvelle tentative avec l'encodeur logiciel…"
+
+msgid "Show in Files"
+msgstr "Afficher dans Fichiers"
+
+msgid "The partial file was removed"
+msgstr "Le fichier partiel a été supprimé"
+
+msgid "The selected codec cannot encode on this machine"
+msgstr "Le codec sélectionné ne peut pas encoder sur cette machine"
+
+msgid "This ffmpeg build has no HEVC encoder"
+msgstr "Cette version de ffmpeg n'a pas d'encodeur HEVC"
+
+msgid "Uploaded, but the link could not be copied: {error}"
+msgstr "Téléversé, mais le lien n'a pas pu être copié : {error}"

@@ -50,6 +50,26 @@ pub(crate) fn with_gtk<R: Send + 'static>(f: impl FnOnce() -> R + Send + 'static
     }
 }
 
+pub(crate) fn test_app() -> gtk4::Application {
+    use gtk4::prelude::ApplicationExt;
+    // Its own application id: this app lives for the whole test run on the
+    // shared GTK thread, so reusing the production id would collide with
+    // tests that register a short-lived app under that id ("An object is
+    // already exported for the interface org.gtk.Application").
+    thread_local! {
+        static TEST_APP: gtk4::Application = {
+            let app = gtk4::Application::builder()
+                .application_id(format!("{}.Tests", crate::app_identity::app_id()))
+                .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+                .build();
+            app.register(None::<&gtk4::gio::Cancellable>)
+                .expect("the test application to register");
+            app
+        };
+    }
+    TEST_APP.with(|app| app.clone())
+}
+
 /// Start the GTK thread and report whether GTK initialized on it.
 fn spawn_gtk_thread() -> Result<Sender<Job>, ()> {
     let (ready_tx, ready_rx) = channel::<bool>();

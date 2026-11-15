@@ -16,6 +16,7 @@
 use gst::prelude::*;
 use gstreamer as gst;
 use gstreamer_app as gst_app;
+use std::collections::VecDeque;
 use std::io::Write;
 use std::os::fd::{FromRawFd, OwnedFd};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -33,9 +34,15 @@ const FIRST_SAMPLE_GRACE: Duration = Duration::from_secs(2);
 /// mixer then inserts digital silence — keep enough cushion for peaks.
 const PULSE_BUFFER_TIME_US: i64 = 400_000;
 const PULSE_LATENCY_TIME_US: i64 = 40_000;
-/// Branch/output queues (ns). Leak the oldest buffers instead of stalling
-/// pulsesrc when the encoder or ffmpeg pipe is briefly busy.
+/// Branch queues and the AppSink output queue (ns). Leak the oldest buffers
+/// instead of stalling pulsesrc when the encoder or ffmpeg pipe is briefly busy.
 const AUDIO_QUEUE_TIME_NS: u64 = 200_000_000;
+/// Output queue in front of a muxer's audio pad (ns), used only for the ghost
+/// pad termination. It must exceed the video encoder's latency at the lowest
+/// recording fps so the muxer can interleave audio while it waits for video;
+/// a leaky 200 ms queue drops most of the audio in that window. Raw F32 stereo
+/// at 48 kHz is ~1.9 MB for 5 s, which is an acceptable ceiling.
+const AUDIO_MUX_QUEUE_TIME_NS: u64 = 5_000_000_000;
 
 /// Process-wide GStreamer init. Must run before any `pw::init()` in this
 /// process so gstpulse and the native PipeWire video thread do not fight
@@ -265,6 +272,17 @@ fn configure_live_queue(queue: &gst::Element) {
     queue.set_property("max-size-time", AUDIO_QUEUE_TIME_NS);
 }
 
+/// Queue feeding a muxer's audio pad: never leaks, and buffers long enough
+/// for the muxer to interleave against video encoder latency.
+fn configure_mux_queue(queue: &gst::Element) {
+    if queue.find_property("leaky").is_some() {
+        queue.set_property_from_str("leaky", "no");
+    }
+    queue.set_property("max-size-buffers", 0u32);
+    queue.set_property("max-size-bytes", 0u32);
+    queue.set_property("max-size-time", AUDIO_MUX_QUEUE_TIME_NS);
+}
+
 fn build_branch(
     setup: &GstAudioSetup,
     prefix: &str,
@@ -343,7 +361,10 @@ pub(super) fn build_audio_bin(
     }
 
     let out_queue = make_element("queue", "audio_out_queue")?;
-    configure_live_queue(&out_queue);
+    match termination {
+        AudioTermination::AppSink => configure_live_queue(&out_queue),
+        AudioTermination::GhostPad => configure_mux_queue(&out_queue),
+    }
     let mut out_elements = vec![
         out_queue,
         make_element("audioconvert", "audio_out_convert")?,
@@ -390,12 +411,12 @@ pub(super) fn build_audio_bin(
 
     // A single live pad through audiomixer still aligns on running time and
     // inserts digital silence after a timestamp jump (exactly the snap crack).
+    // ignore-inactive-pads stays at its default (false). When it is true and
+    // the mixer's first timeout fires before either live source has delivered
+    // a buffer, the aggregator sees no sink pads, reports EOS, and its src task
+    // pauses for good, so the audio track never receives data.
     let mixer = if branches.len() > 1 {
-        let mixer = make_element("audiomixer", "audio_mix")?;
-        if mixer.find_property("ignore-inactive-pads").is_some() {
-            mixer.set_property("ignore-inactive-pads", true);
-        }
-        Some(mixer)
+        Some(make_element("audiomixer", "audio_mix")?)
     } else {
         None
     };
@@ -518,6 +539,157 @@ fn append_sample_bytes(sample: &gst::Sample, out: &mut Vec<u8>) {
     }
 }
 
+/// Upper bound on encoded chunks held while the video origin is still unknown
+/// (about 5 s of AAC at ~21 ms per ADTS frame). The oldest chunk goes first.
+const MAX_HELD_CHUNKS: usize = 300;
+/// Sentinel for an unset bound in `AudioTrimGate`.
+const TRIM_UNSET: u64 = u64::MAX;
+
+/// Window of pipeline running time (ns) the encoded audio is trimmed to.
+/// Set from the control thread, read by the writer thread.
+#[derive(Debug)]
+pub(super) struct AudioTrimGate {
+    start_ns: AtomicU64,
+    end_ns: AtomicU64,
+}
+
+impl AudioTrimGate {
+    fn new() -> Self {
+        Self {
+            start_ns: AtomicU64::new(TRIM_UNSET),
+            end_ns: AtomicU64::new(TRIM_UNSET),
+        }
+    }
+
+    fn set_start(&self, start_ns: u64) {
+        self.start_ns.store(start_ns, Ordering::Release);
+    }
+
+    fn set_end(&self, end_ns: u64) {
+        self.end_ns.store(end_ns, Ordering::Release);
+    }
+
+    /// `(start, end)` as currently set; `None` means unset.
+    fn bounds(&self) -> (Option<u64>, Option<u64>) {
+        let decode = |value: u64| (value != TRIM_UNSET).then_some(value);
+        (
+            decode(self.start_ns.load(Ordering::Acquire)),
+            decode(self.end_ns.load(Ordering::Acquire)),
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TrimDecision {
+    /// The window has no start yet; keep the sample until it does.
+    Hold,
+    Drop,
+    Write,
+}
+
+/// Keep/drop rule for one encoded sample, with times in pipeline running time:
+/// - no start yet: hold;
+/// - pts after end: drop (a sample without pts is dropped once end is set);
+/// - pts before start: drop;
+/// - otherwise write (a sample without pts is written while the window is open).
+fn trim_decision(pts_ns: Option<u64>, start_ns: Option<u64>, end_ns: Option<u64>) -> TrimDecision {
+    let Some(start) = start_ns else {
+        return TrimDecision::Hold;
+    };
+    if let Some(end) = end_ns {
+        if pts_ns.is_none_or(|pts| pts > end) {
+            return TrimDecision::Drop;
+        }
+    }
+    match pts_ns {
+        Some(pts) if pts < start => TrimDecision::Drop,
+        _ => TrimDecision::Write,
+    }
+}
+
+/// Maps the video media origin (`CLOCK_MONOTONIC` µs) to pipeline running time.
+/// Falls back to 0 when the base time is unknown or the result would be
+/// negative, so audio is never lost to a bad conversion.
+fn running_start_ns(origin_us: i64, base_ns: Option<u64>) -> u64 {
+    let Some(base_ns) = base_ns else {
+        return 0;
+    };
+    let running = i128::from(origin_us) * 1000 - i128::from(base_ns);
+    u64::try_from(running).unwrap_or(0)
+}
+
+/// Pipeline running time now (the clock's time minus the base time). Pauses
+/// freeze running time, so callers that stop while paused use the pause value.
+fn clock_running_time_ns(pipeline: &gst::Pipeline) -> Option<u64> {
+    let clock = pipeline.clock()?;
+    let base = pipeline.base_time()?;
+    clock.time().nseconds().checked_sub(base.nseconds())
+}
+
+/// One encoded buffer from the appsink, with its running-time PTS.
+#[derive(Debug)]
+struct EncodedChunk {
+    pts_ns: Option<u64>,
+    bytes: Vec<u8>,
+}
+
+impl EncodedChunk {
+    fn from_sample(sample: &gst::Sample) -> Self {
+        let mut bytes = Vec::new();
+        append_sample_bytes(sample, &mut bytes);
+        let pts_ns = sample
+            .buffer()
+            .and_then(|buffer| buffer.pts())
+            .map(|pts| pts.nseconds());
+        Self { pts_ns, bytes }
+    }
+}
+
+/// Writes encoded chunks to the audio pipe, trimmed to the gate's window.
+/// Chunks wait in `held` until the window opens; the queue is bounded.
+struct TrimmedWriter<W: Write> {
+    gate: Arc<AudioTrimGate>,
+    held: VecDeque<EncodedChunk>,
+    out: W,
+}
+
+impl<W: Write> TrimmedWriter<W> {
+    fn new(gate: Arc<AudioTrimGate>, out: W) -> Self {
+        Self {
+            gate,
+            held: VecDeque::new(),
+            out,
+        }
+    }
+
+    fn hold(&mut self, chunk: EncodedChunk) {
+        if self.held.len() >= MAX_HELD_CHUNKS {
+            self.held.pop_front();
+        }
+        self.held.push_back(chunk);
+    }
+
+    /// Apply the gate to held chunks in order. Stops at the first chunk that
+    /// must still be held, so the output keeps capture order.
+    fn drain(&mut self) -> std::io::Result<()> {
+        let (start_ns, end_ns) = self.gate.bounds();
+        while let Some(front) = self.held.front() {
+            match trim_decision(front.pts_ns, start_ns, end_ns) {
+                TrimDecision::Hold => break,
+                TrimDecision::Drop => {
+                    self.held.pop_front();
+                }
+                TrimDecision::Write => {
+                    if let Some(chunk) = self.held.pop_front() {
+                        self.out.write_all(&chunk.bytes)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 /// A running Wayland audio capture: gst pipeline + writer thread feeding the
 /// inherited pipe that ffmpeg reads as its second input.
 pub(super) struct ActiveGstAudio {
@@ -527,14 +699,18 @@ pub(super) struct ActiveGstAudio {
     halt: Arc<AtomicBool>,
     done: Option<mpsc::Receiver<()>>,
     writer: Option<std::thread::JoinHandle<()>>,
+    gate: Arc<AudioTrimGate>,
     paused: bool,
+    /// Running time frozen by the current pause, if any.
+    paused_running_ns: Option<u64>,
 }
 
 impl ActiveGstAudio {
     /// Build and start the audio pipeline. Waits for the first encoded sample
     /// (bounded by a short grace window) so a failing source is detected
     /// before ffmpeg is spawned with the audio pipe attached — ffmpeg
-    /// hard-fails on an empty audio input.
+    /// hard-fails on an empty audio input. Nothing is written to the pipe
+    /// until `set_start_at_monotonic_us` anchors the window to the video.
     pub(super) fn start(setup: &GstAudioSetup, muxer: &str) -> Result<Self, String> {
         ensure_gst_initialized()?;
         let encoder =
@@ -553,8 +729,7 @@ impl ActiveGstAudio {
 
         let bus = pipeline.bus().ok_or("audio pipeline has no bus")?;
         let deadline = Instant::now() + FIRST_SAMPLE_GRACE;
-        let mut prebuf = Vec::new();
-        loop {
+        let prebuf: Option<EncodedChunk> = loop {
             for message in bus.iter_timed(gst::ClockTime::ZERO) {
                 if let gst::MessageView::Error(err) = message.view() {
                     let _ = pipeline.set_state(gst::State::Null);
@@ -562,48 +737,47 @@ impl ActiveGstAudio {
                 }
             }
             if let Some(sample) = appsink.try_pull_sample(gst::ClockTime::ZERO) {
-                append_sample_bytes(&sample, &mut prebuf);
-                break;
+                break Some(EncodedChunk::from_sample(&sample));
             }
             if Instant::now() > deadline {
                 let _ = pipeline.set_state(gst::State::Null);
                 return Err("audio pipeline produced no encoded data".into());
             }
             std::thread::sleep(Duration::from_millis(10));
-        }
+        };
 
         let halt = Arc::new(AtomicBool::new(false));
         let writer_halt = halt.clone();
+        let gate = Arc::new(AudioTrimGate::new());
+        let writer_gate = gate.clone();
         let (done_tx, done_rx) = mpsc::channel::<()>();
         let writer = std::thread::Builder::new()
             .name("apexshot-audio-writer".into())
             .spawn(move || {
                 let done_tx = done_tx;
-                let mut file: std::fs::File = write_fd.into();
-                if !prebuf.is_empty() {
-                    if let Err(err) = file.write_all(&prebuf) {
-                        eprintln!("[recording] audio pipe write failed: {err}");
-                        let _ = done_tx.send(());
-                        return;
-                    }
+                let file: std::fs::File = write_fd.into();
+                let mut out = TrimmedWriter::new(writer_gate, file);
+                if let Some(chunk) = prebuf {
+                    out.hold(chunk);
                 }
                 while !writer_halt.load(Ordering::Acquire) {
-                    match appsink.try_pull_sample(gst::ClockTime::from_mseconds(100)) {
+                    let at_eos = match appsink.try_pull_sample(gst::ClockTime::from_mseconds(100)) {
                         Some(sample) => {
-                            let mut bytes = Vec::new();
-                            append_sample_bytes(&sample, &mut bytes);
-                            if let Err(err) = file.write_all(&bytes) {
-                                if err.kind() != std::io::ErrorKind::BrokenPipe {
-                                    eprintln!("[recording] audio pipe write failed: {err}");
-                                }
-                                break;
-                            }
+                            out.hold(EncodedChunk::from_sample(&sample));
+                            false
                         }
-                        None => {
-                            if appsink.is_eos() {
-                                break;
-                            }
+                        None => appsink.is_eos(),
+                    };
+                    if let Err(err) = out.drain() {
+                        if err.kind() != std::io::ErrorKind::BrokenPipe {
+                            eprintln!("[recording] audio pipe write failed: {err}");
                         }
+                        break;
+                    }
+                    // At EOS whatever is still held lies outside the window
+                    // (or the window never opened): discard it and close the pipe.
+                    if at_eos {
+                        break;
                     }
                 }
                 let _ = done_tx.send(());
@@ -617,8 +791,42 @@ impl ActiveGstAudio {
             halt,
             done: Some(done_rx),
             writer: Some(writer),
+            gate,
             paused: false,
+            paused_running_ns: None,
         })
+    }
+
+    /// Anchor the start of the audio to the video media origin, given as a
+    /// `CLOCK_MONOTONIC` µs timestamp (the clock `glib::monotonic_time` reads).
+    /// Audio captured before this instant is dropped.
+    pub(super) fn set_start_at_monotonic_us(&self, origin_us: i64) {
+        let base_ns = self
+            .pipeline
+            .clock()
+            .and_then(|_| self.pipeline.base_time())
+            .map(|base| base.nseconds());
+        let start_ns = running_start_ns(origin_us, base_ns);
+        self.gate.set_start(start_ns);
+        eprintln!(
+            "[recording] audio trimmed to video origin: running_ns={start_ns} \
+             (origin_us={origin_us}, base_time_ns={base_ns:?})"
+        );
+    }
+
+    /// Trim the audio tail at the stop instant. Uses the running time frozen
+    /// by a pause if the recording stops while paused.
+    pub(super) fn set_end_now(&self) {
+        let end_ns = self
+            .paused_running_ns
+            .or_else(|| clock_running_time_ns(&self.pipeline));
+        match end_ns {
+            Some(end_ns) => {
+                self.gate.set_end(end_ns);
+                eprintln!("[recording] audio trimmed at stop: running_ns={end_ns}");
+            }
+            None => eprintln!("[recording] audio stop time unknown; audio tail is not trimmed"),
+        }
     }
 
     /// The pipe fd ffmpeg should inherit as fd 3.
@@ -642,10 +850,16 @@ impl ActiveGstAudio {
         } else {
             gst::State::Playing
         };
+        let frozen_ns = if paused {
+            clock_running_time_ns(&self.pipeline)
+        } else {
+            None
+        };
         if let Err(err) = self.pipeline.set_state(state) {
             eprintln!("[recording] audio pause/resume failed: {err:?}");
             return;
         }
+        self.paused_running_ns = frozen_ns;
         self.paused = paused;
     }
 
@@ -1041,7 +1255,7 @@ mod tests {
     }
 
     #[test]
-    fn two_branch_bin_keeps_mixer_and_ignores_inactive_pads() {
+    fn two_branch_bin_keeps_mixer_and_waits_for_inactive_pads() {
         if skip_if_gst_audio_unavailable(AudioEncoder::Aac, true) {
             return;
         }
@@ -1052,10 +1266,108 @@ mod tests {
             .by_name("audio_mix")
             .expect("mic+monitor still uses audiomixer");
         if mixer.find_property("ignore-inactive-pads").is_some() {
-            assert!(mixer.property::<bool>("ignore-inactive-pads"));
+            assert!(!mixer.property::<bool>("ignore-inactive-pads"));
         }
         assert_eq!(bin.volumes.len(), 2);
         let _ = bin.bin.set_state(gst::State::Null);
+    }
+
+    /// Regression: with `ignore-inactive-pads=true`, a mixer whose first
+    /// timeout fires before either live source has delivered a buffer reports
+    /// EOS and never emits audio. Both branches are held silent for the first
+    /// 500 ms after PLAYING, and encoded output must still follow.
+    #[test]
+    fn two_branch_bin_produces_audio_when_sources_start_late() {
+        if skip_if_gst_audio_unavailable(AudioEncoder::Aac, true) {
+            return;
+        }
+        let setup = test_setup(false);
+        let bin = build_audio_bin(&setup, AudioEncoder::Aac, AudioTermination::AppSink).unwrap();
+        let appsink = bin.appsink.as_ref().unwrap().clone();
+
+        let started = Instant::now();
+        for name in ["mic_src", "mon_src"] {
+            let src_pad = bin
+                .bin
+                .by_name(name)
+                .unwrap_or_else(|| panic!("{name} missing"))
+                .static_pad("src")
+                .expect("source has a src pad");
+            src_pad.add_probe(gst::PadProbeType::BUFFER, move |_pad, _info| {
+                if started.elapsed() < Duration::from_millis(500) {
+                    gst::PadProbeReturn::Drop
+                } else {
+                    gst::PadProbeReturn::Ok
+                }
+            });
+        }
+
+        let pipeline = gst::Pipeline::new();
+        pipeline.add(&bin.bin).unwrap();
+        pipeline.set_state(gst::State::Playing).unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut got_sample = false;
+        let mut saw_eos = false;
+        while Instant::now() < deadline {
+            if appsink
+                .try_pull_sample(gst::ClockTime::from_mseconds(100))
+                .is_some()
+            {
+                got_sample = true;
+                break;
+            }
+            if appsink.is_eos() {
+                saw_eos = true;
+                break;
+            }
+        }
+        let _ = pipeline.set_state(gst::State::Null);
+
+        assert!(
+            !saw_eos,
+            "audiomixer reached EOS after late-starting sources; no audio can follow"
+        );
+        assert!(
+            got_sample,
+            "no encoded audio within 3s after sources started late"
+        );
+    }
+
+    #[test]
+    fn ghost_pad_bin_out_queue_is_not_leaky_and_buffers_five_seconds() {
+        if skip_if_gst_audio_unavailable(AudioEncoder::Aac, false) {
+            return;
+        }
+        let setup = test_setup(false);
+        let bin = build_audio_bin(&setup, AudioEncoder::Aac, AudioTermination::GhostPad).unwrap();
+        let queue = bin.bin.by_name("audio_out_queue").expect("audio out queue");
+        assert_eq!(queue_leaky_nick(&queue), "no");
+        assert!(queue.property::<u64>("max-size-time") >= 3_000_000_000);
+        assert_eq!(queue.property::<u32>("max-size-buffers"), 0);
+        assert_eq!(queue.property::<u32>("max-size-bytes"), 0);
+        let _ = bin.bin.set_state(gst::State::Null);
+    }
+
+    #[test]
+    fn appsink_bin_out_queue_stays_leaky_downstream() {
+        if skip_if_gst_audio_unavailable(AudioEncoder::Aac, true) {
+            return;
+        }
+        let setup = test_setup(false);
+        let bin = build_audio_bin(&setup, AudioEncoder::Aac, AudioTermination::AppSink).unwrap();
+        let queue = bin.bin.by_name("audio_out_queue").expect("audio out queue");
+        assert_eq!(queue_leaky_nick(&queue), "downstream");
+        assert_eq!(queue.property::<u64>("max-size-time"), AUDIO_QUEUE_TIME_NS);
+        let _ = bin.bin.set_state(gst::State::Null);
+    }
+
+    fn queue_leaky_nick(queue: &gst::Element) -> String {
+        queue
+            .property_value("leaky")
+            .serialize()
+            .expect("leaky serializes")
+            .to_string()
     }
 
     #[test]
@@ -1121,6 +1433,9 @@ mod tests {
         let setup = test_setup(false);
         let mut audio =
             ActiveGstAudio::start(&setup, "mp4mux").expect("audio pipeline should start");
+        // Production anchors the window at the first video frame; this test has
+        // no video, so anchor at "now" or the writer would hold every sample.
+        audio.set_start_at_monotonic_us(gst::glib::monotonic_time());
         let read_fd = audio.take_read_fd().expect("pipe read fd");
 
         let out =
@@ -1173,6 +1488,145 @@ mod tests {
             "expected an aac stream in the output, got: {streams}"
         );
         let _ = std::fs::remove_file(&out);
+    }
+
+    #[test]
+    fn trim_decision_holds_until_the_video_origin_is_known() {
+        assert_eq!(trim_decision(Some(0), None, None), TrimDecision::Hold);
+        assert_eq!(trim_decision(Some(5), None, Some(9)), TrimDecision::Hold);
+        assert_eq!(trim_decision(None, None, None), TrimDecision::Hold);
+    }
+
+    #[test]
+    fn trim_decision_drops_samples_captured_before_the_origin() {
+        assert_eq!(trim_decision(Some(99), Some(100), None), TrimDecision::Drop);
+        assert_eq!(
+            trim_decision(Some(100), Some(100), None),
+            TrimDecision::Write
+        );
+        assert_eq!(
+            trim_decision(Some(101), Some(100), None),
+            TrimDecision::Write
+        );
+    }
+
+    #[test]
+    fn trim_decision_writes_samples_inside_the_window_and_drops_after_end() {
+        assert_eq!(
+            trim_decision(Some(150), Some(100), Some(200)),
+            TrimDecision::Write
+        );
+        assert_eq!(
+            trim_decision(Some(200), Some(100), Some(200)),
+            TrimDecision::Write
+        );
+        assert_eq!(
+            trim_decision(Some(201), Some(100), Some(200)),
+            TrimDecision::Drop
+        );
+        assert_eq!(
+            trim_decision(Some(50), Some(100), Some(200)),
+            TrimDecision::Drop
+        );
+    }
+
+    #[test]
+    fn trim_decision_handles_samples_without_pts() {
+        // Written while the window is open (start set, end unset)...
+        assert_eq!(trim_decision(None, Some(100), None), TrimDecision::Write);
+        // ...dropped once the stop instant has passed...
+        assert_eq!(
+            trim_decision(None, Some(100), Some(200)),
+            TrimDecision::Drop
+        );
+        // ...and held, like any sample, until the window has a start.
+        assert_eq!(trim_decision(None, None, Some(200)), TrimDecision::Hold);
+    }
+
+    #[test]
+    fn running_start_maps_the_monotonic_origin_and_never_underflows() {
+        // origin 1.0 s on the monotonic clock, base time 0.4 s -> 0.6 s running.
+        assert_eq!(running_start_ns(1_000_000, Some(400_000_000)), 600_000_000);
+        // Missing base time (no clock) falls back to 0 so audio is kept.
+        assert_eq!(running_start_ns(1_000_000, None), 0);
+        // Origin before the base time would underflow: fall back to 0.
+        assert_eq!(running_start_ns(100, Some(400_000_000)), 0);
+        assert_eq!(running_start_ns(-5, Some(0)), 0);
+    }
+
+    #[test]
+    fn audio_trim_gate_starts_unset_and_reports_bounds() {
+        let gate = AudioTrimGate::new();
+        assert_eq!(gate.bounds(), (None, None));
+        gate.set_start(0);
+        assert_eq!(gate.bounds(), (Some(0), None));
+        gate.set_end(42);
+        assert_eq!(gate.bounds(), (Some(0), Some(42)));
+    }
+
+    fn encoded(pts_ns: Option<u64>, byte: u8) -> EncodedChunk {
+        EncodedChunk {
+            pts_ns,
+            bytes: vec![byte],
+        }
+    }
+
+    #[test]
+    fn writer_holds_until_start_then_writes_from_the_origin() {
+        let gate = Arc::new(AudioTrimGate::new());
+        let mut out = TrimmedWriter::new(gate.clone(), Vec::new());
+        out.hold(encoded(Some(10), b'a'));
+        out.hold(encoded(Some(20), b'b'));
+        out.hold(encoded(Some(30), b'c'));
+        out.drain().unwrap();
+        assert!(out.out.is_empty(), "nothing is written before the origin");
+        assert_eq!(out.held.len(), 3);
+
+        gate.set_start(20);
+        out.drain().unwrap();
+        assert_eq!(out.out, b"bc", "the sample before the origin is dropped");
+        assert!(out.held.is_empty());
+    }
+
+    #[test]
+    fn writer_stops_writing_after_end_and_keeps_order() {
+        let gate = Arc::new(AudioTrimGate::new());
+        let mut out = TrimmedWriter::new(gate.clone(), Vec::new());
+        gate.set_start(0);
+        out.hold(encoded(Some(10), b'a'));
+        out.drain().unwrap();
+        gate.set_end(40);
+        out.hold(encoded(Some(40), b'b'));
+        out.hold(encoded(Some(50), b'c'));
+        out.hold(encoded(None, b'd'));
+        out.drain().unwrap();
+        assert_eq!(out.out, b"ab");
+        assert!(out.held.is_empty());
+    }
+
+    #[test]
+    fn writer_discards_everything_when_the_origin_never_arrives() {
+        // EOS without a video origin: the writer drains (nothing is eligible)
+        // and exits, so the pipe closes with no audio written.
+        let gate = Arc::new(AudioTrimGate::new());
+        let mut out = TrimmedWriter::new(gate.clone(), Vec::new());
+        out.hold(encoded(Some(1), b'a'));
+        out.hold(encoded(Some(2), b'b'));
+        out.drain().unwrap();
+        gate.set_end(10);
+        out.drain().unwrap();
+        assert!(out.out.is_empty());
+    }
+
+    #[test]
+    fn writer_holds_a_bounded_queue_before_the_origin() {
+        let gate = Arc::new(AudioTrimGate::new());
+        let mut out = TrimmedWriter::new(gate, Vec::new());
+        for pts in 0..(MAX_HELD_CHUNKS as u64 + 50) {
+            out.hold(encoded(Some(pts), b'x'));
+        }
+        assert_eq!(out.held.len(), MAX_HELD_CHUNKS);
+        assert_eq!(out.held.front().unwrap().pts_ns, Some(50));
     }
 
     #[test]

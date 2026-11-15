@@ -56,6 +56,8 @@ impl VideoEditState {
             timeline_scale: 0.0,
             timeline_offset_seconds: 0.0,
             timeline_scroll_seconds: 0.0,
+            export_settings: Default::default(),
+            export_progress: None,
         }
     }
 
@@ -108,8 +110,8 @@ impl VideoEditState {
                 if timeline_t >= composition_start + duration {
                     return Some((timeline_t, last_frame));
                 }
-                let source = (source_start + (timeline_t - composition_start) * speed)
-                    .min(last_frame);
+                let source =
+                    (source_start + (timeline_t - composition_start) * speed).min(last_frame);
                 return Some((timeline_t, source));
             }
             last = Some((composition_start + duration + hold, last_frame));
@@ -178,10 +180,7 @@ impl VideoEditState {
                     0.0
                 };
                 let end = composition_start + self.segment_timeline_duration(index) + hold;
-                (end <= timeline_t + 1e-9).then_some((
-                    end,
-                    (source_end - frame).max(source_start),
-                ))
+                (end <= timeline_t + 1e-9).then_some((end, (source_end - frame).max(source_start)))
             })
             .max_by(|left, right| left.0.total_cmp(&right.0));
         previous
@@ -223,9 +222,12 @@ impl VideoEditState {
                 return self.segment_start(index) + (source_t - start) / self.segment_speed(index);
             }
         }
-        if let Some((index, &(start, _))) = bounds.iter().enumerate().rev().find(|(index, _)| {
-            self.segments_kept.get(*index).copied().unwrap_or(true)
-        }) {
+        if let Some((index, &(start, _))) = bounds
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(index, _)| self.segments_kept.get(*index).copied().unwrap_or(true))
+        {
             return self.segment_start(index) + (source_t - start) / self.segment_speed(index);
         }
         source_t.max(0.0)
