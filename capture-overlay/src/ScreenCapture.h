@@ -12,6 +12,7 @@
 
 #include <memory>
 
+class QPainter;
 class QProcess;
 class QScreen;
 
@@ -76,5 +77,9 @@ bool cropLogicalSelectionToTempPng(const QImage& captureImage,
 QPixmap freezeBackgroundForLogicalRect(const QImage& captureImage,
                                        const QRect& captureRect,
                                        const QRect& logicalRect);
+void paintFreezeBackground(QPainter& painter,
+                           const QPixmap& background,
+                           const QRect& targetRect,
+                           const QRect& clipRect);
 
 }

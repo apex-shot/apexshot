@@ -292,7 +292,7 @@ void CaptureOverlay::updateCursor(const QPoint& pos)
         height(),
         m_captureIntent == CaptureIntent::Scroll
     );
-    for (int i = 0; i < NUM_TOOLS; ++i) {
+    for (int i = 0; !m_captureMenuAreaMode && i < NUM_TOOLS; ++i) {
         if (layout.toolCells[i].contains(pos)) {
             setCursor(Qt::PointingHandCursor);
             return;

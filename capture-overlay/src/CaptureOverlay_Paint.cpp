@@ -1,6 +1,7 @@
 #include "CaptureOverlay.h"
 #include "CaptureOverlay_DrawingPrimitives_p.h"
 #include "CaptureOverlay_p.h"
+#include "ScreenCapture.h"
 
 #include <QColor>
 #include <QCursor>
@@ -36,7 +37,7 @@ void CaptureOverlay::paintEvent(QPaintEvent* event)
 
     if (isCrosshairMode()) {
         if (!m_background.isNull()) {
-            p.drawPixmap(widgetRect, m_background);
+            ScreenCapture::paintFreezeBackground(p, m_background, widgetRect, widgetRect);
         }
 
         const QPoint guidePoint = widgetRect.contains(m_pointerPos)
@@ -99,7 +100,7 @@ void CaptureOverlay::paintEvent(QPaintEvent* event)
 
     // ── Background ────────────────────────────────────────────────────────────
     if (!m_background.isNull()) {
-        p.drawPixmap(widgetRect, m_background);
+        ScreenCapture::paintFreezeBackground(p, m_background, widgetRect, widgetRect);
     } else {
         p.fillRect(widgetRect, QColor(0, 0, 0, 51)); // 0.20 alpha
     }
@@ -148,7 +149,7 @@ void CaptureOverlay::paintEvent(QPaintEvent* event)
 
     // ── Reveal selection area (repaint background there sharp) ────────────────
     if (!m_background.isNull()) {
-        p.drawPixmap(sel, m_background, sel);
+        ScreenCapture::paintFreezeBackground(p, m_background, widgetRect, sel);
     } else {
         // No background pixmap — punch the selection area fully transparent so
         // the real screen content shows through without any dark tint.
