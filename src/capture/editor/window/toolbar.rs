@@ -195,6 +195,10 @@ pub(super) fn build_toolbar_base(icon_names: ToolbarBaseIconNames<'_>) -> Toolba
         // Square tiles: the row is taller than the button, so pin each tile to
         // the middle and let the fixed min-size define the box.
         btn.set_valign(Align::Center);
+        btn.set_size_request(34, 34);
+        if let Some(image) = btn.child().and_downcast::<Image>() {
+            image.set_pixel_size(16);
+        }
     }
 
     let sep_1 = GtkBox::new(Orientation::Vertical, 0);
@@ -821,6 +825,7 @@ pub(super) fn build_toolbar_mode_controls(
     text_size_popover.set_has_arrow(false);
     text_size_popover.set_autohide(true);
     text_size_popover.add_css_class("editor-popover");
+    text_size_popover.set_offset(0, 12);
     text_size_popover.set_parent(&text_size_button);
     let text_size_list = GtkBox::new(Orientation::Vertical, 0);
     text_size_list.add_css_class("editor-popover-list");
@@ -833,11 +838,27 @@ pub(super) fn build_toolbar_mode_controls(
 
     for size in [12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72] {
         let label = format!("{}pt", size);
+        let btn_box = GtkBox::new(Orientation::Horizontal, 8);
+        let label_widget = Label::new(Some(&label));
+        label_widget.set_hexpand(true);
+        label_widget.set_xalign(0.0);
+        let check_icon = Image::from_icon_name(icon_names::custom::CHECK_SYMBOLIC);
+        check_icon.set_pixel_size(12);
+        check_icon.set_visible(false);
+        check_icon.add_css_class("editor-text-inspector-check");
+        check_icon.add_css_class("editor-menu-check");
+        btn_box.append(&label_widget);
+        btn_box.append(&check_icon);
         let btn = Button::builder()
-            .label(&label)
             .has_frame(false)
-            .css_classes(["editor-popover-list-item", "flat"])
+            .css_classes([
+                "editor-popover-list-item",
+                "flat",
+                "editor-text-inspector-option",
+            ])
+            .child(&btn_box)
             .build();
+        btn.set_size_request(-1, 32);
         text_size_list.append(&btn);
     }
 
@@ -865,6 +886,7 @@ pub(super) fn build_toolbar_mode_controls(
     font_family_popover.set_has_arrow(false);
     font_family_popover.set_autohide(true);
     font_family_popover.add_css_class("editor-popover");
+    font_family_popover.set_offset(0, 12);
     font_family_popover.set_parent(&font_family_button);
     let font_family_list = GtkBox::new(Orientation::Vertical, 0);
     font_family_list.add_css_class("editor-popover-list");
@@ -876,11 +898,27 @@ pub(super) fn build_toolbar_mode_controls(
     });
 
     for family in ["Sans", "Serif", "Monospace", "Fantasy", "Cursive"] {
+        let btn_box = GtkBox::new(Orientation::Horizontal, 8);
+        let label_widget = Label::new(Some(family));
+        label_widget.set_hexpand(true);
+        label_widget.set_xalign(0.0);
+        let check_icon = Image::from_icon_name(icon_names::custom::CHECK_SYMBOLIC);
+        check_icon.set_pixel_size(12);
+        check_icon.set_visible(false);
+        check_icon.add_css_class("editor-text-inspector-check");
+        check_icon.add_css_class("editor-menu-check");
+        btn_box.append(&label_widget);
+        btn_box.append(&check_icon);
         let btn = Button::builder()
-            .label(family)
             .has_frame(false)
-            .css_classes(["editor-popover-list-item", "flat"])
+            .css_classes([
+                "editor-popover-list-item",
+                "flat",
+                "editor-text-inspector-option",
+            ])
+            .child(&btn_box)
             .build();
+        btn.set_size_request(-1, 32);
         font_family_list.append(&btn);
     }
 
@@ -1095,7 +1133,6 @@ pub(super) fn build_toolbar_mode_controls(
     standard_mode_group.append(&primary_tools_group);
     standard_mode_group.append(&obfuscate_method_group);
     standard_mode_group.append(&pen_weight_group);
-    standard_mode_group.append(&size_group);
 
     let toolbar_mode_stack = Stack::new();
     toolbar_mode_stack.add_css_class("editor-toolbar-mode-stack");

@@ -272,6 +272,8 @@ const EDITOR_CSS: &str = concat!(
     include_str!("css/12-background-choices.css"),
     include_str!("css/13-text-modal.css"),
     include_str!("css/14-upscale-preview.css"),
+    include_str!("css/15-toolbar-controls.css"),
+    include_str!("css/16-menus.css"),
 );
 
 pub fn install_editor_css() {
@@ -909,15 +911,21 @@ mod tests {
         assert!(light_surface.contains("color: #1d2129;"));
         assert!(light_surface.contains("border-color: alpha(#111827, 0.10);"));
 
+        assert!(include_str!("window/toolbar_controls.rs")
+            .contains("add_css_class(\"editor-text-floating-bar\")"));
         for source in [
             include_str!("window/arrow_bar.rs"),
             include_str!("window/highlighter_bar.rs"),
             include_str!("window/number_bar.rs"),
             include_str!("window/text_bar.rs"),
+            include_str!("window/stroke_bar.rs"),
             include_str!("window/obfuscate_bar.rs"),
             include_str!("window/focus_bar.rs"),
         ] {
-            assert!(source.contains("add_css_class(\"editor-text-floating-bar\")"));
+            assert!(
+                source.contains("add_css_class(\"editor-text-floating-bar\")")
+                    || source.contains("sub_bar(")
+            );
         }
     }
 
@@ -1147,6 +1155,68 @@ mod tests {
         assert!(
             !production_source.contains("scale slider"),
             "editor CSS should not style GTK scale slider nodes"
+        );
+    }
+
+    #[test]
+    fn menu_stylesheet_is_the_last_include_and_covers_every_menu_popover() {
+        let source = include_str!("ui_support.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        let includes: Vec<&str> = production_source
+            .split("const EDITOR_CSS")
+            .nth(1)
+            .unwrap()
+            .split(");")
+            .next()
+            .unwrap()
+            .split("include_str!")
+            .skip(1)
+            .collect();
+        assert!(
+            includes
+                .last()
+                .is_some_and(|tail| tail.starts_with("(\"css/16-menus.css\")")),
+            "16-menus.css must be the last include so its additive overrides win"
+        );
+        for selector in [
+            "popover.editor-popover > contents",
+            "popover.editor-subbar-popover > contents",
+            "popover.recording-editor-dropdown-popover > contents",
+            "popover.recording-editor-stage-aspect > contents",
+            "popover.recording-editor-clip-menu-popover > contents",
+            "button.recording-editor-clip-menu-row-danger:hover",
+            ".editor-root.editor-theme-light popover.recording-editor-clip-menu-popover > contents",
+        ] {
+            assert!(
+                super::EDITOR_CSS.contains(selector),
+                "the shared menu stylesheet must cover {selector}"
+            );
+        }
+    }
+
+    #[test]
+    fn menu_stylesheet_parses_without_errors() {
+        let Some(errors) = crate::test_support::with_gtk(|| {
+            let provider = gtk4::CssProvider::new();
+            let errors = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+            {
+                let errors = std::rc::Rc::clone(&errors);
+                provider.connect_parsing_error(move |_, section, error| {
+                    errors
+                        .borrow_mut()
+                        .push(format!("{}: {}", section.to_str(), error.message()));
+                });
+            }
+            provider.load_from_data(include_str!("css/16-menus.css"));
+            let result = errors.borrow().clone();
+            result
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
+        assert!(
+            errors.is_empty(),
+            "16-menus.css raised parsing errors: {errors:?}"
         );
     }
 }
