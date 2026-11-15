@@ -34,7 +34,27 @@ impl SourceUpscale {
     }
 }
 
+/// Returned when `enhance_with_progress`'s callback asks to stop.
+pub(crate) const ENHANCE_CANCELLED: &str = "Neural upscaling was cancelled.";
+
+/// How many network passes an image of this size takes: one per tile.
+pub(crate) fn tile_count(width: u32, height: u32) -> usize {
+    (width as usize).div_ceil(TILE_CONTENT) * (height as usize).div_ceil(TILE_CONTENT)
+}
+
+#[cfg(test)]
 pub(crate) fn enhance(image: &RgbaImage, mode: SourceUpscale) -> Result<RgbaImage, String> {
+    enhance_with_progress(image, mode, &|_| true)
+}
+
+/// `enhance`, reporting each finished tile to `on_tile` (the count so far,
+/// out of `tile_count`). Returning false stops before the next tile, so a
+/// caller that no longer needs the result does not wait for the rest.
+pub(crate) fn enhance_with_progress(
+    image: &RgbaImage,
+    mode: SourceUpscale,
+    on_tile: &dyn Fn(usize) -> bool,
+) -> Result<RgbaImage, String> {
     if mode == SourceUpscale::Off {
         return Ok(image.clone());
     }
@@ -64,8 +84,13 @@ pub(crate) fn enhance(image: &RgbaImage, mode: SourceUpscale) -> Result<RgbaImag
             imageops::FilterType::Lanczos3,
         )
     };
+    let mut tiles_done = 0;
     for top in (0..height as usize).step_by(TILE_CONTENT) {
         for left in (0..width as usize).step_by(TILE_CONTENT) {
+            if !on_tile(tiles_done) {
+                return Err(ENHANCE_CANCELLED.into());
+            }
+            tiles_done += 1;
             let mut input = NdTensor::<f32, 4>::zeros([1, 3, TILE_SIZE, TILE_SIZE]);
             for y in 0..TILE_SIZE {
                 let source_y = (top + y)
@@ -117,6 +142,7 @@ pub(crate) fn enhance(image: &RgbaImage, mode: SourceUpscale) -> Result<RgbaImag
             }
         }
     }
+    on_tile(tiles_done);
     Ok(enhanced)
 }
 
@@ -147,6 +173,36 @@ pub(crate) fn validate_input_dimensions(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tiles_cover_partial_edges() {
+        assert_eq!(tile_count(1280, 800), 12 * 8);
+        assert_eq!(tile_count(TILE_CONTENT as u32, 1), 1);
+        assert_eq!(tile_count(TILE_CONTENT as u32 + 1, 1), 2);
+    }
+
+    #[test]
+    fn enhancement_reports_tiles_and_stops_when_asked() {
+        let image = RgbaImage::from_pixel(
+            TILE_CONTENT as u32 + 1,
+            TILE_CONTENT as u32 + 1,
+            image::Rgba([90, 120, 150, 255]),
+        );
+        let seen = std::cell::RefCell::new(Vec::new());
+        enhance_with_progress(&image, SourceUpscale::Neural2x, &|done| {
+            seen.borrow_mut().push(done);
+            true
+        })
+        .unwrap();
+        assert_eq!(*seen.borrow(), vec![0, 1, 2, 3, 4]);
+        let calls = std::cell::Cell::new(0);
+        let result = enhance_with_progress(&image, SourceUpscale::Neural2x, &|done| {
+            calls.set(calls.get() + 1);
+            done < 1
+        });
+        assert_eq!(result.err().as_deref(), Some(ENHANCE_CANCELLED));
+        assert_eq!(calls.get(), 2, "it stops before the second tile");
+    }
 
     #[test]
     fn disabled_enhancement_preserves_every_pixel() {

@@ -1,251 +1,477 @@
             /* ─────────────────────────────────────────────────────────────
-               Neural upscaling comparison dialog.
-
-               Opened from the Motion editor, so it borrows that surface
-               system: #141414 cards, 10–14px radii, hairline white rims,
-               muted secondary copy, and the #ff670d action colour. The
-               global editor rules scope to .editor-root, which left this
-               standalone window on platform defaults.
+               Export quality: the Appearance card and its before / after
+               sheet. The sheet sits in the editor's own overlay, so it
+               borrows the editor surfaces: #141414 for the card and panel,
+               #0f0f0f for the recessed stage, hairline rims, no shadow.
                ───────────────────────────────────────────────────────────── */
 
-            .editor-upscale-window {
-                font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
-                color: #f1f1f3;
-                background-color: #141414;
-                border: 1px solid alpha(white, 0.10);
-                border-radius: 14px;
-                /* The dialog is modal and sits over the editor, so the
-                   drop shadow only smudged the surrounding canvas. */
-                box-shadow: none;
-            }
-
-            .editor-upscale-window .editor-upscale-titlebar {
-                padding: 14px 18px 10px;
-                background: transparent;
-            }
-
-            .editor-upscale-window .editor-upscale-title {
-                color: #f1f1f3;
-                font-size: 15px;
-                font-weight: 600;
-                letter-spacing: -0.2px;
-            }
-
-            .editor-upscale-window .editor-upscale-subtitle {
-                color: rgba(255, 255, 255, 0.50);
-                font-size: 11px;
-            }
-
-            .editor-upscale-window button.editor-upscale-close {
-                min-width: 30px;
-                min-height: 30px;
-                padding: 0;
-                border: none;
+            /* Studio tier badge on the card header: a small warm pill. */
+            .editor-root .editor-studio-badge {
+                color: #ff9250;
+                background: rgba(255, 103, 13, 0.16);
                 border-radius: 999px;
-                background: transparent;
-                background-image: none;
-                box-shadow: none;
-                color: rgba(255, 255, 255, 0.62);
-            }
-
-            .editor-upscale-window button.editor-upscale-close:hover {
-                background: alpha(white, 0.10);
-                color: #ffffff;
-            }
-
-            .editor-upscale-window button.editor-upscale-close:active {
-                background: alpha(white, 0.14);
-                color: #ffffff;
-            }
-
-            /* The content sits directly under the custom titlebar, so the
-               shared editor root must not paint a second rounded surface. */
-            .editor-upscale-window .editor-upscale-body {
-                padding: 0 18px 18px;
-                background: transparent;
-                border: none;
-                border-radius: 0;
-                box-shadow: none;
-            }
-
-            .editor-upscale-window .editor-upscale-note {
-                padding: 10px 12px;
-                border: 1px solid alpha(#ff670d, 0.14);
-                border-radius: 8px;
-                background-color: alpha(#ff670d, 0.07);
-                color: rgba(255, 255, 255, 0.66);
-                font-size: 11px;
-                line-height: 1.4;
-            }
-
-            .editor-upscale-window .editor-upscale-note label {
-                color: inherit;
-            }
-
-            .editor-upscale-window .editor-upscale-note image {
-                color: #ff9a5c;
-            }
-
-            .editor-upscale-window .editor-upscale-controls {
-                margin-top: 14px;
-            }
-
-            .editor-upscale-window .editor-upscale-field-label {
-                color: rgba(255, 255, 255, 0.45);
-                font-size: 11px;
-                font-weight: 500;
-            }
-
-            .editor-upscale-window .editor-motion-select {
-                min-width: 132px;
-            }
-
-            .editor-upscale-window .editor-upscale-message {
-                margin: 24px;
-                color: rgba(255, 255, 255, 0.70);
-                font-size: 13px;
-            }
-
-            .editor-upscale-window .editor-upscale-stage {
-                min-height: 260px;
-                margin-top: 16px;
-                border: 1px solid alpha(white, 0.10);
-                border-radius: 10px;
-                background-color: #0d0d0d;
-            }
-
-            .editor-upscale-window .editor-upscale-scroll {
-                background: transparent;
-            }
-
-            .editor-upscale-window .editor-upscale-stage-badge {
-                padding: 4px 9px;
-                border: 1px solid alpha(white, 0.14);
-                border-radius: 999px;
-                background-color: alpha(black, 0.62);
-                color: rgba(255, 255, 255, 0.92);
-                font-size: 10px;
+                padding: 1px 7px;
+                font-size: 9px;
                 font-weight: 700;
-                box-shadow: 0 2px 8px alpha(black, 0.25);
+                letter-spacing: 0.5px;
             }
 
-            .editor-upscale-window .editor-upscale-status-row {
-                min-height: 16px;
-                margin-top: 8px;
+            .editor-root.editor-theme-light .editor-studio-badge {
+                color: #c2410c;
+                background: rgba(255, 103, 13, 0.12);
             }
 
-            .editor-upscale-window .editor-upscale-status {
-                color: rgba(255, 255, 255, 0.55);
+            .editor-root .editor-upscale-segmented {
+                margin: 0;
+            }
+
+            .editor-root .editor-upscale-meta {
+                padding: 0 2px;
+            }
+
+            .editor-root .editor-upscale-size,
+            .editor-root .editor-upscale-arrow,
+            .editor-root .editor-upscale-output {
+                color: rgba(255, 255, 255, 0.56);
+                font-size: 11px;
+                font-feature-settings: "tnum";
+            }
+
+            .editor-root .editor-upscale-arrow {
+                color: #ff8a3d;
+            }
+
+            .editor-root .editor-upscale-output {
+                color: rgba(255, 255, 255, 0.92);
+                font-weight: 600;
+            }
+
+            .editor-root .editor-upscale-notice {
+                padding: 8px 10px;
+                border-left: 2px solid #ff670d;
+                border-radius: 6px;
+                background: rgba(255, 103, 13, 0.08);
+                color: rgba(255, 255, 255, 0.78);
                 font-size: 11px;
             }
 
-            .editor-upscale-window spinner {
-                color: #ff670d;
+            .editor-root.editor-theme-light .editor-upscale-size {
+                color: rgba(17, 24, 39, 0.58);
             }
 
-            .editor-upscale-window .editor-upscale-footer {
-                margin-top: 16px;
-                padding-top: 14px;
-                border-top: 1px solid alpha(white, 0.07);
-            }
-
-            .editor-upscale-window button.editor-upscale-secondary {
-                min-height: 34px;
-                padding: 0 14px;
-                border-radius: 7px;
-                color: rgba(255, 255, 255, 0.78);
-                font-size: 12px;
-                font-weight: 600;
-            }
-
-            .editor-upscale-window button.editor-upscale-primary {
-                min-width: 148px;
-                min-height: 34px;
-                padding: 0 16px;
-                border-radius: 7px;
-                font-size: 12px;
-                font-weight: 600;
-            }
-
-            .editor-upscale-window button.editor-upscale-primary:disabled {
-                background: alpha(white, 0.06);
-                color: rgba(255, 255, 255, 0.35);
-            }
-
-            .editor-upscale-window button.editor-upscale-primary:disabled label {
-                color: rgba(255, 255, 255, 0.35);
-            }
-
-            /* ── Light theme, mirroring the editor's palette ── */
-
-            .editor-upscale-window.editor-theme-light {
-                color: #1d2129;
-                background-color: #f6f7fb;
-                border-color: alpha(#111827, 0.10);
-            }
-
-            .editor-upscale-window.editor-theme-light .editor-upscale-title {
-                color: #1d2129;
-            }
-
-            .editor-upscale-window.editor-theme-light .editor-upscale-subtitle {
-                color: rgba(29, 33, 41, 0.52);
-            }
-
-            .editor-upscale-window.editor-theme-light button.editor-upscale-close {
-                color: rgba(29, 33, 41, 0.55);
-            }
-
-            .editor-upscale-window.editor-theme-light button.editor-upscale-close:hover {
-                background: alpha(#111827, 0.07);
-                color: #1d2129;
-            }
-
-            .editor-upscale-window.editor-theme-light button.editor-upscale-close:active {
-                background: alpha(#111827, 0.11);
-                color: #1d2129;
-            }
-
-            .editor-upscale-window.editor-theme-light .editor-upscale-note {
-                border-color: alpha(#ff670d, 0.20);
-                background-color: alpha(#ff670d, 0.08);
-                color: rgba(29, 33, 41, 0.68);
-            }
-
-            .editor-upscale-window.editor-theme-light .editor-upscale-note image {
+            .editor-root.editor-theme-light .editor-upscale-arrow {
                 color: #d15b12;
             }
 
-            .editor-upscale-window.editor-theme-light .editor-upscale-field-label {
-                color: rgba(29, 33, 41, 0.48);
+            .editor-root.editor-theme-light .editor-upscale-output {
+                color: rgba(17, 24, 39, 0.92);
             }
 
-            .editor-upscale-window.editor-theme-light .editor-upscale-message {
-                color: rgba(29, 33, 41, 0.70);
+            .editor-root.editor-theme-light .editor-upscale-notice {
+                color: rgba(17, 24, 39, 0.78);
             }
 
-            .editor-upscale-window.editor-theme-light .editor-upscale-stage {
-                border-color: alpha(#111827, 0.10);
-                background-color: #eef0f5;
+            /* The compare action: a full-width row with the split glyph, its
+               label, and a chevron for the sheet it opens. */
+            .editor-root button.editor-upscale-compare {
+                min-height: 40px;
+                padding: 0 12px;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 8px;
+                background: rgba(255, 255, 255, 0.03);
+                background-image: none;
+                box-shadow: none;
+                outline: none;
+                color: rgba(255, 255, 255, 0.90);
             }
 
-            .editor-upscale-window.editor-theme-light .editor-upscale-status {
-                color: rgba(29, 33, 41, 0.56);
+            .editor-root button.editor-upscale-compare:hover {
+                border-color: rgba(255, 255, 255, 0.16);
+                background: rgba(255, 255, 255, 0.06);
             }
 
-            .editor-upscale-window.editor-theme-light .editor-upscale-footer {
-                border-top-color: alpha(#111827, 0.08);
+            .editor-root button.editor-upscale-compare:active {
+                background: rgba(255, 255, 255, 0.08);
             }
 
-            .editor-upscale-window.editor-theme-light button.editor-upscale-secondary {
-                color: rgba(29, 33, 41, 0.72);
+            .editor-root button.editor-upscale-compare:disabled {
+                opacity: 0.4;
             }
 
-            .editor-upscale-window.editor-theme-light button.editor-upscale-primary:disabled {
-                background: alpha(#111827, 0.05);
-                color: rgba(29, 33, 41, 0.35);
+            .editor-root .editor-upscale-compare-icon {
+                color: #ff670d;
             }
 
-            .editor-upscale-window.editor-theme-light button.editor-upscale-primary:disabled label {
-                color: rgba(29, 33, 41, 0.35);
+            .editor-root .editor-upscale-compare-label {
+                color: inherit;
+                font-size: 13px;
+                font-weight: 500;
+            }
+
+            .editor-root .editor-upscale-compare-chevron {
+                color: rgba(255, 255, 255, 0.40);
+            }
+
+            .editor-root button.editor-upscale-compare:hover .editor-upscale-compare-chevron {
+                color: rgba(255, 255, 255, 0.80);
+            }
+
+            .editor-root.editor-theme-light button.editor-upscale-compare {
+                border-color: rgba(17, 24, 39, 0.10);
+                background: #ffffff;
+                color: rgba(17, 24, 39, 0.90);
+            }
+
+            .editor-root.editor-theme-light button.editor-upscale-compare:hover {
+                border-color: rgba(17, 24, 39, 0.20);
+                background: rgba(17, 24, 39, 0.03);
+            }
+
+            .editor-root.editor-theme-light .editor-upscale-compare-chevron {
+                color: rgba(17, 24, 39, 0.40);
+            }
+
+            .editor-root.editor-theme-light button.editor-upscale-compare:hover .editor-upscale-compare-chevron {
+                color: rgba(17, 24, 39, 0.80);
+            }
+
+            /* ── Comparison sheet ── */
+
+            /* A neutral dim, so the editor's greys carry no blue cast. */
+            .editor-root .editor-upscale-scrim {
+                background: rgba(0, 0, 0, 0.60);
+            }
+
+            .editor-root .editor-upscale-card {
+                background: #141414;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 12px;
+                box-shadow: none;
+            }
+
+            .editor-root .editor-upscale-stage {
+                background: #0f0f0f;
+            }
+
+            .editor-root .editor-upscale-scroll,
+            .editor-root .editor-upscale-scroll > viewport {
+                background: transparent;
+            }
+
+            .editor-root .editor-upscale-message {
+                color: rgba(255, 255, 255, 0.56);
+                font-size: 13px;
+            }
+
+            .editor-root .editor-upscale-card spinner {
+                color: rgba(255, 255, 255, 0.72);
+            }
+
+            .editor-root .editor-upscale-panel {
+                padding: 20px;
+                background: #141414;
+                border-left: 1px solid rgba(255, 255, 255, 0.07);
+            }
+
+            .editor-root .editor-upscale-title {
+                color: rgba(255, 255, 255, 0.95);
+                font-size: 14px;
+                font-weight: 600;
+            }
+
+            .editor-root .editor-upscale-hint {
+                color: rgba(255, 255, 255, 0.50);
+                font-size: 12px;
+            }
+
+            .editor-root button.editor-upscale-close {
+                min-width: 28px;
+                min-height: 28px;
+                padding: 0;
+                border: none;
+                border-radius: 6px;
+                background: transparent;
+                background-image: none;
+                box-shadow: none;
+                color: rgba(255, 255, 255, 0.56);
+            }
+
+            .editor-root button.editor-upscale-close:hover {
+                background: rgba(255, 255, 255, 0.07);
+                color: #ffffff;
+            }
+
+            .editor-root .editor-upscale-eyebrow {
+                color: rgba(255, 255, 255, 0.50);
+                font-size: 12px;
+                font-weight: 600;
+            }
+
+            /* Output size choices: bordered rows with a radio mark. GTK names
+               a toggle button's node `button`, so these select on `button`. */
+            .editor-root button.editor-upscale-option {
+                padding: 10px 12px;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 10px;
+                background: transparent;
+                background-image: none;
+                box-shadow: none;
+                outline: none;
+            }
+
+            .editor-root button.editor-upscale-option:hover {
+                border-color: rgba(255, 255, 255, 0.16);
+                background: rgba(255, 255, 255, 0.02);
+            }
+
+            .editor-root button.editor-upscale-option:checked,
+            .editor-root button.editor-upscale-option:checked:hover {
+                border-color: #ff670d;
+                background: rgba(255, 255, 255, 0.03);
+            }
+
+            .editor-root button.editor-upscale-option:disabled {
+                opacity: 0.4;
+            }
+
+            .editor-root .editor-upscale-radio {
+                min-width: 12px;
+                min-height: 12px;
+                border: 2px solid rgba(255, 255, 255, 0.28);
+                border-radius: 999px;
+                background: transparent;
+            }
+
+            .editor-root button.editor-upscale-option:checked .editor-upscale-radio {
+                min-width: 6px;
+                min-height: 6px;
+                border: 5px solid #ff670d;
+                background: #ffffff;
+            }
+
+            .editor-root .editor-upscale-option-title {
+                color: rgba(255, 255, 255, 0.92);
+                font-size: 13px;
+                font-weight: 600;
+            }
+
+            .editor-root .editor-upscale-option-detail {
+                color: rgba(255, 255, 255, 0.50);
+                font-size: 12px;
+                font-feature-settings: "tnum";
+            }
+
+            .editor-root .editor-upscale-source {
+                margin-top: 12px;
+                padding: 0 2px;
+            }
+
+            .editor-root .editor-upscale-source-name {
+                color: rgba(255, 255, 255, 0.50);
+                font-size: 12px;
+            }
+
+            .editor-root .editor-upscale-source-value {
+                color: rgba(255, 255, 255, 0.78);
+                font-size: 12px;
+                font-feature-settings: "tnum";
+            }
+
+            /* Zoom: one tray of equal segments across the panel. */
+            .editor-root .editor-upscale-seg {
+                padding: 2px;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 8px;
+                background: #0f0f0f;
+            }
+
+            .editor-root button.editor-upscale-seg-button {
+                min-height: 28px;
+                padding: 0 10px;
+                border: none;
+                border-radius: 6px;
+                background: transparent;
+                background-image: none;
+                box-shadow: none;
+                outline: none;
+                color: rgba(255, 255, 255, 0.60);
+                font-size: 12px;
+                font-weight: 500;
+            }
+
+            .editor-root button.editor-upscale-seg-button label {
+                color: inherit;
+                font-weight: 500;
+            }
+
+            .editor-root button.editor-upscale-seg-button:hover {
+                color: rgba(255, 255, 255, 0.92);
+            }
+
+            .editor-root button.editor-upscale-seg-button:checked,
+            .editor-root button.editor-upscale-seg-button:checked:hover {
+                background: rgba(255, 255, 255, 0.10);
+                color: #ffffff;
+            }
+
+            .editor-root button.editor-upscale-seg-button:disabled {
+                color: rgba(255, 255, 255, 0.24);
+            }
+
+            .editor-root .editor-upscale-note {
+                margin-bottom: 14px;
+                color: rgba(255, 255, 255, 0.50);
+                font-size: 12px;
+            }
+
+            .editor-root .editor-upscale-card button.editor-upscale-cancel,
+            .editor-root .editor-upscale-card button.editor-upscale-apply {
+                min-height: 32px;
+                padding: 0 12px;
+                border-radius: 8px;
+                font-size: 12px;
+                font-weight: 600;
+                box-shadow: none;
+            }
+
+            .editor-root .editor-upscale-card button.editor-upscale-cancel {
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                background: transparent;
+                background-image: none;
+                color: rgba(255, 255, 255, 0.88);
+            }
+
+            .editor-root .editor-upscale-card button.editor-upscale-cancel:hover {
+                background: rgba(255, 255, 255, 0.06);
+                color: #ffffff;
+            }
+
+            .editor-root .editor-upscale-card button.editor-upscale-apply {
+                border: 1px solid #ff670d;
+            }
+
+            .editor-root .editor-upscale-card button.editor-upscale-apply:hover {
+                border-color: #ff7c2f;
+            }
+
+            .editor-root .editor-upscale-card button.editor-upscale-apply:active {
+                border-color: #e85b06;
+            }
+
+            .editor-root .editor-upscale-card button.editor-upscale-apply:disabled {
+                border-color: transparent;
+                background: rgba(255, 255, 255, 0.07);
+                color: rgba(255, 255, 255, 0.32);
+            }
+
+            .editor-root .editor-upscale-card button.editor-upscale-apply:disabled label {
+                color: rgba(255, 255, 255, 0.32);
+            }
+
+            /* Light theme */
+
+            .editor-root .editor-upscale-card.editor-theme-light {
+                background: #ffffff;
+                border-color: rgba(17, 24, 39, 0.12);
+            }
+
+            .editor-root .editor-upscale-card.editor-theme-light .editor-upscale-stage {
+                background: #f6f7fb;
+            }
+
+            .editor-root .editor-upscale-card.editor-theme-light .editor-upscale-panel {
+                background: #ffffff;
+                border-left-color: rgba(17, 24, 39, 0.08);
+            }
+
+            .editor-root .editor-upscale-card.editor-theme-light .editor-upscale-title,
+            .editor-root .editor-upscale-card.editor-theme-light .editor-upscale-option-title {
+                color: #1d2129;
+            }
+
+            .editor-root .editor-upscale-card.editor-theme-light .editor-upscale-hint,
+            .editor-root .editor-upscale-card.editor-theme-light .editor-upscale-eyebrow,
+            .editor-root .editor-upscale-card.editor-theme-light .editor-upscale-option-detail,
+            .editor-root .editor-upscale-card.editor-theme-light .editor-upscale-source-name,
+            .editor-root .editor-upscale-card.editor-theme-light .editor-upscale-note,
+            .editor-root .editor-upscale-card.editor-theme-light .editor-upscale-message {
+                color: rgba(17, 24, 39, 0.56);
+            }
+
+            .editor-root .editor-upscale-card.editor-theme-light .editor-upscale-source-value {
+                color: rgba(17, 24, 39, 0.82);
+            }
+
+            .editor-root .editor-upscale-card.editor-theme-light spinner {
+                color: rgba(17, 24, 39, 0.56);
+            }
+
+            .editor-root .editor-upscale-card.editor-theme-light button.editor-upscale-close {
+                color: rgba(17, 24, 39, 0.52);
+            }
+
+            .editor-root .editor-upscale-card.editor-theme-light button.editor-upscale-close:hover {
+                background: rgba(17, 24, 39, 0.06);
+                color: #1d2129;
+            }
+
+            .editor-root .editor-upscale-card.editor-theme-light button.editor-upscale-option {
+                border-color: rgba(17, 24, 39, 0.10);
+            }
+
+            .editor-root .editor-upscale-card.editor-theme-light button.editor-upscale-option:hover {
+                border-color: rgba(17, 24, 39, 0.20);
+                background: rgba(17, 24, 39, 0.02);
+            }
+
+            .editor-root .editor-upscale-card.editor-theme-light button.editor-upscale-option:checked,
+            .editor-root .editor-upscale-card.editor-theme-light button.editor-upscale-option:checked:hover {
+                border-color: #ff670d;
+                background: rgba(255, 103, 13, 0.04);
+            }
+
+            .editor-root .editor-upscale-card.editor-theme-light .editor-upscale-radio {
+                border-color: rgba(17, 24, 39, 0.28);
+            }
+
+            .editor-root .editor-upscale-card.editor-theme-light button.editor-upscale-option:checked .editor-upscale-radio {
+                border-color: #ff670d;
+            }
+
+            .editor-root .editor-upscale-card.editor-theme-light .editor-upscale-seg {
+                border-color: rgba(17, 24, 39, 0.10);
+                background: #eef0f5;
+            }
+
+            .editor-root .editor-upscale-card.editor-theme-light button.editor-upscale-seg-button {
+                color: rgba(17, 24, 39, 0.60);
+            }
+
+            .editor-root .editor-upscale-card.editor-theme-light button.editor-upscale-seg-button:hover {
+                color: rgba(17, 24, 39, 0.92);
+            }
+
+            .editor-root .editor-upscale-card.editor-theme-light button.editor-upscale-seg-button:checked,
+            .editor-root .editor-upscale-card.editor-theme-light button.editor-upscale-seg-button:checked:hover {
+                background: #ffffff;
+                color: #1d2129;
+            }
+
+            .editor-root .editor-upscale-card.editor-theme-light button.editor-upscale-cancel {
+                border-color: rgba(17, 24, 39, 0.14);
+                color: rgba(17, 24, 39, 0.82);
+            }
+
+            .editor-root .editor-upscale-card.editor-theme-light button.editor-upscale-cancel:hover {
+                background: rgba(17, 24, 39, 0.05);
+                color: #1d2129;
+            }
+
+            .editor-root .editor-upscale-card.editor-theme-light button.editor-upscale-apply:disabled {
+                background: rgba(17, 24, 39, 0.05);
+                color: rgba(17, 24, 39, 0.35);
+            }
+
+            .editor-root .editor-upscale-card.editor-theme-light button.editor-upscale-apply:disabled label {
+                color: rgba(17, 24, 39, 0.35);
             }

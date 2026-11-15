@@ -504,10 +504,24 @@ impl EditorState {
 
     /// Prepare source pixels at export resolution while keeping annotation coordinates native.
     pub(crate) fn upscaled_export_state(&self, neural: bool) -> Result<Self, EditorError> {
+        self.upscaled_export_state_with_progress(neural, &|_| true)
+    }
+
+    /// `upscaled_export_state`, reporting neural tiles to `on_tile`; see
+    /// `upscale::enhance_with_progress`.
+    pub(crate) fn upscaled_export_state_with_progress(
+        &self,
+        neural: bool,
+        on_tile: &dyn Fn(usize) -> bool,
+    ) -> Result<Self, EditorError> {
         let factor = self.source_upscale.factor();
         let pixels = if neural {
-            super::super::upscale::enhance(&self.working_image, self.source_upscale)
-                .map_err(EditorError::ImageSave)?
+            super::super::upscale::enhance_with_progress(
+                &self.working_image,
+                self.source_upscale,
+                on_tile,
+            )
+            .map_err(EditorError::ImageSave)?
         } else {
             super::super::upscale::validate_input(&self.working_image, self.source_upscale)
                 .map_err(EditorError::ImageSave)?;
