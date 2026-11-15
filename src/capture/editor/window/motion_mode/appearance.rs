@@ -24,7 +24,6 @@ use crate::recording::editor::window::custom_wallpaper_popover::{
 };
 use crate::recording::editor::window::tool_sidebar::FillSlider;
 
-use super::select::MotionSelect;
 use super::session::MotionRuntime;
 use super::widgets::{
     motion_appearance_slider, motion_reference_percent_slider, motion_rgb888, motion_rgba,
@@ -866,132 +865,19 @@ fn build_appearance_panel(
     // Paint the Custom summary chip once so it is correct before any edit.
     redraw_summary();
     root.append(&background_section);
-    let export_quality = motion_appearance_section("Export quality");
-    let initial_upscale = session.runtime.borrow().motion.appearance.source_upscale;
-    let upscale = MotionSelect::new(
-        &[&t("Off"), &t("Neural 2×"), &t("Neural 4×")],
-        match initial_upscale.factor() {
-            2 => 1,
-            4 => 2,
-            _ => 0,
-        },
-    );
-    upscale
-        .widget()
-        .set_tooltip_text(Some(&t("Neural upscaling for Studio exports")));
-    upscale.connect_changed({
-        let runtime = session.runtime.clone();
-        let source_state = session.source_state.clone();
-        let session = session.clone();
-        let notify = notify_interact.clone();
-        move |selected| {
-            use crate::capture::editor::upscale::SourceUpscale;
-            let mode = match selected {
-                1 => SourceUpscale::Neural2x,
-                2 => SourceUpscale::Neural4x,
-                _ => SourceUpscale::Off,
-            };
-            if mode != SourceUpscale::Off
-                && super::upscale_preview::unavailable_reason(&session, mode, motion_export)
-                    .is_some()
-            {
-                return;
-            }
-            if runtime.borrow().motion.appearance.source_upscale == mode {
-                return;
-            }
-            notify();
-            let mut runtime = runtime.borrow_mut();
-            runtime.begin_motion_edit();
-            runtime.motion.appearance.source_upscale = mode;
-            drop(runtime);
-            if let Some(state) = source_state.borrow().as_ref() {
-                state.lock().unwrap().source_upscale = mode;
-            }
-        }
-    });
-    export_quality.append(upscale.widget());
-    let compare = Button::with_label(&t("Compare before / after"));
-    compare.set_tooltip_text(Some(&t(
-        "Preview neural enhancement without a Studio license",
-    )));
-    compare.connect_clicked({
-        let window = window.downgrade();
-        let session = session.clone();
-        move |_| {
-            if let Some(window) = window.upgrade() {
-                super::upscale_preview::show(&window, &session, motion_export);
-            }
-        }
-    });
-    export_quality.append(&compare);
-    let upscale_hint = Label::new(None);
-    upscale_hint.set_wrap(true);
-    upscale_hint.set_xalign(0.0);
-    upscale_hint.add_css_class("editor-select-inspector-hint");
-    export_quality.append(&upscale_hint);
-    let refresh_upscale: Rc<dyn Fn()> = Rc::new({
-        let session = session.clone();
-        let upscale = upscale.clone();
-        let compare = compare.clone();
-        let hint = upscale_hint.clone();
-        let previous = Cell::new(None);
-        move || {
-            let dimensions = (
-                super::upscale_preview::source_dimensions(&session),
-                super::upscale_preview::output_dimensions(
-                    &session,
-                    crate::capture::editor::upscale::SourceUpscale::Off,
-                ),
-            );
-            if previous.replace(Some(dimensions)) == Some(dimensions) {
-                return;
-            }
-            let reason_2x = super::upscale_preview::unavailable_reason(
-                &session,
-                crate::capture::editor::upscale::SourceUpscale::Neural2x,
-                motion_export,
-            );
-            let reason_4x = super::upscale_preview::unavailable_reason(
-                &session,
-                crate::capture::editor::upscale::SourceUpscale::Neural4x,
-                motion_export,
-            );
-            let available = reason_2x.is_none();
-            upscale.set_option_sensitive(1, reason_2x.is_none());
-            upscale.set_option_sensitive(2, reason_4x.is_none());
-            compare.set_sensitive(available);
-            let reason = reason_2x.or_else(|| {
-                reason_4x.map(|reason| {
-                    tfmt("Neural 4× is unavailable: {reason}", &[("reason", &reason)])
-                })
-            });
-            upscale.widget().set_tooltip_text(reason.as_deref());
-            compare.set_tooltip_text(if available { None } else { reason.as_deref() });
-            hint.set_text(&reason.unwrap_or_else(|| t("Offline neural enhancement for small images. Image exports grow by 2× or 4×; Motion keeps its Frame size. Compare the export for free before enabling Studio enhancement. Supports up to 1 megapixel. Missing detail cannot always be recovered.")));
-        }
-    });
-    refresh_upscale();
-    export_quality.add_tick_callback({
-        let runtime = session.runtime.clone();
-        let upscale = upscale.clone();
-        move |_, _| {
-            refresh_upscale();
-            let factor = runtime.borrow().motion.appearance.source_upscale.factor();
-            let selected = match factor {
-                2 => 1,
-                4 => 2,
-                _ => 0,
-            };
-            if upscale.selected() != selected {
-                upscale.set_selected(selected);
-            }
-            glib::ControlFlow::Continue
-        }
+    let (export_quality, refresh_upscale) =
+        export_quality_section(window, session, motion_export, notify_interact.clone());
+    export_quality.add_tick_callback(move |_, _| {
+        refresh_upscale();
+        glib::ControlFlow::Continue
     });
     root.append(&export_quality);
     if let Some(static_transform) = static_transform {
-        root.append(&motion_disclosure_row("Transform", &static_transform));
+        root.append(&motion_disclosure_row_with_badge(
+            "Transform",
+            &static_transform,
+            true,
+        ));
     }
 
     let shadow_section = motion_appearance_body();
@@ -1106,7 +992,11 @@ fn build_appearance_panel(
     shadow_section.append(&light_pad);
     let shadow_hint = appearance_hint("");
     shadow_section.append(&shadow_hint);
-    root.append(&motion_disclosure_row("Shadow", &shadow_section));
+    root.append(&motion_disclosure_row_with_badge(
+        "Shadow",
+        &shadow_section,
+        true,
+    ));
 
     let border_section = motion_appearance_body();
     let style_grid = Grid::new();
@@ -1194,7 +1084,11 @@ fn build_appearance_panel(
         }
     }
     border_section.append(&style_grid);
-    root.append(&motion_disclosure_row("Style", &border_section));
+    root.append(&motion_disclosure_row_with_badge(
+        "Style",
+        &border_section,
+        true,
+    ));
 
     // Frame section: collapsed W/H inputs plus an expandable ratio grid.
     // Collapsed shows the output size for Motion (original dims for Static's
@@ -2029,6 +1923,235 @@ fn build_appearance_panel(
     root
 }
 
+/// Each Export quality tab's tooltip while it is available.
+const UPSCALE_MODE_TIPS: [&str; 3] = ["Export at the original size", "Neural 2×", "Neural 4×"];
+
+fn upscale_mode_at(index: usize) -> crate::capture::editor::upscale::SourceUpscale {
+    use crate::capture::editor::upscale::SourceUpscale;
+    match index {
+        1 => SourceUpscale::Neural2x,
+        2 => SourceUpscale::Neural4x,
+        _ => SourceUpscale::Off,
+    }
+}
+
+fn upscale_mode_index(mode: crate::capture::editor::upscale::SourceUpscale) -> usize {
+    match mode.factor() {
+        2 => 1,
+        4 => 2,
+        _ => 0,
+    }
+}
+
+/// The Export quality card: Off / 2× / 4× neural enlargement, the export
+/// size it produces, why enhancement is off when it is, and the free
+/// before / after sheet. Returns the card and its refresh, which the caller
+/// runs on every tick so the card follows the image and the selected mode.
+fn export_quality_section(
+    window: &ApplicationWindow,
+    session: &MotionSession,
+    motion_export: bool,
+    notify_interact: Rc<dyn Fn()>,
+) -> (GtkBox, Rc<dyn Fn()>) {
+    use crate::capture::editor::upscale::SourceUpscale;
+
+    let card = GtkBox::new(Orientation::Vertical, 10);
+    card.add_css_class("editor-motion-settings-section");
+    card.add_css_class("editor-upscale-section");
+
+    let header = GtkBox::new(Orientation::Horizontal, 8);
+    let title = Label::new(Some(&t("Export quality")));
+    title.add_css_class("editor-background-section-title");
+    title.set_xalign(0.0);
+    title.set_hexpand(true);
+    header.append(&title);
+    append_studio_badge(&header);
+    card.append(&header);
+
+    let tray = GtkBox::new(Orientation::Horizontal, 0);
+    tray.add_css_class("recording-editor-bg-tabs");
+    tray.add_css_class("editor-upscale-segmented");
+    tray.set_hexpand(true);
+    tray.set_homogeneous(true);
+    let tabs: Rc<Vec<ToggleButton>> = Rc::new(
+        ["Off", "2×", "4×"]
+            .iter()
+            .map(|label| motion_source_tab(label))
+            .collect(),
+    );
+    for (index, tab) in tabs.iter().enumerate() {
+        if index > 0 {
+            tab.set_group(Some(&tabs[0]));
+        }
+        tab.set_tooltip_text(Some(&t(UPSCALE_MODE_TIPS[index])));
+        tray.append(tab);
+    }
+    let initial = session.runtime.borrow().motion.appearance.source_upscale;
+    tabs[upscale_mode_index(initial)].set_active(true);
+    card.append(&tray);
+
+    let meta = GtkBox::new(Orientation::Horizontal, 6);
+    meta.add_css_class("editor-upscale-meta");
+    let source_size = Label::new(None);
+    source_size.add_css_class("editor-upscale-size");
+    source_size.set_xalign(0.0);
+    let arrow = Label::new(Some("→"));
+    arrow.add_css_class("editor-upscale-arrow");
+    let output_size = Label::new(None);
+    output_size.add_css_class("editor-upscale-output");
+    output_size.set_xalign(0.0);
+    meta.append(&source_size);
+    meta.append(&arrow);
+    meta.append(&output_size);
+    card.append(&meta);
+
+    let notice = Label::new(None);
+    notice.add_css_class("editor-upscale-notice");
+    notice.set_wrap(true);
+    notice.set_xalign(0.0);
+    notice.set_visible(false);
+    card.append(&notice);
+
+    // An action row: what it shows, then a chevron for the sheet it opens.
+    let compare = Button::new();
+    compare.add_css_class("editor-upscale-compare");
+    compare.set_has_frame(false);
+    compare.set_hexpand(true);
+    let compare_row = GtkBox::new(Orientation::Horizontal, 10);
+    let compare_icon = Image::from_icon_name(icon_names::custom::SQUARE_SPLIT_HORIZONTAL_SYMBOLIC);
+    compare_icon.set_pixel_size(16);
+    compare_icon.add_css_class("editor-upscale-compare-icon");
+    let compare_label = Label::new(Some(&t("Compare before / after")));
+    compare_label.add_css_class("editor-upscale-compare-label");
+    compare_label.set_xalign(0.0);
+    compare_label.set_hexpand(true);
+    let compare_chevron = Image::from_icon_name(icon_names::CHEVRON_RIGHT_REGULAR);
+    compare_chevron.set_pixel_size(12);
+    compare_chevron.add_css_class("editor-upscale-compare-chevron");
+    compare_row.append(&compare_icon);
+    compare_row.append(&compare_label);
+    compare_row.append(&compare_chevron);
+    compare.set_child(Some(&compare_row));
+    compare.connect_clicked({
+        let window = window.downgrade();
+        let session = session.clone();
+        move |_| {
+            if let Some(window) = window.upgrade() {
+                super::upscale_preview::show(&window, &session, motion_export);
+            }
+        }
+    });
+    card.append(&compare);
+
+    card.append(&appearance_hint(
+        "Sharpens small screenshots on this device, up to 1 megapixel. Missing detail cannot always be recovered.",
+    ));
+
+    let syncing = Rc::new(Cell::new(false));
+    for (index, tab) in tabs.iter().enumerate() {
+        tab.connect_toggled({
+            let syncing = syncing.clone();
+            let session = session.clone();
+            let notify = notify_interact.clone();
+            move |button| {
+                if !button.is_active() || syncing.get() {
+                    return;
+                }
+                let mode = upscale_mode_at(index);
+                if mode != SourceUpscale::Off
+                    && super::upscale_preview::unavailable_reason(&session, mode, motion_export)
+                        .is_some()
+                {
+                    return;
+                }
+                if session.runtime.borrow().motion.appearance.source_upscale == mode {
+                    return;
+                }
+                notify();
+                let mut runtime = session.runtime.borrow_mut();
+                runtime.begin_motion_edit();
+                runtime.motion.appearance.source_upscale = mode;
+                drop(runtime);
+                if let Some(state) = session.source_state.borrow().as_ref() {
+                    state.lock().unwrap().source_upscale = mode;
+                }
+            }
+        });
+    }
+
+    // Availability only changes with the export's size, so it is re-checked
+    // when that changes; the tabs and size line follow the mode every tick.
+    let reasons: Rc<RefCell<[Option<String>; 2]>> = Rc::new(RefCell::new([None, None]));
+    let previous_size = Cell::new(None);
+    let previous_mode = Cell::new(None);
+    let refresh: Rc<dyn Fn()> =
+        {
+            let session = session.clone();
+            Rc::new(move || {
+                let size = (
+                    super::upscale_preview::source_dimensions(&session),
+                    super::upscale_preview::output_dimensions(&session, SourceUpscale::Off),
+                );
+                let size_changed = previous_size.replace(Some(size)) != Some(size);
+                if size_changed {
+                    let checked = [SourceUpscale::Neural2x, SourceUpscale::Neural4x].map(|mode| {
+                        super::upscale_preview::unavailable_reason(&session, mode, motion_export)
+                    });
+                    for (k, reason) in checked.iter().enumerate() {
+                        let tab = &tabs[k + 1];
+                        tab.set_sensitive(reason.is_none());
+                        let tip = reason
+                            .clone()
+                            .unwrap_or_else(|| t(UPSCALE_MODE_TIPS[k + 1]));
+                        tab.set_tooltip_text(Some(&tip));
+                    }
+                    compare.set_sensitive(checked[0].is_none());
+                    compare.set_tooltip_text(Some(&checked[0].clone().unwrap_or_else(|| {
+                        t("Preview neural enhancement without a Studio license")
+                    })));
+                    match &checked[0] {
+                        Some(reason) => {
+                            notice.set_text(reason);
+                            notice.set_visible(true);
+                        }
+                        None => notice.set_visible(false),
+                    }
+                    *reasons.borrow_mut() = checked;
+                }
+
+                let mode = session.runtime.borrow().motion.appearance.source_upscale;
+                if !size_changed && previous_mode.replace(Some(mode)) == Some(mode) {
+                    return;
+                }
+                previous_mode.set(Some(mode));
+                let index = upscale_mode_index(mode);
+                if !tabs[index].is_active() {
+                    syncing.set(true);
+                    tabs[index].set_active(true);
+                    syncing.set(false);
+                }
+                // A Motion export keeps its Frame size, so only a still export
+                // shows the size enhancement produces.
+                let enhancement_off = reasons.borrow()[0].is_some();
+                meta.set_visible(!motion_export && !enhancement_off);
+                let off = size.1;
+                if mode == SourceUpscale::Off {
+                    source_size.set_text(&format!("{} × {} px", off.0, off.1));
+                    arrow.set_visible(false);
+                    output_size.set_visible(false);
+                } else {
+                    let output = super::upscale_preview::output_dimensions(&session, mode);
+                    source_size.set_text(&format!("{} × {}", off.0, off.1));
+                    arrow.set_visible(true);
+                    output_size.set_visible(true);
+                    output_size.set_text(&format!("{} × {} px", output.0, output.1));
+                }
+            })
+        };
+    refresh();
+    (card, refresh)
+}
+
 fn motion_appearance_section(title: &str) -> GtkBox {
     let section = GtkBox::new(Orientation::Vertical, 8);
     section.add_css_class("editor-motion-settings-section");
@@ -2063,6 +2186,32 @@ fn motion_appearance_body() -> GtkBox {
 /// panel; everything else opens on demand so the sidebar never becomes one
 /// long scroll. The heading stays in the row the revealer wraps.
 fn motion_disclosure_row(title: &str, body: &GtkBox) -> GtkBox {
+    motion_disclosure_row_with_badge(title, body, false)
+}
+
+/// Append the quiet tier marker to a Studio group's header. The controls
+/// stay usable; the badge only says which tier owns them, so it is hidden
+/// once Studio is unlocked. Activation can happen while the editor is open,
+/// so the check runs again whenever the header is shown.
+fn append_studio_badge(header: &GtkBox) {
+    let badge = Label::new(Some(&t("Studio")));
+    badge.add_css_class("editor-studio-badge");
+    badge.set_valign(Align::Center);
+    badge.set_tooltip_text(Some(&t("Included with Studio")));
+    badge.set_visible(!crate::studio_entitlement::studio_unlocked());
+    header.connect_map({
+        let badge = badge.downgrade();
+        move |_| {
+            if let Some(badge) = badge.upgrade() {
+                badge.set_visible(!crate::studio_entitlement::studio_unlocked());
+            }
+        }
+    });
+    header.append(&badge);
+}
+
+/// A disclosure row, with the Studio badge in its header when `studio`.
+fn motion_disclosure_row_with_badge(title: &str, body: &GtkBox, studio: bool) -> GtkBox {
     let row = GtkBox::new(Orientation::Vertical, 8);
     row.add_css_class("editor-motion-settings-section");
     let header = Button::new();
@@ -2078,6 +2227,9 @@ fn motion_disclosure_row(title: &str, body: &GtkBox) -> GtkBox {
     let chevron = Label::new(Some("\u{203A}"));
     chevron.add_css_class("editor-disclosure-chevron");
     header_inner.append(&heading);
+    if studio {
+        append_studio_badge(&header_inner);
+    }
     header_inner.append(&chevron);
     header.set_child(Some(&header_inner));
     row.append(&header);

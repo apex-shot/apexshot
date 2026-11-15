@@ -12,7 +12,6 @@ mod pad_handle;
 mod parts;
 pub(in crate::capture::editor::window) mod position_pad;
 mod preview;
-mod select;
 mod session;
 mod text_pad;
 mod transition;
@@ -348,7 +347,7 @@ mod tests {
             .find("root.append(&background_section)")
             .expect("Background section append");
         let transform = source
-            .find("root.append(&motion_disclosure_row(\"Transform\", &static_transform))")
+            .find("\"Transform\",\n            &static_transform,")
             .expect("static transform section append");
         let shadow = source.find("let shadow_section").expect("Shadow section");
         assert!(

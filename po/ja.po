@@ -4814,6 +4814,17 @@ msgstr "{width} × {height} px で書き出します。"
 msgid "Ratio presets change the aspect ratio; platform presets also export at the size that platform asks for. W/H shows the export size. Click the selected preset again to reset."
 msgstr "比率プリセットはアスペクト比を変更します。プラットフォームのプリセットは、そのプラットフォームが求めるサイズでも書き出します。W/H には書き出しサイズが表示されます。選択中のプリセットをもう一度クリックするとリセットされます。"
 
+msgid "This image is large, so enhancing it takes a while on this device. {percent}% done, about {left} left. You can close the preview to stop."
+msgstr "画像が大きいため、このデバイスでは補正に時間がかかります。{percent}% 完了、残り約 {left}。プレビューを閉じると中止できます。"
+
+msgid "Enhancing… {percent}%, about {left} left"
+msgstr "補正中… {percent}%、残り約 {left}"
+
+msgid "{minutes} min"
+msgstr "{minutes} 分"
+
+msgid "{seconds} s"
+msgstr "{seconds} 秒"
 msgid "A link to the exported file was copied"
 msgstr "エクスポートしたファイルへのリンクをコピーしました"
 
