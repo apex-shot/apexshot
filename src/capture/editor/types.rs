@@ -805,7 +805,6 @@ impl ViewTransform {
         image_point
     }
 
-    #[allow(dead_code)]
     pub fn image_to_view(&self, point: Point) -> Point {
         Point {
             x: point.x * self.scale + self.offset_x,

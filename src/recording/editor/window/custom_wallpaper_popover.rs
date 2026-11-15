@@ -1474,8 +1474,11 @@ fn build_gradient_page(
         item.set_has_frame(false);
         item.add_css_class("recording-editor-dropdown-item");
         let row = GtkBox::new(Orientation::Horizontal, 8);
-        let check = Image::from_icon_name("object-select-symbolic");
+        let check = Image::from_icon_name(
+            crate::capture::editor::window::icon_names::custom::CHECK_SYMBOLIC,
+        );
         check.set_pixel_size(12);
+        check.add_css_class("editor-menu-check");
         // Hidden with opacity rather than visibility so every label starts at
         // the same x, checked or not.
         check.set_opacity(0.0);

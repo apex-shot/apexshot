@@ -15,6 +15,7 @@ mod tool_style;
 
 pub(super) use crop::{crop_handle_at, point_in_rect};
 pub(crate) use history::MotionCropHistoryChange;
+pub(crate) use text_input::normalize_pasted_line_endings;
 
 use super::color::{
     DEFAULT_COLOR_INDEX, DEFAULT_FOCUS_INTENSITY, DEFAULT_OBFUSCATE_AMOUNT, DRAW_COLORS,
@@ -112,6 +113,7 @@ pub struct EditorState {
     pub active_text_is_resizing: bool,
     pub hovered_text_action_index: Option<usize>,
     pub active_text_input: Option<TextInputState>,
+    text_input_session_id: u64,
 
     // Text detection for highlighter
     pub text_detector: Arc<Mutex<TextDetector>>,
@@ -301,6 +303,7 @@ impl EditorState {
             active_text_is_resizing: false,
             hovered_text_action_index: None,
             active_text_input: None,
+            text_input_session_id: 0,
 
             text_detector: Arc::new(Mutex::new(TextDetector::new_pending())),
             text_detection_ready: Arc::new(AtomicBool::new(false)),

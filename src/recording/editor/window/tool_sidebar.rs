@@ -1438,7 +1438,7 @@ mod tests {
                 "the type picker must be the app's own dropdown pattern",
             ),
             (
-                "object-select-symbolic",
+                "CHECK_SYMBOLIC",
                 "the active type must be checked in the menu",
             ),
         ] {

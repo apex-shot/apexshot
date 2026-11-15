@@ -39,8 +39,9 @@ pub(super) fn show_clip_menu(
     popover.set_autohide(true);
     popover.set_position(PositionType::Top);
 
-    let card = GtkBox::new(Orientation::Vertical, 0);
+    let card = GtkBox::new(Orientation::Vertical, 2);
     card.add_css_class("recording-editor-clip-menu");
+    card.set_size_request(160, -1);
     let (index, is_text, disabled, can_duplicate) = {
         let runtime = runtime.borrow();
         match target {
@@ -179,6 +180,8 @@ fn menu_row(item: MenuItem, popover: &Popover) -> Button {
         button.add_css_class("recording-editor-clip-menu-row-danger");
     }
     button.set_has_frame(false);
+    button.set_focus_on_click(false);
+    button.set_size_request(-1, 32);
     button.set_sensitive(item.sensitive);
 
     let row = GtkBox::new(Orientation::Horizontal, 10);
@@ -199,4 +202,85 @@ fn menu_row(item: MenuItem, popover: &Popover) -> Button {
         (item.action)();
     });
     button
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{menu_row, MenuItem};
+    use gtk4::{prelude::*, Box as GtkBox, Image, Label, Popover};
+    use std::rc::Rc;
+
+    fn production_source() -> &'static str {
+        let source = include_str!("clip_menu.rs");
+        source.split("#[cfg(test)]").next().unwrap_or(source)
+    }
+
+    #[test]
+    fn clip_menu_rows_match_the_shared_menu_metrics() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let popover = Popover::new();
+            let row = menu_row(
+                MenuItem {
+                    icon: crate::capture::editor::window::icon_names::shipped::COPY_REGULAR,
+                    label: "Duplicate".to_string(),
+                    danger: false,
+                    sensitive: true,
+                    action: Rc::new(|| {}),
+                },
+                &popover,
+            );
+            assert_eq!(row.size_request(), (-1, 32));
+            assert!(!row.has_frame());
+            assert!(!row.gets_focus_on_click());
+            let inner = row
+                .child()
+                .and_then(|child| child.downcast::<GtkBox>().ok())
+                .expect("the row content is a box");
+            assert_eq!(inner.spacing(), 10);
+            let icon = inner
+                .first_child()
+                .and_then(|icon| icon.downcast::<Image>().ok())
+                .expect("the row leads with the item icon");
+            assert_eq!(icon.pixel_size(), 15);
+            let label = icon
+                .next_sibling()
+                .and_then(|label| label.downcast::<Label>().ok())
+                .expect("the label follows the icon");
+            assert!(label.hexpands());
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
+    }
+
+    #[test]
+    fn a_disabled_menu_item_stays_insensitive() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let popover = Popover::new();
+            let row = menu_row(
+                MenuItem {
+                    icon: crate::capture::editor::window::icon_names::shipped::COPY_ARROW_RIGHT_REGULAR,
+                    label: "Duplicate".to_string(),
+                    danger: false,
+                    sensitive: false,
+                    action: Rc::new(|| {}),
+                },
+                &popover,
+            );
+            assert!(!row.is_sensitive());
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
+    }
+
+    #[test]
+    fn the_menu_card_matches_the_shared_menu_metrics() {
+        let source = production_source();
+        assert!(
+            source.contains("GtkBox::new(Orientation::Vertical, 2)")
+                && source.contains("card.set_size_request(160, -1);"),
+            "the clip menu card keeps the shared menu's 160px width and 2px row spacing"
+        );
+    }
 }

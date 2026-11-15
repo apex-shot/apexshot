@@ -254,6 +254,7 @@ void CaptureOverlay::setFreezeBackground(const QPixmap& freeze)
 void CaptureOverlay::setCaptureMenuAreaMode(bool ocr, int timerSeconds)
 {
     m_captureMenuAreaMode = true;
+    m_captureMenuNavigationEnabled = true;
     m_captureIntent = ocr ? CaptureIntent::Ocr : CaptureIntent::Area;
     // Unified-menu timers run after this selector closes, allowing normal
     // desktop interaction throughout the countdown.
@@ -384,7 +385,8 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
     , m_selectionCursorMode(QStringLiteral("Disabled"))
     , m_showZoomPreview(false)
     , m_freezeSelectionBackground(true)
-    , m_captureMenuAreaMode(false)
+    , m_captureMenuAreaMode(true)
+    , m_captureMenuNavigationEnabled(false)
     , m_timerDelayActive(timerCaptureEnabled)
     , m_captureDelaySeconds(5)
     , m_countdownActive(false)

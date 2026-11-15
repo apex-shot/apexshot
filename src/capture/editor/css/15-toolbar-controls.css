@@ -1,0 +1,394 @@
+            .editor-sub-bar {
+                padding: 6px;
+                border: none;
+                border-radius: 9px;
+                box-shadow: none;
+            }
+
+            button.editor-color-trigger {
+                min-height: 28px;
+                padding: 0 8px;
+                border: none;
+                border-radius: 6px;
+                background: rgba(255, 255, 255, 0.10);
+                background-image: none;
+                box-shadow: none;
+                color: rgba(255, 255, 255, 0.65);
+            }
+
+            button.editor-color-trigger:hover {
+                background: rgba(255, 255, 255, 0.17);
+                color: #ffffff;
+            }
+
+            button.editor-subbar-pill,
+            button.editor-subbar-button,
+            button.editor-subbar-step {
+                min-height: 28px;
+                padding: 0 8px;
+                border: none;
+                border-radius: 5px;
+                background: transparent;
+                background-image: none;
+                box-shadow: none;
+                color: rgba(255, 255, 255, 0.78);
+                font-size: 12px;
+            }
+
+            button.editor-subbar-pill:hover,
+            button.editor-subbar-button:hover,
+            button.editor-subbar-step:hover {
+                background: rgba(255, 255, 255, 0.06);
+                color: #ffffff;
+            }
+
+            button.editor-subbar-button.selected {
+                background: rgba(255, 255, 255, 0.10);
+                color: #ff8b4a;
+            }
+
+            .editor-subbar-pill-label {
+                font-size: 12px;
+            }
+
+            .editor-subbar-pill-arrow {
+                opacity: 0.5;
+            }
+
+            .editor-subbar-stepper {
+                border-radius: 5px;
+                background: rgba(255, 255, 255, 0.06);
+            }
+
+            entry.editor-subbar-entry {
+                min-height: 26px;
+                min-width: 44px;
+                padding: 0 6px;
+                border: none;
+                border-radius: 5px;
+                background: transparent;
+                box-shadow: none;
+                color: rgba(255, 255, 255, 0.85);
+            }
+
+            button.editor-stroke-trigger {
+                min-height: 28px;
+                padding: 0 7px;
+                border: none;
+                border-radius: 6px;
+                background: transparent;
+                background-image: none;
+                box-shadow: none;
+                color: rgba(255, 255, 255, 0.82);
+            }
+
+            button.editor-stroke-trigger:hover {
+                background: rgba(255, 255, 255, 0.08);
+                color: #ffffff;
+            }
+
+            .editor-stroke-preview {
+                margin: 0;
+            }
+
+            /* Sub-bar menus wear the bar's own surface. The extra class
+               outranks the shared menu sheet, which loads after this one. */
+            .editor-root popover.editor-subbar-popover > contents {
+                padding: 6px;
+                background-color: #0f0f0f;
+                border: none;
+                border-radius: 9px;
+            }
+
+            .editor-stroke-menu,
+            .editor-subbar-menu {
+                padding: 0;
+            }
+
+            button.editor-stroke-option,
+            button.editor-subbar-option {
+                min-width: 42px;
+                min-height: 26px;
+                padding: 0 8px;
+                border: none;
+                border-radius: 7px;
+                background: transparent;
+                background-image: none;
+                box-shadow: none;
+                color: rgba(255, 255, 255, 0.72);
+                font-size: 12px;
+            }
+
+            button.editor-stroke-option:hover,
+            button.editor-subbar-option:hover {
+                background: rgba(255, 255, 255, 0.09);
+                color: #ffffff;
+            }
+
+            button.editor-stroke-option.selected,
+            button.editor-subbar-option.selected {
+                background: transparent;
+                box-shadow: none;
+                color: #ff8b4a;
+            }
+
+            button.editor-number-style-option {
+                min-width: 54px;
+            }
+
+            .editor-number-style-sample {
+                font-size: 13px;
+                font-weight: 600;
+            }
+
+            .editor-subbar-check {
+                opacity: 0.85;
+            }
+
+            .editor-root.editor-theme-light button.editor-color-trigger {
+                background: rgba(17, 24, 39, 0.09);
+                color: rgba(17, 24, 39, 0.65);
+            }
+
+            .editor-root.editor-theme-light button.editor-color-trigger:hover {
+                background: rgba(17, 24, 39, 0.15);
+                color: #1d2129;
+            }
+
+            .editor-root.editor-theme-light button.editor-subbar-pill,
+            .editor-root.editor-theme-light button.editor-subbar-button,
+            .editor-root.editor-theme-light button.editor-subbar-step {
+                color: rgba(17, 24, 39, 0.78);
+            }
+
+            .editor-root.editor-theme-light button.editor-subbar-pill:hover,
+            .editor-root.editor-theme-light button.editor-subbar-button:hover,
+            .editor-root.editor-theme-light button.editor-subbar-step:hover {
+                background: rgba(17, 24, 39, 0.06);
+                color: #1d2129;
+            }
+
+            .editor-root.editor-theme-light button.editor-subbar-button.selected {
+                background: rgba(17, 24, 39, 0.10);
+                color: #c2410c;
+            }
+
+            .editor-root.editor-theme-light .editor-subbar-stepper {
+                background: rgba(17, 24, 39, 0.06);
+            }
+
+            .editor-root.editor-theme-light entry.editor-subbar-entry {
+                color: rgba(17, 24, 39, 0.85);
+            }
+
+            .editor-root.editor-theme-light button.editor-stroke-trigger {
+                color: rgba(17, 24, 39, 0.78);
+            }
+
+            .editor-root.editor-theme-light button.editor-stroke-trigger:hover {
+                background: rgba(17, 24, 39, 0.08);
+                color: #1d2129;
+            }
+
+            .editor-root.editor-theme-light popover.editor-subbar-popover contents {
+                background: #ffffff;
+                border-color: rgba(17, 24, 39, 0.14);
+            }
+
+            .editor-root.editor-theme-light button.editor-stroke-option,
+            .editor-root.editor-theme-light button.editor-subbar-option {
+                color: rgba(17, 24, 39, 0.72);
+            }
+
+            .editor-root.editor-theme-light button.editor-stroke-option:hover,
+            .editor-root.editor-theme-light button.editor-subbar-option:hover {
+                background: rgba(17, 24, 39, 0.09);
+                color: #1d2129;
+            }
+
+            .editor-root.editor-theme-light button.editor-stroke-option.selected,
+            .editor-root.editor-theme-light button.editor-subbar-option.selected {
+                background: transparent;
+                color: #c2410c;
+            }
+
+        .editor-root .editor-color-palette {
+            margin-top: 4px;
+            padding: 8px;
+            background: #0f0f0f;
+            border: 1px solid alpha(white, 0.10);
+            border-radius: 10px;
+        }
+
+        .editor-root button.editor-color-swatch {
+            min-width: 26px;
+            min-height: 26px;
+            padding: 2px;
+            border: none;
+            border-radius: 999px;
+            background: transparent;
+            box-shadow: none;
+        }
+
+        .editor-root button.editor-color-swatch:hover {
+            background: alpha(white, 0.08);
+        }
+
+        .editor-root button.editor-color-swatch.selected {
+            box-shadow: 0 0 0 2px #ff670d;
+        }
+
+        .editor-root .editor-custom-color {
+            min-width: 264px;
+            background: #1c1c1c;
+            border: 1px solid alpha(white, 0.10);
+            border-radius: 10px;
+            box-shadow: 0 8px 24px alpha(black, 0.35);
+        }
+
+        .editor-root .editor-custom-color-header {
+            padding: 8px 8px 6px 8px;
+        }
+
+        .editor-root .editor-custom-color-title {
+            color: alpha(white, 0.92);
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .editor-root button.editor-custom-color-close {
+            min-width: 24px;
+            min-height: 24px;
+            padding: 0;
+            border: none;
+            border-radius: 6px;
+            background: transparent;
+        }
+
+        .editor-root button.editor-custom-color-close:hover {
+            background: alpha(white, 0.10);
+        }
+
+        .editor-root .editor-custom-color .recording-editor-custom-field {
+            margin: 0 8px 8px 8px;
+        }
+
+        .editor-root .editor-custom-color .recording-editor-custom-spectrum {
+            margin: 0 8px 8px 8px;
+        }
+
+        .editor-root .editor-custom-color .recording-editor-custom-value-row {
+            margin: 0 8px 8px 8px;
+            padding: 0 10px;
+            min-height: 34px;
+            border-radius: 8px;
+            background: alpha(white, 0.06);
+        }
+
+        .editor-root
+            .editor-custom-color
+            .recording-editor-custom-value-row
+            .recording-editor-custom-hex {
+            min-width: 0;
+            min-height: 30px;
+            padding: 0 2px;
+            font-size: 12px;
+            color: alpha(white, 0.78);
+            background: transparent;
+            background-image: none;
+            border: none;
+            box-shadow: none;
+        }
+
+        .editor-root
+            .editor-custom-color
+            .recording-editor-custom-value-row
+            .recording-editor-custom-hex:focus {
+            background: alpha(white, 0.08);
+        }
+
+        .editor-root .editor-custom-color .recording-editor-custom-unit {
+            color: alpha(white, 0.42);
+            font-size: 11px;
+        }
+
+        .editor-root .editor-custom-color .recording-editor-custom-swatch {
+            border-radius: 5px;
+            background: transparent;
+            border: none;
+            box-shadow: none;
+        }
+
+        .editor-root .editor-custom-color .editor-custom-opacity {
+            padding: 0 10px 10px 10px;
+        }
+
+        .editor-root .editor-custom-color .editor-custom-opacity-label {
+            color: alpha(white, 0.6);
+            font-size: 11px;
+        }
+
+        .editor-root .editor-custom-color .editor-custom-opacity-value {
+            min-width: 34px;
+            color: alpha(white, 0.78);
+            font-size: 11px;
+        }
+
+        .editor-root.editor-theme-light .editor-color-palette {
+            background: #eef0f5;
+            border-color: alpha(#111827, 0.14);
+        }
+
+        .editor-root.editor-theme-light button.editor-color-swatch:hover {
+            background: alpha(#111827, 0.08);
+        }
+
+        .editor-root.editor-theme-light .editor-custom-color {
+            background: #ffffff;
+            border-color: alpha(#111827, 0.18);
+        }
+
+        .editor-root.editor-theme-light .editor-custom-color-title {
+            color: alpha(#1d2129, 0.92);
+        }
+
+        .editor-root.editor-theme-light button.editor-custom-color-close:hover {
+            background: alpha(#111827, 0.08);
+        }
+
+        .editor-root.editor-theme-light
+            .editor-custom-color
+            .recording-editor-custom-value-row {
+            background: alpha(#111827, 0.05);
+        }
+
+        .editor-root.editor-theme-light
+            .editor-custom-color
+            .recording-editor-custom-hex {
+            color: alpha(#1d2129, 0.78);
+        }
+
+        .editor-root.editor-theme-light
+            .editor-custom-color
+            .recording-editor-custom-value-row
+            .recording-editor-custom-hex:focus {
+            background: alpha(#111827, 0.08);
+        }
+
+        .editor-root.editor-theme-light
+            .editor-custom-color
+            .recording-editor-custom-unit {
+            color: alpha(#1d2129, 0.42);
+        }
+
+        .editor-root.editor-theme-light
+            .editor-custom-color
+            .editor-custom-opacity-label {
+            color: alpha(#1d2129, 0.6);
+        }
+
+        .editor-root.editor-theme-light
+            .editor-custom-color
+            .editor-custom-opacity-value {
+            color: alpha(#1d2129, 0.78);
+        }

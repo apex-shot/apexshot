@@ -329,3 +329,13 @@
                 background: #f2f2f2;
                 border: 1px solid rgba(255, 255, 255, 0.16);
             }
+
+            .editor-root .editor-custom-color .editor-custom-opacity scale trough,
+            .editor-root .editor-custom-color .editor-custom-opacity scale highlight,
+            .editor-root.editor-theme-light .editor-custom-color .editor-custom-opacity scale trough,
+            .editor-root.editor-theme-light .editor-custom-color .editor-custom-opacity scale highlight {
+                background: transparent;
+                background-image: none;
+                border: none;
+                box-shadow: none;
+            }

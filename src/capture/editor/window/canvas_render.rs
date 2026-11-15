@@ -66,6 +66,12 @@ pub(super) struct CanvasRenderCaches {
     /// marks a full-resolution/unblurred surface. A burst only upgrades it, so
     /// a drag never re-blurs a surface that is already crisp enough.
     pub background_edge: Rc<Cell<f64>>,
+    /// Everything under the annotations, rastered at the on-screen size.
+    pub base_layer: Rc<RefCell<Option<(BaseKey, ImageSurface)>>>,
+    /// The base layer plus every committed annotation, for the length of a
+    /// pen or highlighter stroke: the committed actions count and the action
+    /// being edited as text are part of its key.
+    pub drag_frame: Rc<RefCell<Option<(BaseKey, usize, Option<usize>, ImageSurface)>>>,
 }
 
 impl CanvasRenderCaches {
@@ -77,7 +83,102 @@ impl CanvasRenderCaches {
             background_surface: Rc::new(RefCell::new(None)),
             background_signature: Rc::new(RefCell::new(None)),
             background_edge: Rc::new(Cell::new(f64::INFINITY)),
+            base_layer: Rc::new(RefCell::new(None)),
+            drag_frame: Rc::new(RefCell::new(None)),
         }
+    }
+}
+
+/// Everything the cached base layer depends on. Annotations, the draft, the
+/// selection chrome and the text box are painted over it, so drawing, typing
+/// and selecting never rebuild it.
+#[derive(Clone, PartialEq)]
+pub(super) struct BaseKey {
+    size: (i32, i32),
+    device_scale: f64,
+    prefers_dark: bool,
+    working_revision: u64,
+    background_style: BackgroundStyle,
+    /// Which wallpaper pixels the fill can use; a landed decode rebuilds.
+    background_resolution: Option<(bool, i32, i32)>,
+    background_padding: f64,
+    background_aspect_ratio: crate::capture::editor::types::CropAspectRatio,
+    background_insert: f64,
+    background_alignment: crate::capture::editor::types::BackgroundAlignment,
+    shadow: (f64, f64, f64, f64),
+    background_corner_radius: f64,
+    background_noise: f64,
+    background_blur: f64,
+    border_thickness: f64,
+    border_color: crate::capture::editor::types::DrawColor,
+    frame_style: crate::capture::editor::types::FrameStyle,
+    /// Canvas offset and scale, then image offset and scale, in view pixels.
+    view: (f64, f64, f64, f64, f64, f64),
+}
+
+/// The wallpaper pixels a Wallpaper fill would be built from right now: the
+/// Motion runtime's decode (thumbnail flag and size) or a landed decode in the
+/// wallpaper cache. Other fills need nothing decoded.
+fn background_resolution(
+    style: &BackgroundStyle,
+    motion_runtime: &Rc<RefCell<MotionRuntime>>,
+    wallpaper_cache: &Rc<RefCell<HashMap<PathBuf, ImageSurface>>>,
+) -> Option<(bool, i32, i32)> {
+    let BackgroundStyle::Wallpaper(path) = style else {
+        return None;
+    };
+    if let Ok(runtime) = motion_runtime.try_borrow() {
+        if runtime.background_surface_path.as_deref() == Some(path.to_string_lossy().as_ref()) {
+            if let Some(surface) = runtime.background_surface.as_ref() {
+                return Some((
+                    runtime.background_surface_is_preview,
+                    surface.width(),
+                    surface.height(),
+                ));
+            }
+        }
+    }
+    wallpaper_cache
+        .borrow()
+        .get(path)
+        .map(|surface| (false, surface.width(), surface.height()))
+}
+
+/// A transparent raster covering the canvas widget at device resolution,
+/// drawn in widget coordinates. None when it would be unreasonably large.
+fn offscreen_surface(width: i32, height: i32, device_scale: f64) -> Option<ImageSurface> {
+    let pixel_width = (f64::from(width) * device_scale).ceil();
+    let pixel_height = (f64::from(height) * device_scale).ceil();
+    if !(pixel_width >= 1.0 && pixel_height >= 1.0) || pixel_width * pixel_height > 40_000_000.0 {
+        return None;
+    }
+    let surface = ImageSurface::create(
+        gtk4::cairo::Format::ARgb32,
+        pixel_width as i32,
+        pixel_height as i32,
+    )
+    .ok()?;
+    surface.set_device_scale(device_scale, device_scale);
+    Some(surface)
+}
+
+/// Every committed annotation except the one being edited as text. Obfuscate
+/// and Focus are baked into the working image, so they are skipped here.
+fn draw_committed_annotations(
+    context: &Context,
+    actions: &[AnnotationAction],
+    editing_action_index: Option<usize>,
+) {
+    for (index, action) in actions.iter().enumerate() {
+        if Some(index) == editing_action_index
+            || matches!(
+                action,
+                AnnotationAction::Obfuscate { .. } | AnnotationAction::Focus { .. }
+            )
+        {
+            continue;
+        }
+        draw_annotation_action(context, action);
     }
 }
 
@@ -385,11 +486,13 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
     let background_surface = caches.background_surface.clone();
     let background_signature_cache = caches.background_signature.clone();
     let background_edge = caches.background_edge.clone();
+    let base_layer = caches.base_layer.clone();
+    let drag_frame = caches.drag_frame.clone();
     let canvas_padding_draw = canvas_padding as f64;
     let interactive_preview = interactive_preview.clone();
     let wallpaper_cache = wallpaper_cache.clone();
     let motion_runtime = motion_runtime.clone();
-    drawing_area.set_draw_func(move |_, context, width, height| {
+    drawing_area.set_draw_func(move |widget, context, width, height| {
         // Appearance edits live in the Motion history, so the toolbar's Undo has
         // to stay reachable while the still's own stack is empty. Read it before
         // taking the state lock to keep one borrow order.
@@ -408,6 +511,8 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
             working_image_revision,
             static_image_transform,
             actions,
+            actions_len,
+            pen_drag,
             draft_action,
             background_style,
             background_padding,
@@ -439,6 +544,12 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
         ) = {
             let st = state_draw.lock().unwrap();
             let (can_undo, can_redo) = st.history_availability();
+            // A pen or highlighter stroke only adds the draft; the committed
+            // annotations come from the cached stroke frame, so they are not
+            // cloned on every pointer event.
+            let pen_drag = st.drag_start.is_some()
+                && matches!(st.selected_tool, Tool::Pen | Tool::Highlighter)
+                && !st.auto_expand_canvas;
             (
                 can_undo,
                 can_redo,
@@ -446,7 +557,13 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
                 Arc::clone(&st.working_image),
                 st.working_image_revision,
                 st.static_image_transform,
-                st.actions.clone(),
+                if pen_drag {
+                    Vec::new()
+                } else {
+                    st.actions.clone()
+                },
+                st.actions.len(),
+                pen_drag,
                 st.draft_action(),
                 st.background_style.clone(),
                 st.background_padding,
@@ -601,413 +718,555 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
             virtual_h * canvas_t.scale,
         );
 
-        // Quality filter while the canvas rests, cheap one while a drag or draft is
-        // repainting at pointer rate (see `editor_interactive_image_filter`).
-        let pick_image_filter = |scale: f64| {
-            if interactive_frame {
-                crate::capture::editor::render::editor_interactive_image_filter()
-            } else {
-                crate::capture::editor::render::editor_image_filter_for_scale(scale)
-            }
-        };
+        // The image transform is fixed by the layout before anything is
+        // painted, so the base layer below can come from a cache.
+        if let Some(layout) = background_layout {
+            update_canvas_image_transform(
+                &mut t,
+                canvas_t,
+                layout,
+                has_background || frame_without_background,
+            );
+        }
+        let base_t = t;
 
-        context.set_operator(gtk4::cairo::Operator::Source);
-        draw_canvas_checkerboard_background(context, width, height, None, !prefers_dark);
-
-        if has_background || frame_without_background {
-            context.set_operator(gtk4::cairo::Operator::Over);
-            // Wallpaper fill only exists with a background; frame-only mode
-            // keeps the checkerboard surround and just adds the window.
-            if has_background {
-                let current_style = background_style.clone();
-                // Pixels the Motion runtime already decoded for this wallpaper.
-                // Reusing them keeps a multi-megapixel decode off the UI thread;
-                // carrying which pixels they are in the signature means a landed
-                // full-size decode replaces the cached thumbnail instead of
-                // leaving it stretched (and blurred) over the whole canvas.
-                let motion_wallpaper = match &current_style {
-                    BackgroundStyle::Wallpaper(path) => {
-                        let runtime = motion_runtime.borrow();
-                        let is_selected = runtime.background_surface_path.as_deref()
-                            == Some(path.to_string_lossy().as_ref());
-                        is_selected
-                            .then(|| {
-                                runtime
-                                    .background_surface
-                                    .clone()
-                                    .map(|surface| (surface, runtime.background_surface_is_preview))
-                            })
-                            .flatten()
-                    }
-                    _ => None,
-                };
-                let current_background_signature = (
-                    current_style.clone(),
-                    if matches!(current_style, BackgroundStyle::Blurred(_)) {
-                        Some(working_image_revision)
-                    } else {
-                        None
-                    },
-                    background_blur.to_bits(),
-                    motion_wallpaper.as_ref().map(|(surface, is_preview)| {
-                        (*is_preview, surface.width(), surface.height())
-                    }),
-                );
-                // The blur is baked into the cached surface, so the working
-                // resolution only has to satisfy what the canvas shows on screen.
-                // It is also the one expensive step here: the box blur costs
-                // O(pixels) and the fill is then upscaled across the canvas, so
-                // the preview bounds it rather than paying the export's
-                // full-resolution cost on every edit. The burst bakes a small
-                // one; the resting frame a crisper one.
-                let canvas_edge = virtual_w * canvas_t.scale;
-                let blur_work_edge = if interactive_frame {
-                    canvas_edge.clamp(96.0, 128.0)
+        // Everything under the annotations: checkerboard, fill, grain, card
+        // shadow, the screenshot and its frame. `interactive` paints with the
+        // cheap filters; `fill_only` stops after the fill for the transformed
+        // card preview. Returns false when a wallpaper is still decoding, so
+        // the frame is not cached with a blank background.
+        let paint_base = |context: &Context, interactive: bool, fill_only: bool| -> bool {
+            let t = base_t;
+            let mut resolved = true;
+            // Quality filter while the canvas rests, cheap one while a drag or draft is
+            // repainting at pointer rate (see `editor_interactive_image_filter`).
+            let pick_image_filter = |scale: f64| {
+                if interactive {
+                    crate::capture::editor::render::editor_interactive_image_filter()
                 } else {
-                    canvas_edge.clamp(256.0, 512.0)
-                };
-                let needs_background_surface = !matches!(
-                    current_style,
-                    BackgroundStyle::None | BackgroundStyle::PlainColor(_)
-                );
-                // A burst may bake the blur smaller than the resting frame needs;
-                // the burst-tail repaint upgrades it. But a surface already crisp
-                // enough for this frame is never rebuilt, so dragging a control
-                // that does not touch the blur (padding, radius, noise) costs
-                // nothing here.
-                let background_edge_draw = background_edge.clone();
-                let blur_upgrade =
-                    needs_background_surface && blur_work_edge > background_edge_draw.get() + 0.5;
-                // Edge the surface we are about to build actually ends up at:
-                // the source's own long edge caps the blur, and a zero blur
-                // keeps the source as-is (full resolution, nothing to upgrade).
-                let edge_for = |source: &ImageSurface| -> f64 {
-                    if background_blur <= 0.001 {
-                        f64::INFINITY
-                    } else {
-                        blur_work_edge.min(f64::from(source.width().max(source.height())))
-                    }
-                };
-                let mut built_edge = background_edge_draw.get();
-                let mut bg_cache = background_surface.borrow_mut();
-                let mut bg_signature_cache = background_signature_cache.borrow_mut();
+                    crate::capture::editor::render::editor_image_filter_for_scale(scale)
+                }
+            };
 
-                if bg_signature_cache.as_ref() != Some(&current_background_signature)
-                    || (needs_background_surface && bg_cache.is_none())
-                    || blur_upgrade
-                {
-                    // A Wallpaper whose pixels are not decoded yet keeps the
-                    // previous surface and leaves the signature stale, so the next
-                    // draw retries instead of caching a blank background.
-                    let mut background_resolved = true;
-                    if let BackgroundStyle::Gradient(gradient) = &current_style {
-                        // Rasterize the shared spec, then blur it like any
-                        // other fill. The fill covers the whole scene, so the
-                        // raster takes the scene's aspect and the paint below
-                        // stretches it across the canvas.
-                        let aspect = virtual_h / virtual_w.max(1.0);
-                        let height = ((f64::from(GRADIENT_PREVIEW_WIDTH) * aspect).round() as u32)
-                            .clamp(1, 960);
-                        let surface = bitmap_to_surface(&render_gradient(
-                            gradient,
-                            GRADIENT_PREVIEW_WIDTH,
-                            height,
-                        ));
-                        *bg_cache = Some(blurred_preview_background(
-                            &surface,
-                            background_blur,
-                            virtual_w,
-                            blur_work_edge,
-                        ));
-                        built_edge = edge_for(&surface);
-                    } else if let BackgroundStyle::Wallpaper(path) = &current_style {
-                        // The Appearance inspector decoded this wallpaper for its
-                        // own preview; reuse those pixels rather than running a
-                        // multi-megapixel JPEG decode on the UI thread. Its
-                        // thumbnail paints immediately and the signature above
-                        // rebuilds once the full decode lands.
-                        if let Some((surface, _)) = motion_wallpaper.as_ref() {
-                            *bg_cache = Some(blurred_preview_background(
-                                surface,
-                                background_blur,
-                                virtual_w,
-                                blur_work_edge,
-                            ));
-                            built_edge = edge_for(surface);
-                        } else if let Some(surface) = wallpaper_cache.borrow().get(path) {
-                            *bg_cache = Some(blurred_preview_background(
-                                surface,
-                                background_blur,
-                                virtual_w,
-                                blur_work_edge,
-                            ));
-                            built_edge = edge_for(surface);
-                        } else {
-                            // Still decoding off-thread; it queues a redraw when it
-                            // lands. ponytail: never sync-decode on the UI thread.
-                            background_resolved = false;
+            context.set_operator(gtk4::cairo::Operator::Source);
+            draw_canvas_checkerboard_background(context, width, height, None, !prefers_dark);
+
+            if has_background || frame_without_background {
+                context.set_operator(gtk4::cairo::Operator::Over);
+                // Wallpaper fill only exists with a background; frame-only mode
+                // keeps the checkerboard surround and just adds the window.
+                if has_background {
+                    let current_style = background_style.clone();
+                    // Pixels the Motion runtime already decoded for this wallpaper.
+                    // Reusing them keeps a multi-megapixel decode off the UI thread;
+                    // carrying which pixels they are in the signature means a landed
+                    // full-size decode replaces the cached thumbnail instead of
+                    // leaving it stretched (and blurred) over the whole canvas.
+                    let motion_wallpaper = match &current_style {
+                        BackgroundStyle::Wallpaper(path) => {
+                            let runtime = motion_runtime.borrow();
+                            let is_selected = runtime.background_surface_path.as_deref()
+                                == Some(path.to_string_lossy().as_ref());
+                            is_selected
+                                .then(|| {
+                                    runtime.background_surface.clone().map(|surface| {
+                                        (surface, runtime.background_surface_is_preview)
+                                    })
+                                })
+                                .flatten()
                         }
-                    } else if let BackgroundStyle::PlainColor(_color) = &current_style {
-                        *bg_cache = None;
-                        built_edge = f64::INFINITY;
-                    } else if let BackgroundStyle::Blurred(blur_idx) = &current_style {
-                        let (bw, bh) = working_image.dimensions();
-
-                        // Optimization: Downsample for background blur to save CPU.
-                        // For very long webpage screenshots, resize directly from the
-                        // source image to avoid cloning the full-size buffer first.
-                        let max_dim = 800u32;
-                        let mut blurred_bg = if bw > max_dim || bh > max_dim {
-                            let scale = max_dim as f64 / (bw.max(bh) as f64);
-                            image::imageops::resize(
-                                &*working_image,
-                                (bw as f64 * scale) as u32,
-                                (bh as f64 * scale) as u32,
-                                image::imageops::FilterType::Triangle,
-                            )
+                        _ => None,
+                    };
+                    let current_background_signature = (
+                        current_style.clone(),
+                        if matches!(current_style, BackgroundStyle::Blurred(_)) {
+                            Some(working_image_revision)
                         } else {
-                            (*working_image).clone()
-                        };
+                            None
+                        },
+                        background_blur.to_bits(),
+                        motion_wallpaper.as_ref().map(|(surface, is_preview)| {
+                            (*is_preview, surface.width(), surface.height())
+                        }),
+                    );
+                    // The blur is baked into the cached surface, so the working
+                    // resolution only has to satisfy what the canvas shows on screen.
+                    // It is also the one expensive step here: the box blur costs
+                    // O(pixels) and the fill is then upscaled across the canvas, so
+                    // the preview bounds it rather than paying the export's
+                    // full-resolution cost on every edit. The burst bakes a small
+                    // one; the resting frame a crisper one.
+                    let canvas_edge = virtual_w * canvas_t.scale;
+                    let blur_work_edge = if interactive {
+                        canvas_edge.clamp(96.0, 128.0)
+                    } else {
+                        canvas_edge.clamp(256.0, 512.0)
+                    };
+                    let needs_background_surface = !matches!(
+                        current_style,
+                        BackgroundStyle::None | BackgroundStyle::PlainColor(_)
+                    );
+                    // A burst may bake the blur smaller than the resting frame needs;
+                    // the burst-tail repaint upgrades it. But a surface already crisp
+                    // enough for this frame is never rebuilt, so dragging a control
+                    // that does not touch the blur (padding, radius, noise) costs
+                    // nothing here.
+                    let background_edge_draw = background_edge.clone();
+                    let blur_upgrade = needs_background_surface
+                        && blur_work_edge > background_edge_draw.get() + 0.5;
+                    // Edge the surface we are about to build actually ends up at:
+                    // the source's own long edge caps the blur, and a zero blur
+                    // keeps the source as-is (full resolution, nothing to upgrade).
+                    let edge_for = |source: &ImageSurface| -> f64 {
+                        if background_blur <= 0.001 {
+                            f64::INFINITY
+                        } else {
+                            blur_work_edge.min(f64::from(source.width().max(source.height())))
+                        }
+                    };
+                    let mut built_edge = background_edge_draw.get();
+                    let mut bg_cache = background_surface.borrow_mut();
+                    let mut bg_signature_cache = background_signature_cache.borrow_mut();
 
-                        let (nbw, nbh) = blurred_bg.dimensions();
-                        // The style picks the base level; the Appearance slider
-                        // adds to it, in canvas pixels converted to this working
-                        // image.
-                        let blur_radius = match blur_idx {
-                            0 => 10.0,
-                            1 => 35.0,
-                            2 => 80.0,
-                            _ => 20.0,
-                        } + background_blur.clamp(0.0, 1.0)
-                            * BACKGROUND_BLUR_MAX_RADIUS
-                            * (nbw as f64 / virtual_w.max(1.0));
-                        crate::capture::editor::render::apply_blur_rect(
-                            &mut blurred_bg,
-                            Rect {
-                                x: 0,
-                                y: 0,
-                                width: nbw as i32,
-                                height: nbh as i32,
-                            },
-                            blur_radius,
-                            false,
-                        );
-                        *bg_cache = rgba_image_to_surface(&blurred_bg);
-                        // The screenshot blur is not tiered; treat it as crisp.
-                        built_edge = f64::INFINITY;
+                    if bg_signature_cache.as_ref() != Some(&current_background_signature)
+                        || (needs_background_surface && bg_cache.is_none())
+                        || blur_upgrade
+                    {
+                        // A Wallpaper whose pixels are not decoded yet keeps the
+                        // previous surface and leaves the signature stale, so the next
+                        // draw retries instead of caching a blank background.
+                        let mut background_resolved = true;
+                        if let BackgroundStyle::Gradient(gradient) = &current_style {
+                            // Rasterize the shared spec, then blur it like any
+                            // other fill. The fill covers the whole scene, so the
+                            // raster takes the scene's aspect and the paint below
+                            // stretches it across the canvas.
+                            let aspect = virtual_h / virtual_w.max(1.0);
+                            let height = ((f64::from(GRADIENT_PREVIEW_WIDTH) * aspect).round()
+                                as u32)
+                                .clamp(1, 960);
+                            let surface = bitmap_to_surface(&render_gradient(
+                                gradient,
+                                GRADIENT_PREVIEW_WIDTH,
+                                height,
+                            ));
+                            *bg_cache = Some(blurred_preview_background(
+                                &surface,
+                                background_blur,
+                                virtual_w,
+                                blur_work_edge,
+                            ));
+                            built_edge = edge_for(&surface);
+                        } else if let BackgroundStyle::Wallpaper(path) = &current_style {
+                            // The Appearance inspector decoded this wallpaper for its
+                            // own preview; reuse those pixels rather than running a
+                            // multi-megapixel JPEG decode on the UI thread. Its
+                            // thumbnail paints immediately and the signature above
+                            // rebuilds once the full decode lands.
+                            if let Some((surface, _)) = motion_wallpaper.as_ref() {
+                                *bg_cache = Some(blurred_preview_background(
+                                    surface,
+                                    background_blur,
+                                    virtual_w,
+                                    blur_work_edge,
+                                ));
+                                built_edge = edge_for(surface);
+                            } else if let Some(surface) = wallpaper_cache.borrow().get(path) {
+                                *bg_cache = Some(blurred_preview_background(
+                                    surface,
+                                    background_blur,
+                                    virtual_w,
+                                    blur_work_edge,
+                                ));
+                                built_edge = edge_for(surface);
+                            } else {
+                                // Still decoding off-thread; it queues a redraw when it
+                                // lands. ponytail: never sync-decode on the UI thread.
+                                background_resolved = false;
+                            }
+                        } else if let BackgroundStyle::PlainColor(_color) = &current_style {
+                            *bg_cache = None;
+                            built_edge = f64::INFINITY;
+                        } else if let BackgroundStyle::Blurred(blur_idx) = &current_style {
+                            let (bw, bh) = working_image.dimensions();
+
+                            // Optimization: Downsample for background blur to save CPU.
+                            // For very long webpage screenshots, resize directly from the
+                            // source image to avoid cloning the full-size buffer first.
+                            let max_dim = 800u32;
+                            let mut blurred_bg = if bw > max_dim || bh > max_dim {
+                                let scale = max_dim as f64 / (bw.max(bh) as f64);
+                                image::imageops::resize(
+                                    &*working_image,
+                                    (bw as f64 * scale) as u32,
+                                    (bh as f64 * scale) as u32,
+                                    image::imageops::FilterType::Triangle,
+                                )
+                            } else {
+                                (*working_image).clone()
+                            };
+
+                            let (nbw, nbh) = blurred_bg.dimensions();
+                            // The style picks the base level; the Appearance slider
+                            // adds to it, in canvas pixels converted to this working
+                            // image.
+                            let blur_radius = match blur_idx {
+                                0 => 10.0,
+                                1 => 35.0,
+                                2 => 80.0,
+                                _ => 20.0,
+                            } + background_blur.clamp(0.0, 1.0)
+                                * BACKGROUND_BLUR_MAX_RADIUS
+                                * (nbw as f64 / virtual_w.max(1.0));
+                            crate::capture::editor::render::apply_blur_rect(
+                                &mut blurred_bg,
+                                Rect {
+                                    x: 0,
+                                    y: 0,
+                                    width: nbw as i32,
+                                    height: nbh as i32,
+                                },
+                                blur_radius,
+                                false,
+                            );
+                            *bg_cache = rgba_image_to_surface(&blurred_bg);
+                            // The screenshot blur is not tiered; treat it as crisp.
+                            built_edge = f64::INFINITY;
+                        }
+                        if background_resolved {
+                            *bg_signature_cache = Some(current_background_signature);
+                            background_edge_draw.set(built_edge);
+                        } else {
+                            resolved = false;
+                        }
                     }
-                    if background_resolved {
-                        *bg_signature_cache = Some(current_background_signature);
-                        background_edge_draw.set(built_edge);
+
+                    if let Some(surface) = bg_cache.as_ref() {
+                        let _ = context.save();
+                        let sw = surface.width() as f64;
+                        let sh = surface.height() as f64;
+                        context.translate(canvas_t.offset_x, canvas_t.offset_y);
+                        context.scale(
+                            (virtual_w * canvas_t.scale) / sw,
+                            (virtual_h * canvas_t.scale) / sh,
+                        );
+                        context.set_source_surface(surface, 0.0, 0.0).unwrap();
+                        context
+                            .source()
+                            .set_filter(pick_image_filter(canvas_t.scale));
+                        let _ = context.paint();
+                        let _ = context.restore();
+                    } else if let BackgroundStyle::PlainColor(color) = &current_style {
+                        context.set_source_rgba(color.r, color.g, color.b, color.a);
+                        context.rectangle(
+                            canvas_t.offset_x,
+                            canvas_t.offset_y,
+                            virtual_w * canvas_t.scale,
+                            virtual_h * canvas_t.scale,
+                        );
+                        let _ = context.fill();
                     }
                 }
 
-                if let Some(surface) = bg_cache.as_ref() {
-                    let _ = context.save();
-                    let sw = surface.width() as f64;
-                    let sh = surface.height() as f64;
-                    context.translate(canvas_t.offset_x, canvas_t.offset_y);
-                    context.scale(
-                        (virtual_w * canvas_t.scale) / sw,
-                        (virtual_h * canvas_t.scale) / sh,
-                    );
-                    context.set_source_surface(surface, 0.0, 0.0).unwrap();
-                    context
-                        .source()
-                        .set_filter(pick_image_filter(canvas_t.scale));
-                    let _ = context.paint();
-                    let _ = context.restore();
-                } else if let BackgroundStyle::PlainColor(color) = &current_style {
-                    context.set_source_rgba(color.r, color.g, color.b, color.a);
-                    context.rectangle(
+                // Background grain belongs to the fill, so it lands under the card,
+                // its backings, and its shadow: the screenshot stays clean while the
+                // fill reads as film grain, matching the Motion preview and export.
+                if has_background {
+                    paint_background_noise(
+                        context,
                         canvas_t.offset_x,
                         canvas_t.offset_y,
                         virtual_w * canvas_t.scale,
                         virtual_h * canvas_t.scale,
+                        background_noise,
                     );
-                    let _ = context.fill();
                 }
-            }
 
-            // Background grain belongs to the fill, so it lands under the card,
-            // its backings, and its shadow: the screenshot stays clean while the
-            // fill reads as film grain, matching the Motion preview and export.
-            if has_background {
-                paint_background_noise(
-                    context,
-                    canvas_t.offset_x,
-                    canvas_t.offset_y,
-                    virtual_w * canvas_t.scale,
-                    virtual_h * canvas_t.scale,
-                    background_noise,
-                );
-            }
+                if fill_only {
+                    return resolved;
+                }
 
-            if transform_active {
-                let layout = card_composition(
-                    background_layout,
-                    image_width,
-                    image_height,
-                    background_alignment,
-                    background_corner_radius,
-                    background_aspect_ratio,
-                    frame_style,
-                    border_thickness,
-                );
-                draw_static_motion_preview(
-                    context,
-                    &static_card_surface,
-                    &working_image,
-                    working_image_revision,
-                    &actions,
-                    layout,
-                    canvas_t,
-                    &mut t,
-                    true,
-                    preview_transform,
-                    background_corner_radius,
-                    frame_style,
-                    border_thickness,
-                    border_color,
-                    shadow_opacity,
-                    shadow_blur,
-                    shadow_offset_x,
-                    shadow_offset_y,
-                );
-                *transform_draw.lock().unwrap() = t;
-                return;
-            }
-
-            if let Some(layout) = background_layout.as_ref() {
-                t.offset_x = canvas_t.offset_x + layout.image_rect.x * canvas_t.scale;
-                t.offset_y = canvas_t.offset_y + layout.image_rect.y * canvas_t.scale;
-                t.scale = canvas_t.scale * layout.draw_scale;
-                t.image_rect_x = layout.image_rect.x;
-                t.image_rect_y = layout.image_rect.y;
-                t.canvas_draw_scale = layout.draw_scale;
-                t.canvas_offset_x = canvas_t.offset_x;
-                t.canvas_offset_y = canvas_t.offset_y;
-                t.canvas_scale = canvas_t.scale;
-                t.canvas_width = layout.canvas_width;
-                t.canvas_height = layout.canvas_height;
-                t.has_background = has_background || frame_without_background;
-
-                // Stack presets: flat backing sheets behind the card, offset
-                // up-left like stacked prints. Farthest sheet first.
-                {
-                    let spec = frame_style.spec();
-                    let backings = [spec.backing1, spec.backing2];
-                    if backings.iter().any(|b| b.is_some()) {
-                        let bw = image_width * t.scale;
-                        let bh = image_height * t.scale;
-                        let br = background_corner_radius * background_scale_factor * t.scale;
-                        // Backing offsets are fixed canvas px (same at any image
-                        // size); canvas px -> view px via the canvas scale.
-                        let unit = canvas_t.scale;
-                        for backing in backings.into_iter().flatten() {
-                            if bw <= 1.0 || bh <= 1.0 {
-                                continue;
+                if let Some(layout) = background_layout.as_ref() {
+                    // Stack presets: flat backing sheets behind the card, offset
+                    // up-left like stacked prints. Farthest sheet first.
+                    {
+                        let spec = frame_style.spec();
+                        let backings = [spec.backing1, spec.backing2];
+                        if backings.iter().any(|b| b.is_some()) {
+                            let bw = image_width * t.scale;
+                            let bh = image_height * t.scale;
+                            let br = background_corner_radius * background_scale_factor * t.scale;
+                            // Backing offsets are fixed canvas px (same at any image
+                            // size); canvas px -> view px via the canvas scale.
+                            let unit = canvas_t.scale;
+                            for backing in backings.into_iter().flatten() {
+                                if bw <= 1.0 || bh <= 1.0 {
+                                    continue;
+                                }
+                                // Center-pivot sheets fan diagonally (Stack);
+                                // the rest pivot at the hidden bottom-right corner
+                                // and fan top-left (Stack2).
+                                let _ = context.save();
+                                if backing.center_pivot {
+                                    context.translate(
+                                        t.offset_x + bw / 2.0 + backing.offset_x * unit,
+                                        t.offset_y + bh / 2.0 + backing.offset_y * unit,
+                                    );
+                                    context.rotate(backing.rotation_deg.to_radians());
+                                    context.translate(-bw / 2.0, -bh / 2.0);
+                                } else {
+                                    context.translate(
+                                        t.offset_x + backing.offset_x * unit + bw,
+                                        t.offset_y + backing.offset_y * unit + bh,
+                                    );
+                                    context.rotate(backing.rotation_deg.to_radians());
+                                    context.translate(-bw, -bh);
+                                }
+                                draw_rounded_rect_path(context, bw, bh, br.max(0.0), 0.0);
+                                let color = frame_style.backing_color(&backing, has_background);
+                                context.set_source_rgba(color.r, color.g, color.b, color.a);
+                                let _ = context.fill();
+                                let _ = context.restore();
                             }
-                            // Center-pivot sheets fan diagonally (Stack);
-                            // the rest pivot at the hidden bottom-right corner
-                            // and fan top-left (Stack2).
-                            let _ = context.save();
-                            if backing.center_pivot {
-                                context.translate(
-                                    t.offset_x + bw / 2.0 + backing.offset_x * unit,
-                                    t.offset_y + bh / 2.0 + backing.offset_y * unit,
-                                );
-                                context.rotate(backing.rotation_deg.to_radians());
-                                context.translate(-bw / 2.0, -bh / 2.0);
-                            } else {
-                                context.translate(
-                                    t.offset_x + backing.offset_x * unit + bw,
-                                    t.offset_y + backing.offset_y * unit + bh,
-                                );
-                                context.rotate(backing.rotation_deg.to_radians());
-                                context.translate(-bw, -bh);
-                            }
-                            draw_rounded_rect_path(context, bw, bh, br.max(0.0), 0.0);
-                            let color = frame_style.backing_color(&backing, has_background);
-                            context.set_source_rgba(color.r, color.g, color.b, color.a);
-                            let _ = context.fill();
-                            let _ = context.restore();
                         }
+                    }
+
+                    if layout.shadow.is_some() {
+                        // Shared with the Motion preview/export: one painter, and
+                        // the Appearance Shadow controls are stage/screen pixels in
+                        // both, so the card drop shadow looks the same in either
+                        // mode. The static canvas draws at canvas resolution and
+                        // scales to the view, so the card corners are converted to
+                        // view space here instead of rasterizing the shadow at
+                        // canvas resolution and scaling it down with everything
+                        // else (which is what made the two previews diverge).
+                        let card_w = image_width * t.scale;
+                        let card_h = image_height * t.scale;
+                        let corners = [
+                            (t.offset_x, t.offset_y),
+                            (t.offset_x + card_w, t.offset_y),
+                            (t.offset_x + card_w, t.offset_y + card_h),
+                            (t.offset_x, t.offset_y + card_h),
+                        ];
+                        paint_card_shadow(
+                            context,
+                            scene_stage,
+                            corners,
+                            background_corner_radius * background_scale_factor * t.scale,
+                            shadow_opacity,
+                            shadow_blur,
+                            (shadow_offset_x, shadow_offset_y),
+                            interactive,
+                        );
                     }
                 }
 
-                if layout.shadow.is_some() {
-                    // Shared with the Motion preview/export: one painter, and
-                    // the Appearance Shadow controls are stage/screen pixels in
-                    // both, so the card drop shadow looks the same in either
-                    // mode. The static canvas draws at canvas resolution and
-                    // scales to the view, so the card corners are converted to
-                    // view space here instead of rasterizing the shadow at
-                    // canvas resolution and scaling it down with everything
-                    // else (which is what made the two previews diverge).
-                    let card_w = image_width * t.scale;
-                    let card_h = image_height * t.scale;
-                    let corners = [
-                        (t.offset_x, t.offset_y),
-                        (t.offset_x + card_w, t.offset_y),
-                        (t.offset_x + card_w, t.offset_y + card_h),
-                        (t.offset_x, t.offset_y + card_h),
-                    ];
-                    paint_card_shadow(
+                let rect_w = image_width * t.scale;
+                let rect_h = image_height * t.scale;
+                let corner_r = background_corner_radius * background_scale_factor * t.scale;
+                if frame_has_attached_border(frame_style) && !frame_style.spec().inset_border {
+                    paint_attached_frame_border(
                         context,
-                        scene_stage,
-                        corners,
-                        background_corner_radius * background_scale_factor * t.scale,
-                        shadow_opacity,
-                        shadow_blur,
-                        (shadow_offset_x, shadow_offset_y),
-                        interactive_frame,
+                        &FloatRect {
+                            x: t.offset_x,
+                            y: t.offset_y,
+                            width: rect_w,
+                            height: rect_h,
+                        },
+                        corner_r,
+                        border_thickness * background_scale_factor * t.scale,
+                        border_color,
+                        false,
                     );
                 }
-            } else {
-                t.scale = canvas_t.scale * draw_scale_factor;
-            }
+                if crate::capture::editor::render::frame_needs_underlay(
+                    frame_style,
+                    border_thickness,
+                ) {
+                    crate::capture::editor::render::paint_frame_underlay(
+                        context,
+                        &FloatRect {
+                            x: t.offset_x,
+                            y: t.offset_y,
+                            width: rect_w,
+                            height: rect_h,
+                        },
+                        corner_r,
+                        border_thickness * background_scale_factor * t.scale,
+                        border_color,
+                    );
+                }
 
-            let rect_w = image_width * t.scale;
-            let rect_h = image_height * t.scale;
-            let corner_r = background_corner_radius * background_scale_factor * t.scale;
-            if frame_has_attached_border(frame_style) && !frame_style.spec().inset_border {
-                paint_attached_frame_border(
-                    context,
-                    &FloatRect {
-                        x: t.offset_x,
-                        y: t.offset_y,
-                        width: rect_w,
-                        height: rect_h,
-                    },
-                    corner_r,
-                    border_thickness * background_scale_factor * t.scale,
-                    border_color,
-                    false,
-                );
+                let _ = context.save();
+                context.translate(t.offset_x, t.offset_y);
+                draw_rounded_rect_path(context, rect_w, rect_h, corner_r, 0.0);
+                context.clip();
+                context.translate(-t.offset_x, -t.offset_y);
             }
-            if crate::capture::editor::render::frame_needs_underlay(frame_style, border_thickness) {
-                crate::capture::editor::render::paint_frame_underlay(
-                    context,
-                    &FloatRect {
-                        x: t.offset_x,
-                        y: t.offset_y,
-                        width: rect_w,
-                        height: rect_h,
-                    },
-                    corner_r,
-                    border_thickness * background_scale_factor * t.scale,
-                    border_color,
-                );
+            if fill_only {
+                return resolved;
             }
+            context.set_operator(gtk4::cairo::Operator::Over);
 
             let _ = context.save();
             context.translate(t.offset_x, t.offset_y);
-            draw_rounded_rect_path(context, rect_w, rect_h, corner_r, 0.0);
-            context.clip();
-            context.translate(-t.offset_x, -t.offset_y);
-        }
+            context.scale(t.scale, t.scale);
+
+            if working_revision.get() != working_image_revision
+                || working_surface.borrow().is_none()
+            {
+                *working_surface.borrow_mut() = rgba_image_to_surface(&working_image);
+                working_revision.set(working_image_revision);
+            }
+
+            if let Some(surface) = working_surface.borrow().as_ref() {
+                crate::capture::editor::render::paint_surface_with_filter(
+                    context,
+                    surface,
+                    0.0,
+                    0.0,
+                    pick_image_filter(t.scale),
+                );
+            } else {
+                draw_rgba_to_context(context, &working_image);
+            }
+            let _ = context.restore();
+
+            // Annotations paint above the background/wallpaper (not clipped to the
+            // screenshot rounded rect) so text/shapes placed on the padding stay
+            // visible instead of slipping underneath the wallpaper. Same for a
+            // frameless surround: annotations sit above the window and border.
+            if has_background || frame_without_background {
+                let _ = context.restore();
+            }
+
+            // Frame style preset: outside border drawn *around* the screenshot on
+            // top of any background/wallpaper, below the annotations. The stroke is
+            // centered on an expanded path so the inner edge aligns with the image
+            // edge and the outer edge carries the radius outward.
+            {
+                let bw = image_width * t.scale;
+                let bh = image_height * t.scale;
+                let br = background_corner_radius * background_scale_factor * t.scale;
+                let unit = background_scale_factor * t.scale;
+                let spec = frame_style.spec();
+                if let Some(liquid) = crate::capture::editor::render::LiquidFrame::resolve(
+                    frame_style,
+                    border_thickness,
+                    unit,
+                ) {
+                    // Glass presets: blended bands instead of flat strokes.
+                    let path = |path_context: &gtk4::cairo::Context, expand: f64| {
+                        crate::capture::editor::render::rounded_rect_path(
+                            path_context,
+                            t.offset_x - expand,
+                            t.offset_y - expand,
+                            bw + expand * 2.0,
+                            bh + expand * 2.0,
+                            if br <= 0.0 { 0.0 } else { br + expand },
+                        );
+                    };
+                    liquid.paint(context, t.offset_y, t.offset_y + bh, path);
+                } else {
+                    // Inset borders paint fully inside the image edge.
+                    if spec.inset_border && border_thickness > 0.0 {
+                        let lw = (border_thickness * unit).max(0.0);
+                        let card = FloatRect {
+                            x: t.offset_x,
+                            y: t.offset_y,
+                            width: bw,
+                            height: bh,
+                        };
+                        let radius = if has_background || frame_without_background {
+                            br
+                        } else {
+                            0.0
+                        };
+                        paint_attached_frame_border(context, &card, radius, lw, border_color, true);
+                        crate::capture::editor::render::paint_inset_inner_line(
+                            context,
+                            &card,
+                            radius,
+                            lw,
+                            unit,
+                            frame_style,
+                        );
+                    }
+                    let mut expand = 0.0;
+                    let stroke_outside = |thickness: f64,
+                                          radius: f64,
+                                          r: f64,
+                                          g: f64,
+                                          b: f64,
+                                          a: f64,
+                                          extra: f64| {
+                        let lw = (thickness * unit).max(0.0);
+                        if lw <= 0.01 {
+                            return extra;
+                        }
+                        let e = extra + lw / 2.0;
+                        if bw + e * 2.0 <= 1.0 || bh + e * 2.0 <= 1.0 {
+                            return extra;
+                        }
+                        let _ = context.save();
+                        context.translate(t.offset_x - e, t.offset_y - e);
+                        // A zero radius stays a sharp mitered frame: the expanded
+                        // path must not inherit half the line width as rounding.
+                        let path_radius = if radius <= 0.0 { 0.0 } else { radius + e };
+                        draw_rounded_rect_path(
+                            context,
+                            bw + e * 2.0,
+                            bh + e * 2.0,
+                            path_radius,
+                            0.0,
+                        );
+                        context.set_source_rgba(r, g, b, a);
+                        context.set_line_width(lw);
+                        let _ = context.stroke();
+                        let _ = context.restore();
+                        extra + lw
+                    };
+                    if border_thickness > 0.0
+                        && !spec.inset_border
+                        && !frame_has_attached_border(frame_style)
+                    {
+                        expand = stroke_outside(
+                            border_thickness,
+                            br,
+                            border_color.r,
+                            border_color.g,
+                            border_color.b,
+                            border_color.a,
+                            expand,
+                        );
+                    }
+                    for outer in [spec.outer1, spec.outer2].into_iter().flatten() {
+                        // Preset main border already applied via border_* fields;
+                        // only paint accent strokes that extend beyond it.
+                        let main_matches = (outer.thickness - spec.border_thickness).abs()
+                            < f64::EPSILON
+                            && outer.gap == 0.0;
+                        if main_matches {
+                            continue;
+                        }
+                        expand += outer.gap * unit;
+                        expand = stroke_outside(
+                            outer.thickness,
+                            br,
+                            outer.color.r,
+                            outer.color.g,
+                            outer.color.b,
+                            outer.color.a,
+                            expand,
+                        );
+                    }
+                }
+            }
+            resolved
+        };
+
         if transform_active {
+            paint_base(context, interactive_frame, true);
             let layout = card_composition(
                 background_layout,
                 image_width,
@@ -1027,7 +1286,7 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
                 layout,
                 canvas_t,
                 &mut t,
-                false,
+                has_background || frame_without_background,
                 preview_transform,
                 background_corner_radius,
                 frame_style,
@@ -1041,175 +1300,152 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
             *transform_draw.lock().unwrap() = t;
             return;
         }
-        context.set_operator(gtk4::cairo::Operator::Over);
         *transform_draw.lock().unwrap() = t;
 
-        let _ = context.save();
-        context.translate(t.offset_x, t.offset_y);
-        context.scale(t.scale, t.scale);
-
-        if working_revision.get() != working_image_revision || working_surface.borrow().is_none() {
-            *working_surface.borrow_mut() = rgba_image_to_surface(&working_image);
-            working_revision.set(working_image_revision);
-        }
-
-        if let Some(surface) = working_surface.borrow().as_ref() {
-            crate::capture::editor::render::paint_surface_with_filter(
-                context,
-                surface,
-                0.0,
-                0.0,
-                pick_image_filter(t.scale),
-            );
-        } else {
-            draw_rgba_to_context(context, &working_image);
-        }
-        let _ = context.restore();
-
-        // Annotations paint above the background/wallpaper (not clipped to the
-        // screenshot rounded rect) so text/shapes placed on the padding stay
-        // visible instead of slipping underneath the wallpaper. Same for a
-        // frameless surround: annotations sit above the window and border.
-        if has_background || frame_without_background {
-            let _ = context.restore();
-        }
-
-        // Frame style preset: outside border drawn *around* the screenshot on
-        // top of any background/wallpaper, below the annotations. The stroke is
-        // centered on an expanded path so the inner edge aligns with the image
-        // edge and the outer edge carries the radius outward.
-        {
-            let bw = image_width * t.scale;
-            let bh = image_height * t.scale;
-            let br = background_corner_radius * background_scale_factor * t.scale;
-            let unit = background_scale_factor * t.scale;
-            let spec = frame_style.spec();
-            if let Some(liquid) = crate::capture::editor::render::LiquidFrame::resolve(
-                frame_style,
+        // Annotating repaints at pointer rate, but nothing under the
+        // annotations moves. Paint that base from a raster kept at the
+        // on-screen size, rebuilt only when something it depends on changes;
+        // while a pen or highlighter stroke is drawn, the raster also carries
+        // the committed annotations so each frame only adds the live stroke.
+        // Appearance edits change the base on every event, so a burst keeps
+        // painting it directly with the cheap filters instead.
+        let editing_action_index = active_text_input
+            .as_ref()
+            .and_then(|input| input.editing_action_index);
+        let mut annotations_baked = false;
+        let mut base_painted = false;
+        if !interactive_preview.active() {
+            let (device_x, device_y) = context.target().device_scale();
+            let device_scale = device_x
+                .max(device_y)
+                .max(f64::from(widget.scale_factor()))
+                .max(1.0);
+            let key = BaseKey {
+                size: (width, height),
+                device_scale,
+                prefers_dark,
+                working_revision: working_image_revision,
+                background_style: background_style.clone(),
+                background_resolution: background_resolution(
+                    &background_style,
+                    &motion_runtime,
+                    &wallpaper_cache,
+                ),
+                background_padding,
+                background_aspect_ratio,
+                background_insert,
+                background_alignment,
+                shadow: (
+                    shadow_opacity,
+                    shadow_blur,
+                    shadow_offset_x,
+                    shadow_offset_y,
+                ),
+                background_corner_radius,
+                background_noise,
+                background_blur,
                 border_thickness,
-                unit,
-            ) {
-                // Glass presets: blended bands instead of flat strokes.
-                let path = |path_context: &gtk4::cairo::Context, expand: f64| {
-                    crate::capture::editor::render::rounded_rect_path(
-                        path_context,
-                        t.offset_x - expand,
-                        t.offset_y - expand,
-                        bw + expand * 2.0,
-                        bh + expand * 2.0,
-                        if br <= 0.0 { 0.0 } else { br + expand },
-                    );
-                };
-                liquid.paint(context, t.offset_y, t.offset_y + bh, path);
-            } else {
-                // Inset borders paint fully inside the image edge.
-                if spec.inset_border && border_thickness > 0.0 {
-                    let lw = (border_thickness * unit).max(0.0);
-                    let card = FloatRect {
-                        x: t.offset_x,
-                        y: t.offset_y,
-                        width: bw,
-                        height: bh,
+                border_color,
+                frame_style,
+                view: (
+                    canvas_t.offset_x,
+                    canvas_t.offset_y,
+                    canvas_t.scale,
+                    t.offset_x,
+                    t.offset_y,
+                    t.scale,
+                ),
+            };
+            let base = {
+                let cached = base_layer
+                    .borrow()
+                    .as_ref()
+                    .filter(|(cached_key, _)| *cached_key == key)
+                    .map(|(_, surface)| surface.clone());
+                cached.or_else(|| {
+                    let surface = offscreen_surface(width, height, device_scale)?;
+                    let resolved = {
+                        let base = Context::new(&surface).ok()?;
+                        paint_base(&base, false, false)
                     };
-                    let radius = if has_background || frame_without_background {
-                        br
-                    } else {
-                        0.0
-                    };
-                    paint_attached_frame_border(context, &card, radius, lw, border_color, true);
-                    crate::capture::editor::render::paint_inset_inner_line(
-                        context,
-                        &card,
-                        radius,
-                        lw,
-                        unit,
-                        frame_style,
-                    );
-                }
-                let mut expand = 0.0;
-                let stroke_outside = |thickness: f64,
-                                      radius: f64,
-                                      r: f64,
-                                      g: f64,
-                                      b: f64,
-                                      a: f64,
-                                      extra: f64| {
-                    let lw = (thickness * unit).max(0.0);
-                    if lw <= 0.01 {
-                        return extra;
+                    surface.flush();
+                    if resolved {
+                        *base_layer.borrow_mut() = Some((key.clone(), surface.clone()));
                     }
-                    let e = extra + lw / 2.0;
-                    if bw + e * 2.0 <= 1.0 || bh + e * 2.0 <= 1.0 {
-                        return extra;
-                    }
-                    let _ = context.save();
-                    context.translate(t.offset_x - e, t.offset_y - e);
-                    // A zero radius stays a sharp mitered frame: the expanded
-                    // path must not inherit half the line width as rounding.
-                    let path_radius = if radius <= 0.0 { 0.0 } else { radius + e };
-                    draw_rounded_rect_path(context, bw + e * 2.0, bh + e * 2.0, path_radius, 0.0);
-                    context.set_source_rgba(r, g, b, a);
-                    context.set_line_width(lw);
-                    let _ = context.stroke();
-                    let _ = context.restore();
-                    extra + lw
-                };
-                if border_thickness > 0.0
-                    && !spec.inset_border
-                    && !frame_has_attached_border(frame_style)
-                {
-                    expand = stroke_outside(
-                        border_thickness,
-                        br,
-                        border_color.r,
-                        border_color.g,
-                        border_color.b,
-                        border_color.a,
-                        expand,
-                    );
+                    Some(surface)
+                })
+            };
+            let frame = match base {
+                Some(base) if pen_drag => {
+                    let cached = drag_frame
+                        .borrow()
+                        .as_ref()
+                        .filter(|(cached_key, len, editing, _)| {
+                            *cached_key == key
+                                && *len == actions_len
+                                && *editing == editing_action_index
+                        })
+                        .map(|(_, _, _, frame)| frame.clone());
+                    let frame = cached.or_else(|| {
+                        let frame = offscreen_surface(width, height, device_scale)?;
+                        {
+                            let drawing = Context::new(&frame).ok()?;
+                            drawing.set_operator(gtk4::cairo::Operator::Source);
+                            drawing.set_source_surface(&base, 0.0, 0.0).ok()?;
+                            drawing.paint().ok()?;
+                            drawing.set_operator(gtk4::cairo::Operator::Over);
+                            drawing.translate(t.offset_x, t.offset_y);
+                            drawing.scale(t.scale, t.scale);
+                            crate::capture::editor::render::clip_annotation_content_to_canvas(
+                                &drawing, t,
+                            );
+                            let committed = state_draw.lock().unwrap().actions.clone();
+                            draw_committed_annotations(&drawing, &committed, editing_action_index);
+                        }
+                        frame.flush();
+                        *drag_frame.borrow_mut() =
+                            Some((key, actions_len, editing_action_index, frame.clone()));
+                        Some(frame)
+                    });
+                    annotations_baked = frame.is_some();
+                    frame.or(Some(base))
                 }
-                for outer in [spec.outer1, spec.outer2].into_iter().flatten() {
-                    // Preset main border already applied via border_* fields;
-                    // only paint accent strokes that extend beyond it.
-                    let main_matches = (outer.thickness - spec.border_thickness).abs()
-                        < f64::EPSILON
-                        && outer.gap == 0.0;
-                    if main_matches {
-                        continue;
-                    }
-                    expand += outer.gap * unit;
-                    expand = stroke_outside(
-                        outer.thickness,
-                        br,
-                        outer.color.r,
-                        outer.color.g,
-                        outer.color.b,
-                        outer.color.a,
-                        expand,
-                    );
+                base => base,
+            };
+            if let Some(frame) = frame {
+                let _ = context.save();
+                context.set_operator(gtk4::cairo::Operator::Source);
+                if context.set_source_surface(&frame, 0.0, 0.0).is_ok() {
+                    context.source().set_filter(gtk4::cairo::Filter::Fast);
+                    let _ = context.paint();
+                    base_painted = true;
                 }
+                let _ = context.restore();
             }
         }
+        if !pen_drag {
+            *drag_frame.borrow_mut() = None;
+        }
+        if !base_painted {
+            annotations_baked = false;
+            paint_base(context, interactive_frame, false);
+        }
+        context.set_operator(gtk4::cairo::Operator::Over);
         let _ = context.save();
         context.translate(t.offset_x, t.offset_y);
         context.scale(t.scale, t.scale);
         let _ = context.save();
         crate::capture::editor::render::clip_annotation_content_to_canvas(context, t);
 
-        let editing_action_index = active_text_input
-            .as_ref()
-            .and_then(|input| input.editing_action_index);
-        for (index, action) in actions.iter().enumerate() {
-            if Some(index) == editing_action_index {
-                continue;
+        if !annotations_baked {
+            if pen_drag {
+                // A stroke frame skips the per-frame clone; this is the
+                // fallback when no raster could carry the annotations.
+                let committed = state_draw.lock().unwrap().actions.clone();
+                draw_committed_annotations(context, &committed, editing_action_index);
+            } else {
+                draw_committed_annotations(context, &actions, editing_action_index);
             }
-            if matches!(
-                action,
-                AnnotationAction::Obfuscate { .. } | AnnotationAction::Focus { .. }
-            ) {
-                continue;
-            }
-            draw_annotation_action(context, action);
         }
 
         if let Some(draft) = draft_action {
@@ -1661,7 +1897,7 @@ mod tests {
         assert!(
             production.contains("pub(super) struct CanvasRenderCaches")
                 && production.contains("pub(super) fn install_canvas_draw_func(")
-                && production.contains("drawing_area.set_draw_func(move |_, context, width, height| {")
+                && production.contains("drawing_area.set_draw_func(move |widget, context, width, height| {")
                 && production.contains("IMPORTANT: do not hold the state mutex while performing cairo drawing")
                 && production.contains("draw_canvas_checkerboard_background")
                 && production.contains("draw_annotation_action")
@@ -1713,6 +1949,62 @@ mod tests {
         );
     }
 
+    /// A pointer-rate annotation frame must not repaint the fill, shadow and
+    /// screenshot: the base comes from a raster keyed on what it depends on,
+    /// and a pen stroke reuses one with the committed annotations baked in.
+    #[test]
+    fn annotating_paints_the_base_from_a_cached_raster() {
+        let source = include_str!("canvas_render.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production.contains("if !interactive_preview.active() {")
+                && production.contains("paint_base(&base, false, false)")
+                && production
+                    .contains("*base_layer.borrow_mut() = Some((key.clone(), surface.clone()));")
+                && production.contains(
+                    "*cached_key == key\n                                && *len == actions_len"
+                )
+                && production.contains("if !annotations_baked {"),
+            "annotating must reuse the cached base and stroke frame",
+        );
+    }
+
+    #[test]
+    fn offscreen_rasters_cover_the_widget_at_device_resolution() {
+        let surface = offscreen_surface(300, 200, 2.0).expect("surface");
+        assert_eq!((surface.width(), surface.height()), (600, 400));
+        assert_eq!(surface.device_scale(), (2.0, 2.0));
+        assert!(offscreen_surface(0, 200, 1.0).is_none());
+        assert!(offscreen_surface(10_000, 10_000, 1.0).is_none());
+    }
+
+    #[test]
+    fn committed_annotations_skip_the_edited_text_and_baked_effects() {
+        use crate::capture::editor::types::{DrawColor, Point};
+        let line = |x: f64| AnnotationAction::Line {
+            start: Point { x, y: 1.0 },
+            end: Point { x, y: 9.0 },
+            color: DrawColor::new(1.0, 0.0, 0.0, 1.0),
+            stroke_size: 2.0,
+            shadow: false,
+        };
+        let surface = ImageSurface::create(gtk4::cairo::Format::ARgb32, 20, 10).unwrap();
+        {
+            let context = Context::new(&surface).unwrap();
+            draw_committed_annotations(&context, &[line(4.0), line(14.0)], Some(1));
+        }
+        let mut surface = surface;
+        let stride = surface.stride() as usize;
+        let data = surface.data().unwrap();
+        let alpha_at = |x: usize| data[5 * stride + x * 4 + 3];
+        assert!(alpha_at(4) > 0, "a committed line is drawn");
+        assert_eq!(
+            alpha_at(14),
+            0,
+            "the action being edited is left to the editor"
+        );
+    }
+
     /// Re-blurring the whole fill per slider tick stuttered next to the cheap
     /// controls around it. A live burst bakes the blur small and the tail
     /// upgrades it. The tier must ride the surface's edge, not the cache key, or
@@ -1723,7 +2015,7 @@ mod tests {
         let source = include_str!("canvas_render.rs");
         let production = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production.contains("let blur_work_edge = if interactive_frame {")
+            production.contains("let blur_work_edge = if interactive {")
                 && production.contains("canvas_edge.clamp(96.0, 128.0)")
                 && production.contains("canvas_edge.clamp(256.0, 512.0)")
                 && production.contains("blur_work_edge > background_edge_draw.get() + 0.5")
@@ -1791,22 +2083,28 @@ mod tests {
     /// resample the interactive filter exists to avoid.
     #[test]
     fn an_appearance_burst_keeps_frames_cheap_until_the_tail_expires() {
-        let draws = Rc::new(Cell::new(0));
-        let preview = InteractivePreview::with_tail(
-            Duration::from_millis(20),
-            Rc::new({
-                let draws = draws.clone();
-                move || draws.set(draws.get() + 1)
-            }),
-        );
-        assert!(!preview.active(), "a resting canvas is not interactive");
-        preview.touch();
-        assert!(preview.active(), "an interaction turns the burst on");
-        // The burst has expired on its own, and the one quality repaint it
-        // owes has landed.
-        std::thread::sleep(Duration::from_millis(60));
-        while gtk4::glib::MainContext::default().iteration(false) {}
-        assert!(!preview.active(), "the burst must expire on its own");
-        assert_eq!(draws.get(), 1, "the burst owes exactly one resting repaint");
+        // The burst schedules on the default main context, which the GTK test
+        // thread owns once it exists, so the whole check runs on that thread.
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let draws = Rc::new(Cell::new(0));
+            let preview = InteractivePreview::with_tail(
+                Duration::from_millis(20),
+                Rc::new({
+                    let draws = draws.clone();
+                    move || draws.set(draws.get() + 1)
+                }),
+            );
+            assert!(!preview.active(), "a resting canvas is not interactive");
+            preview.touch();
+            assert!(preview.active(), "an interaction turns the burst on");
+            // The burst has expired on its own, and the one quality repaint it
+            // owes has landed.
+            std::thread::sleep(Duration::from_millis(60));
+            while gtk4::glib::MainContext::default().iteration(false) {}
+            assert!(!preview.active(), "the burst must expire on its own");
+            assert_eq!(draws.get(), 1, "the burst owes exactly one resting repaint");
+        }) else {
+            return;
+        };
     }
 }
