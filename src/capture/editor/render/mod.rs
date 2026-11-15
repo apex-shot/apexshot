@@ -1,7 +1,7 @@
 use super::color::{highlighter_stroke_width, HIGHLIGHTER_ALPHA_SCALE};
 use super::numbering_style::{NumberSize, NumberingStyle};
 use super::types::{
-    AnnotationAction, DrawColor, FrameSpec, FrameStyle, Point, Rect, SelectHandle, ViewTransform,
+    AnnotationAction, DrawColor, FrameStyle, Point, Rect, SelectHandle, ViewTransform,
 };
 use image::{ImageBuffer, RgbaImage};
 use rayon::prelude::*;
@@ -9,7 +9,6 @@ use rayon::prelude::*;
 mod arrows;
 mod background_blur;
 mod effects;
-mod liquid_glass;
 mod noise;
 pub(crate) mod scene_shadow;
 mod text;
@@ -24,11 +23,6 @@ pub use background_blur::{
 pub use effects::{
     apply_blackout_rect, apply_blur_rect, apply_censor_rect, apply_focus_rect, apply_hybrid_blur,
 };
-#[cfg(test)]
-pub use liquid_glass::clear_lens;
-#[allow(unused_imports)]
-pub use liquid_glass::liquid_preview_backdrop;
-pub use liquid_glass::{glass_layer, liquid_preview_layer, GlassLook, GlassRing, LiquidPreview};
 pub use noise::{apply_background_noise, paint_background_noise};
 #[allow(unused_imports)]
 pub use text::{
@@ -1131,227 +1125,266 @@ pub fn paint_attached_frame_border(
     let _ = context.restore();
 }
 
-/// Resolved Liquid Glass geometry in device pixels.
+/// Colour of the hairline along Pearl's inner edge.
+pub const PEARL_INNER_LINE: DrawColor = DrawColor {
+    r: 0.12,
+    g: 0.14,
+    b: 0.18,
+    a: 0.35,
+};
+
+/// Width of the hairline along Pearl's inner edge, for `unit` device pixels
+/// per preset unit.
+pub fn pearl_inner_line_width(unit: f64) -> f64 {
+    (0.75 * unit).max(0.3)
+}
+
+/// Pearl's white inset band reads on a dark screenshot but vanishes on a
+/// light one, where it looked exactly like Clean. A faint dark hairline
+/// along the band's inner edge keeps it visible on any picture. No-op for
+/// every other style.
+pub fn paint_inset_inner_line(
+    context: &gtk4::cairo::Context,
+    image_rect: &super::composition::FloatRect,
+    radius: f64,
+    thickness: f64,
+    unit: f64,
+    style: FrameStyle,
+) {
+    if style != FrameStyle::InsetLight || thickness <= 0.01 {
+        return;
+    }
+    let line = pearl_inner_line_width(unit);
+    let inset = |by: f64| super::composition::FloatRect {
+        x: image_rect.x + by,
+        y: image_rect.y + by,
+        width: image_rect.width - by * 2.0,
+        height: image_rect.height - by * 2.0,
+    };
+    let outer = inset(thickness);
+    if outer.width <= line * 2.0 || outer.height <= line * 2.0 {
+        return;
+    }
+    let inner = inset(thickness + line);
+    let _ = context.save();
+    context.new_path();
+    context.set_fill_rule(gtk4::cairo::FillRule::EvenOdd);
+    rounded_rect_path(
+        context,
+        outer.x,
+        outer.y,
+        outer.width,
+        outer.height,
+        (radius - thickness).max(0.0),
+    );
+    rounded_rect_path(
+        context,
+        inner.x,
+        inner.y,
+        inner.width,
+        inner.height,
+        (radius - thickness - line).max(0.0),
+    );
+    let c = PEARL_INNER_LINE;
+    context.set_source_rgba(c.r, c.g, c.b, c.a);
+    let _ = context.fill();
+    let _ = context.restore();
+}
+
+/// Whether a style's outside border is laid under the card as well as
+/// stroked around it; see [`paint_frame_underlay`].
+pub fn frame_needs_underlay(style: FrameStyle, border_thickness: f64) -> bool {
+    let spec = style.spec();
+    border_thickness > 0.0
+        && !spec.liquid
+        && !spec.inset_border
+        && !frame_has_attached_border(style)
+}
+
+/// The outside border's colour from one pixel inside the card out to the
+/// border's outer edge, painted before the card. The card is clipped to its
+/// outline, so its anti-aliased rim would otherwise blend with whatever is
+/// behind it and the rounded corners show a rough seam of background between
+/// picture and border; over this band the rim blends into the border instead.
+pub fn paint_frame_underlay(
+    context: &gtk4::cairo::Context,
+    rect: &super::composition::FloatRect,
+    radius: f64,
+    thickness: f64,
+    color: DrawColor,
+) {
+    if thickness <= 0.01 || rect.width <= 2.0 || rect.height <= 2.0 {
+        return;
+    }
+    let _ = context.save();
+    context.new_path();
+    context.set_fill_rule(gtk4::cairo::FillRule::EvenOdd);
+    rounded_rect_path(
+        context,
+        rect.x - thickness,
+        rect.y - thickness,
+        rect.width + thickness * 2.0,
+        rect.height + thickness * 2.0,
+        if radius <= 0.0 {
+            0.0
+        } else {
+            radius + thickness
+        },
+    );
+    rounded_rect_path(
+        context,
+        rect.x + 1.0,
+        rect.y + 1.0,
+        rect.width - 2.0,
+        rect.height - 2.0,
+        (radius - 1.0).max(0.0),
+    );
+    context.set_source_rgba(color.r, color.g, color.b, color.a);
+    let _ = context.fill();
+    let _ = context.restore();
+}
+
+/// A glass frame preset (Frost, Smoke, Prism) resolved to device pixels.
+///
+/// The glass is drawn over whatever is already painted under the band, with
+/// blend operators: the wallpaper seen through a lifted, vivid band with a
+/// bright lip along the outer edge (strongest at the top, where the light
+/// comes from) and a faint contact line against the card. Everything is
+/// vector paint on the card's own outline, so the preview, a drag, a tilted
+/// pose, the inspector swatches and the export all look the same and stay
+/// anti-aliased at the corners.
 pub struct LiquidFrame {
-    band: f64,
-    rim: f64,
-    tint: DrawColor,
-    rim_color: DrawColor,
-    /// Wide frosted-glass mode (Glass Light/Dark): a diffuse milky/smoked
-    /// veil instead of Liquid's clear refractive body.
-    frost: bool,
+    style: crate::capture::editor::types::FrameStyle,
+    /// Band width: the preset's border plus its outer rim.
+    gap: f64,
+    /// Device pixels per preset unit, for the lip's inset.
+    unit: f64,
 }
 
 impl LiquidFrame {
-    /// Resolve a preset into device-pixel geometry. `thickness` is the
+    /// Resolve a glass preset into device-pixel geometry. `thickness` is the
     /// caller's own resolved band thickness in `unit`-scaled units (the
     /// editors store the preset's value), falling back to the preset when the
     /// caller has none. `None` for any other preset or a collapsed band.
-    pub fn resolve(spec: &FrameSpec, thickness: f64, unit: f64) -> Option<Self> {
+    pub fn resolve(
+        style: crate::capture::editor::types::FrameStyle,
+        thickness: f64,
+        unit: f64,
+    ) -> Option<Self> {
+        let spec = style.spec();
         if !spec.liquid {
             return None;
         }
-        let band_source = if thickness > 0.01 {
+        let band = if thickness > 0.01 {
             thickness
         } else {
             spec.border_thickness
         };
-        let frame = Self {
-            band: (band_source * unit).max(0.0),
-            rim: (spec.outer1.map(|outer| outer.thickness).unwrap_or(0.0) * unit).max(0.0),
-            tint: spec.border_color,
-            rim_color: spec
-                .outer1
-                .map(|outer| outer.color)
-                .unwrap_or(DrawColor::new(1.0, 1.0, 1.0, 0.9)),
-            frost: spec.frost,
-        };
-        if frame.band <= 0.01 && frame.rim <= 0.01 {
-            return None;
-        }
-        Some(frame)
+        let gap = (band + spec.outer1.map_or(0.0, |outer| outer.thickness)) * unit;
+        (gap > 0.5).then_some(Self { style, gap, unit })
     }
 
-    /// Paint the glass: a clear tinted band with the light pooling along its
-    /// top lip, capped by a specular rim that fades around the perimeter,
-    /// instead of the flat stroke every other preset uses. `top`/`bottom` are
-    /// the card's vertical extent in the context's current user space and
-    /// `path` builds a closed card outline expanded outward by its argument
-    /// (negative expands inward), so the static renderers' rounded rects and
-    /// the motion renderer's projected quads share one recipe.
-    ///
-    /// Layer order: tinted band, light pooling, lip shadow inside the card
-    /// edge, specular rim, shadow line under the bottom of the rim.
+    /// Paint the glass. `top`/`bottom` are the card's vertical extent in the
+    /// context's current user space and `path` adds a closed card outline
+    /// expanded outward by its argument (negative insets it), so the static
+    /// renderers' rounded rects and the Motion renderer's projected quads
+    /// share one recipe.
     pub fn paint<F>(&self, context: &gtk4::cairo::Context, top: f64, bottom: f64, path: F)
     where
         F: Fn(&gtk4::cairo::Context, f64),
     {
-        let LiquidFrame {
-            band,
-            rim,
-            tint,
-            rim_color,
-            frost,
-        } = *self;
-        // Gradients need a real span; a degenerate band still paints something
-        // sane instead of an empty pattern.
-        let (top, bottom) = if bottom - top < 1.0 {
-            (top, top + 1.0)
-        } else {
-            (top, bottom)
+        use crate::capture::editor::types::FrameStyle;
+        use gtk4::cairo::{FillRule, LinearGradient, Operator};
+        let gap = self.gap;
+        let (top, bottom) = (top - gap, bottom.max(top + 1.0) + gap);
+        let lit = |high: f64, low: f64| {
+            let gradient = LinearGradient::new(0.0, top, 0.0, bottom);
+            gradient.add_color_stop_rgba(0.0, 1.0, 1.0, 1.0, high);
+            gradient.add_color_stop_rgba(1.0, 1.0, 1.0, 1.0, low);
+            gradient
         };
+        // The band starts just under the card so it covers the card's own
+        // antialiased edge instead of leaving a seam beside it.
+        let band = |context: &gtk4::cairo::Context| {
+            context.new_path();
+            context.set_fill_rule(FillRule::EvenOdd);
+            path(context, gap);
+            path(context, -0.6);
+        };
+        let _ = context.save();
 
-        if band > 0.01 {
-            let gradient = gtk4::cairo::LinearGradient::new(0.0, top, 0.0, bottom);
-            if frost {
-                // Frosted body: a diffuse nearly-uniform veil in the tint
-                // (whitish milk / darkish smoke) so the backdrop smears
-                // behind it, like Shots.so frames. No lensing theatrics.
-                let a = tint.a.clamp(0.0, 1.0);
-                gradient.add_color_stop_rgba(0.0, tint.r, tint.g, tint.b, a);
-                gradient.add_color_stop_rgba(0.5, tint.r, tint.g, tint.b, a * 0.92);
-                gradient.add_color_stop_rgba(1.0, tint.r, tint.g, tint.b, a * 0.96);
-            } else {
-                // Clear glass body: mostly refraction, not paint. Keep the tint
-                // whisper-thin with a cool cast so black backdrops stay black and
-                // the highlights do the talking, like the reference shader.
-                let a = (tint.a * 0.45).clamp(0.0, 1.0);
-                gradient.add_color_stop_rgba(
-                    0.0,
-                    tint.r * 0.92,
-                    tint.g * 0.95,
-                    (tint.b * 1.05).min(1.0),
-                    a * 0.5,
-                );
-                gradient.add_color_stop_rgba(
-                    0.35,
-                    tint.r * 0.92,
-                    tint.g * 0.95,
-                    (tint.b * 1.05).min(1.0),
-                    a * 0.12,
-                );
-                gradient.add_color_stop_rgba(
-                    0.78,
-                    tint.r * 0.92,
-                    tint.g * 0.95,
-                    (tint.b * 1.05).min(1.0),
-                    a * 0.18,
-                );
-                gradient.add_color_stop_rgba(
-                    1.0,
-                    tint.r * 0.92,
-                    tint.g * 0.95,
-                    (tint.b * 1.05).min(1.0),
-                    a * 0.32,
-                );
+        // Body.
+        match self.style {
+            FrameStyle::GlassDark => {
+                // Smoke: the wallpaper multiplied down to ~40%, which keeps
+                // its hue vivid, a touch deeper toward the card.
+                band(context);
+                context.set_operator(Operator::Multiply);
+                context.set_source_rgb(0.40, 0.40, 0.40);
+                let _ = context.fill();
+                context.new_path();
+                path(context, gap * 0.2);
+                context.set_line_width(gap * 0.4);
+                context.set_source_rgb(0.90, 0.90, 0.90);
+                let _ = context.stroke();
+                context.set_operator(Operator::Over);
             }
-            context.set_fill_rule(gtk4::cairo::FillRule::EvenOdd);
-            path(context, band);
-            path(context, 0.0);
-            let _ = context.set_source(&gradient);
-            let _ = context.fill();
-            context.set_fill_rule(gtk4::cairo::FillRule::Winding);
-        }
-
-        // Light pooling: one compact top wash sized to the band, so the
-        // light sits on the glass instead of flooding past it. On a 3px
-        // edge a stacked double wash just turns milky. Frost gets a soft
-        // diffuse breath of light instead of a specular pool.
-        if band > 1.0 {
-            let gradient = gtk4::cairo::LinearGradient::new(0.0, top, 0.0, bottom);
-            if frost {
-                gradient.add_color_stop_rgba(0.0, 1.0, 1.0, 1.0, 0.16);
-                gradient.add_color_stop_rgba(0.30, 1.0, 1.0, 1.0, 0.06);
-                gradient.add_color_stop_rgba(0.65, 1.0, 1.0, 1.0, 0.0);
-                gradient.add_color_stop_rgba(1.0, 1.0, 1.0, 1.0, 0.0);
-            } else {
-                gradient.add_color_stop_rgba(0.0, 1.0, 1.0, 1.0, 0.50);
-                gradient.add_color_stop_rgba(0.22, 1.0, 1.0, 1.0, 0.22);
-                gradient.add_color_stop_rgba(0.58, 1.0, 1.0, 1.0, 0.05);
-                gradient.add_color_stop_rgba(1.0, 1.0, 1.0, 1.0, 0.0);
+            FrameStyle::Liquid => {
+                // Prism: the wallpaper itself, lifted by a light wash.
+                band(context);
+                context.set_operator(Operator::Add);
+                let _ = context.set_source(lit(0.16, 0.09));
+                let _ = context.fill();
             }
-            let _ = context.set_source(&gradient);
-            context.set_line_width(band * 0.6);
-            path(context, band * 0.7);
-            let _ = context.stroke();
-            // Diagonal sheen on wider refractive bands only: a soft streak
-            // across the top so dark frames still show a reflection. Frost
-            // stays diffuse — no specular streaks.
-            if band > 3.0 && !frost {
-                let sheen = gtk4::cairo::LinearGradient::new(
-                    0.0,
-                    top,
-                    band * 3.0,
-                    top + (bottom - top) * 0.35,
-                );
-                sheen.add_color_stop_rgba(0.0, 1.0, 1.0, 1.0, 0.0);
-                sheen.add_color_stop_rgba(0.35, 1.0, 1.0, 1.0, 0.20);
-                sheen.add_color_stop_rgba(0.55, 1.0, 1.0, 1.0, 0.06);
-                sheen.add_color_stop_rgba(1.0, 1.0, 1.0, 1.0, 0.0);
-                let _ = context.set_source(&sheen);
-                context.set_line_width((band * 0.55).max(1.0));
-                path(context, band * 0.5);
+            _ => {
+                // Frost: a milky veil, whitest at the outer edge and easing
+                // toward the card, the wallpaper tinting it from beneath.
+                band(context);
+                context.set_source_rgba(1.0, 1.0, 1.0, 0.40);
+                let _ = context.fill();
+                context.new_path();
+                path(context, gap * 0.75);
+                context.set_line_width(gap * 0.5);
+                context.set_source_rgba(1.0, 1.0, 1.0, 0.16);
+                let _ = context.stroke();
+                context.new_path();
+                path(context, gap * 0.15);
+                context.set_line_width(gap * 0.3);
+                context.set_source_rgba(0.0, 0.0, 0.0, 0.06);
                 let _ = context.stroke();
             }
         }
+        context.set_fill_rule(FillRule::Winding);
 
-        // Faint lip shade just inside the card edge: a whisper of depth so
-        // the glass reads as a body. Kept minimal — anything stronger dirties
-        // the screenshot content itself.
-        if band > 0.5 {
-            let lip = (band * 0.35).clamp(0.5, band);
-            let shadow = gtk4::cairo::LinearGradient::new(0.0, top, 0.0, bottom);
-            shadow.add_color_stop_rgba(0.0, 0.0, 0.0, 0.0, 0.05);
-            shadow.add_color_stop_rgba(0.22, 0.0, 0.0, 0.0, 0.01);
-            shadow.add_color_stop_rgba(1.0, 0.0, 0.0, 0.0, 0.0);
-            let _ = context.set_source(&shadow);
-            context.set_line_width(lip);
-            path(context, -lip / 2.0);
+        // Bright outer lip, one band-pixel in from the outer edge. Smoke has
+        // none, and Frost's veil is its own highlight, so it keeps a soft one.
+        if self.style != FrameStyle::GlassDark {
+            context.set_operator(if self.style == FrameStyle::GlassLight {
+                Operator::Over
+            } else {
+                Operator::Add
+            });
+            context.new_path();
+            path(context, gap - 0.75 * self.unit.clamp(1.0, 1.5));
+            context.set_line_width(1.5);
+            let lip = if self.style == FrameStyle::Liquid {
+                lit(0.30, 0.10)
+            } else {
+                lit(0.10, 0.04)
+            };
+            let _ = context.set_source(lip);
             let _ = context.stroke();
         }
 
-        // Inner lip highlight: the card edge catches the same top light as
-        // the outer lip, otherwise the edge looks one-sided on black. Kept
-        // visible all around (Fresnel-like) rather than fading to nothing.
-        if band > 0.5 {
-            let inner = gtk4::cairo::LinearGradient::new(0.0, top, 0.0, bottom);
-            inner.add_color_stop_rgba(0.0, 1.0, 1.0, 1.0, 0.45);
-            inner.add_color_stop_rgba(0.25, 1.0, 1.0, 1.0, 0.25);
-            inner.add_color_stop_rgba(0.6, 1.0, 1.0, 1.0, 0.15);
-            inner.add_color_stop_rgba(1.0, 1.0, 1.0, 1.0, 0.20);
-            let _ = context.set_source(&inner);
-            context.set_line_width(1.0_f64.max(band * 0.14));
-            path(context, 0.5);
-            let _ = context.stroke();
-        }
+        // Faint contact line where the glass meets the card.
+        context.set_operator(Operator::Over);
+        context.new_path();
+        path(context, 0.5);
+        context.set_line_width(1.0);
+        context.set_source_rgba(0.0, 0.0, 0.0, 0.18);
+        let _ = context.stroke();
 
-        if rim > 0.01 {
-            let a = rim_color.a.clamp(0.0, 1.0);
-            let (r, g, b) = (rim_color.r, rim_color.g, rim_color.b);
-            let gradient = gtk4::cairo::LinearGradient::new(0.0, top, 0.0, bottom);
-            gradient.add_color_stop_rgba(0.0, r, g, b, a);
-            gradient.add_color_stop_rgba(0.2, r, g, b, a * 0.85);
-            gradient.add_color_stop_rgba(0.5, r, g, b, a * 0.60);
-            gradient.add_color_stop_rgba(0.82, r, g, b, a * 0.45);
-            gradient.add_color_stop_rgba(1.0, r, g, b, a * 0.50);
-            let _ = context.set_source(&gradient);
-            context.set_line_width(rim);
-            path(context, band + rim / 2.0);
-            let _ = context.stroke();
-
-            // Shadow line under the bottom of the rim: on a light backdrop a
-            // white rim alone washes out, and this is what makes the glass
-            // read as a solid body rather than a floating hairline.
-            let hair = (rim * 0.55).max(0.5);
-            let edge = gtk4::cairo::LinearGradient::new(0.0, top, 0.0, bottom);
-            edge.add_color_stop_rgba(0.0, 0.0, 0.0, 0.0, 0.0);
-            edge.add_color_stop_rgba(0.6, 0.0, 0.0, 0.0, 0.0);
-            edge.add_color_stop_rgba(1.0, 0.0, 0.0, 0.0, 0.20);
-            let _ = context.set_source(&edge);
-            context.set_line_width(hair);
-            path(context, band + rim * 0.5);
-            let _ = context.stroke();
-        }
+        let _ = context.restore();
     }
 }
 

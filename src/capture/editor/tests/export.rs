@@ -1,8 +1,7 @@
 use super::*;
 use crate::capture::editor::render::{
-    cairo_argb_to_rgba_image, clear_lens, frame_has_attached_border, glass_layer,
-    liquid_preview_backdrop, liquid_preview_layer, rounded_rect_path,
-    squircle_rounded_rect_contains, GlassLook, GlassRing, LiquidPreview,
+    cairo_argb_to_rgba_image, frame_has_attached_border, rounded_rect_path,
+    squircle_rounded_rect_contains,
 };
 
 #[test]
@@ -415,9 +414,10 @@ fn retro_draws_thin_border_with_solid_window_behind_card() {
     let (w, h) = (final_image.width(), final_image.height());
     let x = w / 2;
     let is_gray = |px: &image::Rgba<u8>| px[0] == 100 && px[1] == 100 && px[2] == 100;
-    // The sheet behind the card is a light card, not a black void, so it reads
-    // on a transparent export as well as over a background.
-    let sheet = spec.backing1.expect("retro sheet").color;
+    // Over a fill the sheet is a solid black drop; a transparent export keeps
+    // the light card instead (see `FrameStyle::backing_color`).
+    let sheet = FrameStyle::Retro.backing_color(&spec.backing1.expect("retro sheet"), true);
+    assert_eq!(sheet, DrawColor::new(0.0, 0.0, 0.0, 1.0));
     let is_sheet = |px: &image::Rgba<u8>| {
         let channel = |value: f64| (value * 255.0).round() as u8;
         px[0].abs_diff(channel(sheet.r)) <= 2
@@ -1064,401 +1064,127 @@ fn liquid_glass_lights_the_band_from_the_top_and_stays_translucent() {
     );
 }
 
+/// The glass presets blend a band over the wallpaper: Frost lifts it toward
+/// white, Smoke multiplies it darker while keeping its hue, and Prism adds a
+/// light wash, all inside the band and nowhere past it.
 #[test]
-fn liquid_glass_refraction_bends_a_patterned_backdrop() {
-    let mut backdrop = RgbaImage::from_pixel(240, 240, image::Rgba([0, 0, 0, 255]));
-    for (x, y, pixel) in backdrop.enumerate_pixels_mut() {
-        if (x + y) % 2 == 0 {
-            *pixel = image::Rgba([255, 255, 255, 255]);
-        }
-    }
-    let ring = GlassRing {
-        x: 80.0,
-        y: 80.0,
-        width: 80.0,
-        height: 80.0,
-        radius: 0.0,
-        gap: 7.0,
+fn glass_presets_blend_their_band_over_the_fill() {
+    let fill = [60u8, 90, 200];
+    let render = |style: FrameStyle| {
+        let mut state = EditorState::new(RgbaImage::from_pixel(
+            400,
+            400,
+            image::Rgba([25, 25, 25, 255]),
+        ));
+        state.background_style = BackgroundStyle::PlainColor(DrawColor::new(
+            f64::from(fill[0]) / 255.0,
+            f64::from(fill[1]) / 255.0,
+            f64::from(fill[2]) / 255.0,
+            1.0,
+        ));
+        state.background_padding = 80.0;
+        state.shadow_opacity = 0.0;
+        state.background_corner_radius = 20.0;
+        state.frame_style = style;
+        state.border_thickness = style.spec().border_thickness;
+        state.to_final_image().expect("final image")
     };
-    let look = GlassLook::default();
-    let bent = glass_layer(&backdrop, &ring, &look).expect("refracted layer");
-    let flat = glass_layer(
-        &backdrop,
-        &ring,
-        &GlassLook {
-            refraction: 0.0,
-            ..look
-        },
-    )
-    .expect("unrefracted layer");
-    assert_eq!(
-        (bent.x, bent.y),
-        (64, 64),
-        "the band should start at the card edge minus the glass reach"
-    );
-    let mut lit = 0usize;
-    let mut displaced = 0usize;
-    for (x, y, pixel) in bent.image.enumerate_pixels() {
-        if pixel[3] == 0 {
-            continue;
-        }
-        let other_x = x as i64 + bent.x - flat.x;
-        let other_y = y as i64 + bent.y - flat.y;
-        if other_x < 0
-            || other_y < 0
-            || other_x as u32 >= flat.image.width()
-            || other_y as u32 >= flat.image.height()
-        {
-            continue;
-        }
-        lit += 1;
-        if *pixel != *flat.image.get_pixel(other_x as u32, other_y as u32) {
-            displaced += 1;
-        }
-    }
-    assert!(lit > 100, "the band should cover real pixels, got {lit}");
-    assert!(
-        displaced > 20,
-        "the refracted band should pull the patterned backdrop through the glass, \
-         only {displaced} of {lit} band pixels moved"
-    );
-}
-
-#[test]
-fn liquid_glass_keeps_the_backdrop_colour_dominant() {
-    let backdrop = RgbaImage::from_pixel(240, 240, image::Rgba([255, 0, 0, 255]));
-    let ring = GlassRing {
-        x: 80.0,
-        y: 80.0,
-        width: 80.0,
-        height: 80.0,
-        radius: 0.0,
-        gap: 7.0,
+    let luma = |px: &image::Rgba<u8>| {
+        0.2126 * f64::from(px[0]) + 0.7152 * f64::from(px[1]) + 0.0722 * f64::from(px[2])
     };
-    let layer = glass_layer(&backdrop, &ring, &GlassLook::default()).expect("layer");
-    let mid_x = (120.0 - layer.x as f64) as u32;
-    let mid_y = (76.0 - layer.y as f64) as u32;
-    let mid = *layer.image.get_pixel(mid_x, mid_y);
-    assert!(
-        mid[0] > 200 && mid[1] < 60 && mid[2] < 60,
-        "the flat body should stay the backdrop's colour, got {mid:?}"
-    );
-    let mut lit = 0usize;
-    let mut coloured = 0usize;
-    for (_, _, pixel) in layer.image.enumerate_pixels() {
-        if pixel[3] == 0 {
-            continue;
-        }
-        lit += 1;
-        if pixel[0] > 200 && pixel[1] < 90 && pixel[2] < 90 {
-            coloured += 1;
-        }
-    }
-    assert!(lit > 100, "the band should cover real pixels, got {lit}");
-    assert!(
-        coloured * 2 > lit,
-        "the backdrop colour should dominate more than half the band: {coloured}/{lit}"
-    );
-}
-
-#[test]
-fn liquid_glass_layer_only_covers_the_band() {
-    let backdrop = RgbaImage::from_pixel(240, 240, image::Rgba([30, 60, 120, 255]));
-    let ring = GlassRing {
-        x: 80.0,
-        y: 80.0,
-        width: 80.0,
-        height: 80.0,
-        radius: 0.0,
-        gap: 7.0,
-    };
-    let layer = glass_layer(&backdrop, &ring, &GlassLook::default()).expect("layer");
-    let center = *layer.image.get_pixel(
-        (120.0 - layer.x as f64) as u32,
-        (120.0 - layer.y as f64) as u32,
-    );
-    assert_eq!(
-        center[3], 0,
-        "the card centre must stay untouched by the layer, got {center:?}"
-    );
-    for (x, y, pixel) in layer.image.enumerate_pixels() {
-        if pixel[3] == 0 {
-            continue;
-        }
-        let ax = layer.x as f64 + f64::from(x) + 0.5;
-        let ay = layer.y as f64 + f64::from(y) + 0.5;
-        let dx = (80.0 - ax).max(ax - 160.0).max(0.0);
-        let dy = (80.0 - ay).max(ay - 160.0).max(0.0);
-        let distance = (dx * dx + dy * dy).sqrt();
-        assert!(
-            distance <= 9.0,
-            "layer paints {distance}px outside the 7px band at ({ax}, {ay})"
-        );
-        assert!(
-            !(ax > 82.0 && ax < 158.0 && ay > 82.0 && ay < 158.0),
-            "layer reached the card interior at ({ax}, {ay})"
-        );
-    }
-}
-
-#[test]
-fn liquid_glass_transparent_backdrop_antialiasing_stays_dim() {
-    let backdrop = RgbaImage::from_pixel(240, 240, image::Rgba([24, 24, 72, 90]));
-    let ring = GlassRing {
-        x: 80.0,
-        y: 80.0,
-        width: 80.0,
-        height: 80.0,
-        radius: 0.0,
-        gap: 7.0,
-    };
-    let layer = glass_layer(&backdrop, &ring, &GlassLook::default()).expect("layer");
-    let mut feathered = 0usize;
-    for (_, _, pixel) in layer.image.enumerate_pixels() {
-        if pixel[3] == 0 || pixel[3] >= 250 {
-            continue;
-        }
-        feathered += 1;
-        assert!(
-            pixel[0] <= 240 && pixel[1] <= 240 && pixel[2] <= 240,
-            "the feathered lip must not blow out to white, got {pixel:?}"
-        );
-    }
-    assert!(
-        feathered > 50,
-        "the band should carry a feathered edge to check, got {feathered} pixels"
-    );
-}
-
-#[test]
-fn liquid_preview_layer_replays_the_recorded_scene_for_the_shader() {
-    let width = 200i32;
-    let height = 180i32;
-    let paint_scene = |context: &gtk4::cairo::Context| {
-        context.set_operator(gtk4::cairo::Operator::Source);
-        context.set_source_rgb(0.25, 0.55, 0.85);
-        context.paint().expect("background");
-        context.set_operator(gtk4::cairo::Operator::Over);
-        context.set_source_rgb(0.9, 0.35, 0.2);
-        context.rectangle(60.0, 50.0, 80.0, 70.0);
-        context.fill().expect("card");
-    };
-    let scene = gtk4::cairo::RecordingSurface::create(
-        gtk4::cairo::Content::ColorAlpha,
-        Some(gtk4::cairo::Rectangle::new(
-            0.0,
-            0.0,
-            width as f64,
-            height as f64,
-        )),
-    )
-    .expect("scene surface");
-    let group = {
-        let context = gtk4::cairo::Context::new(&scene).expect("scene context");
-        context.push_group();
-        paint_scene(&context);
-        context.pop_group().expect("recorded scene")
-    };
-    let mut direct = gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::ARgb32, width, height)
-        .expect("direct surface");
-    {
-        let context = gtk4::cairo::Context::new(&direct).expect("direct context");
-        paint_scene(&context);
-    }
-    direct.flush();
-    let direct_stride = direct.stride() as usize;
-    let scene_pixels = {
-        let data = direct.data().expect("direct data");
-        cairo_argb_to_rgba_image(width as u32, height as u32, direct_stride, data.as_ref())
-    };
-
-    let crop = Rect {
-        x: 17,
-        y: 11,
-        width: 160,
-        height: 150,
-    };
-    let backdrop = liquid_preview_backdrop(&group, crop).expect("rasterized backdrop");
-    for (x, y, pixel) in backdrop.enumerate_pixels() {
-        assert_eq!(
-            *pixel,
-            *scene_pixels.get_pixel(crop.x as u32 + x, crop.y as u32 + y),
-            "the preview must feed the shader the recorded scene pixels, ({x}, {y}) differs"
-        );
-    }
-
-    let look = GlassLook::default();
-    let ring = GlassRing {
-        x: 60.0 - f64::from(crop.x),
-        y: 50.0 - f64::from(crop.y),
-        width: 80.0,
-        height: 70.0,
-        radius: 0.0,
-        gap: 7.0,
-    };
-    let mut preview = LiquidPreview::new();
-    let first =
-        liquid_preview_layer(&mut preview, &group, crop, &ring, &look).expect("preview layer");
-    let direct_layer = glass_layer(&backdrop, &ring, &look).expect("direct layer");
-    assert_eq!(
-        (first.x, first.y),
-        (
-            i64::from(crop.x) + direct_layer.x,
-            i64::from(crop.y) + direct_layer.y
-        ),
-        "the preview layer should land at the crop origin plus the layer offset"
-    );
-    assert_eq!(
-        first.image, direct_layer.image,
-        "the preview layer must agree with the shader on the same pixels"
-    );
-    let again =
-        liquid_preview_layer(&mut preview, &group, crop, &ring, &look).expect("cached layer");
-    assert_eq!(
-        again.image, first.image,
-        "the cached layer must be reused unchanged"
-    );
-    let changed_look = GlassLook {
-        body_shade: 0.4,
-        ..look
-    };
-    let changed = liquid_preview_layer(&mut preview, &group, crop, &ring, &changed_look)
-        .expect("updated layer");
-    assert_ne!(
-        changed.image, first.image,
-        "changing the look must invalidate the cache"
-    );
-    assert_eq!(
-        changed.image,
-        glass_layer(&backdrop, &ring, &changed_look)
-            .expect("updated direct layer")
-            .image
-    );
-}
-
-#[test]
-fn liquid_glass_follows_the_card_squircle_corners() {
-    let backdrop = RgbaImage::from_pixel(160, 160, image::Rgba([30, 60, 120, 255]));
-    let ring = GlassRing {
-        x: 40.0,
-        y: 40.0,
-        width: 80.0,
-        height: 80.0,
-        radius: 20.0,
-        gap: 7.0,
-    };
-    let layer = glass_layer(&backdrop, &ring, &GlassLook::default()).expect("layer");
-    let alpha = |x: i64, y: i64| {
-        layer
-            .image
-            .get_pixel((x - layer.x) as u32, (y - layer.y) as u32)[3]
-    };
-    for (x, y) in [(44, 44), (115, 44), (44, 115), (115, 115)] {
-        assert_eq!(
-            alpha(x, y),
-            0,
-            "glass must not cover the card corner at {x},{y}"
-        );
-    }
-    for (x, y) in [(42, 42), (117, 42), (42, 117), (117, 117)] {
-        assert!(
-            alpha(x, y) > 0,
-            "glass must meet the curved corner at {x},{y}"
-        );
-    }
-}
-
-#[test]
-fn liquid_glass_has_a_lit_body_without_an_inner_outline() {
-    let backdrop = RgbaImage::from_pixel(200, 200, image::Rgba([70, 80, 110, 255]));
-    let ring = GlassRing {
-        x: 50.0,
-        y: 50.0,
-        width: 100.0,
-        height: 100.0,
-        radius: 20.0,
-        gap: 7.0,
-    };
-    let layer = glass_layer(&backdrop, &ring, &GlassLook::default()).expect("layer");
-    let pixel = |x: i64, y: i64| {
-        *layer
-            .image
-            .get_pixel((x - layer.x) as u32, (y - layer.y) as u32)
-    };
-    let mid = pixel(100, 46);
-    let inner = pixel(100, 49);
-    assert!(mid[1] > 90, "the body must carry light, got {mid:?}");
-    assert!(
-        inner[1] <= mid[1] + 5,
-        "the inner edge must not form a second highlight: {inner:?} vs {mid:?}"
-    );
-    let left = pixel(46, 65);
-    let right = pixel(153, 135);
-    assert!(
-        left[1] > right[1] + 10,
-        "the broad reflection must taper from upper-left to lower-right"
-    );
-}
-
-#[test]
-fn liquid_glass_body_samples_the_background_before_the_card_shadow() {
-    let mut state = EditorState::new(RgbaImage::from_pixel(
-        400,
-        400,
-        image::Rgba([25, 25, 25, 255]),
-    ));
-    state.background_style = BackgroundStyle::PlainColor(DrawColor::new(0.6, 0.3, 0.8, 1.0));
-    state.background_padding = 80.0;
-    state.shadow_opacity = 0.45;
-    state.background_corner_radius = 20.0;
-    state.frame_style = FrameStyle::Liquid;
-    state.border_thickness = FrameStyle::Liquid.spec().border_thickness;
-    state.shadow_opacity = 0.0;
-    let without = state.to_final_image().expect("without shadow");
-    state.shadow_opacity = 0.9;
-    let with = state.to_final_image().expect("with shadow");
-    let spec = state.frame_style.spec();
-    let gap = state.border_thickness + spec.outer1.expect("glass rim").thickness;
-    let body_y = 480 + (gap / 2.0).floor() as u32;
-    assert_eq!(with.dimensions(), without.dimensions());
-    assert_eq!(
-        with.get_pixel(280, body_y),
-        without.get_pixel(280, body_y),
-        "the glass body must not inherit the shadow underneath it"
-    );
-    assert!(
-        with.get_pixel(280, 496)[0] < without.get_pixel(280, 496)[0],
-        "the shadow must still shade the surround outside the glass"
-    );
-}
-
-#[test]
-fn liquid_glass_body_stays_visible_on_every_side_of_light_and_dark_backdrops() {
-    let ring = GlassRing {
-        x: 50.0,
-        y: 50.0,
-        width: 100.0,
-        height: 100.0,
-        radius: 20.0,
-        gap: 7.0,
-    };
-    for fill in [[10, 15, 30, 255], [0, 0, 0, 255], [245, 245, 245, 255]] {
-        let backdrop = RgbaImage::from_pixel(200, 200, image::Rgba(fill));
-        let layer = glass_layer(&backdrop, &ring, &GlassLook::default()).expect("glass layer");
-        for (x, y) in [(46, 100), (153, 100), (100, 46), (100, 153)] {
-            let pixel = layer
-                .image
-                .get_pixel((x - layer.x) as u32, (y - layer.y) as u32);
-            let contrast: i32 = (0..3)
-                .map(|channel| (i32::from(pixel[channel]) - i32::from(fill[channel])).abs())
-                .sum();
+    let fill_luma = luma(&image::Rgba([fill[0], fill[1], fill[2], 255]));
+    for (style, lighter) in [
+        (FrameStyle::GlassLight, true),
+        (FrameStyle::GlassDark, false),
+        (FrameStyle::Liquid, true),
+    ] {
+        let image = render(style);
+        // The card's first fully dark row down the middle column; the band
+        // starts just under it, so step a pixel clear before sampling.
+        let x = image.width() / 2;
+        let top = (0..image.height())
+            .find(|y| image.get_pixel(x, *y).0 == [25, 25, 25, 255])
+            .expect("card top");
+        let band = luma(image.get_pixel(x, top - 2));
+        if lighter {
             assert!(
-                contrast >= 30,
-                "the glass body must remain distinct at ({x},{y}) over {fill:?}: {pixel:?}"
+                band > fill_luma + 8.0,
+                "{style:?} band {band} over fill {fill_luma}"
             );
-            assert_eq!(pixel[3], 255, "the body must not fade away on any side");
+        } else {
+            assert!(
+                band < fill_luma - 8.0,
+                "{style:?} band {band} over fill {fill_luma}"
+            );
+            let px = image.get_pixel(x, top - 2);
+            assert!(px[2] > px[0], "Smoke keeps the fill's hue: {px:?}");
         }
+        let clear = image.get_pixel(x, top - 40);
+        assert_eq!(
+            clear.0,
+            [fill[0], fill[1], fill[2], 255],
+            "{style:?} must leave the fill past its band untouched"
+        );
     }
+}
+
+/// Pearl's white inset band disappears on a white screenshot unless its
+/// inner hairline is drawn, which made it indistinguishable from Clean.
+#[test]
+fn pearl_stays_visible_on_a_white_screenshot() {
+    let render = |style: FrameStyle| {
+        let mut state = EditorState::new(RgbaImage::from_pixel(
+            300,
+            200,
+            image::Rgba([255, 255, 255, 255]),
+        ));
+        state.background_style = BackgroundStyle::PlainColor(DrawColor::new(0.2, 0.2, 0.3, 1.0));
+        state.background_padding = 60.0;
+        state.shadow_opacity = 0.0;
+        state.frame_style = style;
+        state.border_thickness = style.spec().border_thickness;
+        state.border_color = style.spec().border_color;
+        state.to_final_image().expect("final image")
+    };
+    let clean = render(FrameStyle::Default);
+    let pearl = render(FrameStyle::InsetLight);
+    assert_eq!(clean.dimensions(), pearl.dimensions());
+    let differing = clean
+        .pixels()
+        .zip(pearl.pixels())
+        .filter(|(a, b)| a.0.iter().zip(b.0.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
+        .count();
+    assert!(
+        differing > 200,
+        "Pearl must read on a white card: {differing} pixels differ"
+    );
+}
+
+#[test]
+fn only_stroked_outside_borders_get_an_underlay() {
+    use crate::capture::editor::render::frame_needs_underlay;
+    for style in FrameStyle::ALL {
+        let spec = style.spec();
+        let expected = spec.border_thickness > 0.0
+            && !spec.liquid
+            && !spec.inset_border
+            && !frame_has_attached_border(style);
+        assert_eq!(
+            frame_needs_underlay(style, spec.border_thickness),
+            expected,
+            "{style:?}"
+        );
+        assert!(
+            !frame_needs_underlay(style, 0.0),
+            "{style:?} without a border"
+        );
+    }
+    assert!(
+        FrameStyle::ALL
+            .iter()
+            .any(|style| frame_needs_underlay(*style, style.spec().border_thickness)),
+        "some preset strokes an outside border"
+    );
 }
 
 #[test]
@@ -1500,68 +1226,6 @@ fn glass_frost_siblings_share_the_3px_edge_with_opposite_tints() {
         band_luma[0] > band_luma[1] + 25.0,
         "Glass Light frost should read milky over smoked Glass Dark: {:?}",
         band_luma
-    );
-}
-
-#[test]
-fn glass_presets_share_the_reduced_geometry_and_liquid_optics() {
-    let base = GlassLook::for_style(FrameStyle::Liquid);
-    for (style, shade) in [
-        (FrameStyle::Liquid, 0.0),
-        (FrameStyle::GlassLight, -0.55),
-        (FrameStyle::GlassDark, 0.55),
-    ] {
-        let spec = style.spec();
-        let rim = spec.outer1.expect("glass rim");
-        assert_eq!(spec.border_thickness + rim.thickness, 3.5);
-        let look = GlassLook::for_style(style);
-        assert_eq!(look.body_shade, shade);
-        assert_eq!(
-            GlassLook {
-                body_shade: 0.0,
-                ..look
-            },
-            base
-        );
-    }
-    let source = include_str!("../window/canvas_render.rs");
-    assert!(source.contains("let liquid_group = frame_style.spec().liquid && !transform_active;"));
-    assert!(source.contains("draw_static_motion_preview("));
-    assert!(source.contains("&GlassLook::for_style(frame_style)"));
-}
-
-#[test]
-fn clear_lens_follows_snells_law_across_the_bevel() {
-    let gap = 7.0;
-    let strength = GlassLook::default().refraction;
-    assert_eq!(clear_lens(0.0, gap, strength), (0.0, 0.0));
-    let (lip_slope, lip_bend) = clear_lens(1.0, gap, strength);
-    assert!(
-        lip_slope.is_finite() && lip_slope >= 1.0e4,
-        "the lip slope must stay finite and steep, got {lip_slope}"
-    );
-    assert_eq!(lip_bend, 0.0, "the lip must not displace the sample");
-    assert_eq!(clear_lens(-0.5, gap, strength), (0.0, 0.0));
-    assert_eq!(clear_lens(2.0, gap, strength), (1.0e4, 0.0));
-
-    let mut max_bend = 0.0_f64;
-    for step in 1..100 {
-        let u = f64::from(step) / 100.0;
-        let (slope, bend) = clear_lens(u, gap, strength);
-        assert!(slope.is_finite() && slope > 0.0, "slope at u={u}: {slope}");
-        assert!(bend.is_finite(), "displacement at u={u}: {bend}");
-        let theta_t = ((slope.atan()).sin() / 1.5).asin();
-        assert!(theta_t.is_finite() && theta_t >= 0.0, "index law at u={u}");
-        assert_eq!(
-            clear_lens(u, gap, 0.0),
-            (slope, 0.0),
-            "zero strength must keep the slope and drop the displacement at u={u}"
-        );
-        max_bend = max_bend.max(bend);
-    }
-    assert!(
-        max_bend > gap * 0.5,
-        "the dome must pull samples more than half the band inward, got {max_bend}"
     );
 }
 
