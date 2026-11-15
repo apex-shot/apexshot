@@ -171,13 +171,11 @@ pub struct FrameSpec {
     /// True for Inset styles: the main border paints *inside* the image edge
     /// instead of outside it, so it needs no extra canvas.
     pub inset_border: bool,
-    /// True for the glass family (Liquid, Glass Light, Glass Dark): the edge
-    /// paints as glass instead of a flat stroke, so renderers hand the preset
-    /// to `render::LiquidFrame` (Cairo previews) or `render::glass_layer`
-    /// (static exports). The whitish/darkish read comes from `border_color`.
+    /// True for the glass family (Prism, Frost, Smoke): the edge paints as
+    /// glass blended over the backdrop instead of a flat stroke, so every
+    /// renderer hands the preset to `render::LiquidFrame`.
     pub liquid: bool,
-    /// Diffuse light/smoked tint in the Cairo approximation. The pixel
-    /// renderer uses the shared glass optics with the corresponding tint.
+    /// The tinted glass siblings (Frost, Smoke), as opposed to clear Prism.
     pub frost: bool,
     pub outer1: Option<FrameOuterStroke>,
     pub outer2: Option<FrameOuterStroke>,
@@ -215,6 +213,17 @@ impl FrameStyle {
             Self::Card => "Bevel",
             Self::Stack => "Tilt",
             Self::Stack2 => "Cascade",
+        }
+    }
+
+    /// The colour a backing sheet is painted in. Offset's sheet is a solid
+    /// black drop when the card sits on a fill; over a transparent export it
+    /// stays the light card from its spec, so it never reads as a black slab.
+    pub fn backing_color(self, backing: &FrameBacking, over_fill: bool) -> DrawColor {
+        if self == Self::Retro && over_fill {
+            DrawColor::new(0.0, 0.0, 0.0, 1.0)
+        } else {
+            backing.color
         }
     }
 
@@ -337,9 +346,8 @@ impl FrameStyle {
                     offset_y: 28.0,
                     rotation_deg: 0.0,
                     center_pivot: false,
-                    // The sheet reads as a second card behind this one, like the
-                    // Stack presets' sheets. Opaque black only worked over a
-                    // background; on a transparent export it was a black slab.
+                    // The light card used over a transparent export; over a
+                    // fill the sheet is a black drop (see `backing_color`).
                     color: DrawColor::new(0.75, 0.75, 0.77, 1.0),
                 }),
                 backing2: None,
@@ -797,7 +805,6 @@ impl ViewTransform {
         image_point
     }
 
-    #[allow(dead_code)]
     pub fn image_to_view(&self, point: Point) -> Point {
         Point {
             x: point.x * self.scale + self.offset_x,

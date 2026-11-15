@@ -1,15 +1,16 @@
+use super::export_settings::{Codec, ExportPhase, ExportProgress, HardwarePreference};
 use super::hardware_encode::{self, HardwareEncoder};
 use super::model::background_render::render_rounded_mask;
 use super::model::{
-    even_crop_rect, AudioMode, ExportQuality, VideoBackground, VideoEditState, VideoMetadata,
-    DEFAULT_FRAME_RATE,
+    even_crop_rect, AudioMode, VideoBackground, VideoEditState, VideoMetadata, DEFAULT_FRAME_RATE,
 };
 use anyhow::{anyhow, Context};
 use serde::Deserialize;
-use std::io::Read;
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 
 /// Distinguishes concurrent exports' scratch directories. The process id and
 /// start time are not enough: two exports that start at the same time (the
@@ -551,10 +552,22 @@ fn run_trim_only_cancellable(
     }
     if kept.len() <= 1 {
         let (start, end) = kept.first().copied().unwrap();
+        if let Some(progress) = state.export_progress.as_ref() {
+            progress.set_total_us(((end - start).max(0.0) * 1_000_000.0) as u64);
+            progress.set_phase(ExportPhase::Encoding);
+        }
         let args = build_single_trim_args(state, start, end, &output_path);
-        run_ffmpeg_cancellable(&args, &output_path, cancellation)?;
+        let feed = progress_feed(state, 0.0);
+        run_ffmpeg_cancellable_progress(&args, &output_path, cancellation, feed, None)?;
     } else {
-        run_multi_segment_trim(state, &kept, &output_path, false, cancellation)?;
+        run_multi_segment_trim(
+            state,
+            &kept,
+            &output_path,
+            false,
+            cancellation,
+            &AtomicBool::new(false),
+        )?;
     }
     Ok(output_path)
 }
@@ -570,18 +583,73 @@ fn run_convert_cancellable(
 ) -> anyhow::Result<PathBuf> {
     ensure_studio_export_allowed(state)?;
     ensure_export_destination_is_distinct(state, &output_path)?;
+    ensure_codec_export_possible(state)?;
     let kept = state.ordered_kept_segments();
     if kept.is_empty() {
         anyhow::bail!("no segments selected for export");
     }
+    let attempted_hardware = export_encoder(state).is_some();
+    let encode_started = AtomicBool::new(false);
+    let result = run_convert_segments(state, &kept, &output_path, cancellation, &encode_started);
+    match result {
+        Err(err)
+            if should_retry_hardware(
+                attempted_hardware && encode_started.load(Ordering::Acquire),
+                cancellation_requested(cancellation),
+                false,
+            ) =>
+        {
+            eprintln!("[export] hardware encode failed ({err}); retrying on the software encoder");
+            if let Some(progress) = state.export_progress.as_ref() {
+                progress.reset();
+                progress.mark_retried();
+                progress.set_phase(ExportPhase::RetryingSoftware);
+            }
+            let mut software = state.clone();
+            software.export_settings.hardware = HardwarePreference::Software;
+            encode_started.store(false, Ordering::Release);
+            run_convert_segments(
+                &software,
+                &kept,
+                &output_path,
+                cancellation,
+                &encode_started,
+            )?;
+            Ok(output_path)
+        }
+        other => other.map(|_| output_path),
+    }
+}
+
+fn should_retry_hardware(attempted_hardware: bool, cancelled: bool, succeeded: bool) -> bool {
+    attempted_hardware && !cancelled && !succeeded
+}
+
+fn run_convert_segments(
+    state: &VideoEditState,
+    kept: &[(f64, f64)],
+    output_path: &Path,
+    cancellation: Option<&AtomicBool>,
+    encode_started: &AtomicBool,
+) -> anyhow::Result<()> {
+    if let Some(progress) = state.export_progress.as_ref() {
+        progress.set_total_us((state.composition_duration().max(0.0) * 1_000_000.0) as u64);
+        progress.set_phase(ExportPhase::Encoding);
+    }
     if kept.len() <= 1 {
         let (start, end) = kept.first().copied().unwrap();
-        let command = build_single_convert_args(state, start, end, &output_path);
-        run_command(command, &output_path, cancellation)?;
+        let command = build_single_convert_args(state, start, end, output_path);
+        let feed = progress_feed(state, 0.0);
+        run_command(
+            command,
+            output_path,
+            cancellation,
+            feed,
+            Some(encode_started),
+        )
     } else {
-        run_multi_segment_trim(state, &kept, &output_path, true, cancellation)?;
+        run_multi_segment_trim(state, kept, output_path, true, cancellation, encode_started)
     }
-    Ok(output_path)
 }
 
 /// Extra headroom on top of the estimated output size.
@@ -790,11 +858,17 @@ pub(crate) fn export_edited_to_cancellable(
         anyhow::bail!("export cancelled");
     }
     let path = result?;
+    if let Some(progress) = state.export_progress.as_ref() {
+        progress.set_phase(ExportPhase::Finishing);
+    }
     super::export_cache::remember_if_inputs_unchanged(input_snapshot, state, &path, cancellation);
     if cancellation_requested(cancellation) {
         super::export_cache::forget(&path);
         let _ = std::fs::remove_file(&output_path);
         anyhow::bail!("export cancelled");
+    }
+    if let Some(progress) = state.export_progress.as_ref() {
+        progress.set_phase(ExportPhase::Finished);
     }
     Ok(path)
 }
@@ -870,6 +944,7 @@ fn build_single_trim_args(
             }
         }
     }
+    args.extend(mp4_faststart_args(output_path));
     args.push(output_path.to_string_lossy().into_owned());
     args
 }
@@ -879,21 +954,126 @@ fn build_single_trim_args(
 /// Hardware is only ever `Some` after an explicit opt-in and a passing runtime
 /// probe (see `super::hardware_encode`), so the software branch is the default
 /// and keeps the previous export byte-for-byte.
-fn export_video_args(encoder: Option<HardwareEncoder>, quality: ExportQuality) -> Vec<String> {
+fn export_video_args(encoder: Option<HardwareEncoder>, codec: Codec, crf: u32) -> Vec<String> {
     match encoder {
-        Some(encoder) => hardware_encode::hardware_video_args(
+        Some(encoder) => hardware_encode::hardware_video_args_for(
             encoder,
-            hardware_encode::hardware_qp(quality.crf()),
+            codec,
+            hardware_encode::hardware_qp(crf),
         ),
-        None => vec![
-            "-c:v".into(),
-            "libx264".into(),
-            "-preset".into(),
-            "veryfast".into(),
-            "-crf".into(),
-            quality.crf().to_string(),
-        ],
+        None => match codec {
+            Codec::Hevc => vec![
+                "-c:v".into(),
+                "libx265".into(),
+                "-preset".into(),
+                "veryfast".into(),
+                "-crf".into(),
+                crf.to_string(),
+                "-tag:v".into(),
+                "hvc1".into(),
+                "-pix_fmt".into(),
+                "yuv420p".into(),
+            ],
+            _ => vec![
+                "-c:v".into(),
+                "libx264".into(),
+                "-preset".into(),
+                "veryfast".into(),
+                "-crf".into(),
+                crf.to_string(),
+                "-pix_fmt".into(),
+                "yuv420p".into(),
+            ],
+        },
     }
+}
+
+fn mp4_faststart_args(output_path: &Path) -> Vec<String> {
+    let is_mp4 = output_path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("mp4"));
+    if is_mp4 {
+        vec!["-movflags".into(), "+faststart".into()]
+    } else {
+        Vec::new()
+    }
+}
+
+fn export_encoder(state: &VideoEditState) -> Option<HardwareEncoder> {
+    let settings = state.export_settings.sanitized();
+    hardware_encode::export_encoder(settings.effective_codec(), settings.hardware)
+}
+
+fn ensure_codec_export_possible(state: &VideoEditState) -> anyhow::Result<()> {
+    let settings = state.export_settings.sanitized();
+    let codec = settings.effective_codec();
+    if hardware_encode::codec_export_available(codec, settings.hardware) {
+        return Ok(());
+    }
+    let name = match codec {
+        Codec::Hevc => "HEVC",
+        _ => "H.264",
+    };
+    match settings.hardware {
+        HardwarePreference::Software | HardwarePreference::Environment => anyhow::bail!(
+            "{name} export is not available: this ffmpeg build has no software encoder for it"
+        ),
+        HardwarePreference::Auto => anyhow::bail!(
+            "{name} export is not available: no software or hardware encoder for it passed a probe"
+        ),
+    }
+}
+
+fn export_tail_filters(state: &VideoEditState) -> Option<String> {
+    let settings = state.export_settings.sanitized();
+    let mut parts = Vec::new();
+    if settings.resolution.is_some() {
+        let (w, h) = settings.dimensions(state.output_dimensions());
+        parts.push(format!("scale={w}:{h}"));
+    }
+    if let Some(fps) = settings.fps {
+        parts.push(format!("fps={fps}"));
+    }
+    (!parts.is_empty()).then(|| parts.join(","))
+}
+
+fn join_filters(a: Option<String>, b: Option<String>) -> Option<String> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(format!("{a},{b}")),
+        (a, b) => a.or(b),
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ProgressFeed {
+    progress: Arc<ExportProgress>,
+    base_us: u64,
+}
+
+impl ProgressFeed {
+    fn note_line(&self, line: &str) {
+        let Some(value) = line
+            .strip_prefix("out_time_us=")
+            .or_else(|| line.strip_prefix("out_time_ms="))
+        else {
+            return;
+        };
+        self.note_value(value);
+    }
+
+    fn note_value(&self, value: &str) {
+        let Ok(us) = value.parse::<i64>() else {
+            return;
+        };
+        self.progress.note_encoded(self.base_us, us.max(0) as u64);
+    }
+}
+
+fn progress_feed(state: &VideoEditState, base_seconds: f64) -> Option<ProgressFeed> {
+    state.export_progress.clone().map(|progress| ProgressFeed {
+        progress,
+        base_us: (base_seconds.max(0.0) * 1_000_000.0) as u64,
+    })
 }
 
 /// Append the VA-API upload to a filter graph when the chosen encoder needs it.
@@ -934,7 +1114,8 @@ fn build_single_convert_args_with(
     if state.needs_composite() {
         return build_composite_convert_args(state, start, end, output_path, warp);
     }
-    let encoder = hardware_encode::selected_export_encoder();
+    let encoder = export_encoder(state);
+    let settings = state.export_settings.sanitized();
     let mut args = vec![
         "-y".into(),
         "-ss".into(),
@@ -951,12 +1132,23 @@ fn build_single_convert_args_with(
     if let Some(encoder) = encoder {
         args.extend(hardware_encode::hardware_input_args(encoder));
     }
-    if let Some(filter) = with_hardware_upload(convert_video_filter(state, speed), encoder) {
+    if let Some(filter) = with_hardware_upload(
+        join_filters(
+            convert_video_filter(state, speed),
+            export_tail_filters(state),
+        ),
+        encoder,
+    ) {
         args.push("-vf".into());
         args.push(filter);
     }
-    args.extend(export_video_args(encoder, state.quality));
+    args.extend(export_video_args(
+        encoder,
+        settings.effective_codec(),
+        settings.crf_or(state.quality.crf()),
+    ));
     args.extend(convert_audio_args(state, speed, start));
+    args.extend(mp4_faststart_args(output_path));
     args.push(output_path.to_string_lossy().into_owned());
     ConvertCommand {
         args,
@@ -978,7 +1170,8 @@ fn build_composite_convert_args(
     // An opt-in hardware encoder applies to the composite graph too. It is
     // `None` (libx264) unless the user asked for hardware and the runtime
     // probe passed, so the default composite export is unchanged.
-    let encoder = hardware_encode::selected_export_encoder();
+    let encoder = export_encoder(state);
+    let settings = state.export_settings.sanitized();
     // The held tail is part of the composition, so the camera command file has
     // to cover it too: preview keeps moving the zoom through a freeze, and the
     // export must match.
@@ -1154,6 +1347,11 @@ fn build_composite_convert_args(
         filter.push(',');
         filter.push_str(&pad);
     }
+
+    if let Some(tail) = export_tail_filters(state) {
+        filter.push(',');
+        filter.push_str(&tail);
+    }
     // VA-API reads GPU frames, so its upload has to be the graph's last step,
     // after every overlay, mask, and pad. NVENC and libx264 need nothing.
     if let Some(upload) = hardware_encode::hardware_upload_suffix(encoder) {
@@ -1227,8 +1425,13 @@ fn build_composite_convert_args(
         args.extend(["-filter_complex_threads".into(), "1".into()]);
     }
     args.extend(["-filter_complex".into(), filter]);
-    args.extend(export_video_args(encoder, state.quality));
+    args.extend(export_video_args(
+        encoder,
+        settings.effective_codec(),
+        settings.crf_or(state.quality.crf()),
+    ));
     args.extend(convert_audio_args(state, speed, start));
+    args.extend(mp4_faststart_args(output_path));
     args.push(output_path.to_string_lossy().into_owned());
     ConvertCommand {
         args,
@@ -1536,6 +1739,7 @@ fn run_multi_segment_trim(
     output_path: &Path,
     convert: bool,
     cancellation: Option<&AtomicBool>,
+    encode_started: &AtomicBool,
 ) -> anyhow::Result<()> {
     let segments_scratch = ScratchDir::new("segments", 0.0);
     let tmp_dir = &segments_scratch.path;
@@ -1564,6 +1768,7 @@ fn run_multi_segment_trim(
             segment_state.freeze_tail = 0.0;
             segment_state.frozen_segment = None;
         }
+        let feed = progress_feed(&segment_state, cursor);
         cursor = comp + (seg_end - start).max(0.0) / state.speed_for_source(start);
         let command = if convert {
             build_single_convert_args(&segment_state, start, end, &seg_path)
@@ -1575,7 +1780,7 @@ fn run_multi_segment_trim(
                 cursor: None,
             }
         };
-        run_command(command, &seg_path, cancellation)
+        run_command(command, &seg_path, cancellation, feed, Some(encode_started))
             .with_context(|| format!("failed to export segment {i}"))?;
         segment_files.push(seg_path);
     }
@@ -1590,7 +1795,10 @@ fn run_multi_segment_trim(
     std::fs::write(&list_path, &list_content)?;
 
     // Concat
-    let concat_args = vec![
+    if let Some(progress) = state.export_progress.as_ref() {
+        progress.set_phase(ExportPhase::Finishing);
+    }
+    let mut concat_args = vec![
         "-y".into(),
         "-f".into(),
         "concat".into(),
@@ -1600,8 +1808,9 @@ fn run_multi_segment_trim(
         list_path.to_string_lossy().into_owned(),
         "-c".into(),
         "copy".into(),
-        output_path.to_string_lossy().into_owned(),
     ];
+    concat_args.extend(mp4_faststart_args(output_path));
+    concat_args.push(output_path.to_string_lossy().into_owned());
     run_ffmpeg_cancellable(&concat_args, output_path, cancellation)?;
 
     Ok(())
@@ -1611,6 +1820,8 @@ fn run_command(
     command: ConvertCommand,
     output_path: &Path,
     cancellation: Option<&AtomicBool>,
+    feed: Option<ProgressFeed>,
+    encode_started: Option<&AtomicBool>,
 ) -> anyhow::Result<()> {
     let ConvertCommand {
         args,
@@ -1621,9 +1832,23 @@ fn run_command(
     // Hold the scratch tree until the command has finished reading it.
     let _scratch = scratch;
     if warp.is_none() && cursor.is_none() {
-        return run_ffmpeg_cancellable(&args, output_path, cancellation);
+        return run_ffmpeg_cancellable_progress(
+            &args,
+            output_path,
+            cancellation,
+            feed,
+            encode_started,
+        );
     }
-    run_ffmpeg_with_inputs(&args, output_path, warp, cursor, cancellation)
+    run_ffmpeg_with_inputs(
+        &args,
+        output_path,
+        warp,
+        cursor,
+        cancellation,
+        feed,
+        encode_started,
+    )
 }
 
 /// Run ffmpeg with the GPU warp on `pipe:3` and the cursor track on `pipe:4`.
@@ -1639,10 +1864,13 @@ fn run_ffmpeg_with_inputs(
     warp_setup: Option<super::gst_warp::WarpSetup>,
     mut cursor: Option<super::cursor_track::ActiveCursorTrack>,
     cancellation: Option<&AtomicBool>,
+    feed: Option<ProgressFeed>,
+    encode_started: Option<&AtomicBool>,
 ) -> anyhow::Result<()> {
     if cancellation_requested(cancellation) {
         anyhow::bail!("export cancelled");
     }
+    let args = with_progress_args(args, feed.is_some());
     let mut warp = match warp_setup {
         Some(setup) => {
             Some(super::gst_warp::ActiveGstWarp::start(&setup).map_err(|err| anyhow!(err))?)
@@ -1651,7 +1879,7 @@ fn run_ffmpeg_with_inputs(
     };
 
     let mut cmd = Command::new("ffmpeg");
-    cmd.args(args);
+    cmd.args(&args);
     cmd.stdin(std::process::Stdio::null());
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
@@ -1669,8 +1897,11 @@ fn run_ffmpeg_with_inputs(
     }
 
     let child = cmd.spawn().context("failed to run ffmpeg")?;
+    if let Some(started) = encode_started {
+        started.store(true, Ordering::Release);
+    }
     drop(cmd);
-    let output = wait_for_ffmpeg_output(child, cancellation)?;
+    let output = wait_for_ffmpeg_output(child, cancellation, feed)?;
     // ffmpeg has exited, so the cursor writer has either finished or hit the
     // closed pipe. Joining it here means the track never outlives the export.
     if let Some(active) = cursor.as_mut() {
@@ -1707,17 +1938,43 @@ fn run_ffmpeg_cancellable(
     output_path: &Path,
     cancellation: Option<&AtomicBool>,
 ) -> anyhow::Result<()> {
+    run_ffmpeg_cancellable_progress(args, output_path, cancellation, None, None)
+}
+
+fn with_progress_args(args: &[String], progress: bool) -> Vec<String> {
+    let mut args = args.to_vec();
+    if progress {
+        let at = args.len().saturating_sub(1);
+        args.splice(
+            at..at,
+            ["-progress".into(), "pipe:1".into(), "-nostats".into()],
+        );
+    }
+    args
+}
+
+fn run_ffmpeg_cancellable_progress(
+    args: &[String],
+    output_path: &Path,
+    cancellation: Option<&AtomicBool>,
+    feed: Option<ProgressFeed>,
+    encode_started: Option<&AtomicBool>,
+) -> anyhow::Result<()> {
     if cancellation_requested(cancellation) {
         anyhow::bail!("export cancelled");
     }
+    let args = with_progress_args(args, feed.is_some());
     let child = Command::new("ffmpeg")
-        .args(args)
+        .args(&args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .context("failed to run ffmpeg")?;
-    let output = wait_for_ffmpeg_output(child, cancellation)?;
+    if let Some(started) = encode_started {
+        started.store(true, Ordering::Release);
+    }
+    let output = wait_for_ffmpeg_output(child, cancellation, feed)?;
 
     if output.status.success() {
         return Ok(());
@@ -1733,13 +1990,8 @@ fn run_ffmpeg_cancellable(
 fn wait_for_ffmpeg_output(
     mut child: Child,
     cancellation: Option<&AtomicBool>,
+    feed: Option<ProgressFeed>,
 ) -> anyhow::Result<Output> {
-    let Some(cancellation) = cancellation else {
-        return child
-            .wait_with_output()
-            .context("failed while waiting for ffmpeg");
-    };
-
     let stdout = child
         .stdout
         .take()
@@ -1748,11 +2000,11 @@ fn wait_for_ffmpeg_output(
         .stderr
         .take()
         .context("ffmpeg stderr pipe was not captured")?;
-    let stdout_reader = std::thread::spawn(move || read_pipe(stdout));
+    let stdout_reader = std::thread::spawn(move || read_pipe_progress(stdout, feed));
     let stderr_reader = std::thread::spawn(move || read_pipe(stderr));
 
     loop {
-        if cancellation.load(Ordering::Acquire) {
+        if cancellation_requested(cancellation) {
             let _ = child.kill();
             let status = child.wait().context("failed to stop ffmpeg")?;
             return Ok(Output {
@@ -1774,9 +2026,45 @@ fn wait_for_ffmpeg_output(
     }
 }
 
+const PIPE_RETAINED_BYTES: usize = 64 * 1024;
+
+fn retain_tail(output: &mut Vec<u8>, bytes: &[u8]) {
+    output.extend_from_slice(bytes);
+    if output.len() > PIPE_RETAINED_BYTES {
+        let keep = PIPE_RETAINED_BYTES / 2;
+        output.drain(..output.len() - keep);
+    }
+}
+
 fn read_pipe(mut pipe: impl Read) -> Vec<u8> {
     let mut output = Vec::new();
-    let _ = pipe.read_to_end(&mut output);
+    let mut chunk = [0u8; 8192];
+    loop {
+        match pipe.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(read) => retain_tail(&mut output, &chunk[..read]),
+        }
+    }
+    output
+}
+
+fn read_pipe_progress(pipe: impl Read, feed: Option<ProgressFeed>) -> Vec<u8> {
+    let Some(feed) = feed else {
+        return read_pipe(pipe);
+    };
+    let mut output = Vec::new();
+    let mut reader = BufReader::new(pipe);
+    let mut line = String::new();
+    loop {
+        line.clear();
+        match reader.read_line(&mut line) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {
+                feed.note_line(line.trim_end_matches(['\r', '\n']));
+                retain_tail(&mut output, line.as_bytes());
+            }
+        }
+    }
     output
 }
 
@@ -1797,7 +2085,7 @@ fn escape_filter_path(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::recording::editor::model::{ProjectMedia, ProjectMediaKind};
+    use crate::recording::editor::model::{ExportQuality, ProjectMedia, ProjectMediaKind};
 
     fn state() -> VideoEditState {
         let metadata = VideoMetadata {
@@ -2567,6 +2855,8 @@ mod tests {
                 None,
                 Some(track),
                 None,
+                None,
+                None,
             );
             let _ = sender.send(result);
         });
@@ -2593,7 +2883,7 @@ mod tests {
         });
 
         let started = std::time::Instant::now();
-        let output = wait_for_ffmpeg_output(child, Some(&cancellation))
+        let output = wait_for_ffmpeg_output(child, Some(&cancellation), None)
             .expect("a cancelled child should be reaped successfully");
 
         assert!(!output.status.success());
@@ -3799,7 +4089,7 @@ mod tests {
     fn the_default_export_encoder_is_software() {
         // No opt-in: the export must be exactly libx264 at the tier's CRF, so a
         // machine with a GPU cannot change the file a user without one gets.
-        let args = export_video_args(None, ExportQuality::High);
+        let args = export_video_args(None, Codec::H264, ExportQuality::High.crf());
         assert!(args.windows(2).any(|pair| pair == ["-c:v", "libx264"]));
         assert!(args.windows(2).any(|pair| pair == ["-crf", "20"]));
         assert!(!args.iter().any(|arg| arg == "-qp"));
@@ -3807,12 +4097,223 @@ mod tests {
 
     #[test]
     fn an_opted_in_hardware_encoder_replaces_software() {
-        let nvenc = export_video_args(Some(HardwareEncoder::Nvenc), ExportQuality::Ultra);
+        let nvenc = export_video_args(
+            Some(HardwareEncoder::Nvenc),
+            Codec::H264,
+            ExportQuality::Ultra.crf(),
+        );
         assert!(nvenc.windows(2).any(|pair| pair == ["-c:v", "h264_nvenc"]));
         assert!(!nvenc.iter().any(|arg| arg == "libx264"));
         // Ultra is CRF 16, which is the quantizer the hardware encoder gets.
         assert!(nvenc.windows(2).any(|pair| pair == ["-qp", "16"]));
         assert!(!nvenc.iter().any(|arg| arg == "-crf"));
+    }
+
+    #[test]
+    fn export_settings_drive_resolution_fps_codec_crf_and_faststart() {
+        use crate::recording::editor::export_settings::{
+            Codec, ExportSettings, HardwarePreference,
+        };
+
+        let mut state = state();
+        state.export_settings = ExportSettings {
+            resolution: Some(720),
+            fps: Some(24),
+            codec: Codec::Hevc,
+            crf: Some(30),
+            hardware: HardwarePreference::Software,
+        };
+        let command = build_single_convert_args(&state, 0.0, 9.0, Path::new("/tmp/out.mp4"));
+        let args = &command.args;
+        assert!(args.windows(2).any(|pair| pair == ["-c:v", "libx265"]));
+        assert!(args.windows(2).any(|pair| pair == ["-crf", "30"]));
+        assert!(args.windows(2).any(|pair| pair == ["-tag:v", "hvc1"]));
+        assert!(args.windows(2).any(|pair| pair == ["-pix_fmt", "yuv420p"]));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["-movflags", "+faststart"]));
+        assert_eq!(args.last().unwrap(), "/tmp/out.mp4");
+        let vf = args
+            .windows(2)
+            .find(|pair| pair[0] == "-vf")
+            .map(|pair| pair[1].clone())
+            .expect("the export names its video filter");
+        assert!(vf.contains("scale=1280:720"), "{vf}");
+        assert!(vf.contains("fps=24"), "{vf}");
+    }
+
+    #[test]
+    fn a_software_preference_overrides_the_environment_hardware_opt_in() {
+        use crate::recording::editor::export_settings::{ExportSettings, HardwarePreference};
+
+        let mut state = state();
+        state.export_settings = ExportSettings {
+            hardware: HardwarePreference::Software,
+            ..Default::default()
+        };
+        let command = build_single_convert_args(&state, 0.0, 9.0, Path::new("/tmp/out.mp4"));
+        assert!(command
+            .args
+            .windows(2)
+            .any(|pair| pair == ["-c:v", "libx264"]));
+        assert!(!command.args.iter().any(|arg| arg.contains("nvenc")));
+        assert!(!command.args.iter().any(|arg| arg.contains("vaapi")));
+    }
+
+    #[test]
+    fn the_project_crf_is_used_until_a_quality_is_picked() {
+        use crate::recording::editor::export_settings::{ExportSettings, HardwarePreference};
+
+        let mut state = state();
+        state.quality = ExportQuality::Ultra;
+        state.export_settings = ExportSettings {
+            codec: Codec::H264,
+            hardware: HardwarePreference::Software,
+            ..Default::default()
+        };
+        let command = build_single_convert_args(&state, 0.0, 9.0, Path::new("/tmp/out.mp4"));
+        assert!(command.args.windows(2).any(|pair| pair == ["-crf", "16"]));
+    }
+
+    #[test]
+    fn the_software_retry_is_a_once_only_post_encode_decision() {
+        assert!(!should_retry_hardware(false, false, false));
+        assert!(!should_retry_hardware(true, true, false));
+        assert!(!should_retry_hardware(true, false, true));
+        assert!(should_retry_hardware(true, false, false));
+    }
+
+    #[test]
+    fn hardware_hevc_args_carry_the_mp4_tag_without_a_pixel_format() {
+        use crate::recording::editor::export_settings::Codec;
+
+        for encoder in [HardwareEncoder::Nvenc, HardwareEncoder::Vaapi] {
+            let args = export_video_args(Some(encoder), Codec::Hevc, 20);
+            assert!(
+                args.windows(2).any(|pair| pair == ["-tag:v", "hvc1"]),
+                "{encoder:?} must tag HEVC for MP4 players: {args:?}"
+            );
+            assert!(
+                !args.iter().any(|arg| arg == "-pix_fmt"),
+                "the upload filter owns the VAAPI frame format, not -pix_fmt: {args:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn retained_pipe_output_is_bounded() {
+        let mut output = Vec::new();
+        let chunk = vec![b'x'; PIPE_RETAINED_BYTES];
+        for _ in 0..4 {
+            retain_tail(&mut output, &chunk);
+        }
+        assert!(output.len() <= PIPE_RETAINED_BYTES);
+        assert!(!output.is_empty());
+    }
+
+    #[test]
+    fn export_tail_filters_run_after_composition_and_before_hwupload() {
+        use crate::recording::editor::export_settings::{
+            Codec, ExportSettings, HardwarePreference,
+        };
+        use crate::recording::editor::model::VideoBackground;
+
+        let mut state = state();
+        state.background = VideoBackground::Plain {
+            r: 20,
+            g: 30,
+            b: 40,
+        };
+        state.background_padding = 48.0;
+        assert!(state.needs_composite());
+        state.export_settings = ExportSettings {
+            resolution: Some(720),
+            fps: Some(24),
+            codec: Codec::H264,
+            crf: Some(24),
+            hardware: HardwarePreference::Software,
+        };
+        let command = build_single_convert_args(&state, 0.0, 9.0, Path::new("/tmp/out.mp4"));
+        let graph = command
+            .args
+            .windows(2)
+            .find(|pair| pair[0] == "-filter_complex")
+            .map(|pair| pair[1].clone())
+            .expect("a padded export goes through the composite graph");
+        let pad = graph.find("pad=").expect("composition pads the card");
+        let overlay = graph.find("overlay").unwrap_or(0);
+        let scale = graph.rfind("scale=").expect("the tail scales");
+        let fps = graph.rfind(",fps=").expect("the tail resamples");
+        assert!(pad < scale && overlay < scale, "{graph}");
+        assert!(scale < fps, "{graph}");
+        let (tail_w, tail_h) = state.export_settings.dimensions(state.output_dimensions());
+        assert!(
+            graph.contains(&format!("scale={tail_w}:{tail_h}")),
+            "{graph}"
+        );
+        assert_eq!(state.metadata.width, 1920);
+        assert_eq!(state.metadata.height, 1080);
+
+        let tail = export_tail_filters(&state).expect("explicit settings emit a tail");
+        let upload = hardware_encode::hardware_upload_suffix(Some(HardwareEncoder::Vaapi))
+            .expect("VAAPI needs a final upload");
+        let joined = format!("{tail},{upload}");
+        assert!(joined.find("fps=").unwrap() < joined.find("hwupload").unwrap());
+        assert!(upload.ends_with("hwupload"));
+    }
+
+    #[test]
+    fn progress_args_go_before_the_output_path() {
+        let args = with_progress_args(&["-y".into(), "out.mp4".into()], true);
+        assert_eq!(args.last().unwrap(), "out.mp4");
+        assert!(args.windows(2).any(|pair| pair == ["-progress", "pipe:1"]));
+        assert!(args.iter().any(|arg| arg == "-nostats"));
+        assert_eq!(with_progress_args(&["-y".into()], false), ["-y"]);
+    }
+
+    #[test]
+    fn the_progress_feed_parses_and_ignores_malformed_lines() {
+        use crate::recording::editor::export_settings::ExportProgress;
+
+        let progress = Arc::new(ExportProgress::new(1_000_000));
+        let feed = ProgressFeed {
+            progress: progress.clone(),
+            base_us: 500_000,
+        };
+        feed.note_line("frame=10");
+        feed.note_line("out_time_us=250000");
+        assert_eq!(progress.encoded_us(), 750_000);
+        feed.note_line("out_time_us=N/A");
+        feed.note_line("out_time_us=garbage");
+        feed.note_line("out_time_ms=-42");
+        assert_eq!(progress.encoded_us(), 750_000);
+        feed.note_line("out_time_us=100000");
+        assert_eq!(
+            progress.encoded_us(),
+            750_000,
+            "backward progress must not regress the fraction"
+        );
+        feed.note_line("out_time_ms=800000");
+        assert_eq!(progress.encoded_us(), 1_300_000);
+    }
+
+    #[test]
+    fn a_cloned_segment_state_keeps_the_same_export_settings() {
+        use crate::recording::editor::export_settings::{
+            Codec, ExportSettings, HardwarePreference,
+        };
+
+        let mut state = state();
+        state.export_settings = ExportSettings {
+            resolution: Some(1080),
+            fps: Some(30),
+            codec: Codec::Hevc,
+            crf: Some(42),
+            hardware: HardwarePreference::Auto,
+        };
+        let segment_state = state.clone();
+        assert_eq!(segment_state.export_settings, state.export_settings);
+        assert!(segment_state.export_progress.is_none());
     }
 }
 

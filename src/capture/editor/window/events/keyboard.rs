@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::capture::editor::{
     state::EditorState,
-    types::{tool_shortcut_target, Point, Tool},
+    types::{tool_shortcut_target, Point, Tool, ViewTransform},
     ui_support::{set_active_tool_button, text_input_has_focus},
 };
 
@@ -26,6 +26,7 @@ pub(super) fn wire_window_keyboard(
     window: &ApplicationWindow,
     in_motion: &Rc<Cell<bool>>,
     state: &Arc<Mutex<EditorState>>,
+    transform: &Arc<Mutex<ViewTransform>>,
     drawing_area: &DrawingArea,
     tool_buttons: &[Button],
     crop_apply_btn: &Button,
@@ -48,6 +49,7 @@ pub(super) fn wire_window_keyboard(
     let crop_apply_btn = crop_apply_btn.clone();
     let crop_cancel_btn = crop_cancel_btn.clone();
     let sync_motion_crop_history = sync_motion_crop_history.clone();
+    super::text_input::wire_text_input(window, in_motion, state, transform, drawing_area);
     // Capture-phase Space handler: tool/chrome buttons are often focusable and
     // would activate on Space in the bubble phase, which breaks hand-pan after
     // the first tool click. Capture runs before the focused widget.
@@ -173,55 +175,6 @@ pub(super) fn wire_window_keyboard(
         let shift = modifiers.contains(gdk::ModifierType::SHIFT_MASK);
         let pressed = key.to_unicode();
 
-        {
-            let mut st = state_keys.lock().unwrap();
-            if st.active_text_input.is_some() {
-                let mut should_cancel = false;
-                let mut handled = true;
-
-                match key {
-                    gdk::Key::Escape => should_cancel = true,
-                    gdk::Key::Return | gdk::Key::KP_Enter => st.add_text_input_char('\n'),
-                    gdk::Key::BackSpace => st.delete_text_input_char(),
-                    gdk::Key::space => st.add_text_input_char(' '),
-                    gdk::Key::Left => st.move_cursor_left(),
-                    gdk::Key::Right => st.move_cursor_right(),
-                    _ => {
-                        if !ctrl {
-                            if let Some(ch) = pressed {
-                                if !ch.is_control() {
-                                    st.add_text_input_char(ch);
-                                } else {
-                                    handled = false;
-                                }
-                            } else {
-                                handled = false;
-                            }
-                        } else {
-                            handled = false;
-                        }
-                    }
-                }
-
-                if should_cancel {
-                    st.cancel_text_input();
-                }
-
-                if handled && st.active_text_input.is_some() {
-                    st.fit_active_text_to_layout();
-                    st.reset_text_cursor_blink();
-                }
-
-                if handled || should_cancel {
-                    drop(st);
-                    if let Some(area) = drawing_area_keys.upgrade() {
-                        area.queue_draw();
-                    }
-                    return glib::Propagation::Stop;
-                }
-            }
-        }
-
         if ctrl && (pressed == Some('z') || pressed == Some('Z')) {
             let changed = if shift {
                 state_keys.lock().unwrap().redo()
@@ -330,7 +283,7 @@ mod tests {
             .unwrap();
         assert!(
             bubble.find("text_input_has_focus(&window)").unwrap()
-                < bubble.find("st.active_text_input.is_some()").unwrap()
+                < bubble.find(".selected_tool == Tool::Crop").unwrap()
         );
         assert!(production.contains("!space_pan_active_released.get()"));
     }
@@ -341,16 +294,16 @@ mod tests {
         let production = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
             production.contains("pub(super) fn wire_window_keyboard(")
+                && production.contains("super::text_input::wire_text_input(")
                 && production.contains("space_pan_controller.set_propagation_phase(gtk4::PropagationPhase::Capture)")
                 && production.contains("if key != gdk::Key::space || eyedropper_mode_space.get()")
                 && production.contains("window.add_controller(space_pan_controller);")
                 && production.contains("let key_controller = EventControllerKey::new();")
-                && production.contains("gdk::Key::Return | gdk::Key::KP_Enter => st.add_text_input_char('\\n'),")
                 && production.contains("apply_zoom_change_keys(1.5);")
                 && production.contains("gdk::Key::_2 | gdk::Key::KP_2 => {")
                 && production.contains("tool_shortcut_target")
                 && production.contains("window.add_controller(key_controller);"),
-            "keyboard.rs must own Space capture, text input, zoom shortcuts including Ctrl+2, and tool shortcuts"
+            "keyboard.rs must own Space capture, wire the text-input module, zoom shortcuts including Ctrl+2, and tool shortcuts"
         );
     }
 }

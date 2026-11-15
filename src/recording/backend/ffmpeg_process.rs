@@ -144,6 +144,7 @@ pub(super) struct FfmpegFrameControl<'a> {
     pub active_audio: &'a mut Option<ActiveGstAudio>,
     pub timeline: &'a mut super::super::timeline::RecordingTimeline,
     pub notify: fn(&str),
+    pub disk_guard: &'a mut super::disk_space::DiskSpaceGuard,
 }
 
 pub(super) fn write_ffmpeg_frame_interruptible(
@@ -184,18 +185,29 @@ pub(super) fn write_ffmpeg_frame_interruptible(
                                 (controls.notify)("recording_session_paused");
                             }
                             Ok(RecordingControlCommand::Resume) if *controls.paused => {
-                                controls.timeline.resume(glib::monotonic_time());
-                                if let Some(audio) = controls.active_audio.as_mut() {
-                                    audio.set_paused(false);
+                                if controls.disk_guard.low() {
+                                    eprintln!(
+                                        "[recording] refusing to resume: disk space is almost full"
+                                    );
+                                    stop_after_frame = true;
+                                } else {
+                                    controls.timeline.resume(glib::monotonic_time());
+                                    if let Some(audio) = controls.active_audio.as_mut() {
+                                        audio.set_paused(false);
+                                    }
+                                    *controls.paused = false;
+                                    (controls.notify)("recording_session_resumed");
                                 }
-                                *controls.paused = false;
-                                (controls.notify)("recording_session_resumed");
                             }
                             Ok(_) | Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
                             Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
                                 *controls.command_rx = None;
                             }
                         }
+                    }
+                    if controls.disk_guard.poll() == Some(true) {
+                        eprintln!("[recording] stopping: disk space is almost full");
+                        stop_after_frame = true;
                     }
                     std::thread::sleep(Duration::from_millis(5));
                 }
@@ -277,6 +289,10 @@ mod tests {
         let mut paused = false;
         let mut audio = None;
         let mut timeline = super::super::super::timeline::RecordingTimeline::default();
+        let mut disk_guard = super::super::disk_space::DiskSpaceGuard::with_probe(
+            std::path::Path::new("/tmp/apexshot-guard-test.mp4"),
+            |_| Some(u64::MAX),
+        );
         let origin = glib::monotonic_time();
         timeline.frame_time_us(origin);
         let header = [0x81u8; 64];
@@ -291,6 +307,7 @@ mod tests {
                 active_audio: &mut audio,
                 timeline: &mut timeline,
                 notify: |_| {},
+                disk_guard: &mut disk_guard,
             },
         )
         .unwrap();
@@ -332,6 +349,10 @@ mod tests {
             let mut paused = false;
             let mut audio = None;
             let mut timeline = super::super::super::timeline::RecordingTimeline::default();
+            let mut disk_guard = super::super::disk_space::DiskSpaceGuard::with_probe(
+                std::path::Path::new("/tmp/apexshot-guard-test.mp4"),
+                |_| Some(u64::MAX),
+            );
             let pixels = vec![0x55u8; 2 * 1024 * 1024];
             let keep_recording = write_ffmpeg_frame_interruptible(
                 &mut input,
@@ -343,6 +364,7 @@ mod tests {
                     active_audio: &mut audio,
                     timeline: &mut timeline,
                     notify: |_| {},
+                    disk_guard: &mut disk_guard,
                 },
             )
             .unwrap();

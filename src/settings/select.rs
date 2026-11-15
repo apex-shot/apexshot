@@ -20,7 +20,7 @@ const MENU_GAP: i32 = 6;
 /// Room a popover surface reserves on each side of its contents for the
 /// shadow. Sizing the surface to the trigger's width alone leaves the visible
 /// panel this much narrower on both sides, so the request adds it back.
-const POPOVER_SHADOW_INSET: i32 = 10;
+const POPOVER_SHADOW_INSET: i32 = 0;
 
 type ChangeListeners = Rc<RefCell<Vec<Rc<dyn Fn()>>>>;
 
@@ -90,10 +90,11 @@ impl SettingsSelect {
         let menu = GtkBox::new(Orientation::Vertical, 2);
         menu.add_css_class("settings-select-menu");
         let mut option_buttons = Vec::with_capacity(labels.len());
-        let mut option_checks: Vec<Label> = Vec::with_capacity(labels.len());
+        let mut option_checks: Vec<Image> = Vec::with_capacity(labels.len());
         for (index, option_label) in labels.iter().enumerate() {
             let option = Button::new();
             option.add_css_class("history-action-btn");
+            option.set_has_frame(false);
             option.set_focus_on_click(false);
             if index == selected_index {
                 option.add_css_class("settings-select-option-active");
@@ -106,7 +107,8 @@ impl SettingsSelect {
             option_text.set_hexpand(true);
             // The chosen option is marked, not filled: the row keeps the same
             // surface as its neighbours and only the tick sets it apart.
-            let check = Label::new(Some("✓"));
+            let check = Image::from_icon_name(icon_names::custom::CHECK_SYMBOLIC);
+            check.set_pixel_size(12);
             check.add_css_class("settings-select-check");
             check.set_valign(Align::Center);
             check.set_visible(index == selected_index);
@@ -221,6 +223,8 @@ pub fn language_combo(current: &str) -> SettingsSelect {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn settings_select_reuses_history_popover_classes() {
         let source = include_str!("select.rs");
@@ -241,5 +245,110 @@ mod tests {
             production_source.contains("button_for_width.width()"),
             "settings dropdown menu should match its trigger width"
         );
+    }
+
+    #[test]
+    fn settings_select_rows_carry_trailing_checks_and_selection_syncs() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let select = SettingsSelect::new(
+                [("first", "First option"), ("second", "Second option")],
+                "first",
+            );
+            assert_eq!(select.active_id().as_deref(), Some("first"));
+
+            let popover = {
+                let mut found = None;
+                let mut child = select.widget().first_child();
+                while let Some(widget) = child {
+                    if let Ok(popover) = widget.clone().downcast::<Popover>() {
+                        found = Some(popover);
+                        break;
+                    }
+                    child = widget.next_sibling();
+                }
+                found.expect("settings select popover")
+            };
+            let menu = popover
+                .child()
+                .expect("popover child")
+                .downcast::<GtkBox>()
+                .expect("menu box");
+
+            let mut rows = Vec::new();
+            let mut child = menu.first_child();
+            while let Some(widget) = child {
+                let next = widget.next_sibling();
+                rows.push(widget.downcast::<Button>().expect("option row"));
+                child = next;
+            }
+            assert_eq!(rows.len(), 2);
+
+            let checks: Vec<Image> = rows
+                .iter()
+                .map(|row| {
+                    assert_eq!(row.size_request(), (-1, OPTION_HEIGHT));
+                    let row_box = row
+                        .child()
+                        .expect("row content")
+                        .downcast::<GtkBox>()
+                        .expect("row box");
+                    let mut last = row_box.first_child();
+                    let mut check = None;
+                    while let Some(widget) = last {
+                        if let Ok(image) = widget.clone().downcast::<Image>() {
+                            check = Some(image);
+                        }
+                        last = widget.next_sibling();
+                    }
+                    let check = check.expect("trailing check image");
+                    assert_eq!(
+                        check.icon_name().as_deref(),
+                        Some(icon_names::custom::CHECK_SYMBOLIC)
+                    );
+                    assert_eq!(check.pixel_size(), 12);
+                    check
+                })
+                .collect();
+            assert!(checks[0].get_visible());
+            assert!(!checks[1].get_visible());
+
+            let trigger_label = select
+                .widget()
+                .child()
+                .expect("trigger content")
+                .downcast::<GtkBox>()
+                .expect("trigger row")
+                .first_child()
+                .expect("trigger label")
+                .downcast::<Label>()
+                .expect("label widget");
+
+            let calls = Rc::new(Cell::new(0));
+            {
+                let calls = Rc::clone(&calls);
+                select.connect_changed(move || calls.set(calls.get() + 1));
+            }
+
+            assert!(select.set_active_id("second"));
+            assert_eq!(select.active_id().as_deref(), Some("second"));
+            assert!(!checks[0].get_visible());
+            assert!(checks[1].get_visible());
+            assert_eq!(trigger_label.label().as_str(), "Second option");
+            assert_eq!(calls.get(), 0);
+
+            rows[0].emit_clicked();
+            assert_eq!(select.active_id().as_deref(), Some("first"));
+            assert!(checks[0].get_visible());
+            assert_eq!(trigger_label.label().as_str(), "First option");
+            assert_eq!(calls.get(), 1);
+
+            let selection_before = select.active_id();
+            assert!(!select.set_active_id("missing"));
+            assert_eq!(select.active_id(), selection_before);
+            assert!(checks[0].get_visible());
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
     }
 }

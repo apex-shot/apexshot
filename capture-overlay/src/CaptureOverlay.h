@@ -358,6 +358,7 @@ private:
     bool      m_showZoomPreview;
     bool      m_freezeSelectionBackground;
     bool      m_captureMenuAreaMode;
+    bool      m_captureMenuNavigationEnabled;
     bool      m_timerDelayActive;
     int       m_captureDelaySeconds;
     bool      m_countdownActive;

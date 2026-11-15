@@ -92,6 +92,9 @@ impl VideoEditState {
         if self.crop.is_some() {
             return true;
         }
+        if self.export_settings.forces_reencode() {
+            return true;
+        }
         // A held last frame is padded with tpad, which a stream copy cannot
         // express — the tail is longer than the source it came from.
         if self.freeze_tail_seconds() > 0.001 {
@@ -167,5 +170,4 @@ impl VideoEditState {
         }
         (frame_w / 2.0, frame_h / 2.0)
     }
-
 }

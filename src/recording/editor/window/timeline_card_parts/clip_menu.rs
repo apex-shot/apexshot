@@ -51,8 +51,9 @@ pub fn show_clip_menu(
     // downward menu would land off the window edge.
     popover.set_position(PositionType::Top);
 
-    let card = GtkBox::new(Orientation::Vertical, 0);
+    let card = GtkBox::new(Orientation::Vertical, 2);
     card.add_css_class("recording-editor-clip-menu");
+    card.set_size_request(160, -1);
 
     let index = target.index();
     let is_zoom = target.is_zoom();
@@ -312,6 +313,8 @@ fn menu_row(item: MenuItem, popover: &Popover) -> Button {
         button.add_css_class("recording-editor-clip-menu-row-danger");
     }
     button.set_has_frame(false);
+    button.set_focus_on_click(false);
+    button.set_size_request(-1, 32);
 
     let row = GtkBox::new(Orientation::Horizontal, 10);
     row.add_css_class("recording-editor-clip-menu-row-inner");
@@ -395,6 +398,58 @@ mod tests {
         assert!(
             rows.contains("if item.danger && position > 0 {"),
             "a separator must not lead a menu whose only destructive row is first"
+        );
+    }
+
+    #[test]
+    fn clip_menu_rows_match_the_shared_menu_metrics() {
+        use super::*;
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let popover = Popover::new();
+            let row = menu_row(
+                MenuItem {
+                    icon: icon_names::shipped::COPY_REGULAR,
+                    label: "Copy".to_string(),
+                    danger: false,
+                    action: Rc::new(|| {}),
+                },
+                &popover,
+            );
+            assert_eq!(row.size_request(), (-1, 32));
+            assert!(!row.has_frame());
+            assert!(!row.gets_focus_on_click());
+            let inner = row
+                .child()
+                .and_then(|child| child.downcast::<GtkBox>().ok())
+                .expect("the row content is a box");
+            assert_eq!(inner.spacing(), 10);
+            let icon = inner
+                .first_child()
+                .and_then(|icon| icon.downcast::<Image>().ok())
+                .expect("the row leads with the item icon");
+            assert_eq!(icon.pixel_size(), 15);
+            let label = icon
+                .next_sibling()
+                .and_then(|label| label.downcast::<Label>().ok())
+                .expect("the label follows the icon");
+            assert!(label.hexpands());
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
+    }
+
+    #[test]
+    fn the_menu_card_matches_the_shared_menu_metrics() {
+        let menu = include_str!("clip_menu.rs");
+        let source = menu
+            .split("#[cfg(test)]")
+            .next()
+            .expect("the menu's production source");
+        assert!(
+            source.contains("GtkBox::new(Orientation::Vertical, 2)")
+                && source.contains("card.set_size_request(160, -1);"),
+            "the clip menu card keeps the shared menu's 160px width and 2px row spacing"
         );
     }
 }

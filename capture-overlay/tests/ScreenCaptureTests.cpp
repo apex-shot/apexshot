@@ -4,6 +4,7 @@
 #include <QFile>
 #include <QGuiApplication>
 #include <QImage>
+#include <QPainter>
 #include <QScreen>
 #include <QTemporaryDir>
 #include <QtTest/QtTest>
@@ -28,6 +29,15 @@ private Q_SLOTS:
     void clipsSelectionToCaptureRect();
     void rejectsSelectionOutsideCaptureRect();
     void freezeUsesChosenMonitorOrigin();
+    void freezePreservesNativePixels_data();
+    void freezePreservesNativePixels();
+    void freezeMapsOddAndClippedRectsAtFractionalScale();
+    void freezeRejectsInvalidAndOutsideRects();
+    void freezeKeepsEachMonitorFrameIndependent();
+    void paintFreezeBackgroundExactRender_data();
+    void paintFreezeBackgroundExactRender();
+    void paintFreezeBackgroundClippedSelection();
+    void paintFreezeBackgroundHonorsExistingClipAndRestoresState();
     void cropsMixedDpiFrameToTempPng();
     void cropsEachSyntheticMonitorFromVirtualDesktop();
     void tempPngUsesRealCompression();
@@ -122,6 +132,20 @@ QImage twoByOneBlueRightHalfImage(int width, int height)
     for (int y = 0; y < height; ++y) {
         for (int x = width / 2; x < width; ++x) {
             image.setPixelColor(x, y, Qt::blue);
+        }
+    }
+    return image;
+}
+
+QImage highFrequencyFixture(int width, int height)
+{
+    QImage image(width, height, QImage::Format_ARGB32);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            image.setPixelColor(x, y,
+                                QColor((x * 37 + y * 11) & 0xff,
+                                       (x * 17 + y * 29) & 0xff,
+                                       (x * 13 + y * 7) & 0xff));
         }
     }
     return image;
@@ -254,9 +278,260 @@ void ScreenCaptureTests::freezeUsesChosenMonitorOrigin()
     const QImage capture = twoByOneBlueRightHalfImage(200, 100);
     const QPixmap freeze = ScreenCapture::freezeBackgroundForLogicalRect(
       capture, QRect(-100, 0, 100, 50), QRect(-50, 0, 50, 50));
-    QCOMPARE(freeze.size(), QSize(50, 50));
+    QCOMPARE(freeze.size(), QSize(100, 100));
     QCOMPARE(freeze.toImage().pixelColor(0, 0), QColor(Qt::blue));
-    QCOMPARE(freeze.toImage().pixelColor(49, 49), QColor(Qt::blue));
+    QCOMPARE(freeze.toImage().pixelColor(99, 99), QColor(Qt::blue));
+}
+
+void ScreenCaptureTests::freezePreservesNativePixels_data()
+{
+    QTest::addColumn<int>("nativeWidth");
+    QTest::addColumn<int>("nativeHeight");
+    QTest::addColumn<QRect>("subrectCrop");
+
+    QTest::newRow("1x") << 80 << 64 << QRect(16, 16, 32, 16);
+    QTest::newRow("1.25x") << 100 << 80 << QRect(20, 20, 40, 20);
+    QTest::newRow("1.5x") << 120 << 96 << QRect(24, 24, 48, 24);
+    QTest::newRow("2x") << 160 << 128 << QRect(32, 32, 64, 32);
+    QTest::newRow("1.75x") << 140 << 112 << QRect(28, 28, 56, 28);
+    QTest::newRow("2.25x") << 180 << 144 << QRect(36, 36, 72, 36);
+    QTest::newRow("2.5x") << 200 << 160 << QRect(40, 40, 80, 40);
+    QTest::newRow("3x") << 240 << 192 << QRect(48, 48, 96, 48);
+    QTest::newRow("nominal-4:3-frame") << 107 << 85 << QRect(21, 21, 43, 22);
+}
+
+void ScreenCaptureTests::freezePreservesNativePixels()
+{
+    QFETCH(int, nativeWidth);
+    QFETCH(int, nativeHeight);
+    QFETCH(QRect, subrectCrop);
+
+    const QImage capture = highFrequencyFixture(nativeWidth, nativeHeight);
+    const QRect captureRect(-80, -64, 80, 64);
+
+    const QPixmap full = ScreenCapture::freezeBackgroundForLogicalRect(
+      capture, captureRect, captureRect);
+    QCOMPARE(full.size(), QSize(nativeWidth, nativeHeight));
+    QCOMPARE(full.toImage().convertToFormat(QImage::Format_ARGB32), capture);
+
+    const QPixmap sub = ScreenCapture::freezeBackgroundForLogicalRect(
+      capture, captureRect, QRect(-64, -48, 32, 16));
+    QCOMPARE(sub.size(), subrectCrop.size());
+    QCOMPARE(sub.toImage().convertToFormat(QImage::Format_ARGB32),
+             capture.copy(subrectCrop));
+}
+
+void ScreenCaptureTests::freezeMapsOddAndClippedRectsAtFractionalScale()
+{
+    const QImage capture = highFrequencyFixture(100, 80);
+    const QRect captureRect(-80, -64, 80, 64);
+
+    const QPixmap odd = ScreenCapture::freezeBackgroundForLogicalRect(
+      capture, captureRect, QRect(-79, -63, 3, 3));
+    QCOMPARE(odd.size(), QSize(4, 4));
+    QCOMPARE(odd.toImage().convertToFormat(QImage::Format_ARGB32),
+             capture.copy(QRect(1, 1, 4, 4)));
+
+    const QPixmap clipped = ScreenCapture::freezeBackgroundForLogicalRect(
+      capture, captureRect, QRect(-90, -70, 20, 16));
+    QCOMPARE(clipped.size(), QSize(13, 13));
+    QCOMPARE(clipped.toImage().convertToFormat(QImage::Format_ARGB32),
+             capture.copy(QRect(0, 0, 13, 13)));
+}
+
+void ScreenCaptureTests::freezeRejectsInvalidAndOutsideRects()
+{
+    const QRect captureRect(-80, -64, 80, 64);
+    QVERIFY(ScreenCapture::freezeBackgroundForLogicalRect(
+              QImage(), captureRect, captureRect)
+              .isNull());
+
+    const QImage capture = highFrequencyFixture(100, 80);
+    QVERIFY(ScreenCapture::freezeBackgroundForLogicalRect(
+              capture, captureRect, QRect(10, 10, 10, 10))
+              .isNull());
+    QVERIFY(ScreenCapture::freezeBackgroundForLogicalRect(
+              capture, captureRect, QRect())
+              .isNull());
+}
+
+void ScreenCaptureTests::freezeKeepsEachMonitorFrameIndependent()
+{
+    struct MonitorCase {
+        QRect captureRect;
+        QSize native;
+        QRect subCrop;
+    };
+    const MonitorCase cases[] = {
+        {QRect(0, 0, 80, 64), QSize(100, 80), QRect(20, 20, 40, 20)},
+        {QRect(80, -16, 80, 64), QSize(160, 128), QRect(32, 32, 64, 32)},
+        {QRect(-80, 64, 80, 64), QSize(120, 96), QRect(24, 24, 48, 24)},
+        {QRect(0, 0, 80, 64), QSize(100, 80), QRect(20, 20, 40, 20)},
+    };
+    for (const MonitorCase& monitorCase : cases) {
+        const QImage capture = highFrequencyFixture(
+          monitorCase.native.width(), monitorCase.native.height());
+
+        const QPixmap full = ScreenCapture::freezeBackgroundForLogicalRect(
+          capture, monitorCase.captureRect, monitorCase.captureRect);
+        QCOMPARE(full.size(), monitorCase.native);
+        QCOMPARE(full.toImage().convertToFormat(QImage::Format_ARGB32), capture);
+
+        const QRect selection(monitorCase.captureRect.topLeft() + QPoint(16, 16),
+                              QSize(32, 16));
+        const QPixmap sub = ScreenCapture::freezeBackgroundForLogicalRect(
+          capture, monitorCase.captureRect, selection);
+        QCOMPARE(sub.size(), monitorCase.subCrop.size());
+        QCOMPARE(sub.toImage().convertToFormat(QImage::Format_ARGB32),
+                 capture.copy(monitorCase.subCrop));
+    }
+}
+
+void ScreenCaptureTests::paintFreezeBackgroundExactRender_data()
+{
+    QTest::addColumn<int>("nativeWidth");
+    QTest::addColumn<int>("nativeHeight");
+    QTest::addColumn<qreal>("dpr");
+    QTest::addColumn<bool>("tagPixmapDpr");
+
+    QTest::newRow("1.25x") << 100 << 80 << 1.25 << false;
+    QTest::newRow("1.5x") << 120 << 96 << 1.5 << false;
+    QTest::newRow("2x") << 160 << 128 << 2.0 << false;
+    QTest::newRow("1.25x-tagged") << 100 << 80 << 1.25 << true;
+    QTest::newRow("2x-tagged") << 160 << 128 << 2.0 << true;
+    QTest::newRow("1.75x") << 140 << 112 << 1.75 << false;
+    QTest::newRow("2.25x") << 180 << 144 << 2.25 << false;
+    QTest::newRow("2.5x") << 200 << 160 << 2.5 << false;
+    QTest::newRow("3x") << 240 << 192 << 3.0 << false;
+    QTest::newRow("1.75x-tagged") << 140 << 112 << 1.75 << true;
+    QTest::newRow("2.5x-tagged") << 200 << 160 << 2.5 << true;
+}
+
+void ScreenCaptureTests::paintFreezeBackgroundExactRender()
+{
+    QFETCH(int, nativeWidth);
+    QFETCH(int, nativeHeight);
+    QFETCH(qreal, dpr);
+    QFETCH(bool, tagPixmapDpr);
+
+    const QImage native = highFrequencyFixture(nativeWidth, nativeHeight);
+    QPixmap pixmap = QPixmap::fromImage(native);
+    if (tagPixmapDpr) {
+        pixmap.setDevicePixelRatio(dpr);
+    }
+
+    QImage target(nativeWidth, nativeHeight, QImage::Format_ARGB32);
+    target.setDevicePixelRatio(dpr);
+    target.fill(Qt::black);
+    {
+        QPainter p(&target);
+        ScreenCapture::paintFreezeBackground(
+          p, pixmap, QRect(0, 0, 80, 64), QRect(0, 0, 80, 64));
+    }
+    QImage rendered = target;
+    rendered.setDevicePixelRatio(1);
+    QCOMPARE(rendered, native);
+}
+
+void ScreenCaptureTests::paintFreezeBackgroundClippedSelection()
+{
+    const qreal dpr = 1.25;
+    const QImage native = highFrequencyFixture(100, 80);
+    const QPixmap pixmap = QPixmap::fromImage(native);
+    const QRect targetRect(8, 8, 80, 64);
+    const QRect clipRect(24, 24, 32, 16);
+    const QRect deviceClip(30, 30, 40, 20);
+    const QColor sentinel(Qt::magenta);
+
+    QImage reference(120, 100, QImage::Format_ARGB32);
+    reference.setDevicePixelRatio(dpr);
+    reference.fill(sentinel);
+    {
+        QPainter p(&reference);
+        ScreenCapture::paintFreezeBackground(
+          p, pixmap, targetRect, QRect(0, 0, 96, 80));
+    }
+
+    QImage clipped(120, 100, QImage::Format_ARGB32);
+    clipped.setDevicePixelRatio(dpr);
+    clipped.fill(sentinel);
+    {
+        QPainter p(&clipped);
+        ScreenCapture::paintFreezeBackground(p, pixmap, targetRect, clipRect);
+    }
+
+    for (int y = 0; y < clipped.height(); ++y) {
+        for (int x = 0; x < clipped.width(); ++x) {
+            if (deviceClip.contains(x, y)) {
+                QCOMPARE(clipped.pixelColor(x, y), reference.pixelColor(x, y));
+            } else {
+                QCOMPARE(clipped.pixelColor(x, y), sentinel);
+            }
+        }
+    }
+    QImage mapped = reference.copy(10, 10, 100, 80);
+    mapped.setDevicePixelRatio(1);
+    QCOMPARE(mapped, native);
+}
+
+void ScreenCaptureTests::paintFreezeBackgroundHonorsExistingClipAndRestoresState()
+{
+    const qreal dpr = 1.25;
+    const QImage native = highFrequencyFixture(100, 80);
+    const QPixmap pixmap = QPixmap::fromImage(native);
+    const QRect targetRect(8, 8, 80, 64);
+    const QColor sentinel(Qt::magenta);
+
+    QImage reference(120, 100, QImage::Format_ARGB32);
+    reference.setDevicePixelRatio(dpr);
+    reference.fill(sentinel);
+    {
+        QPainter p(&reference);
+        ScreenCapture::paintFreezeBackground(
+          p, pixmap, targetRect, QRect(0, 0, 96, 80));
+    }
+
+    const QRect existingClip(40, 16, 32, 32);
+    const QRect deviceIntersection(50, 30, 20, 20);
+
+    QImage target(120, 100, QImage::Format_ARGB32);
+    target.setDevicePixelRatio(dpr);
+    target.fill(sentinel);
+    {
+        QPainter p(&target);
+        p.setClipRect(existingClip);
+        const QTransform transformBefore = p.worldTransform();
+        ScreenCapture::paintFreezeBackground(
+          p, pixmap, targetRect, QRect(24, 24, 32, 16));
+        QCOMPARE(p.clipRegion(), QRegion(existingClip));
+        QCOMPARE(p.worldTransform(), transformBefore);
+    }
+
+    for (int y = 0; y < target.height(); ++y) {
+        for (int x = 0; x < target.width(); ++x) {
+            if (deviceIntersection.contains(x, y)) {
+                QCOMPARE(target.pixelColor(x, y), reference.pixelColor(x, y));
+            } else {
+                QCOMPARE(target.pixelColor(x, y), sentinel);
+            }
+        }
+    }
+
+    QImage unused(16, 16, QImage::Format_ARGB32);
+    unused.fill(sentinel);
+    {
+        QPainter p(&unused);
+        p.translate(3, 2);
+        p.rotate(15);
+        const QRect transformedClip(1, 1, 9, 7);
+        p.setClipRect(transformedClip);
+        const QRegion clipBefore = p.clipRegion();
+        const QTransform transformBefore = p.worldTransform();
+        ScreenCapture::paintFreezeBackground(
+          p, pixmap, targetRect, QRect(0, 0, 96, 80));
+        QCOMPARE(p.clipRegion(), clipBefore);
+        QCOMPARE(p.worldTransform(), transformBefore);
+    }
 }
 
 void ScreenCaptureTests::cropsMixedDpiFrameToTempPng()

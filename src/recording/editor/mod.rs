@@ -7,6 +7,7 @@ pub mod cursor_shake;
 pub mod cursor_sprite;
 pub mod cursor_track;
 pub(crate) mod export_cache;
+pub(crate) mod export_settings;
 pub mod ffmpeg;
 pub mod gst_warp;
 pub(crate) mod hardware_encode;

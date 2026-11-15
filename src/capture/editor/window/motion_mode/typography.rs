@@ -116,7 +116,8 @@ impl MotionFontPicker {
             name.set_hexpand(true);
             name.set_max_width_chars(26);
             name.set_ellipsize(pango::EllipsizeMode::End);
-            let check = Label::new(Some("✓"));
+            let check = Image::from_icon_name(super::super::icon_names::custom::CHECK_SYMBOLIC);
+            check.set_pixel_size(12);
             check.add_css_class("editor-text-inspector-check");
             check.set_visible(family == crate::typography::UI_FONT_FAMILY);
             row.append(&name);
@@ -130,6 +131,7 @@ impl MotionFontPicker {
                 ])
                 .child(&row)
                 .build();
+            option.set_size_request(-1, 32);
             option.set_tooltip_text(Some(family));
             option.connect_clicked({
                 let choose = choose.clone();

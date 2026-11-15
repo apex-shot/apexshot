@@ -314,7 +314,7 @@ fn paint_frame_style_swatch(cr: &Context, style: FrameStyle, w: f64, h: f64) {
     // Glass presets: same band + rim recipe as the renderers, scaled
     // down to the tile.
     if let Some(liquid) =
-        crate::capture::editor::render::LiquidFrame::resolve(&spec, spec.border_thickness, 0.45)
+        crate::capture::editor::render::LiquidFrame::resolve(style, spec.border_thickness, 0.32)
     {
         let path = |path_context: &gtk4::cairo::Context, expand: f64| {
             crate::capture::editor::render::rounded_rect_path(
@@ -363,6 +363,19 @@ fn paint_frame_style_swatch(cr: &Context, style: FrameStyle, w: f64, h: f64) {
             (card_r - t / 2.0).max(0.0),
         );
         cr.stroke().ok();
+        crate::capture::editor::render::paint_inset_inner_line(
+            cr,
+            &crate::capture::editor::composition::FloatRect {
+                x: card_x,
+                y: card_y,
+                width: card_w,
+                height: card_h,
+            },
+            card_r,
+            t,
+            0.32,
+            style,
+        );
     }
     for outer in [spec.outer1, spec.outer2]
         .into_iter()

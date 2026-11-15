@@ -260,6 +260,15 @@ jobs:
       - name: Run tests
         run: cargo test --jobs 2 -- --test-threads=1
 
+      - name: Run preview lifecycle regressions with a display
+        env:
+          APEXSHOT_REQUIRE_PREVIEW_GTK_TESTS: '1'
+          GDK_BACKEND: x11
+          GSK_RENDERER: cairo
+        run: |
+          sudo apt-get install -y xvfb xauth
+          xvfb-run -a dbus-run-session -- cargo test --jobs 2 --lib upscale_preview::tests::sheet_lifecycle_ -- --test-threads=1 --nocapture
+
   studio_release_config:
     name: Validate official Studio build configuration
     runs-on: ubuntu-latest

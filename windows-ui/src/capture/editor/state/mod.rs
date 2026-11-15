@@ -104,6 +104,7 @@ pub struct EditorState {
     pub active_text_is_resizing: bool,
     pub hovered_text_action_index: Option<usize>,
     pub active_text_input: Option<TextInputState>,
+    text_input_session_id: u64,
 
     // Text detection for highlighter
     pub text_detector: Arc<Mutex<TextDetector>>,
@@ -333,6 +334,7 @@ impl EditorState {
             active_text_is_resizing: false,
             hovered_text_action_index: None,
             active_text_input: None,
+            text_input_session_id: 0,
 
             text_detector: Arc::new(Mutex::new(TextDetector::new_pending())),
             text_detection_ready: Arc::new(AtomicBool::new(false)),
@@ -510,24 +512,6 @@ impl EditorState {
         });
     }
 
-    /// Forward delete inside the live text input: drop the character under
-    /// the caret. Mirrors `delete_text_input_char` for the Backspace side.
-    pub fn delete_text_input_char_forward(&mut self) {
-        if let Some(ref mut input) = self.active_text_input {
-            if input.cursor_position < input.text.chars().count() {
-                if let Some(byte_idx) = input
-                    .text
-                    .char_indices()
-                    .nth(input.cursor_position)
-                    .map(|(i, _)| i)
-                {
-                    input.text.remove(byte_idx);
-                }
-                input.cursor_blink_timer = 0;
-            }
-        }
-    }
-
     pub fn move_cursor_home(&mut self) {
         if let Some(ref mut input) = self.active_text_input {
             input.cursor_position = 0;
@@ -541,15 +525,6 @@ impl EditorState {
             input.cursor_position = input.text.chars().count();
             input.cursor_visible = true;
             input.cursor_blink_timer = 0;
-        }
-    }
-
-    /// Paste plain text into the live input (clipboard text or equivalent).
-    pub fn insert_text_input_str(&mut self, text: &str) {
-        for c in text.chars() {
-            if !c.is_control() || c == '\n' {
-                self.add_text_input_char(c);
-            }
         }
     }
 }
@@ -686,6 +661,31 @@ mod tests {
         state.move_cursor_end();
         assert!(state.commit_active_text_input());
         assert_eq!(state.actions.len(), 1);
+    }
+
+    #[test]
+    fn shared_text_input_str_forward_delete_and_session_ids() {
+        let mut state = EditorState::new(RgbaImage::new(2, 2));
+        state.begin_text_input(Point { x: 1.0, y: 1.0 }, 100.0, 44.0);
+        let first = state.text_input_session_id();
+
+        state.insert_text_input_str("aé😀b");
+        state.set_text_cursor_position(1);
+        state.delete_text_input_char_forward();
+        let input = state.get_text_input().expect("active input");
+        assert_eq!(input.text, "a😀b");
+        assert_eq!(input.cursor_position, 1);
+
+        state.cancel_text_input();
+        state.begin_text_input(Point { x: 1.0, y: 1.0 }, 100.0, 44.0);
+        let second = state.text_input_session_id();
+        assert_ne!(first, second);
+
+        state.insert_text_input_str("x");
+        assert!(state.commit_active_text_input());
+        state.begin_text_input(Point { x: 1.0, y: 1.0 }, 100.0, 44.0);
+        let third = state.text_input_session_id();
+        assert_ne!(second, third);
     }
 
     #[test]

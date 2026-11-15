@@ -4907,3 +4907,53 @@ msgstr "{minutes} мин"
 
 msgid "{seconds} s"
 msgstr "{seconds} с"
+msgid "A link to the exported file was copied"
+msgstr "Ссылка на экспортированный файл скопирована"
+
+msgid "ApexShot could not reserve a file for the export."
+msgstr "ApexShot не удалось зарезервировать файл для экспорта."
+
+msgid "Checking encoder support…"
+msgstr "Проверка поддержки кодировщика…"
+
+msgid "Copy exported file"
+msgstr "Копировать экспортированный файл"
+
+msgid "Depends on hardware"
+msgstr "Зависит от оборудования"
+
+msgid "Disk space is almost full"
+msgstr "На диске почти не осталось места"
+
+msgid "Encode with HEVC"
+msgstr "Кодировать в HEVC"
+
+msgid "Export stopped"
+msgstr "Экспорт остановлен"
+
+msgid "Hardware encoding failed; the export restarted on the software encoder"
+msgstr "Аппаратное кодирование не удалось; экспорт перезапущен с программным кодировщиком"
+
+msgid "Open failed"
+msgstr "Не удалось открыть"
+
+msgid "Recording stopped"
+msgstr "Запись остановлена"
+
+msgid "Retrying on the software encoder…"
+msgstr "Повторная попытка с программным кодировщиком…"
+
+msgid "Show in Files"
+msgstr "Показать в файлах"
+
+msgid "The partial file was removed"
+msgstr "Незавершённый файл удалён"
+
+msgid "The selected codec cannot encode on this machine"
+msgstr "Выбранный кодек не может кодировать на этом компьютере"
+
+msgid "This ffmpeg build has no HEVC encoder"
+msgstr "В этой сборке ffmpeg нет кодировщика HEVC"
+
+msgid "Uploaded, but the link could not be copied: {error}"
+msgstr "Загружено, но не удалось скопировать ссылку: {error}"

@@ -1,4 +1,5 @@
 use super::dialogs;
+use super::export_flow;
 use crate::recording::editor::ffmpeg;
 use crate::recording::editor::model::{format_size, VideoEditState};
 use gtk4::{
@@ -19,6 +20,7 @@ pub(super) fn build_inspector_actions(
     state: Arc<Mutex<VideoEditState>>,
     exporting: Rc<Cell<bool>>,
     export_cancellation: Arc<AtomicBool>,
+    export_flow_active: export_flow::FlowActive,
 ) -> GtkBox {
     let footer = GtkBox::new(Orientation::Horizontal, 6);
     footer.add_css_class("recording-editor-footer");
@@ -71,6 +73,7 @@ pub(super) fn build_inspector_actions(
         spinner.clone(),
         exporting.clone(),
         export_cancellation.clone(),
+        export_flow_active.clone(),
     );
     wire_export_button(
         &done,
@@ -80,6 +83,7 @@ pub(super) fn build_inspector_actions(
         spinner.clone(),
         exporting,
         export_cancellation,
+        export_flow_active,
     );
 
     let spacer = GtkBox::new(Orientation::Horizontal, 0);
@@ -108,6 +112,7 @@ pub(super) fn build_upload_action(
     state: Arc<Mutex<VideoEditState>>,
     exporting: Rc<Cell<bool>>,
     export_cancellation: Arc<AtomicBool>,
+    export_flow_active: export_flow::FlowActive,
 ) -> (Button, Spinner) {
     let button = Button::new();
     button.set_has_frame(false);
@@ -136,6 +141,7 @@ pub(super) fn build_upload_action(
         spinner.clone(),
         exporting,
         export_cancellation,
+        export_flow_active,
     );
 
     (button, spinner)
@@ -146,6 +152,7 @@ pub(super) fn build_export_action(
     state: Arc<Mutex<VideoEditState>>,
     exporting: Rc<Cell<bool>>,
     export_cancellation: Arc<AtomicBool>,
+    export_flow_active: export_flow::FlowActive,
 ) -> (Button, Spinner) {
     let button = Button::new();
     button.set_has_frame(false);
@@ -175,6 +182,7 @@ pub(super) fn build_export_action(
         spinner.clone(),
         exporting,
         export_cancellation,
+        export_flow_active,
     );
 
     (button, spinner)
@@ -198,11 +206,13 @@ fn wire_upload_button(
     spinner: Spinner,
     exporting: Rc<Cell<bool>>,
     export_cancellation: Arc<AtomicBool>,
+    export_flow_active: export_flow::FlowActive,
 ) {
     button.set_sensitive(state.lock().unwrap().has_source_video());
     let window = window.downgrade();
     button.connect_clicked(move |button| {
-        if exporting.get() || !state.lock().unwrap().has_source_video() {
+        if exporting.get() || export_flow_active.get() || !state.lock().unwrap().has_source_video()
+        {
             return;
         }
 
@@ -358,6 +368,52 @@ fn wire_upload_button(
     });
 }
 
+fn reserve_copy_export_path(state: &VideoEditState) -> Option<PathBuf> {
+    let suggested = state.export_path();
+    let dir = crate::config::load_config()
+        .video_editor_export_dir(suggested.parent().unwrap_or_else(|| Path::new("")));
+    if let Err(err) = std::fs::create_dir_all(&dir) {
+        eprintln!(
+            "could not create the export folder {}: {err}",
+            dir.display()
+        );
+        return None;
+    }
+    let stem = suggested
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "export".to_string());
+    reserve_in_dir(&dir, &stem)
+}
+
+fn reserve_in_dir(dir: &Path, stem: &str) -> Option<PathBuf> {
+    for index in 0..1000u32 {
+        let name = if index == 0 {
+            format!("{stem}.mp4")
+        } else {
+            format!("{stem}-{index}.mp4")
+        };
+        let candidate = dir.join(name);
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(file) => {
+                drop(file);
+                return Some(candidate);
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => {
+                eprintln!("could not reserve {}: {err}", candidate.display());
+                return None;
+            }
+        }
+    }
+    eprintln!("no free export name left under {}", dir.display());
+    None
+}
+
 fn wire_export_button(
     button: &Button,
     window: &ApplicationWindow,
@@ -366,13 +422,14 @@ fn wire_export_button(
     spinner: Spinner,
     exporting: Rc<Cell<bool>>,
     export_cancellation: Arc<AtomicBool>,
+    export_flow_active: export_flow::FlowActive,
 ) {
     let window = window.clone();
-    let chooser_slot = Rc::new(RefCell::new(None::<FileChooserNative>));
+    let chooser_slot_click = Rc::new(RefCell::new(None::<FileChooserNative>));
     button.set_sensitive(state.lock().unwrap().has_source_video());
-    let chooser_slot_click = chooser_slot.clone();
     button.connect_clicked(move |button| {
         if exporting.get()
+            || export_flow_active.get()
             || chooser_slot_click.borrow().is_some()
             || !state.lock().unwrap().has_source_video()
         {
@@ -387,170 +444,293 @@ fn wire_export_button(
         ) {
             return;
         }
-        let suggested = state_snapshot.export_path();
-        let suggested_dir = crate::config::load_config()
-            .video_editor_export_dir(suggested.parent().unwrap_or_else(|| Path::new("")));
-        let title = t("Export video");
-        let export = t("Export");
-        let cancel = t("Cancel");
-        let chooser = FileChooserNative::new(
-            Some(&title),
-            Some(&window),
-            FileChooserAction::Save,
-            Some(&export),
-            Some(&cancel),
-        );
-        let filter = FileFilter::new();
-        filter.set_name(Some(&t("MP4 video")));
-        filter.add_mime_type("video/mp4");
-        filter.add_pattern("*.mp4");
-        chooser.add_filter(&filter);
-        if !suggested_dir.as_os_str().is_empty() {
-            let _ = chooser.set_current_folder(Some(&gio::File::for_path(&suggested_dir)));
-        }
-        if let Some(name) = suggested.file_name() {
-            chooser.set_current_name(&name.to_string_lossy());
-        }
 
-        let state = state.clone();
-        let controls = controls.clone();
-        let spinner = spinner.clone();
-        let exporting = exporting.clone();
-        let window = window.clone();
-        let export_button = button.clone();
-        let idle_label = button.label().unwrap_or_else(|| t("Export").into());
+        let Some(flow) = export_flow::ActiveFlow::begin(&window, &export_flow_active) else {
+            return;
+        };
         export_cancellation.store(false, Ordering::Release);
-        let chooser_slot_response = Rc::downgrade(&chooser_slot_click);
-        let export_cancellation_response = export_cancellation.clone();
-        chooser.connect_response(move |dialog, response| {
-            dialog.hide();
-            let selected_file = (response == ResponseType::Accept)
-                .then(|| dialog.file())
-                .flatten();
-            if let Some(chooser_slot) = chooser_slot_response.upgrade() {
-                chooser_slot.borrow_mut().take();
-            }
-            if response != ResponseType::Accept {
-                return;
-            }
-            let Some(mut path) = selected_file.and_then(|file| file.path()) else {
-                dialogs::show_error(
-                    &window,
-                    &t("Export failed"),
-                    &t("ApexShot could not export this recording."),
-                    Some("Choose a local file to export."),
-                );
-                return;
-            };
-            let is_mp4 = path
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("mp4"));
-            if !is_mp4 {
-                path.set_extension("mp4");
-            }
 
-            exporting.set(true);
-            export_button.set_label(&t("Exporting…"));
-            spinner.set_visible(true);
-            spinner.start();
-            for control in &controls {
-                control.set_sensitive(false);
-            }
-
-            let state_snapshot = state.lock().unwrap().clone();
-            let export_cancellation_worker = export_cancellation_response.clone();
-            let (sender, receiver) = std::sync::mpsc::channel::<Result<PathBuf, String>>();
-            std::thread::spawn(move || {
-                let result = ffmpeg::export_edited_to_cancellable(
-                    &state_snapshot,
-                    path,
-                    Some(&export_cancellation_worker),
-                );
-                let _ = sender.send(result.map_err(|err| err.to_string()));
-            });
-
-            let controls = controls.clone();
-            let spinner = spinner.clone();
-            let exporting = exporting.clone();
-            let window = window.clone();
-            let export_button = export_button.clone();
-            let idle_label = idle_label.clone();
-            let export_cancellation = export_cancellation_response.clone();
-            glib::timeout_add_local(Duration::from_millis(100), move || {
-                match receiver.try_recv() {
-                    Ok(result) => {
-                        exporting.set(false);
-                        export_button.set_label(&idle_label);
-                        spinner.stop();
-                        spinner.set_visible(false);
-                        for control in &controls {
-                            control.set_sensitive(true);
-                        }
-                        if export_cancellation.load(Ordering::Acquire) {
-                            if let Ok(path) = &result {
-                                let _ = std::fs::remove_file(path);
-                            }
-                            return glib::ControlFlow::Break;
-                        }
-                        match result {
-                            Ok(path) => {
-                                let mut config = crate::config::load_config();
-                                if config.remember_video_export_dir(&path) {
-                                    let _ = crate::config::save_config(&config);
-                                }
-                                dialogs::show_success(&window, path)
-                            }
-                            Err(err) => dialogs::show_error(
-                                &window,
-                                &t("Export failed"),
-                                &t("ApexShot could not export this recording."),
-                                Some(&err),
-                            ),
-                        }
-                        glib::ControlFlow::Break
-                    }
-                    Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                        exporting.set(false);
-                        export_button.set_label(&idle_label);
-                        spinner.stop();
-                        spinner.set_visible(false);
-                        for control in &controls {
-                            control.set_sensitive(true);
-                        }
+        let state_actions = state.clone();
+        let window_actions = window.clone();
+        let controls_actions = controls.clone();
+        let spinner_actions = spinner.clone();
+        let exporting_actions = exporting.clone();
+        let export_cancellation_actions = export_cancellation.clone();
+        let chooser_slot_actions = chooser_slot_click.clone();
+        let export_button_actions = button.clone();
+        super::export_options::show(
+            &window,
+            state_snapshot,
+            flow.clone(),
+            Rc::new(move |export_state, action| match action {
+                super::export_options::ExportAction::CopyToClipboard => {
+                    let Some(path) = reserve_copy_export_path(&export_state) else {
+                        export_flow::release(&flow);
                         dialogs::show_error(
-                            &window,
+                            &window_actions,
                             &t("Export failed"),
-                            &t("ApexShot lost contact with the export worker."),
+                            &t("ApexShot could not reserve a file for the export."),
                             None,
                         );
-                        glib::ControlFlow::Break
-                    }
+                        return;
+                    };
+                    start_card_export(
+                        &window_actions,
+                        &state_actions,
+                        export_state,
+                        path,
+                        true,
+                        flow.clone(),
+                        &controls_actions,
+                        &spinner_actions,
+                        &exporting_actions,
+                        &export_button_actions,
+                        &export_cancellation_actions,
+                    );
                 }
-            });
-        });
-        *chooser_slot_click.borrow_mut() = Some(chooser.clone());
-        chooser.show();
+                super::export_options::ExportAction::SaveToFile => {
+                    choose_export_path(
+                        &window_actions,
+                        &state_actions,
+                        export_state,
+                        flow.clone(),
+                        &controls_actions,
+                        &spinner_actions,
+                        &exporting_actions,
+                        &export_button_actions,
+                        &export_cancellation_actions,
+                        &chooser_slot_actions,
+                    );
+                }
+            }),
+        );
     });
+}
+
+fn start_card_export(
+    window: &ApplicationWindow,
+    state: &Arc<Mutex<VideoEditState>>,
+    export_state: VideoEditState,
+    path: PathBuf,
+    copy_to_clipboard: bool,
+    flow: export_flow::FlowSlot,
+    controls: &[gtk4::Widget],
+    spinner: &Spinner,
+    exporting: &Rc<Cell<bool>>,
+    export_button: &Button,
+    export_cancellation: &Arc<AtomicBool>,
+) {
+    state.lock().unwrap().export_settings = export_state.export_settings;
+    let idle_label = export_button.label().unwrap_or_else(|| t("Export").into());
+    exporting.set(true);
+    export_button.set_label(&t("Exporting…"));
+    spinner.set_visible(true);
+    spinner.start();
+    for control in controls {
+        control.set_sensitive(false);
+    }
+
+    let controls = controls.to_vec();
+    let spinner = spinner.clone();
+    let exporting = exporting.clone();
+    let export_button = export_button.clone();
+    let restore = Rc::new(move || {
+        export_button.set_label(&idle_label);
+        spinner.stop();
+        spinner.set_visible(false);
+        for control in &controls {
+            control.set_sensitive(true);
+        }
+    });
+
+    super::export_card::start(
+        window,
+        export_state,
+        path,
+        copy_to_clipboard,
+        flow,
+        restore,
+        exporting.clone(),
+        export_cancellation.clone(),
+    );
+}
+
+fn choose_export_path(
+    window: &ApplicationWindow,
+    state: &Arc<Mutex<VideoEditState>>,
+    export_state: VideoEditState,
+    flow: export_flow::FlowSlot,
+    controls: &[gtk4::Widget],
+    spinner: &Spinner,
+    exporting: &Rc<Cell<bool>>,
+    export_button: &Button,
+    export_cancellation: &Arc<AtomicBool>,
+    chooser_slot: &Rc<RefCell<Option<FileChooserNative>>>,
+) {
+    let suggested = export_state.export_path();
+    let suggested_dir = crate::config::load_config()
+        .video_editor_export_dir(suggested.parent().unwrap_or_else(|| Path::new("")));
+    let title = t("Export video");
+    let export = t("Export");
+    let cancel = t("Cancel");
+    let chooser = FileChooserNative::new(
+        Some(&title),
+        Some(window),
+        FileChooserAction::Save,
+        Some(&export),
+        Some(&cancel),
+    );
+    let filter = FileFilter::new();
+    filter.set_name(Some(&t("MP4 video")));
+    filter.add_mime_type("video/mp4");
+    filter.add_pattern("*.mp4");
+    chooser.add_filter(&filter);
+    if !suggested_dir.as_os_str().is_empty() {
+        let _ = chooser.set_current_folder(Some(&gio::File::for_path(&suggested_dir)));
+    }
+    if let Some(name) = suggested.file_name() {
+        chooser.set_current_name(&name.to_string_lossy());
+    }
+
+    let window = window.clone();
+    let state = state.clone();
+    let controls = controls.to_vec();
+    let spinner = spinner.clone();
+    let exporting = exporting.clone();
+    let export_button = export_button.clone();
+    let export_cancellation = export_cancellation.clone();
+    let flow = flow.clone();
+    let chooser_slot_response = Rc::downgrade(chooser_slot);
+    let export_state = Rc::new(RefCell::new(Some(export_state)));
+    chooser.connect_response(move |dialog, response| {
+        dialog.hide();
+        let selected_file = (response == ResponseType::Accept)
+            .then(|| dialog.file())
+            .flatten();
+        if let Some(chooser_slot) = chooser_slot_response.upgrade() {
+            chooser_slot.borrow_mut().take();
+        }
+        if response != ResponseType::Accept {
+            export_flow::release(&flow);
+            return;
+        }
+        let Some(mut path) = selected_file.and_then(|file| file.path()) else {
+            export_flow::release(&flow);
+            dialogs::show_error(
+                &window,
+                &t("Export failed"),
+                &t("ApexShot could not export this recording."),
+                Some("Choose a local file to export."),
+            );
+            return;
+        };
+        let is_mp4 = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("mp4"));
+        if !is_mp4 {
+            path.set_extension("mp4");
+        }
+        let Some(export_state) = export_state.borrow_mut().take() else {
+            export_flow::release(&flow);
+            return;
+        };
+
+        start_card_export(
+            &window,
+            &state,
+            export_state,
+            path,
+            false,
+            flow.clone(),
+            &controls,
+            &spinner,
+            &exporting,
+            &export_button,
+            &export_cancellation,
+        );
+    });
+    *chooser_slot.borrow_mut() = Some(chooser.clone());
+    chooser.show();
 }
 
 #[cfg(test)]
 mod tests {
+    use super::reserve_in_dir;
+
+    fn scratch_dir(tag: &str) -> std::path::PathBuf {
+        for index in 0u32..1000 {
+            let candidate =
+                std::env::temp_dir().join(format!("apexshot-{tag}-{}-{index}", std::process::id()));
+            match std::fs::create_dir(&candidate) {
+                Ok(()) => return candidate,
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(err) => panic!("could not create {candidate:?}: {err}"),
+            }
+        }
+        panic!("no free scratch dir for {tag}");
+    }
+
+    #[test]
+    fn the_copy_reservation_never_overwrites_an_existing_file() {
+        let dir = scratch_dir("reserve");
+        std::fs::write(dir.join("clip.mp4"), b"keep me").unwrap();
+        let first = reserve_in_dir(&dir, "clip").expect("a free name exists");
+        assert_eq!(first, dir.join("clip-1.mp4"));
+        assert!(first.exists());
+        let second = reserve_in_dir(&dir, "clip").expect("another free name exists");
+        assert_eq!(second, dir.join("clip-2.mp4"));
+        assert_eq!(
+            std::fs::read(dir.join("clip.mp4")).unwrap(),
+            b"keep me",
+            "the pre-existing export must be untouched",
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_copy_reservation_fails_when_every_name_is_taken() {
+        let dir = scratch_dir("reserve-full");
+        for index in 0..1000u32 {
+            let name = if index == 0 {
+                "clip.mp4".to_string()
+            } else {
+                format!("clip-{index}.mp4")
+            };
+            std::fs::write(dir.join(name), b"").unwrap();
+        }
+        assert_eq!(reserve_in_dir(&dir, "clip"), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn video_export_shows_busy_feedback_and_restores_it_on_completion_or_worker_failure() {
         let source = include_str!("footer.rs");
         let source = source.split("#[cfg(test)]").next().unwrap();
         let export = source.split("fn wire_export_button(").nth(1).unwrap();
         assert!(export.contains("if exporting.get()"));
+        assert!(export.contains("export_flow_active.get()"));
         assert!(export.contains("export_button.set_label(&t(\"Exporting…\"))"));
-        assert_eq!(
-            export
-                .matches("export_button.set_label(&idle_label)")
-                .count(),
-            2
-        );
+        assert!(export.contains("export_button.set_label(&idle_label)"));
         assert!(export.contains("control.set_sensitive(false)"));
+        let card = include_str!("export_card.rs");
+        let hand_backs = card
+            .matches("hand_back_to_editor(&handle, &restore, &flow)")
+            .count();
+        let releases = card.matches("export_flow::release(&flow)").count();
+        let restores = card.matches("restore()").count();
+        assert!(
+            hand_backs >= 1 && releases >= 4 && restores >= 4,
+            "success, failure, cancellation, disconnect, and Escape must all hand the editor back; found {hand_backs} hand-backs, {releases} releases, {restores} restores",
+        );
+        assert!(
+            card.contains("connect_parent_notify")
+                && card.contains(
+                    "terminal.get() {
+                hand_back_to_editor(&handle, &restore, &flow);"
+                ),
+            "an externally dismissed terminal screen still restores and releases",
+        );
     }
 
     #[test]
@@ -574,20 +754,34 @@ mod tests {
             "Cloud must export current editor edits before uploading",
         );
         let export = &source[source.find("fn wire_export_button").expect("export wire")..];
+        let options_pos = export
+            .find("export_options::show")
+            .expect("export options sheet");
         let save_pos = export.find("FileChooserAction::Save").expect("save dialog");
-        let write_pos = export.find("export_edited_to").expect("write chosen path");
         assert!(
-            save_pos < write_pos,
-            "Export must ask for a save location before encoding",
+            options_pos < save_pos,
+            "Export must show the options sheet before asking for a save location",
+        );
+        let chooser = &export[export
+            .find("fn choose_export_path")
+            .expect("chooser helper")..];
+        let response_pos = chooser.find("connect_response").expect("chooser response");
+        let card_pos = chooser
+            .find("start_card_export")
+            .expect("export card start");
+        assert!(
+            response_pos < card_pos,
+            "Export must wait for the save chooser before starting the encode",
         );
         assert!(
-            export.contains("chooser_slot_click.borrow_mut() = Some(chooser.clone())")
-                && export.contains("Rc::downgrade(&chooser_slot_click)")
+            export.contains("chooser_slot.borrow_mut() = Some(chooser.clone())")
+                && export.contains("Rc::downgrade(chooser_slot)")
                 && export.contains("chooser_slot.borrow_mut().take()"),
             "The native save chooser must stay strongly owned until its response",
         );
+        let card = include_str!("export_card.rs");
         assert!(
-            export.contains("export_edited_to_cancellable"),
+            card.contains("export_edited_to_cancellable") && card.contains("export_cancellation"),
             "The export worker must observe the editor cancellation token",
         );
     }

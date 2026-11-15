@@ -1507,6 +1507,12 @@ fn apply_fallback_input_region(window: &Window, card: &Overlay) -> bool {
     let region_rect = gtk4::cairo::RectangleInt::new(x, y, width, height);
     let input_region = gtk4::cairo::Region::create_rectangle(&region_rect);
     surface.set_input_region(&input_region);
+    // On Wayland GDK only sends a new input region with the next surface
+    // commit. The card is static once laid out, so without a redraw the
+    // region stays at whatever the first frame carried (a 2x2 box before the
+    // card is allocated) and the preview is click-through. Only a changed
+    // region reaches here, so this cannot loop.
+    window.queue_draw();
     true
 }
 

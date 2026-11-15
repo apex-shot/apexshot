@@ -50,6 +50,26 @@ pub(crate) fn with_gtk<R: Send + 'static>(f: impl FnOnce() -> R + Send + 'static
     }
 }
 
+pub(crate) fn test_app() -> gtk4::Application {
+    use gtk4::prelude::ApplicationExt;
+    // Its own application id: this app lives for the whole test run on the
+    // shared GTK thread, so reusing the production id would collide with
+    // tests that register a short-lived app under that id ("An object is
+    // already exported for the interface org.gtk.Application").
+    thread_local! {
+        static TEST_APP: gtk4::Application = {
+            let app = gtk4::Application::builder()
+                .application_id(format!("{}.Tests", crate::app_identity::app_id()))
+                .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+                .build();
+            app.register(None::<&gtk4::gio::Cancellable>)
+                .expect("the test application to register");
+            app
+        };
+    }
+    TEST_APP.with(|app| app.clone())
+}
+
 /// Start the GTK thread and report whether GTK initialized on it.
 fn spawn_gtk_thread() -> Result<Sender<Job>, ()> {
     let (ready_tx, ready_rx) = channel::<bool>();
@@ -73,8 +93,18 @@ fn spawn_gtk_thread() -> Result<Sender<Job>, ()> {
             if ready_tx.send(available).is_err() || !available {
                 return;
             }
-            while let Ok(job) = job_rx.recv() {
-                job();
+            // GTK owns the default main context on this thread once it
+            // initializes; pump it between jobs so default-context sources
+            // (idle draws, timeouts) still dispatch while tests run.
+            loop {
+                while gtk4::glib::MainContext::default().iteration(false) {}
+                match job_rx.try_recv() {
+                    Ok(job) => job(),
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                        std::thread::sleep(std::time::Duration::from_millis(2));
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+                }
             }
         })
         .map_err(|_| ())?;

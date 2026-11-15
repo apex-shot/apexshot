@@ -4851,3 +4851,53 @@ msgstr "{minutes} دقيقة"
 
 msgid "{seconds} s"
 msgstr "{seconds} ث"
+msgid "A link to the exported file was copied"
+msgstr "تم نسخ رابط إلى الملف المُصدَّر"
+
+msgid "ApexShot could not reserve a file for the export."
+msgstr "تعذّر على ApexShot حجز ملف للتصدير."
+
+msgid "Checking encoder support…"
+msgstr "جارٍ التحقق من دعم المُرمِّز…"
+
+msgid "Copy exported file"
+msgstr "نسخ الملف المُصدَّر"
+
+msgid "Depends on hardware"
+msgstr "يعتمد على العتاد"
+
+msgid "Disk space is almost full"
+msgstr "مساحة القرص على وشك الامتلاء"
+
+msgid "Encode with HEVC"
+msgstr "الترميز باستخدام HEVC"
+
+msgid "Export stopped"
+msgstr "توقّف التصدير"
+
+msgid "Hardware encoding failed; the export restarted on the software encoder"
+msgstr "فشل الترميز بالعتاد؛ أُعيد بدء التصدير باستخدام المُرمِّز البرمجي"
+
+msgid "Open failed"
+msgstr "فشل الفتح"
+
+msgid "Recording stopped"
+msgstr "توقّف التسجيل"
+
+msgid "Retrying on the software encoder…"
+msgstr "جارٍ إعادة المحاولة باستخدام المُرمِّز البرمجي…"
+
+msgid "Show in Files"
+msgstr "إظهار في الملفات"
+
+msgid "The partial file was removed"
+msgstr "تمت إزالة الملف الجزئي"
+
+msgid "The selected codec cannot encode on this machine"
+msgstr "لا يمكن لبرنامج الترميز المحدد الترميز على هذا الجهاز"
+
+msgid "This ffmpeg build has no HEVC encoder"
+msgstr "إصدار ffmpeg هذا لا يحتوي على مُرمِّز HEVC"
+
+msgid "Uploaded, but the link could not be copied: {error}"
+msgstr "تم الرفع، لكن تعذّر نسخ الرابط: {error}"

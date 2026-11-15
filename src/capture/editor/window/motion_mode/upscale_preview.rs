@@ -346,6 +346,58 @@ fn output_size_label(session: &MotionSession, mode: SourceUpscale, motion_export
     format!("{width} × {height} px")
 }
 
+fn wire_sheet_lifecycle(
+    window: &gtk4::ApplicationWindow,
+    overlay: &Overlay,
+    scrim: &GtkBox,
+    keys: &EventControllerKey,
+    active: &Rc<RefCell<Option<Arc<AtomicBool>>>>,
+) -> Rc<dyn Fn()> {
+    OPEN.with(|open| open.set(true));
+    window.add_controller(keys.clone());
+    let closed = Rc::new(Cell::new(false));
+    let cleanup: Rc<dyn Fn()> = {
+        let closed = closed.clone();
+        let window = window.downgrade();
+        let keys = keys.downgrade();
+        let active = active.clone();
+        Rc::new(move || {
+            if closed.replace(true) {
+                return;
+            }
+            if let Some(cancel) = active.borrow().as_ref() {
+                cancel.store(true, Ordering::Relaxed);
+            }
+            OPEN.with(|open| open.set(false));
+            if let (Some(window), Some(keys)) = (window.upgrade(), keys.upgrade()) {
+                window.remove_controller(&keys);
+            }
+        })
+    };
+    scrim.connect_unrealize({
+        let cleanup = cleanup.clone();
+        move |_| cleanup()
+    });
+    scrim.connect_parent_notify({
+        let cleanup = cleanup.clone();
+        move |scrim| {
+            if scrim.parent().is_none() {
+                cleanup();
+            }
+        }
+    });
+    let scrim = scrim.downgrade();
+    let overlay = overlay.downgrade();
+    Rc::new(move || {
+        cleanup();
+        if let (Some(scrim), Some(overlay)) = (scrim.upgrade(), overlay.upgrade()) {
+            if scrim.parent().as_ref() == Some(overlay.upcast_ref::<gtk4::Widget>()) {
+                overlay.remove_overlay(&scrim);
+            }
+        }
+    })
+}
+
 pub(super) fn show(window: &gtk4::ApplicationWindow, session: &MotionSession, motion_export: bool) {
     if OPEN.with(Cell::get)
         || unavailable_reason(session, SourceUpscale::Neural2x, motion_export).is_some()
@@ -355,7 +407,6 @@ pub(super) fn show(window: &gtk4::ApplicationWindow, session: &MotionSession, mo
     let Some(overlay) = window.child().and_downcast::<Overlay>() else {
         return;
     };
-    OPEN.with(|open| open.set(true));
     let dark = session.prefers_dark;
     let (source_width, source_height) = source_dimensions(session);
     let current = session.runtime.borrow().motion.appearance.source_upscale;
@@ -806,25 +857,7 @@ pub(super) fn show(window: &gtk4::ApplicationWindow, session: &MotionSession, mo
 
     let keys = EventControllerKey::new();
     keys.set_propagation_phase(gtk4::PropagationPhase::Capture);
-    let close: Rc<dyn Fn()> = {
-        let scrim = scrim.downgrade();
-        let overlay = overlay.downgrade();
-        let window = window.downgrade();
-        let keys = keys.downgrade();
-        let active = active.clone();
-        Rc::new(move || {
-            if let Some(cancel) = active.borrow().as_ref() {
-                cancel.store(true, Ordering::Relaxed);
-            }
-            OPEN.with(|open| open.set(false));
-            if let (Some(scrim), Some(overlay)) = (scrim.upgrade(), overlay.upgrade()) {
-                overlay.remove_overlay(&scrim);
-            }
-            if let (Some(window), Some(keys)) = (window.upgrade(), keys.upgrade()) {
-                window.remove_controller(&keys);
-            }
-        })
-    };
+    let close = wire_sheet_lifecycle(window, &overlay, &scrim, &keys, &active);
     keys.connect_key_pressed({
         let close = close.clone();
         move |_, key, _, _| {
@@ -835,7 +868,6 @@ pub(super) fn show(window: &gtk4::ApplicationWindow, session: &MotionSession, mo
             Propagation::Proceed
         }
     });
-    window.add_controller(keys);
 
     close_button.connect_clicked({
         let close = close.clone();
@@ -1216,5 +1248,148 @@ mod tests {
             result.err().as_deref(),
             Some("The upscaling preview was cancelled.")
         );
+    }
+
+    use super::{wire_sheet_lifecycle, EventControllerKey, GtkBox, Orientation, Overlay, OPEN};
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+    use std::sync::atomic::Ordering;
+    use std::sync::Arc;
+
+    fn pump_events() {
+        while gtk4::glib::MainContext::default().iteration(false) {}
+    }
+
+    fn sheet_fixture(
+        token: Option<Arc<AtomicBool>>,
+    ) -> (
+        gtk4::ApplicationWindow,
+        Overlay,
+        GtkBox,
+        EventControllerKey,
+        Rc<RefCell<Option<Arc<AtomicBool>>>>,
+        Rc<dyn Fn()>,
+    ) {
+        let window = gtk4::ApplicationWindow::new(&crate::test_support::test_app());
+        let overlay = Overlay::new();
+        window.set_child(Some(&overlay));
+        let scrim = GtkBox::new(Orientation::Vertical, 0);
+        let keys = EventControllerKey::new();
+        let active: Rc<RefCell<Option<Arc<AtomicBool>>>> = Rc::new(RefCell::new(token));
+        let close = wire_sheet_lifecycle(&window, &overlay, &scrim, &keys, &active);
+        overlay.add_overlay(&scrim);
+        window.present();
+        pump_events();
+        (window, overlay, scrim, keys, active, close)
+    }
+
+    #[test]
+    fn sheet_lifecycle_explicit_close_is_idempotent() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let token = Arc::new(AtomicBool::new(false));
+            let (window, _overlay, scrim, keys, _active, close) =
+                sheet_fixture(Some(token.clone()));
+            assert!(OPEN.with(Cell::get), "wiring the sheet marks it open");
+            close();
+            close();
+            assert!(!OPEN.with(Cell::get));
+            assert!(token.load(Ordering::Relaxed), "close cancels the worker");
+            assert!(scrim.parent().is_none(), "close detaches the scrim");
+            assert!(keys.widget().is_none(), "close removes the key controller");
+            window.destroy();
+            pump_events();
+        }) else {
+            assert!(
+                std::env::var_os("APEXSHOT_REQUIRE_PREVIEW_GTK_TESTS").is_none(),
+                "GTK initialization is required for preview lifecycle regressions"
+            );
+            return;
+        };
+    }
+
+    #[test]
+    fn sheet_lifecycle_external_detach_cleans_up() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let token = Arc::new(AtomicBool::new(false));
+            let (window, overlay, scrim, keys, _active, _close) =
+                sheet_fixture(Some(token.clone()));
+            overlay.remove_overlay(&scrim);
+            pump_events();
+            assert!(!OPEN.with(Cell::get));
+            assert!(token.load(Ordering::Relaxed));
+            assert!(keys.widget().is_none());
+            window.destroy();
+            pump_events();
+        }) else {
+            assert!(
+                std::env::var_os("APEXSHOT_REQUIRE_PREVIEW_GTK_TESTS").is_none(),
+                "GTK initialization is required for preview lifecycle regressions"
+            );
+            return;
+        };
+    }
+
+    #[test]
+    fn sheet_lifecycle_parent_destroy_allows_reopen_without_stale_cleanup() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let token = Arc::new(AtomicBool::new(false));
+            let (window, _overlay, _scrim, keys, _active, close) =
+                sheet_fixture(Some(token.clone()));
+            window.destroy();
+            pump_events();
+            assert!(
+                !OPEN.with(Cell::get),
+                "destroying the parent resets the sheet"
+            );
+            assert!(
+                token.load(Ordering::Relaxed),
+                "destroying the parent cancels the worker"
+            );
+            assert!(
+                keys.widget().is_none(),
+                "destroying the parent detaches keys"
+            );
+
+            let token2 = Arc::new(AtomicBool::new(false));
+            let (window2, _overlay2, _scrim2, keys2, _active2, close2) =
+                sheet_fixture(Some(token2.clone()));
+            assert!(OPEN.with(Cell::get));
+            assert!(keys2.widget().is_some());
+            close();
+            assert!(
+                OPEN.with(Cell::get),
+                "a stale close must not clear the new sheet"
+            );
+            assert!(
+                keys2.widget().is_some(),
+                "a stale close must not strip the new keys"
+            );
+            close2();
+            assert!(!OPEN.with(Cell::get));
+            window2.destroy();
+            pump_events();
+        }) else {
+            assert!(
+                std::env::var_os("APEXSHOT_REQUIRE_PREVIEW_GTK_TESTS").is_none(),
+                "GTK initialization is required for preview lifecycle regressions"
+            );
+            return;
+        };
+    }
+
+    #[test]
+    fn sheet_lifecycle_parent_destroy_without_worker_resets() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let (window, _overlay, _scrim, _keys, _active, _close) = sheet_fixture(None);
+            window.destroy();
+            pump_events();
+            assert!(!OPEN.with(Cell::get));
+        }) else {
+            assert!(
+                std::env::var_os("APEXSHOT_REQUIRE_PREVIEW_GTK_TESTS").is_none(),
+                "GTK initialization is required for preview lifecycle regressions"
+            );
+            return;
+        };
     }
 }

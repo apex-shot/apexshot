@@ -78,8 +78,14 @@ fn draw_transformed_card(
                     cy,
                 )
             };
+            // Offset's sheet is a black drop over a fill, a light card
+            // over a transparent frame.
+            let over_fill = !matches!(
+                appearance.background_fill_type,
+                crate::recording::editor::model::MotionBackgroundFillType::None
+            );
             for backing in backings {
-                let c = backing.color;
+                let c = appearance.frame_style.backing_color(&backing, over_fill);
                 let a = (c.a * alpha).clamp(0.0, 1.0);
                 context.set_source_rgba(c.r, c.g, c.b, a);
                 if flat {
@@ -155,7 +161,7 @@ fn draw_transformed_card(
         // flat strokes below; the outline is a rounded rect when the card is
         // square to the camera and the projected quad when it is tilted.
         if let Some(liquid) = crate::capture::editor::render::LiquidFrame::resolve(
-            &spec,
+            appearance.frame_style,
             appearance.border_thickness * ref_scale * fit,
             1.0,
         ) {
@@ -287,6 +293,38 @@ fn draw_transformed_card(
                     cy,
                 );
                 path_through_points(context, &outline);
+                context.stroke().ok();
+            }
+            // Pearl's hairline along the band's inner edge, so the white band
+            // still reads on a light screenshot.
+            if appearance.frame_style == crate::capture::editor::types::FrameStyle::InsetLight {
+                let line =
+                    crate::capture::editor::render::pearl_inner_line_width(ref_scale * fit);
+                let c = crate::capture::editor::render::PEARL_INNER_LINE;
+                context.set_source_rgba(c.r, c.g, c.b, c.a);
+                context.set_line_width(line);
+                let e = thickness + line / 2.0;
+                if flat {
+                    rounded_rectangle(
+                        context,
+                        cx - hw_flat + e,
+                        cy - hh_flat + e,
+                        (hw_flat * 2.0 - e * 2.0).max(1.0),
+                        (hh_flat * 2.0 - e * 2.0).max(1.0),
+                        (card_radius - e).max(0.0),
+                    );
+                } else {
+                    let outline = projected_rounded_rect_points(
+                        (hw_flat * 2.0 - e * 2.0).max(1.0) / 2.0,
+                        (hh_flat * 2.0 - e * 2.0).max(1.0) / 2.0,
+                        (card_radius - e).max(0.0),
+                        transform,
+                        quad_depth,
+                        cx,
+                        cy,
+                    );
+                    path_through_points(context, &outline);
+                }
                 context.stroke().ok();
             }
         }
