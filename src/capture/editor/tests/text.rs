@@ -212,7 +212,7 @@ fn insert_text_input_str_filters_control_chars_except_newline() {
     state.insert_text_input_str("aé");
     state.set_text_cursor_position(1);
 
-    state.insert_text_input_str("x\n\t\r\u{0}😀\u{0301}");
+    state.insert_text_input_str("x\n\ty\r\u{0}😀\u{0301}");
 
     let input = state.get_text_input().expect("active text input");
     assert_eq!(input.text, "ax\ny😀\u{0301}é");
