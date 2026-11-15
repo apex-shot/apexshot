@@ -17,6 +17,17 @@ type SelectedTextActionData = (
     Option<DrawColor>,
 );
 
+fn text_byte_index_for_char(text: &str, char_index: usize) -> usize {
+    text.char_indices()
+        .nth(char_index)
+        .map(|(i, _)| i)
+        .unwrap_or_else(|| text.len())
+}
+
+pub(crate) fn normalize_pasted_line_endings(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
 impl EditorState {
     fn existing_text_bounds(&self, skip_index: Option<usize>) -> Vec<Rect> {
         self.actions
@@ -83,6 +94,7 @@ impl EditorState {
     }
 
     pub fn start_text_input(&mut self) {
+        self.text_input_session_id = self.text_input_session_id.wrapping_add(1);
         self.active_text_input = Some(TextInputState {
             text: String::new(),
             cursor_position: 0,
@@ -99,17 +111,123 @@ impl EditorState {
             // cursor_position counts chars, String::insert/remove want byte
             // indices — convert so multi-byte input never panics or lands
             // one behind.
-            let byte_idx = state
-                .text
-                .char_indices()
-                .nth(state.cursor_position)
-                .map(|(i, _)| i)
-                .unwrap_or_else(|| state.text.len());
+            let byte_idx = text_byte_index_for_char(&state.text, state.cursor_position);
             state.text.insert(byte_idx, c);
             state.cursor_position += 1;
             state.cursor_visible = true;
             state.cursor_blink_timer = 0;
         }
+    }
+
+    /// Paste plain text into the live input (clipboard text or equivalent).
+    pub fn insert_text_input_str(&mut self, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        if let Some(ref mut state) = self.active_text_input {
+            let filtered: String = text
+                .chars()
+                .filter(|c| !c.is_control() || *c == '\n')
+                .collect();
+            if filtered.is_empty() {
+                return;
+            }
+            let byte_idx = text_byte_index_for_char(&state.text, state.cursor_position);
+            state.text.insert_str(byte_idx, &filtered);
+            state.cursor_position += filtered.chars().count();
+            state.cursor_visible = true;
+            state.cursor_blink_timer = 0;
+        }
+    }
+
+    pub fn text_input_surrounding(&self) -> Option<(String, i32)> {
+        let state = self.active_text_input.as_ref()?;
+        let byte_idx = text_byte_index_for_char(&state.text, state.cursor_position);
+        let caret_byte = i32::try_from(byte_idx).ok()?;
+        Some((state.text.clone(), caret_byte))
+    }
+
+    pub fn delete_surrounding_text_input(&mut self, offset: i32, n_chars: i32) -> bool {
+        if n_chars < 0 {
+            return false;
+        }
+        let Some(ref mut state) = self.active_text_input else {
+            return false;
+        };
+        let total = state.text.chars().count() as i64;
+        let cursor = state.cursor_position as i64;
+        let start = cursor + offset as i64;
+        let end = start + n_chars as i64;
+        if start < 0 || end > total {
+            return false;
+        }
+        if start == end {
+            return true;
+        }
+        let byte_start = text_byte_index_for_char(&state.text, start as usize);
+        let byte_end = text_byte_index_for_char(&state.text, end as usize);
+        state.text.replace_range(byte_start..byte_end, "");
+        state.cursor_position = if cursor >= end {
+            (cursor - (end - start)) as usize
+        } else if cursor > start {
+            start as usize
+        } else {
+            cursor as usize
+        };
+        state.cursor_visible = true;
+        state.cursor_blink_timer = 0;
+        true
+    }
+
+    /// Forward delete inside the live text input: drop the character under
+    /// the caret. Mirrors `delete_text_input_char` for the Backspace side.
+    pub fn delete_text_input_char_forward(&mut self) {
+        if let Some(ref mut state) = self.active_text_input {
+            if let Some((byte_idx, ch)) = state.text.char_indices().nth(state.cursor_position) {
+                state
+                    .text
+                    .replace_range(byte_idx..byte_idx + ch.len_utf8(), "");
+                state.cursor_blink_timer = 0;
+            }
+        }
+    }
+
+    pub fn move_cursor_to_line_start(&mut self) {
+        if let Some(ref mut state) = self.active_text_input {
+            let line_start = state
+                .text
+                .chars()
+                .take(state.cursor_position)
+                .enumerate()
+                .filter(|(_, c)| *c == '\n')
+                .map(|(i, _)| i + 1)
+                .last()
+                .unwrap_or(0);
+            state.cursor_position = line_start;
+            state.cursor_visible = true;
+            state.cursor_blink_timer = 0;
+        }
+    }
+
+    pub fn move_cursor_to_line_end(&mut self) {
+        if let Some(ref mut state) = self.active_text_input {
+            let total = state.text.chars().count();
+            let line_end = state
+                .text
+                .chars()
+                .enumerate()
+                .skip(state.cursor_position)
+                .find(|(_, c)| *c == '\n')
+                .map(|(i, _)| i)
+                .unwrap_or(total);
+            state.cursor_position = line_end;
+            state.cursor_visible = true;
+            state.cursor_blink_timer = 0;
+        }
+    }
+
+    pub(crate) fn text_input_session_id(&self) -> u64 {
+        self.text_input_session_id
     }
 
     pub fn reset_text_cursor_blink(&mut self) {
@@ -864,6 +982,7 @@ impl EditorState {
             .unwrap_or_else(|| (font.size * 1.45 + 16.0).max(44.0));
         let bounds = TextEditBounds::new(bounds_position, width, height);
         self.active_text_bounds = Some(bounds);
+        self.text_input_session_id = self.text_input_session_id.wrapping_add(1);
         self.active_text_input = Some(TextInputState {
             cursor_position: text.chars().count(),
             text,

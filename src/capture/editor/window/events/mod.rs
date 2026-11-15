@@ -24,6 +24,7 @@ mod keyboard;
 mod motion;
 mod options;
 mod output;
+mod text_input;
 mod tools;
 mod zoom;
 
@@ -420,6 +421,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         &window,
         &in_motion,
         &state,
+        &transform,
         &drawing_area,
         &tool_buttons,
         &crop_apply_btn,
@@ -467,6 +469,7 @@ mod tests {
         let click_src = include_str!("click.rs");
         let motion_src = include_str!("motion.rs");
         let keyboard_src = include_str!("keyboard.rs");
+        let text_input_src = include_str!("text_input.rs");
         let mod_prod = mod_src.split("#[cfg(test)]").next().unwrap_or(mod_src);
         let output_prod = output_src
             .split("#[cfg(test)]")
@@ -491,8 +494,12 @@ mod tests {
             .split("#[cfg(test)]")
             .next()
             .unwrap_or(keyboard_src);
+        let text_input_prod = text_input_src
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or(text_input_src);
         format!(
-            "{mod_prod}\n{zoom_src}\n{history_src}\n{output_prod}\n{tools_prod}\n{options_prod}\n{interaction_prod}\n{drag_prod}\n{click_prod}\n{motion_prod}\n{keyboard_prod}"
+            "{mod_prod}\n{zoom_src}\n{history_src}\n{output_prod}\n{tools_prod}\n{options_prod}\n{interaction_prod}\n{drag_prod}\n{click_prod}\n{motion_prod}\n{keyboard_prod}\n{text_input_prod}"
         )
     }
 
