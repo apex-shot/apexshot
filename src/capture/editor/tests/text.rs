@@ -205,6 +205,34 @@ fn delete_surrounding_adjusts_caret_inside_deleted_range() {
 }
 
 #[test]
+fn insert_text_input_str_filters_control_chars_except_newline() {
+    let mut state = EditorState::new(RgbaImage::new(400, 300));
+    state.set_tool(Tool::Text);
+    state.begin_text_input(Point { x: 20.0, y: 80.0 }, 160.0, 60.0);
+    state.insert_text_input_str("aé");
+    state.set_text_cursor_position(1);
+
+    state.insert_text_input_str("x\n\t\r\u{0}😀\u{0301}");
+
+    let input = state.get_text_input().expect("active text input");
+    assert_eq!(input.text, "ax\ny😀\u{0301}é");
+    assert_eq!(input.cursor_position, 1 + "x\ny😀\u{0301}".chars().count());
+}
+
+#[test]
+fn insert_text_input_str_control_only_is_a_no_op() {
+    let mut state = EditorState::new(RgbaImage::new(400, 300));
+    state.set_tool(Tool::Text);
+    state.begin_text_input(Point { x: 20.0, y: 80.0 }, 160.0, 60.0);
+
+    state.insert_text_input_str("\t\r\u{0}\u{7}");
+
+    let input = state.get_text_input().expect("active text input");
+    assert_eq!(input.text, "");
+    assert_eq!(input.cursor_position, 0);
+}
+
+#[test]
 fn delete_surrounding_multibyte_scalar_range() {
     let mut state = EditorState::new(RgbaImage::new(400, 300));
     state.set_tool(Tool::Text);

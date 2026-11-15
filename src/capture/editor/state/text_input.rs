@@ -119,14 +119,22 @@ impl EditorState {
         }
     }
 
+    /// Paste plain text into the live input (clipboard text or equivalent).
     pub fn insert_text_input_str(&mut self, text: &str) {
         if text.is_empty() {
             return;
         }
         if let Some(ref mut state) = self.active_text_input {
+            let filtered: String = text
+                .chars()
+                .filter(|c| !c.is_control() || *c == '\n')
+                .collect();
+            if filtered.is_empty() {
+                return;
+            }
             let byte_idx = text_byte_index_for_char(&state.text, state.cursor_position);
-            state.text.insert_str(byte_idx, text);
-            state.cursor_position += text.chars().count();
+            state.text.insert_str(byte_idx, &filtered);
+            state.cursor_position += filtered.chars().count();
             state.cursor_visible = true;
             state.cursor_blink_timer = 0;
         }
@@ -171,6 +179,8 @@ impl EditorState {
         true
     }
 
+    /// Forward delete inside the live text input: drop the character under
+    /// the caret. Mirrors `delete_text_input_char` for the Backspace side.
     pub fn delete_text_input_char_forward(&mut self) {
         if let Some(ref mut state) = self.active_text_input {
             if let Some((byte_idx, ch)) = state.text.char_indices().nth(state.cursor_position) {
