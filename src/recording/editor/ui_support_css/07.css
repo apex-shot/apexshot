@@ -235,12 +235,12 @@
                 padding: 0;
             }
 
-            /* Video lanes total 226px (36 + 48 + 56 + 56 + 30 gaps); the
-             * floor must sit at that exact height or empty space opens under
-             * the hide track. */
+            /* Video lanes total 154px (28 ruler + 8 + 42 video + 8 + 42 open
+             * lane + 8 + 18 resting lane); the floor must sit at that exact
+             * height or empty space opens under the last lane. */
             .recording-editor-card-board {
-                min-height: 226px;
-                padding: 0 0 10px 0;
+                min-height: 154px;
+                padding: 0 0 4px 0;
             }
 
             /* The Motion timeline reuses this board class with its own lanes
@@ -250,19 +250,20 @@
             }
 
             .recording-editor-card-ruler {
-                min-height: 36px;
+                min-height: 28px;
             }
 
             .recording-editor-card-video-track {
-                min-height: 56px;
+                min-height: 42px;
             }
 
-            .recording-editor-card-zoom-track {
-                min-height: 56px;
-            }
-
+            /* The lanes below the video lane rest thin and trade one open
+             * height: the floor rounds down so the animation's whole-pixel
+             * heights all fit inside it. */
+            .recording-editor-card-zoom-track,
+            .recording-editor-card-sound-track,
             .recording-editor-card-hide-track {
-                min-height: 56px;
+                min-height: 18px;
             }
 
             .recording-editor-tool-section {

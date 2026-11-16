@@ -614,7 +614,7 @@ fn build_clip_panel(
 /// Format a clip speed for the slider's value label the way the old presets
 /// read: `0.5×`, `1×`, `1.5×`, `2.5×`, `30×`. Rounds to two decimals so a
 /// value dragged along the log track never prints a long float.
-fn format_clip_speed(value: f64) -> String {
+pub(crate) fn format_clip_speed(value: f64) -> String {
     let rounded = (value * 100.0).round() / 100.0;
     if rounded.fract().abs() < 1e-9 {
         format!("{}×", rounded.round() as i64)

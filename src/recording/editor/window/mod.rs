@@ -1057,13 +1057,14 @@ mod tests {
         );
         let shell = include_str!("timeline_card_parts/shell.rs");
         assert!(
-            shell.contains("video_track.set_size_request(-1, 56)"),
-            "video track must match Motion's 56px source lane"
+            shell.contains("const VIDEO_LANE_HEIGHT: f64 = 42.0;")
+                && shell.contains("video_track.set_size_request(-1, VIDEO_LANE_HEIGHT as i32)"),
+            "video track must keep the compact 42px height"
         );
         let css = include_str!("../ui_support_css/07.css");
         assert!(
-            css.contains(".recording-editor-card-video-track {\n                min-height: 56px;"),
-            "CSS floor must match the 56px video track"
+            css.contains(".recording-editor-card-video-track {\n                min-height: 42px;"),
+            "CSS floor must match the 42px video track"
         );
         assert!(
             css.contains(".editor-motion-timeline-dock .recording-editor-card-board"),

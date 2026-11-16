@@ -396,6 +396,7 @@ pub fn bind_video_clip(
     dragging: Rc<Cell<Option<usize>>>,
     pause: Rc<dyn Fn()>,
     redraw: Rc<dyn Fn()>,
+    lanes: LaneControls,
 ) {
     let click = GestureClick::new();
     click.set_button(1);
@@ -583,6 +584,7 @@ pub fn bind_video_clip(
         let state = state.clone();
         let media = media.clone();
         let redraw = redraw.clone();
+        let lanes = lanes.clone();
         move |gesture, _, x, y| {
             let width = gesture
                 .widget()
@@ -636,6 +638,7 @@ pub fn bind_video_clip(
                         redraw();
                     }
                 }),
+                lanes.clone(),
             );
         }
     });
@@ -652,18 +655,35 @@ pub fn bind_zoom_track(
     dragging: Rc<Cell<Option<usize>>>,
     pause: Rc<dyn Fn()>,
     redraw: Rc<dyn Fn()>,
+    lanes: LaneControls,
 ) {
     let click = GestureClick::new();
     click.set_button(1);
+    // A press on a resting lane opens it, so the drag that may follow must not
+    // trim, move or extend anything: the thin strip only summarises its clips.
+    let resting_press = Rc::new(Cell::new(false));
     click.connect_pressed({
         let state = state.clone();
         let redraw = redraw.clone();
+        let lanes = lanes.clone();
+        let resting_press = resting_press.clone();
         move |gesture, _, x, _| {
             let width = gesture
                 .widget()
                 .map(|widget| widget.allocated_width().max(1) as f64)
                 .unwrap_or(1.0);
+            let resting = !lanes.is_open(TimelineLane::Zoom);
+            resting_press.set(resting);
             let mut guard = state.lock().unwrap();
+            if resting {
+                if let Some(index) = zoom_clip_at(&guard, width, x) {
+                    select_zoom(&mut guard, Some(index));
+                }
+                drop(guard);
+                lanes.open(TimelineLane::Zoom);
+                redraw();
+                return;
+            }
             if near_playhead(&guard, width, x) {
                 return;
             }
@@ -696,7 +716,13 @@ pub fn bind_zoom_track(
         let resize_anchor = resize_anchor.clone();
         let dragging = dragging.clone();
         let pause = pause.clone();
+        let resting_press = resting_press.clone();
         move |gesture, x, _| {
+            if resting_press.replace(false) {
+                dragging.set(None);
+                drag_kind.set(None);
+                return;
+            }
             let width = gesture
                 .widget()
                 .map(|widget| widget.allocated_width().max(1) as f64)
@@ -817,7 +843,12 @@ pub fn bind_zoom_track(
         {
             let state = state.clone();
             let set_band_hover = set_band_hover.clone();
+            let lanes = lanes.clone();
             Rc::new(move |width, x| {
+                // A resting lane shows no grips and offers no resize cursor.
+                if !lanes.is_open(TimelineLane::Zoom) {
+                    return (TrackCursor::None, None, None);
+                }
                 let guard = state.lock().unwrap();
                 if near_playhead(&guard, width, x) {
                     set_band_hover(false);
@@ -854,7 +885,11 @@ pub fn bind_zoom_track(
     menu.connect_pressed({
         let state = state.clone();
         let redraw = redraw.clone();
+        let lanes = lanes.clone();
         move |gesture, _, x, y| {
+            if !lanes.is_open(TimelineLane::Zoom) {
+                return;
+            }
             let width = gesture
                 .widget()
                 .map(|widget| widget.allocated_width().max(1) as f64)
@@ -884,6 +919,7 @@ pub fn bind_zoom_track(
                 y,
                 state.clone(),
                 redraw.clone(),
+                lanes.clone(),
             );
         }
     });
@@ -900,18 +936,35 @@ pub fn bind_hide_track(
     dragging: Rc<Cell<Option<usize>>>,
     pause: Rc<dyn Fn()>,
     redraw: Rc<dyn Fn()>,
+    lanes: LaneControls,
 ) {
     let click = GestureClick::new();
     click.set_button(1);
+    // Same rule as the Zoom lane: a press on the resting strip opens the lane
+    // and the drag that may follow must not trim or move anything.
+    let resting_press = Rc::new(Cell::new(false));
     click.connect_pressed({
         let state = state.clone();
         let redraw = redraw.clone();
+        let lanes = lanes.clone();
+        let resting_press = resting_press.clone();
         move |gesture, _, x, _| {
             let width = gesture
                 .widget()
                 .map(|widget| widget.allocated_width().max(1) as f64)
                 .unwrap_or(1.0);
+            let resting = !lanes.is_open(TimelineLane::Cursor);
+            resting_press.set(resting);
             let mut guard = state.lock().unwrap();
+            if resting {
+                if let Some(index) = cursor_hide_clip_at(&guard, width, x) {
+                    select_cursor_hide(&mut guard, Some(index));
+                }
+                drop(guard);
+                lanes.open(TimelineLane::Cursor);
+                redraw();
+                return;
+            }
             if near_playhead(&guard, width, x) {
                 return;
             }
@@ -943,7 +996,13 @@ pub fn bind_hide_track(
         let resize_anchor = resize_anchor.clone();
         let dragging = dragging.clone();
         let pause = pause.clone();
+        let resting_press = resting_press.clone();
         move |gesture, x, _| {
+            if resting_press.replace(false) {
+                dragging.set(None);
+                drag_kind.set(None);
+                return;
+            }
             let width = gesture
                 .widget()
                 .map(|widget| widget.allocated_width().max(1) as f64)
@@ -1063,7 +1122,12 @@ pub fn bind_hide_track(
         {
             let state = state.clone();
             let set_band_hover = set_band_hover.clone();
+            let lanes = lanes.clone();
             Rc::new(move |width, x| {
+                // A resting lane shows no grips and offers no resize cursor.
+                if !lanes.is_open(TimelineLane::Cursor) {
+                    return (TrackCursor::None, None, None);
+                }
                 let guard = state.lock().unwrap();
                 if near_playhead(&guard, width, x) {
                     set_band_hover(false);
@@ -1098,7 +1162,11 @@ pub fn bind_hide_track(
     menu.connect_pressed({
         let state = state.clone();
         let redraw = redraw.clone();
+        let lanes = lanes.clone();
         move |gesture, _, x, y| {
+            if !lanes.is_open(TimelineLane::Cursor) {
+                return;
+            }
             let width = gesture
                 .widget()
                 .map(|widget| widget.allocated_width().max(1) as f64)
@@ -1128,10 +1196,51 @@ pub fn bind_hide_track(
                 y,
                 state.clone(),
                 redraw.clone(),
+                lanes.clone(),
             );
         }
     });
     area.add_controller(menu);
+}
+
+/// Pressing the sound lane opens it and picks the piece under the pointer, so
+/// the Clip panel edits the sound of the piece that was clicked. The lane has
+/// no clips of its own: it draws the composition's pieces and their waveform.
+pub fn bind_sound_lane(
+    area: &DrawingArea,
+    state: Arc<Mutex<VideoEditState>>,
+    lanes: LaneControls,
+    redraw: Rc<dyn Fn()>,
+) {
+    let click = GestureClick::new();
+    click.set_button(1);
+    click.connect_pressed({
+        let state = state.clone();
+        let redraw = redraw.clone();
+        let lanes = lanes.clone();
+        move |gesture, _, x, _| {
+            let width = gesture
+                .widget()
+                .map(|widget| widget.allocated_width().max(1) as f64)
+                .unwrap_or(1.0);
+            {
+                let mut guard = state.lock().unwrap();
+                // The piece under the pointer is the one the video lane draws
+                // there, so the click selects it exactly as a click on the
+                // video clip would.
+                let segment = video_layout(&guard, width)
+                    .into_iter()
+                    .find(|&(_, _, x0, x1)| x >= x0 && x <= x1)
+                    .map(|(_, segment, _, _)| segment);
+                if let Some(index) = segment {
+                    select_video(&mut guard, Some(index));
+                }
+            }
+            lanes.open(TimelineLane::Sound);
+            redraw();
+        }
+    });
+    area.add_controller(click);
 }
 
 pub fn bind_track_cursor(
