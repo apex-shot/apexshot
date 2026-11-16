@@ -4968,6 +4968,12 @@ msgstr "Esta versão do ffmpeg não tem codificador HEVC"
 msgid "Uploaded, but the link could not be copied: {error}"
 msgstr "Enviado, mas não foi possível copiar o link: {error}"
 
+msgid "Motion isn't available for long screenshots"
+msgstr "Movimento não está disponível para capturas longas"
+
+msgid "This screenshot is too long to animate. Scrolling captures and other long images stay in Static, where every annotation and export tool still works."
+msgstr "Esta captura é longa demais para ser animada. Capturas com rolagem e outras imagens longas ficam no modo Estático, onde todas as ferramentas de anotação e exportação continuam funcionando."
+
 msgid "Account"
 msgstr "Conta"
 

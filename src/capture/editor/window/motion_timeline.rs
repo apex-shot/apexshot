@@ -1,10 +1,15 @@
 //! Motion timeline chrome — same dock/card language as the video editor.
+//!
+//! The dock uses the compact rows: a short ruler, the source filmstrip, and
+//! two clip lanes of which one is drawn at full height while the other rests
+//! as a thin strip with its name and slim clip bars. The lanes trade height
+//! with a fixed total, so the preview above never moves while they ease.
 
-use gtk4::cairo::Context;
+use gtk4::cairo::{Context, ImageSurface};
 use gtk4::{
-    prelude::*, Align, Box as GtkBox, Button, DrawingArea, Image, Label, Orientation, Overlay,
+    glib, prelude::*, Align, Box as GtkBox, Button, DrawingArea, Image, Label, Orientation, Overlay,
 };
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, OnceCell, RefCell};
 use std::rc::Rc;
 
 use crate::i18n::t;
@@ -15,6 +20,121 @@ use super::icon_names::custom::{
     EDIT_UNDO_RTL_SYMBOLIC, EDIT_UNDO_SYMBOLIC, SPLINE_SYMBOLIC, TYPE_SYMBOLIC,
 };
 use super::motion_mode::{MotionHoverTrack, MotionRuntime};
+
+/// Row metrics of the compact dock, in logical pixels.
+const RULER_HEIGHT: f64 = 28.0;
+const SOURCE_LANE_HEIGHT: f64 = 42.0;
+const CLIP_LANE_HEIGHT: f64 = 42.0;
+const THIN_LANE_HEIGHT: f64 = 18.0;
+const LANE_GAP: f64 = 8.0;
+
+/// The source badge's cast: a blurred silhouette with enough pad for the
+/// blur to fall off before the surface edge.
+const BADGE_SHADOW_PAD: f64 = 10.0;
+const BADGE_SHADOW_ICON: f64 = 20.0;
+
+thread_local! {
+    static BADGE_SHADOW: OnceCell<Option<ImageSurface>> = const { OnceCell::new() };
+}
+
+/// Which clip lane is open (drawn at full height) and how far each lane is
+/// through its ease. Progress is `[motion, text]`, 0 resting .. 1 open.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(in crate::capture::editor::window) struct MotionLanes {
+    text_open: bool,
+    progress: [f64; 2],
+    /// The selection last seen, so a new selection brings its lane forward.
+    seen_selection: (Option<usize>, Option<usize>),
+}
+
+impl Default for MotionLanes {
+    fn default() -> Self {
+        Self {
+            text_open: false,
+            progress: [1.0, 0.0],
+            seen_selection: (None, None),
+        }
+    }
+}
+
+impl MotionLanes {
+    /// Whether the lane is the one drawn at full height.
+    pub(in crate::capture::editor::window) fn is_open(&self, text: bool) -> bool {
+        self.text_open == text
+    }
+
+    /// Make the lane the full-height one. Returns whether it changed.
+    pub(in crate::capture::editor::window) fn open(&mut self, text: bool) -> bool {
+        let changed = self.text_open != text;
+        self.text_open = text;
+        changed
+    }
+
+    /// A newly selected clip opens its lane, so a selection made from the
+    /// inspector, the clip menu or by adding a clip is always in view.
+    pub(in crate::capture::editor::window) fn follow_selection(
+        &mut self,
+        motion: Option<usize>,
+        text: Option<usize>,
+    ) {
+        let now = (motion, text);
+        if self.seen_selection == now {
+            return;
+        }
+        self.seen_selection = now;
+        if text.is_some() {
+            self.open(true);
+        } else if motion.is_some() {
+            self.open(false);
+        }
+    }
+
+    fn targets(&self) -> [f64; 2] {
+        [
+            f64::from(u8::from(self.is_open(false))),
+            f64::from(u8::from(self.is_open(true))),
+        ]
+    }
+
+    pub(in crate::capture::editor::window) fn settled(&self) -> bool {
+        self.progress == self.targets()
+    }
+
+    pub(in crate::capture::editor::window) fn progress(&self) -> [f64; 2] {
+        self.progress
+    }
+
+    /// Ease both lanes toward their targets by `dt` seconds, the video
+    /// editor's curve. Returns whether either is still moving.
+    pub(in crate::capture::editor::window) fn step(&mut self, dt: f64) -> bool {
+        // About 180 ms to settle: an exponential ease with a 45 ms constant.
+        let amount = 1.0 - (-dt.max(0.0) / 0.045).exp();
+        let targets = self.targets();
+        let mut next = self.progress;
+        for index in 0..2 {
+            next[index] += (targets[index] - next[index]) * amount;
+        }
+        // Snap only once both arrive: their sum keeps the dock's height.
+        let arrived = (0..2).all(|index| (targets[index] - next[index]).abs() < 0.002);
+        self.progress = if arrived { targets } else { next };
+        !arrived
+    }
+}
+
+/// A clip lane's height for how open it is drawn.
+fn clip_lane_height_exact(progress: f64) -> f64 {
+    let progress = progress.clamp(0.0, 1.0);
+    THIN_LANE_HEIGHT + (CLIP_LANE_HEIGHT - THIN_LANE_HEIGHT) * progress
+}
+
+/// Whole-pixel heights for the two clip lanes whose sum never changes while
+/// they trade: the Motion lane rounds on its own and the Text lane takes the
+/// rest of the fixed total, so a pixel one loses the other gains.
+fn clip_lane_heights(progress: [f64; 2]) -> [i32; 2] {
+    let total = (clip_lane_height_exact(1.0) + clip_lane_height_exact(0.0)).round() as i32;
+    let motion = clip_lane_height_exact(progress[0]).round() as i32;
+    [motion, total - motion]
+}
 
 pub(super) struct MotionTimeline {
     pub dock: GtkBox,
@@ -34,12 +154,24 @@ pub(super) struct MotionTimeline {
     pub playhead: DrawingArea,
     pub hover_playhead: DrawingArea,
     pub playhead_hovered: Rc<Cell<bool>>,
+    /// Bring the lane of a new selection forward and ease the lanes toward
+    /// the open one. Cheap to call on every redraw.
+    pub sync_lanes: Rc<dyn Fn()>,
+}
+
+fn lane_area(height: f64) -> DrawingArea {
+    let area = DrawingArea::new();
+    area.add_css_class("recording-editor-card-zoom-track");
+    area.set_hexpand(true);
+    area.set_size_request(-1, height as i32);
+    area
 }
 
 pub(super) fn build_motion_timeline(runtime: Rc<RefCell<MotionRuntime>>) -> MotionTimeline {
     let dock = GtkBox::new(Orientation::Vertical, 0);
     dock.add_css_class("recording-editor-timeline-dock");
     dock.add_css_class("editor-motion-timeline-dock");
+    dock.add_css_class("recording-editor-timeline-compact");
     dock.set_hexpand(true);
     dock.set_vexpand(false);
     dock.set_valign(Align::End);
@@ -104,43 +236,36 @@ pub(super) fn build_motion_timeline(runtime: Rc<RefCell<MotionRuntime>>) -> Moti
     let ruler = DrawingArea::new();
     ruler.add_css_class("recording-editor-card-ruler");
     ruler.set_hexpand(true);
-    ruler.set_size_request(-1, 36);
+    ruler.set_size_request(-1, RULER_HEIGHT as i32);
     ruler.set_draw_func({
         let runtime = runtime.clone();
         move |_, cr, width, height| draw_ruler(cr, width, height, &runtime, light_theme)
     });
 
-    // The source is a real timeline clip, not an implied backdrop. An earlier
-    // design exposes this as ThumbnailTrack/MotionPreviewSegmentView; ApexShot has
-    // one static source, so the lane spans the entire Motion composition.
-    let source_track = DrawingArea::new();
-    source_track.add_css_class("recording-editor-card-zoom-track");
-    source_track.set_hexpand(true);
-    source_track.set_size_request(-1, 48);
+    // The source is a real timeline clip, not an implied backdrop. ApexShot
+    // has one static source, so the lane spans the entire Motion composition.
+    let source_track = lane_area(SOURCE_LANE_HEIGHT);
     source_track.set_draw_func({
         let runtime = runtime.clone();
         move |_, cr, width, height| draw_source_track(cr, width, height, &runtime)
     });
 
-    let track = DrawingArea::new();
-    track.add_css_class("recording-editor-card-zoom-track");
-    track.set_hexpand(true);
-    track.set_size_request(-1, 56);
+    let initial = clip_lane_heights(runtime.borrow().lanes.progress());
+    let track = lane_area(f64::from(initial[0]));
+    track.set_tooltip_text(Some(&t("Motion")));
     track.set_draw_func({
         let runtime = runtime.clone();
-        move |_, cr, width, height| draw_motion_track(cr, width, height, &runtime)
+        move |_, cr, width, height| draw_lane(cr, width, height, &runtime, false, light_theme)
     });
 
-    let text_track = DrawingArea::new();
-    text_track.add_css_class("recording-editor-card-zoom-track");
-    text_track.set_hexpand(true);
-    text_track.set_size_request(-1, 44);
+    let text_track = lane_area(f64::from(initial[1]));
+    text_track.set_tooltip_text(Some(&t("Text")));
     text_track.set_draw_func({
         let runtime = runtime.clone();
-        move |_, cr, width, height| draw_text_track(cr, width, height, &runtime)
+        move |_, cr, width, height| draw_lane(cr, width, height, &runtime, true, light_theme)
     });
 
-    let tracks = GtkBox::new(Orientation::Vertical, 10);
+    let tracks = GtkBox::new(Orientation::Vertical, LANE_GAP as i32);
     tracks.add_css_class("recording-editor-card-tracks");
     tracks.set_hexpand(true);
     tracks.append(&ruler);
@@ -189,6 +314,62 @@ pub(super) fn build_motion_timeline(runtime: Rc<RefCell<MotionRuntime>>) -> Moti
     card.append(&board);
     dock.append(&card);
 
+    // The lanes ease on the frame clock only while they move: the callback
+    // ends once both arrive, so an idle timeline costs no frames.
+    let sync_lanes: Rc<dyn Fn()> = {
+        let runtime = runtime.clone();
+        let tracks = tracks.clone();
+        let motion_track = track.clone();
+        let text_track = text_track.clone();
+        let running = Rc::new(Cell::new(false));
+        Rc::new(move || {
+            let animate = {
+                let Ok(mut runtime) = runtime.try_borrow_mut() else {
+                    return;
+                };
+                let (motion, text) = (runtime.motion.selected, runtime.motion.selected_text);
+                runtime.lanes.follow_selection(motion, text);
+                !runtime.lanes.settled()
+            };
+            if !animate || running.replace(true) {
+                return;
+            }
+            let runtime = runtime.clone();
+            let running = running.clone();
+            let motion_track = motion_track.clone();
+            let text_track = text_track.clone();
+            let last = Cell::new(None::<i64>);
+            tracks.add_tick_callback(move |_, clock| {
+                let now = clock.frame_time();
+                let dt = last
+                    .replace(Some(now))
+                    .map(|previous| (now - previous) as f64 / 1_000_000.0)
+                    .unwrap_or(0.0)
+                    .min(0.1);
+                let Ok(mut guard) = runtime.try_borrow_mut() else {
+                    return glib::ControlFlow::Continue;
+                };
+                let moving = guard.lanes.step(dt);
+                let heights = clip_lane_heights(guard.lanes.progress());
+                drop(guard);
+                if motion_track.height_request() != heights[0] {
+                    motion_track.set_size_request(-1, heights[0]);
+                }
+                if text_track.height_request() != heights[1] {
+                    text_track.set_size_request(-1, heights[1]);
+                }
+                motion_track.queue_draw();
+                text_track.queue_draw();
+                if moving {
+                    glib::ControlFlow::Continue
+                } else {
+                    running.set(false);
+                    glib::ControlFlow::Break
+                }
+            });
+        })
+    };
+
     MotionTimeline {
         dock,
         play_btn,
@@ -207,6 +388,7 @@ pub(super) fn build_motion_timeline(runtime: Rc<RefCell<MotionRuntime>>) -> Moti
         playhead,
         hover_playhead,
         playhead_hovered,
+        sync_lanes,
     }
 }
 
@@ -222,7 +404,9 @@ fn draw_source_track(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell
     cr.set_source_rgba(0.10, 0.11, 0.13, 0.9);
     let _ = cr.fill();
 
-    if let Some(card) = runtime.card.as_ref() {
+    // The preview texture is plenty for a 30px strip and far cheaper to
+    // sample than the full-resolution still.
+    if let Some(card) = runtime.card_preview.as_ref().or(runtime.card.as_ref()) {
         let _ = cr.save();
         rounded_rect(cr, 0.0, y, w, clip_h, 5.0);
         cr.clip();
@@ -246,6 +430,7 @@ fn draw_source_track(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell
             );
             cr.scale(scale, scale);
             cr.set_source_surface(card, 0.0, 0.0).ok();
+            cr.source().set_filter(gtk4::cairo::Filter::Bilinear);
             let _ = cr.paint();
             let _ = cr.restore();
             thumbnail_x += thumbnail_w;
@@ -253,7 +438,7 @@ fn draw_source_track(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell
         let _ = cr.restore();
     }
 
-    draw_source_chip(cr, y, clip_h, runtime.motion.duration);
+    draw_source_chip(cr, w, y, clip_h, runtime.motion.duration);
 
     if runtime.source_selected {
         rounded_rect(
@@ -270,9 +455,55 @@ fn draw_source_track(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell
     }
 }
 
-/// The source lane's identity badge: icon, "Image", and the clip length.
-fn draw_source_chip(cr: &Context, y: f64, clip_h: f64, duration: f64) {
+/// The badge's cast, built once: a rounded silhouette blurred three times so
+/// the halo is a real gradient instead of stacked rings.
+fn badge_shadow() -> Option<ImageSurface> {
+    BADGE_SHADOW.with(|cache| cache.get_or_init(build_badge_shadow).clone())
+}
+
+fn build_badge_shadow() -> Option<ImageSurface> {
+    let size = (BADGE_SHADOW_ICON + BADGE_SHADOW_PAD * 2.0) as i32;
+    let mut surface = ImageSurface::create(gtk4::cairo::Format::ARgb32, size, size).ok()?;
+    {
+        let cr = Context::new(&surface).ok()?;
+        rounded_rect(
+            &cr,
+            BADGE_SHADOW_PAD,
+            BADGE_SHADOW_PAD,
+            BADGE_SHADOW_ICON,
+            BADGE_SHADOW_ICON,
+            5.0,
+        );
+        cr.set_source_rgba(0.0, 0.0, 0.0, 1.0);
+        let _ = cr.fill();
+    }
+    surface.flush();
+    let stride = surface.stride() as usize;
+    let data = surface.data().ok()?;
+    let mut image = crate::capture::editor::render::cairo_argb_to_rgba_image(
+        size as u32,
+        size as u32,
+        stride,
+        data.as_ref(),
+    );
+    drop(data);
+    let rect = crate::capture::editor::types::Rect {
+        x: 0,
+        y: 0,
+        width: size,
+        height: size,
+    };
+    for _ in 0..3 {
+        crate::capture::editor::render::apply_blur_rect(&mut image, rect, 3.0, true);
+    }
+    crate::capture::editor::render::rgba_image_to_surface(&image)
+}
+
+/// The source lane's identity badge: the image glyph, "Image", and the clip
+/// length, set directly on the filmstrip and centred on the clip.
+fn draw_source_chip(cr: &Context, width: f64, y: f64, clip_h: f64, duration: f64) {
     let title = t("Image");
+    let duration_label = format!("{}s", duration.round().max(0.0) as i64);
     cr.select_font_face(
         UI_FONT_FAMILY,
         gtk4::cairo::FontSlant::Normal,
@@ -283,7 +514,6 @@ fn draw_source_chip(cr: &Context, y: f64, clip_h: f64, duration: f64) {
         .text_extents(&title)
         .map(|ext| ext.width())
         .unwrap_or(0.0);
-    let duration_label = format!("{}s", duration.round().max(0.0) as i64);
     cr.select_font_face(
         UI_FONT_FAMILY,
         gtk4::cairo::FontSlant::Normal,
@@ -295,55 +525,105 @@ fn draw_source_chip(cr: &Context, y: f64, clip_h: f64, duration: f64) {
         .map(|ext| ext.width())
         .unwrap_or(0.0);
 
-    let chip_h = 34.0;
-    let chip_x = 8.0;
-    let chip_y = y + (clip_h - chip_h) / 2.0;
     let icon_size = 20.0;
-    let chip_w = 8.0 + icon_size + 7.0 + title_w.max(duration_w) + 10.0;
-    rounded_rect(cr, chip_x, chip_y, chip_w, chip_h, 8.0);
-    cr.set_source_rgba(0.06, 0.06, 0.08, 0.92);
-    let _ = cr.fill();
+    let gap = 7.0;
+    let block_w = icon_size + gap + title_w.max(duration_w);
+    let block_h = 30.0;
+    let block_x = ((width - block_w) / 2.0).clamp(8.0, (width - block_w - 8.0).max(8.0));
+    let block_y = y + (clip_h - block_h) / 2.0;
 
-    let icon_x = chip_x + 8.0;
-    let icon_y = chip_y + (chip_h - icon_size) / 2.0;
+    let icon_x = block_x;
+    let icon_y = block_y + (block_h - icon_size) / 2.0;
+    // A real blurred silhouette, not stacked rings: the badge reads as a
+    // floating tag over the filmstrip.
+    if let Some(shadow) = badge_shadow() {
+        cr.set_source_surface(
+            &shadow,
+            icon_x - BADGE_SHADOW_PAD,
+            icon_y - BADGE_SHADOW_PAD + 2.0,
+        )
+        .ok();
+        let _ = cr.paint();
+        let _ = cr.paint();
+    }
     rounded_rect(cr, icon_x, icon_y, icon_size, icon_size, 5.0);
-    cr.set_source_rgba(0.95, 0.96, 0.98, 1.0);
-    let _ = cr.fill();
+    cr.set_source_rgba(0.93, 0.95, 0.99, 1.0);
+    let _ = cr.fill_preserve();
+    cr.set_source_rgba(0.0, 0.0, 0.0, 0.16);
+    cr.set_line_width(1.0);
+    let _ = cr.stroke();
     let _ = cr.save();
     rounded_rect(cr, icon_x, icon_y, icon_size, icon_size, 5.0);
     cr.clip();
-    cr.set_source_rgba(0.10, 0.10, 0.12, 1.0);
-    cr.arc(icon_x + 6.5, icon_y + 6.5, 2.2, 0.0, std::f64::consts::TAU);
+    cr.set_source_rgba(0.07, 0.07, 0.09, 1.0);
+    // Sun and two peaks, kept apart so the mark reads as a picture rather
+    // than one solid mound.
+    cr.arc(icon_x + 6.4, icon_y + 6.2, 2.0, 0.0, std::f64::consts::TAU);
     let _ = cr.fill();
-    cr.move_to(icon_x + 2.0, icon_y + icon_size - 3.0);
-    cr.line_to(icon_x + 8.0, icon_y + 9.0);
-    cr.line_to(icon_x + 12.5, icon_y + 14.5);
-    cr.line_to(icon_x + icon_size - 1.0, icon_y + 7.5);
-    cr.line_to(icon_x + icon_size - 1.0, icon_y + icon_size - 1.0);
-    cr.line_to(icon_x + 2.0, icon_y + icon_size - 1.0);
+    cr.move_to(icon_x + 2.5, icon_y + 17.0);
+    cr.line_to(icon_x + 7.5, icon_y + 11.0);
+    cr.line_to(icon_x + 10.6, icon_y + 14.2);
+    cr.line_to(icon_x + 16.0, icon_y + 7.5);
+    cr.line_to(icon_x + 17.5, icon_y + 9.0);
+    cr.line_to(icon_x + 17.5, icon_y + 17.0);
     cr.close_path();
     let _ = cr.fill();
     let _ = cr.restore();
 
-    let text_x = icon_x + icon_size + 7.0;
-    cr.set_source_rgba(0.96, 0.97, 1.0, 0.96);
+    let text_x = icon_x + icon_size + gap;
+    paint_outlined_text(cr, text_x, block_y + 12.0, &title, 11.0, true, 0.98);
+    paint_outlined_text(
+        cr,
+        text_x,
+        block_y + 24.0,
+        &duration_label,
+        10.0,
+        false,
+        0.92,
+    );
+}
+
+/// White type with a soft drop and a dark outline, the recipe that stays
+/// legible over a bright still as well as a dark one.
+fn paint_outlined_text(
+    cr: &Context,
+    x: f64,
+    baseline: f64,
+    text: &str,
+    size: f64,
+    bold: bool,
+    alpha: f64,
+) {
     cr.select_font_face(
         UI_FONT_FAMILY,
         gtk4::cairo::FontSlant::Normal,
-        gtk4::cairo::FontWeight::Bold,
+        if bold {
+            gtk4::cairo::FontWeight::Bold
+        } else {
+            gtk4::cairo::FontWeight::Normal
+        },
     );
-    cr.set_font_size(11.0);
-    cr.move_to(text_x, chip_y + 14.0);
-    let _ = cr.show_text(&title);
-    cr.set_source_rgba(0.86, 0.88, 0.92, 0.72);
-    cr.select_font_face(
-        UI_FONT_FAMILY,
-        gtk4::cairo::FontSlant::Normal,
-        gtk4::cairo::FontWeight::Normal,
-    );
-    cr.set_font_size(10.0);
-    cr.move_to(text_x, chip_y + 26.0);
-    let _ = cr.show_text(&duration_label);
+    cr.set_font_size(size);
+    for (dx, dy, shade) in [
+        (0.0, 2.0, 0.10),
+        (1.0, 1.0, 0.12),
+        (-1.0, 1.0, 0.12),
+        (0.0, 1.0, 0.22),
+    ] {
+        cr.new_path();
+        cr.move_to(x + dx, baseline + dy);
+        cr.text_path(text);
+        cr.set_source_rgba(0.0, 0.0, 0.0, shade);
+        let _ = cr.fill();
+    }
+    cr.new_path();
+    cr.move_to(x, baseline);
+    cr.text_path(text);
+    cr.set_line_width(2.0);
+    cr.set_source_rgba(0.05, 0.05, 0.07, 0.55);
+    let _ = cr.stroke_preserve();
+    cr.set_source_rgba(1.0, 1.0, 1.0, alpha);
+    let _ = cr.fill();
 }
 
 fn icon_button(icon_name: &str, tooltip: &str) -> Button {
@@ -397,13 +677,16 @@ fn draw_ruler(
         gtk4::cairo::FontSlant::Normal,
         gtk4::cairo::FontWeight::Normal,
     );
-    cr.set_font_size(10.0);
+    cr.set_font_size(11.0);
     cr.set_line_width(1.0);
 
-    let mut t = 0.0;
-    while t <= duration + 0.0001 {
-        let x = time_to_x(t, duration, w).floor() + 0.5;
-        let on_major = ((t / major) - (t / major).round()).abs() < 0.02;
+    // Ticks step by index, not by accumulating `minor`: a running sum drifts
+    // below whole seconds and a label floors to the second before it.
+    let steps = (duration / minor + 0.0001).floor() as i64;
+    for step in 0..=steps {
+        let tick = step as f64 * minor;
+        let x = time_to_x(tick, duration, w).floor() + 0.5;
+        let on_major = ((tick / major) - (tick / major).round()).abs() < 0.02;
         let (tick_r, tick_g, tick_b) = if light {
             (0.07, 0.08, 0.09)
         } else {
@@ -425,8 +708,8 @@ fn draw_ruler(
         cr.line_to(x, h);
         let _ = cr.stroke();
         if on_major {
-            let label = format_ruler_label(t, major);
-            let near_playhead = (t - playhead).abs() < major * 0.08;
+            let label = format_ruler_label(tick, major);
+            let near_playhead = (tick - playhead).abs() < major * 0.08;
             let label_alpha = if near_playhead {
                 0.92
             } else if light {
@@ -436,7 +719,7 @@ fn draw_ruler(
             };
             cr.set_source_rgba(tick_r, tick_g, tick_b, label_alpha);
             if let Ok(ext) = cr.text_extents(&label) {
-                let label_x = if t <= 0.001 {
+                let label_x = if tick <= 0.001 {
                     0.0
                 } else {
                     (x - ext.width() / 2.0).clamp(0.0, w - ext.width())
@@ -445,7 +728,6 @@ fn draw_ruler(
                 let _ = cr.show_text(&label);
             }
         }
-        t += minor;
     }
 }
 
@@ -464,7 +746,8 @@ fn format_ruler_label(seconds: f64, major: f64) -> String {
     if major < 1.0 {
         format!("{minutes}:{secs:04.1}")
     } else {
-        format!("{minutes}:{:02}", secs.floor() as u64)
+        // A tick a hair under a whole second still names that second.
+        format!("{minutes}:{:02}", (secs + 1e-6).floor() as u64)
     }
 }
 
@@ -597,7 +880,7 @@ fn motion_clip_tone(selected: bool, faint: bool) -> ClipTone {
             fill: (blue.0, blue.1, blue.2, 0.95),
             edge: (0.0, 0.0, 0.0, 0.0),
             handle: (0.0, 0.0, 0.0, 0.0),
-            label: 0.82,
+            label: 0.92,
         }
     }
 }
@@ -636,7 +919,7 @@ fn text_clip_tone(selected: bool, faint: bool) -> ClipTone {
             fill: (orange.0, orange.1, orange.2, 0.95),
             edge: (0.0, 0.0, 0.0, 0.0),
             handle: (0.0, 0.0, 0.0, 0.0),
-            label: 0.84,
+            label: 0.92,
         }
     }
 }
@@ -657,10 +940,10 @@ fn disabled_clip_tone(mut tone: ClipTone, disabled: bool) -> ClipTone {
 
 fn draw_clip_glyph(cr: &Context, x: f64, center_y: f64, opacity: f64, text: bool) {
     let _ = cr.save();
-    cr.translate(x, center_y - 7.0);
-    cr.scale(14.0 / 24.0, 14.0 / 24.0);
+    cr.translate(x, center_y - 8.0);
+    cr.scale(16.0 / 24.0, 16.0 / 24.0);
     cr.set_source_rgba(1.0, 1.0, 1.0, opacity);
-    cr.set_line_width(2.0);
+    cr.set_line_width(2.4);
     cr.set_line_cap(gtk4::cairo::LineCap::Round);
     cr.set_line_join(gtk4::cairo::LineJoin::Round);
     if text {
@@ -716,47 +999,114 @@ fn draw_trim_handles(cr: &Context, x0: f64, y: f64, clip_w: f64, clip_h: f64, to
     }
 }
 
-fn draw_motion_track(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell<MotionRuntime>>) {
+/// The clip spans of one lane: `(start, end, disabled)`.
+fn lane_clips(runtime: &MotionRuntime, text: bool) -> Vec<(f64, f64, bool)> {
+    if text {
+        runtime
+            .motion
+            .text_segments
+            .iter()
+            .map(|clip| (clip.start, clip.end, clip.is_disabled))
+            .collect()
+    } else {
+        runtime
+            .motion
+            .segments
+            .iter()
+            .map(|clip| (clip.start, clip.end, clip.is_disabled))
+            .collect()
+    }
+}
+
+/// One clip lane at whatever height it is eased to: the full drawing, the
+/// thin resting strip, or a cross-fade of both while the lanes trade height.
+fn draw_lane(
+    cr: &Context,
+    width: i32,
+    height: i32,
+    runtime: &Rc<RefCell<MotionRuntime>>,
+    text: bool,
+    light: bool,
+) {
     let runtime = runtime.borrow();
+    let progress = runtime.lanes.progress()[usize::from(text)];
+    if progress >= 0.999 {
+        draw_clip_track(cr, width, height, &runtime, text);
+    } else if progress <= 0.001 {
+        draw_thin_lane(cr, width, height, &runtime, text, light);
+    } else {
+        cr.push_group();
+        draw_thin_lane(cr, width, height, &runtime, text, light);
+        let _ = cr.pop_group_to_source();
+        let _ = cr.paint_with_alpha(1.0 - progress);
+        cr.push_group();
+        draw_clip_track(cr, width, height, &runtime, text);
+        let _ = cr.pop_group_to_source();
+        let _ = cr.paint_with_alpha(progress);
+    }
+}
+
+/// The open lane: the hover ghost, then the clips with their glyphs and
+/// labels, and the trim grips on a selected clip. A selection steps this
+/// lane's other clips back so the edited clip reads first, without dimming
+/// the other lane.
+fn draw_clip_track(cr: &Context, width: i32, height: i32, runtime: &MotionRuntime, text: bool) {
     let w = width.max(1) as f64;
     let h = height.max(1) as f64;
     let duration = runtime.motion.duration.max(0.001);
-    if runtime.hover_track == Some(MotionHoverTrack::Motion) {
-        if let Some((start, end)) = runtime
-            .hover_time
-            .and_then(|hover| runtime.motion.motion_add_span(hover))
-        {
-            draw_add_track(
-                cr,
-                w,
-                h,
-                duration,
-                start,
-                end,
-                &t("Motion"),
-                MOTION_CLIP_BLUE,
-                MOTION_CLIP_BLUE_EDGE,
-            );
+    let hover_track = if text {
+        MotionHoverTrack::Text
+    } else {
+        MotionHoverTrack::Motion
+    };
+    // The add ghost belongs to the open lane only.
+    if runtime.lanes.is_open(text) && runtime.hover_track == Some(hover_track) {
+        let span = runtime.hover_time.and_then(|hover| {
+            if text {
+                runtime.motion.text_add_span(hover)
+            } else {
+                runtime.motion.motion_add_span(hover)
+            }
+        });
+        if let Some((start, end)) = span {
+            let (label, tint, edge) = if text {
+                (t("Text"), TEXT_CLIP_ORANGE, TEXT_CLIP_ORANGE_EDGE)
+            } else {
+                (t("Motion"), MOTION_CLIP_BLUE, MOTION_CLIP_BLUE_EDGE)
+            };
+            draw_add_track(cr, w, h, duration, start, end, &label, tint, edge);
         }
     }
-    // A selection steps this lane's other clips back so the edited clip
-    // reads first, without blacking out the rest of the timeline.
-    let has_selection = runtime.motion.selected.is_some();
-    for (index, segment) in runtime.motion.segments.iter().enumerate() {
-        let x0 = time_to_x(segment.start, duration, w);
-        let x1 = time_to_x(segment.end, duration, w);
+    let selected = if text {
+        runtime.motion.selected_text
+    } else {
+        runtime.motion.selected
+    };
+    let has_selection = selected.is_some();
+    // Name each clip by its kind. Echoing the typed title here never fit:
+    // long strings were cropped mid-word and short ones left the block
+    // looking half-drawn, while the preview and the inspector show the text.
+    let label = t(if text { "Text" } else { "Motion" });
+    for (index, (start, end, disabled)) in lane_clips(runtime, text).into_iter().enumerate() {
+        let x0 = time_to_x(start, duration, w);
+        let x1 = time_to_x(end, duration, w);
         let clip_w = (x1 - x0).max(22.0);
-        let y = 7.0;
-        let clip_h = h - 14.0;
-        let selected = runtime.motion.selected == Some(index);
+        let y = if text { 6.0 } else { 7.0 };
+        let clip_h = (h - y * 2.0).max(1.0);
+        let is_selected = selected == Some(index);
+        let faint = has_selection && !is_selected;
         let tone = disabled_clip_tone(
-            motion_clip_tone(selected, has_selection && !selected),
-            segment.is_disabled,
+            if text {
+                text_clip_tone(is_selected, faint)
+            } else {
+                motion_clip_tone(is_selected, faint)
+            },
+            disabled,
         );
         rounded_rect(cr, x0, y, clip_w, clip_h, 5.0);
         cr.set_source_rgba(tone.fill.0, tone.fill.1, tone.fill.2, tone.fill.3);
         let _ = cr.fill();
-        if selected {
+        if is_selected {
             rounded_rect(
                 cr,
                 x0 + 0.5,
@@ -775,20 +1125,24 @@ fn draw_motion_track(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell
             rounded_rect(cr, x0, y, clip_w, clip_h, 5.0);
             cr.clip();
             let center_y = y + clip_h / 2.0;
-            draw_clip_glyph(cr, x0 + 12.0, center_y, tone.label, false);
-            if clip_w > 42.0 {
+            draw_clip_glyph(cr, x0 + 12.0, center_y, tone.label, text);
+            if clip_w > 46.0 {
                 let _ = cr.save();
-                cr.rectangle(x0 + 27.0, y + 2.0, (clip_w - 40.0).max(0.0), clip_h - 4.0);
+                cr.rectangle(x0 + 30.0, y + 2.0, (clip_w - 44.0).max(0.0), clip_h - 4.0);
                 cr.clip();
                 cr.set_source_rgba(1.0, 1.0, 1.0, tone.label);
                 cr.select_font_face(
                     UI_FONT_FAMILY,
                     gtk4::cairo::FontSlant::Normal,
-                    gtk4::cairo::FontWeight::Normal,
+                    gtk4::cairo::FontWeight::Bold,
                 );
-                cr.set_font_size(11.0);
-                cr.move_to(x0 + 28.0, y + clip_h * 0.62);
-                let _ = cr.show_text(&t("Motion"));
+                cr.set_font_size(12.0);
+                // Centre the label's ink on the glyph's centre instead of
+                // leaning on a fraction of the lane height.
+                if let Ok(ext) = cr.text_extents(&label) {
+                    cr.move_to(x0 + 30.0, center_y - ext.y_bearing() - ext.height() / 2.0);
+                    let _ = cr.show_text(&label);
+                }
                 let _ = cr.restore();
             }
             let _ = cr.restore();
@@ -796,88 +1150,68 @@ fn draw_motion_track(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell
     }
 }
 
-fn draw_text_track(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell<MotionRuntime>>) {
-    let runtime = runtime.borrow();
+/// A resting clip lane, the video editor's thin strip: the lane's name at the
+/// left edge and each clip as a slim bar in its own colour. A bar running
+/// under the name fades in from transparent, so the name never sits on solid
+/// colour.
+fn draw_thin_lane(
+    cr: &Context,
+    width: i32,
+    height: i32,
+    runtime: &MotionRuntime,
+    text: bool,
+    light: bool,
+) {
     let w = width.max(1) as f64;
     let h = height.max(1) as f64;
     let duration = runtime.motion.duration.max(0.001);
-    if runtime.hover_track == Some(MotionHoverTrack::Text) {
-        if let Some((start, end)) = runtime
-            .hover_time
-            .and_then(|hover| runtime.motion.text_add_span(hover))
-        {
-            draw_add_track(
-                cr,
-                w,
-                h,
-                duration,
-                start,
-                end,
-                &t("Text"),
-                TEXT_CLIP_ORANGE,
-                TEXT_CLIP_ORANGE_EDGE,
+    let label = t(if text { "Text" } else { "Motion" });
+    cr.select_font_face(
+        UI_FONT_FAMILY,
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Bold,
+    );
+    cr.set_font_size(12.0);
+    let extents = cr.text_extents(&label).ok();
+    let text_w = extents.map_or(40.0, |extents| extents.x_advance());
+    let text_h = extents.map_or(9.0, |extents| extents.height());
+    let label_x = 6.0;
+    let label_end = label_x + text_w;
+    let fade_end = label_end + 40.0;
+
+    let colour = if text {
+        TEXT_CLIP_ORANGE
+    } else {
+        MOTION_CLIP_BLUE
+    };
+    let bar_h = (h - 4.0).max(3.0);
+    let y = (h - bar_h) / 2.0;
+    for (start, end, disabled) in lane_clips(runtime, text) {
+        let alpha = if disabled { 0.35 } else { 1.0 };
+        let x0 = time_to_x(start, duration, w);
+        let x1 = time_to_x(end, duration, w).max(x0 + 4.0);
+        rounded_rect(cr, x0, y, x1 - x0, bar_h, (bar_h * 0.35).min(5.0));
+        if x0 < fade_end {
+            let fade = gtk4::cairo::LinearGradient::new(0.0, 0.0, fade_end, 0.0);
+            fade.add_color_stop_rgba(0.0, colour.0, colour.1, colour.2, 0.0);
+            fade.add_color_stop_rgba(
+                label_end / fade_end,
+                colour.0,
+                colour.1,
+                colour.2,
+                alpha * 0.15,
             );
+            fade.add_color_stop_rgba(1.0, colour.0, colour.1, colour.2, alpha);
+            let _ = cr.set_source(&fade);
+        } else {
+            cr.set_source_rgba(colour.0, colour.1, colour.2, alpha);
         }
-    }
-    // Same rule as the Motion lane, applied to this lane's own selection.
-    let has_selection = runtime.motion.selected_text.is_some();
-    for (index, segment) in runtime.motion.text_segments.iter().enumerate() {
-        let x0 = time_to_x(segment.start, duration, w);
-        let x1 = time_to_x(segment.end, duration, w);
-        let clip_w = (x1 - x0).max(22.0);
-        let y = 6.0;
-        let clip_h = h - 12.0;
-        let selected = runtime.motion.selected_text == Some(index);
-        let tone = disabled_clip_tone(
-            text_clip_tone(selected, has_selection && !selected),
-            segment.is_disabled,
-        );
-        rounded_rect(cr, x0, y, clip_w, clip_h, 5.0);
-        cr.set_source_rgba(tone.fill.0, tone.fill.1, tone.fill.2, tone.fill.3);
         let _ = cr.fill();
-        if selected {
-            rounded_rect(
-                cr,
-                x0 + 0.5,
-                y + 0.5,
-                (clip_w - 1.0).max(0.0),
-                (clip_h - 1.0).max(0.0),
-                4.5,
-            );
-            cr.set_source_rgba(tone.edge.0, tone.edge.1, tone.edge.2, tone.edge.3);
-            cr.set_line_width(1.5);
-            let _ = cr.stroke();
-            draw_trim_handles(cr, x0, y, clip_w, clip_h, tone);
-        }
-        if clip_w > 32.0 {
-            let _ = cr.save();
-            rounded_rect(cr, x0, y, clip_w, clip_h, 5.0);
-            cr.clip();
-            let center_y = y + clip_h / 2.0;
-            draw_clip_glyph(cr, x0 + 12.0, center_y, tone.label, true);
-            if clip_w > 42.0 {
-                let _ = cr.save();
-                cr.rectangle(x0 + 27.0, y + 2.0, (clip_w - 40.0).max(0.0), clip_h - 4.0);
-                cr.clip();
-                cr.set_source_rgba(1.0, 1.0, 1.0, tone.label);
-                cr.select_font_face(
-                    UI_FONT_FAMILY,
-                    gtk4::cairo::FontSlant::Normal,
-                    gtk4::cairo::FontWeight::Normal,
-                );
-                cr.set_font_size(11.0);
-                cr.move_to(x0 + 28.0, y + clip_h * 0.64);
-                // Name the clip the way the Motion lane names its own clips.
-                // Echoing the typed content here never fit: long strings were
-                // cropped mid-word and short ones left the block looking
-                // half-drawn, while the preview and the Text inspector already
-                // show the real thing.
-                let _ = cr.show_text(&t("Text"));
-                let _ = cr.restore();
-            }
-            let _ = cr.restore();
-        }
     }
+    let ink = if light { 0.0 } else { 1.0 };
+    cr.set_source_rgba(ink, ink, ink, 0.6);
+    cr.move_to(label_x, (h + text_h) / 2.0);
+    let _ = cr.show_text(&label);
 }
 
 const PLAYHEAD_HANDLE_W: f64 = 12.0;
@@ -1003,7 +1337,10 @@ pub(super) fn format_clock(seconds: f64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{disabled_clip_tone, motion_clip_tone, text_clip_tone};
+    use super::{
+        clip_lane_heights, disabled_clip_tone, format_ruler_label, motion_clip_tone,
+        ruler_major_step, text_clip_tone, MotionLanes,
+    };
 
     #[test]
     fn lucide_symbolic_icons_use_filled_outlines_instead_of_svg_strokes() {
@@ -1111,15 +1448,90 @@ mod tests {
             .split("#[cfg(test)]")
             .next()
             .unwrap();
-        assert!(source.contains("let has_selection = runtime.motion.selected.is_some();"));
-        assert!(source.contains("let has_selection = runtime.motion.selected_text.is_some();"));
-        assert!(source.contains("motion_clip_tone(selected, has_selection && !selected)"));
-        assert!(source.contains("text_clip_tone(selected, has_selection && !selected)"));
+        // Each lane reads only its own selection.
+        assert!(source.contains(
+            "runtime.motion.selected_text\n    } else {\n        runtime.motion.selected\n    };"
+        ));
+        assert!(source.contains("let has_selection = selected.is_some();"));
+        assert!(source.contains("let faint = has_selection && !is_selected;"));
+        assert!(source.contains("text_clip_tone(is_selected, faint)"));
+        assert!(source.contains("motion_clip_tone(is_selected, faint)"));
         assert!(
             !source.contains(
                 "runtime.motion.selected.is_some() || runtime.motion.selected_text.is_some()"
             ),
             "selection must not dim the other lane"
         );
+    }
+
+    #[test]
+    fn one_clip_lane_is_open_and_a_new_selection_brings_its_lane_forward() {
+        let mut lanes = MotionLanes::default();
+        assert!(lanes.is_open(false) && !lanes.is_open(true));
+        assert!(lanes.settled());
+
+        lanes.follow_selection(None, Some(0));
+        assert!(lanes.is_open(true));
+        assert!(!lanes.settled());
+
+        // The same selection seen again does not reopen a lane the user
+        // switched away from by hand.
+        lanes.open(false);
+        lanes.follow_selection(None, Some(0));
+        assert!(lanes.is_open(false));
+
+        lanes.follow_selection(Some(1), None);
+        assert!(lanes.is_open(false));
+    }
+
+    #[test]
+    fn lanes_ease_to_their_targets_and_then_stop_animating() {
+        let mut lanes = MotionLanes::default();
+        lanes.open(true);
+        let mut frames = 0;
+        while lanes.step(1.0 / 60.0) {
+            frames += 1;
+            assert!(frames < 120, "the ease must settle");
+        }
+        assert_eq!(lanes.progress(), [0.0, 1.0]);
+        assert!(lanes.settled());
+        assert!(frames > 3, "the lanes must ease rather than jump");
+    }
+
+    #[test]
+    fn trading_lanes_keep_the_dock_height_fixed() {
+        let total = clip_lane_heights([1.0, 0.0]).iter().sum::<i32>();
+        assert_eq!(clip_lane_heights([1.0, 0.0]), [42, 18]);
+        assert_eq!(clip_lane_heights([0.0, 1.0]), [18, 42]);
+        for step in 0..=20 {
+            let progress = f64::from(step) / 20.0;
+            let heights = clip_lane_heights([1.0 - progress, progress]);
+            assert_eq!(heights.iter().sum::<i32>(), total);
+        }
+    }
+
+    #[test]
+    fn ruler_labels_name_whole_seconds_without_flooring_below_them() {
+        let major = ruler_major_step(10.0);
+        let minor = major / 5.0;
+        let steps = (10.0 / minor + 0.0001).floor() as i64;
+        let labels: Vec<String> = (0..=steps)
+            .map(|step| step as f64 * minor)
+            .filter(|tick| ((tick / major) - (tick / major).round()).abs() < 0.02)
+            .map(|tick| format_ruler_label(tick, major))
+            .collect();
+        assert_eq!(labels.len(), 11);
+        assert_eq!(labels.last().map(String::as_str), Some("0:10"));
+        assert_eq!(format_ruler_label(2.999_999_9, 1.0), "0:03");
+    }
+
+    #[test]
+    fn compact_dock_css_sizes_the_board_for_the_compact_rows() {
+        let css = include_str!("../css/10-canvas-inspector.css");
+        assert!(css.contains(
+            ".editor-motion-timeline-dock.recording-editor-timeline-compact .recording-editor-card-board"
+        ));
+        // 28 ruler + 42 source + 42 open lane + 18 resting lane + 3 × 8 gaps.
+        assert!(css.contains("min-height: 154px;"));
     }
 }

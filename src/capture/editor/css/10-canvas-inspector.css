@@ -23,6 +23,23 @@
                 background: alpha(black, 0.25);
             }
 
+            /* Compact Motion rows: 28px ruler, 42px source strip, one 42px
+             * open clip lane and one 18px resting lane, with three 8px gaps.
+             * The lane floor is the resting height so the two lanes can trade
+             * height without the board, or the preview above it, moving. */
+            .editor-motion-timeline-dock.recording-editor-timeline-compact .recording-editor-card-board {
+                min-height: 154px;
+                padding: 0 0 4px 0;
+            }
+
+            .editor-motion-timeline-dock.recording-editor-timeline-compact .recording-editor-card-ruler {
+                min-height: 28px;
+            }
+
+            .editor-motion-timeline-dock.recording-editor-timeline-compact .recording-editor-card-zoom-track {
+                min-height: 18px;
+            }
+
             .editor-inspector-scroll,
             .editor-inspector-scroll > viewport,
             .editor-inspector-scroll scrollbar {

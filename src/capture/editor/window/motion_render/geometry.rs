@@ -8,9 +8,11 @@ pub(crate) struct MotionStage {
     pub bounds_h: f64,
     pub center_x: f64,
     pub center_y: f64,
-    /// Output frames scale the composition up to fill them. Every other stage
-    /// keeps the composition at most its native size, like Static's canvas.
-    output_resolution: bool,
+    /// Output frames and the editor preview scale the composition up to fill
+    /// them, so a small still is not left at its pixel size in the middle of
+    /// an empty stage. Every other stage keeps the composition at most its
+    /// native size, like Static's canvas.
+    fills_stage: bool,
 }
 
 impl MotionStage {
@@ -20,7 +22,7 @@ impl MotionStage {
             bounds_h: height,
             center_x: width / 2.0,
             center_y: height / 2.0,
-            output_resolution: false,
+            fills_stage: false,
         }
     }
 
@@ -28,7 +30,7 @@ impl MotionStage {
     /// the output resolution, so a small source keeps its padding proportions.
     pub(crate) fn output(width: f64, height: f64) -> Self {
         Self {
-            output_resolution: true,
+            fills_stage: true,
             ..Self::frame(width, height)
         }
     }
@@ -41,12 +43,13 @@ impl MotionStage {
             bounds_h: height,
             center_x: x + width / 2.0,
             center_y: y + height / 2.0,
-            output_resolution: false,
+            fills_stage: false,
         }
     }
 
-    /// The editor's scene panel for a composition canvas, capped at the
-    /// canvas's native size like Static's own canvas scale.
+    /// The editor's scene panel for a composition canvas. The composition
+    /// fills the panel, enlarging a small still past 1:1 the way the video
+    /// editor's preview does.
     pub(super) fn preview(width: f64, height: f64, canvas_w: f64, canvas_h: f64) -> Self {
         let (_, _, bounds_w, bounds_h) =
             motion_preview_scene_rect(width, height, canvas_w, canvas_h);
@@ -55,13 +58,13 @@ impl MotionStage {
             bounds_h,
             center_x: width / 2.0,
             center_y: height / 2.0,
-            output_resolution: false,
+            fills_stage: true,
         }
     }
 
     fn composition_fit(&self, canvas_w: f64, canvas_h: f64) -> f64 {
         let fit = (self.bounds_w / canvas_w.max(1.0)).min(self.bounds_h / canvas_h.max(1.0));
-        if self.output_resolution {
+        if self.fills_stage {
             fit
         } else {
             fit.min(1.0)
@@ -79,8 +82,8 @@ pub(super) fn fit_stage_aspect(bounds_w: f64, bounds_h: f64, aspect: Option<f64>
     (width, width / aspect)
 }
 
-/// The preview scene panel rectangle for a composition canvas, capped at the
-/// canvas's native size. Backdrop, foreground, controls and cache all use it.
+/// The preview scene panel rectangle for a composition canvas, fitted to the
+/// panel at any scale. Backdrop, foreground, controls and cache all use it.
 pub(super) fn motion_preview_scene_rect(
     width: f64,
     height: f64,
@@ -91,7 +94,7 @@ pub(super) fn motion_preview_scene_rect(
     let canvas_w = canvas_w.max(1.0);
     let canvas_h = canvas_h.max(1.0);
     let (fitted_w, _) = fit_stage_aspect(bounds_w, bounds_h, Some(canvas_w / canvas_h));
-    let scale = (fitted_w / canvas_w).min(1.0);
+    let scale = fitted_w / canvas_w;
     let scene_w = canvas_w * scale;
     let scene_h = canvas_h * scale;
     (

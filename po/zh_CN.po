@@ -4866,6 +4866,12 @@ msgstr "此 ffmpeg 版本没有 HEVC 编码器"
 msgid "Uploaded, but the link could not be copied: {error}"
 msgstr "已上传，但无法复制链接：{error}"
 
+msgid "Motion isn't available for long screenshots"
+msgstr "长截图不支持动效"
+
+msgid "This screenshot is too long to animate. Scrolling captures and other long images stay in Static, where every annotation and export tool still works."
+msgstr "此截图过长，无法制作动画。滚动截图和其他长图会保留在静态模式中，所有标注和导出工具仍可使用。"
+
 msgid "Account"
 msgstr "账号"
 

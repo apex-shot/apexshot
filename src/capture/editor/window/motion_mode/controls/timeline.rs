@@ -135,6 +135,26 @@ fn update_clip_drag(
     changed
 }
 
+/// A click on a resting lane opens it and selects the clip under the pointer
+/// instead of adding one blind. Returns whether the lane was resting.
+fn open_resting_lane(runtime: &mut MotionRuntime, text: bool, raw_time: f64) -> bool {
+    if runtime.lanes.is_open(text) {
+        return false;
+    }
+    let index = if text {
+        runtime.motion.text_index_at(raw_time)
+    } else {
+        runtime.motion.segment_index_at(raw_time)
+    };
+    if let Some(index) = index {
+        runtime.motion.selected = (!text).then_some(index);
+        runtime.motion.selected_text = text.then_some(index);
+        runtime.source_selected = false;
+    }
+    runtime.lanes.open(text);
+    true
+}
+
 pub(super) fn install(
     parts: &MotionModeParts,
     session: &MotionSession,
@@ -291,9 +311,14 @@ pub(super) fn install(
                 .unwrap_or(1.0);
             let new_clip_start = {
                 let mut runtime = session.borrow_mut();
-                runtime.source_selected = false;
                 let duration = runtime.motion.duration.max(0.001);
                 let raw_time = ((x / width) * duration).clamp(0.0, duration);
+                if open_resting_lane(&mut runtime, false, raw_time) {
+                    drop(runtime);
+                    redraw();
+                    return;
+                }
+                runtime.source_selected = false;
                 // Selection tests the real pointer position: snapping it first
                 // could land on the next clip's edge and select it while the user
                 // clicked in the empty gap before it.
@@ -337,7 +362,8 @@ pub(super) fn install(
             };
             let width = area.allocated_width().max(1) as f64;
             let height = area.allocated_height() as f64;
-            if y < 7.0 || y > height - 7.0 {
+            // A resting lane takes no clip menu; a click opens it first.
+            if y < 7.0 || y > height - 7.0 || !session.borrow().lanes.is_open(false) {
                 return;
             }
             let index = {
@@ -396,10 +422,13 @@ pub(super) fn install(
             let duration = runtime.motion.duration.max(0.001);
             let time = ((x / width) * duration).clamp(0.0, duration);
             let edge_seconds = (8.0 / width) * duration;
+            // A resting lane takes no drags or trims.
+            let open = runtime.lanes.is_open(false);
             let kind = runtime
                 .motion
                 .segments
                 .iter()
+                .filter(|_| open)
                 .enumerate()
                 .find_map(|(index, segment)| {
                     if (segment.start - time).abs() <= edge_seconds {
@@ -524,9 +553,14 @@ pub(super) fn install(
                 .unwrap_or(1.0);
             let new_text = {
                 let mut runtime = session.borrow_mut();
-                runtime.source_selected = false;
                 let duration = runtime.motion.duration.max(0.001);
                 let raw_time = ((x / width) * duration).clamp(0.0, duration);
+                if open_resting_lane(&mut runtime, true, raw_time) {
+                    drop(runtime);
+                    redraw();
+                    return;
+                }
+                runtime.source_selected = false;
                 // Same single-click rule as the motion lane.
                 if let Some(index) = runtime.motion.text_index_at(raw_time) {
                     runtime.motion.selected_text = Some(index);
@@ -571,7 +605,7 @@ pub(super) fn install(
             };
             let width = area.allocated_width().max(1) as f64;
             let height = area.allocated_height() as f64;
-            if y < 6.0 || y > height - 6.0 {
+            if y < 6.0 || y > height - 6.0 || !session.borrow().lanes.is_open(true) {
                 return;
             }
             let index =
@@ -626,26 +660,27 @@ pub(super) fn install(
             let duration = runtime.motion.duration.max(0.001);
             let time = ((x / width) * duration).clamp(0.0, duration);
             let edge_seconds = (8.0 / width) * duration;
-            let kind =
-                runtime
-                    .motion
-                    .text_segments
-                    .iter()
-                    .enumerate()
-                    .find_map(|(index, segment)| {
-                        if (segment.start - time).abs() <= edge_seconds {
-                            Some(DragKind::Start(index))
-                        } else if (segment.end - time).abs() <= edge_seconds {
-                            Some(DragKind::End(index))
-                        } else if time >= segment.start && time <= segment.end {
-                            Some(DragKind::Body {
-                                index,
-                                origin: segment.start,
-                            })
-                        } else {
-                            None
-                        }
-                    });
+            let open = runtime.lanes.is_open(true);
+            let kind = runtime
+                .motion
+                .text_segments
+                .iter()
+                .filter(|_| open)
+                .enumerate()
+                .find_map(|(index, segment)| {
+                    if (segment.start - time).abs() <= edge_seconds {
+                        Some(DragKind::Start(index))
+                    } else if (segment.end - time).abs() <= edge_seconds {
+                        Some(DragKind::End(index))
+                    } else if time >= segment.start && time <= segment.end {
+                        Some(DragKind::Body {
+                            index,
+                            origin: segment.start,
+                        })
+                    } else {
+                        None
+                    }
+                });
             if let Some(index) = kind.map(drag_kind_index) {
                 runtime.motion.selected_text = Some(index);
                 runtime.motion.selected = None;
@@ -915,6 +950,7 @@ pub(super) fn install(
                 let mut runtime = session.borrow_mut();
                 let playhead = runtime.motion.playhead;
                 runtime.source_selected = false;
+                runtime.lanes.open(false);
                 runtime.begin_motion_edit();
                 runtime
                     .motion
@@ -937,6 +973,7 @@ pub(super) fn install(
                 let mut runtime = session.borrow_mut();
                 let playhead = runtime.motion.playhead;
                 runtime.source_selected = false;
+                runtime.lanes.open(true);
                 runtime.begin_motion_edit();
                 runtime.motion.add_text_at(playhead).and_then(|index| {
                     runtime
@@ -975,7 +1012,11 @@ fn install_track_end_cursor(
             let duration = runtime.motion.duration.max(0.001);
             let time = ((x / width) * duration).clamp(0.0, duration);
             let edge_seconds = (8.0 / width) * duration;
+            let open = runtime.lanes.is_open(text_track);
             let edge_at = |start: f64, end: f64| {
+                if !open {
+                    return None;
+                }
                 if (time - end).abs() <= edge_seconds {
                     Some("e-resize")
                 } else if (time - start).abs() <= edge_seconds {

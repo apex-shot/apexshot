@@ -75,6 +75,12 @@
                 font-weight: 600;
             }
 
+            /* Motion is gated off for long screenshots; the button stays
+             * clickable so it can explain why. */
+            button.editor-mode-label-button.editor-mode-unavailable {
+                opacity: 0.45;
+            }
+
             .editor-motion-time-label {
                 padding: 0 10px 0 4px;
             }

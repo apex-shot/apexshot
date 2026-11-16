@@ -150,6 +150,10 @@ pub(in crate::capture::editor::window) struct MotionRuntime {
     /// Which track row the pointer is over, so an empty row can show its add
     /// affordance. UI-only.
     pub(in crate::capture::editor::window) hover_track: Option<MotionHoverTrack>,
+    /// Which clip lane the compact timeline draws at full height, and how far
+    /// each lane is through its open/rest ease. UI-only.
+    pub(in crate::capture::editor::window) lanes:
+        crate::capture::editor::window::motion_timeline::MotionLanes,
     /// Content generation: bumped on every model mutation a playhead move
     /// alone would not reveal, so a cached preview frame cannot go stale.
     pub(in crate::capture::editor::window) preview_content_gen: u64,
@@ -189,6 +193,7 @@ impl MotionRuntime {
             source_selected: false,
             hover_time: None,
             hover_track: None,
+            lanes: Default::default(),
             preview_content_gen: 0,
             preview_frame: None,
             preview_busy: false,

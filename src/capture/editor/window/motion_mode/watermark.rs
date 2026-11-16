@@ -9,7 +9,9 @@ use gtk4::{
 use crate::capture::editor::window::icon_names;
 use crate::i18n::t;
 
+use super::build::motion_settings_section;
 use super::session::MotionSession;
+use super::watermark_pad::MotionWatermarkPad;
 use super::widgets::motion_appearance_slider;
 
 /// Watermark state is a dedicated Motion layer, not part of the background
@@ -20,26 +22,25 @@ pub(in crate::capture::editor::window) fn build_motion_watermark_panel(
     session: &MotionSession,
     preview: &DrawingArea,
 ) -> GtkBox {
-    let (image_file_name, size, inset, position) = {
+    let (image_file_name, size, inset) = {
         let runtime = session.runtime.borrow();
         let watermark = &runtime.motion.watermark;
         (
             watermark.image_file_name.clone(),
             watermark.size,
             watermark.inset,
-            watermark.position,
         )
     };
-    let section = GtkBox::new(Orientation::Vertical, 6);
-    section.add_css_class("editor-inspector-placeholder-shell");
-    section.add_css_class("editor-motion-inspector");
-    section.add_css_class("editor-motion-watermark-section");
-    section.set_hexpand(false);
-    section.set_vexpand(false);
-    let title = Label::new(Some(&t("Watermark")));
-    title.add_css_class("editor-background-section-title");
-    title.set_xalign(0.0);
-    section.append(&title);
+    let panel = GtkBox::new(Orientation::Vertical, 12);
+    panel.add_css_class("editor-inspector-placeholder-shell");
+    panel.add_css_class("editor-motion-inspector");
+    panel.add_css_class("editor-motion-watermark-section");
+    panel.set_hexpand(false);
+    panel.set_vexpand(false);
+    // One card, like the other Motion pages: the picker, Remove, the size and
+    // inset dials, and the placement pad.
+    let section = motion_settings_section("Watermark");
+    panel.append(&section);
 
     let selected_name = image_file_name
         .as_deref()
@@ -74,6 +75,15 @@ pub(in crate::capture::editor::window) fn build_motion_watermark_panel(
             let source_h = surface.height().max(1) as f64;
             let scale = (f64::from(width) / source_w).min(f64::from(height) / source_h);
             let _ = cr.save();
+            crate::capture::editor::render::rounded_rect_path(
+                cr,
+                0.0,
+                0.0,
+                f64::from(width),
+                f64::from(height),
+                7.0,
+            );
+            cr.clip();
             cr.translate(
                 (f64::from(width) - source_w * scale) * 0.5,
                 (f64::from(height) - source_h * scale) * 0.5,
@@ -100,11 +110,29 @@ pub(in crate::capture::editor::window) fn build_motion_watermark_panel(
     picker.set_child(Some(&picker_inner));
     section.append(&picker);
 
+    // Remove is the panel's quiet secondary action, and only live once a mark
+    // is chosen.
+    let clear = Button::with_label(&t("Remove"));
+    clear.set_has_frame(false);
+    clear.add_css_class("editor-sidebar-action-button");
+    clear.set_sensitive(selected_name.is_some());
+    clear.set_tooltip_text(Some(&t("Remove the watermark")));
+
+    let pad = MotionWatermarkPad::new(session.runtime.clone());
+
     let show_selection: Rc<dyn Fn(Option<&str>)> = {
         let name_label = name_label.downgrade();
         let picker = picker.downgrade();
         let thumbnail = thumbnail.downgrade();
+        let clear = clear.downgrade();
+        let pad = pad.widget().downgrade();
         Rc::new(move |name: Option<&str>| {
+            if let Some(clear) = clear.upgrade() {
+                clear.set_sensitive(name.is_some());
+            }
+            if let Some(pad) = pad.upgrade() {
+                pad.queue_draw();
+            }
             if let Some(name_label) = name_label.upgrade() {
                 name_label.set_text(name.unwrap_or(&t("Select image...")));
             }
@@ -117,9 +145,6 @@ pub(in crate::capture::editor::window) fn build_motion_watermark_panel(
         })
     };
 
-    let clear = Button::with_label(&t("Remove"));
-    clear.set_has_frame(false);
-    clear.add_css_class("editor-sidebar-action-button");
     section.append(&clear);
 
     let chooser_slot = Rc::new(RefCell::new(None::<FileChooserNative>));
@@ -206,11 +231,13 @@ pub(in crate::capture::editor::window) fn build_motion_watermark_panel(
     size_slider.connect_value_changed({
         let runtime = session.runtime.clone();
         let preview = preview.clone();
+        let pad = pad.widget();
         move |slider| {
             let mut runtime = runtime.borrow_mut();
             runtime.begin_motion_edit();
             runtime.motion.watermark.size = slider.value();
             preview.queue_draw();
+            pad.queue_draw();
         }
     });
     section.append(&size_slider.widget());
@@ -219,39 +246,40 @@ pub(in crate::capture::editor::window) fn build_motion_watermark_panel(
     inset_slider.connect_value_changed({
         let runtime = session.runtime.clone();
         let preview = preview.clone();
+        let pad = pad.widget();
         move |slider| {
             let mut runtime = runtime.borrow_mut();
             runtime.begin_motion_edit();
             runtime.motion.watermark.inset = slider.value();
             preview.queue_draw();
+            pad.queue_draw();
         }
     });
     section.append(&inset_slider.widget());
 
-    let x_slider = motion_appearance_slider("Watermark position X", 0.0, 1.0, position.0, "%");
-    x_slider.connect_value_changed({
+    // Placement is a pad over the card thumbnail rather than two sliders, so
+    // the mark is dragged to where it belongs and shown there as it moves.
+    pad.connect_value_changed({
         let runtime = session.runtime.clone();
         let preview = preview.clone();
-        move |slider| {
+        move |x, y| {
             let mut runtime = runtime.borrow_mut();
             runtime.begin_motion_edit();
-            runtime.motion.watermark.position.0 = slider.value();
+            runtime.motion.watermark.position = (x, y);
+            runtime.live_preview = true;
+            drop(runtime);
             preview.queue_draw();
         }
     });
-    section.append(&x_slider.widget());
-
-    let y_slider = motion_appearance_slider("Watermark position Y", 0.0, 1.0, position.1, "%");
-    y_slider.connect_value_changed({
+    pad.connect_interaction_ended({
         let runtime = session.runtime.clone();
         let preview = preview.clone();
-        move |slider| {
-            let mut runtime = runtime.borrow_mut();
-            runtime.begin_motion_edit();
-            runtime.motion.watermark.position.1 = slider.value();
+        move || {
+            // The drag painted live frames; the release lands the sharp one.
+            runtime.borrow_mut().live_preview = false;
             preview.queue_draw();
         }
     });
-    section.append(&y_slider.widget());
-    section
+    section.append(&pad.widget());
+    panel
 }

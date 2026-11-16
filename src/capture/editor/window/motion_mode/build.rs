@@ -631,6 +631,7 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
                 playhead_overlay: timeline.playhead,
                 hover_playhead: timeline.hover_playhead,
                 playhead_hovered: timeline.playhead_hovered,
+                sync_lanes: timeline.sync_lanes,
             },
             panels: MotionPanelParts {
                 inspector,

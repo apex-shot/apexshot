@@ -321,6 +321,42 @@ impl MotionHost {
             }) as Rc<dyn Fn()>
         };
 
+        // Long screenshots, such as scrolling captures, stay in Static. The
+        // button stays clickable so it can explain why instead of going dead.
+        let sync_long_image_gate: Rc<dyn Fn()> = {
+            let motion_btn = self.parts.shell.motion_btn.clone();
+            let state = state.clone();
+            Rc::new(move || {
+                let long = {
+                    let guard = state.lock().unwrap();
+                    let (width, height) = guard.working_image.dimensions();
+                    motion_mode::is_long_image(width, height)
+                };
+                if long {
+                    motion_btn.add_css_class("editor-mode-unavailable");
+                    motion_btn.set_tooltip_text(Some(&motion_mode::long_image_motion_tooltip()));
+                } else {
+                    motion_btn.remove_css_class("editor-mode-unavailable");
+                    motion_btn.set_tooltip_text(Some(&crate::i18n::t("Switch to Motion")));
+                }
+            })
+        };
+        if !empty_drop_zone {
+            sync_long_image_gate();
+        }
+        // A crop can turn a long capture into a normal one (or back), so the
+        // hint follows the image whenever the pointer reaches the button.
+        {
+            let hover = gtk4::EventControllerMotion::new();
+            let sync = sync_long_image_gate.clone();
+            hover.connect_enter(move |_, _, _| {
+                if !empty_drop_zone {
+                    sync();
+                }
+            });
+            self.parts.shell.motion_btn.add_controller(hover);
+        }
+
         self.parts.shell.motion_btn.connect_clicked({
             let window = window.clone();
             let confirm = self.parts.shell.confirm_overlay.clone();
