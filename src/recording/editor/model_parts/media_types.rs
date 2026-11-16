@@ -1,3 +1,5 @@
+use crate::recording::editor::sound::SoundSettings;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct CursorHideClip {
     pub start: f64,
@@ -118,6 +120,9 @@ pub struct VideoEditState {
     pub clipboard: Option<ClipClipboard>,
     pub background: VideoBackground,
     pub background_padding: f64,
+    /// The composition's sound: master volume, the microphone mode, the music
+    /// under it and the click sound. Applies to preview and export alike.
+    pub sound: SoundSettings,
     /// Rounded corners on the video card, in 400px-long-edge slider units.
     /// 0 = square. Applied in both preview and export.
     pub background_corner_radius: f64,

@@ -1,5 +1,5 @@
 use crate::config::load_config;
-use crate::i18n::{self, t, tfmt};
+use crate::i18n::{self, t};
 use gtk4::{
     prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button, FileChooserAction,
     FileChooserNative, Image, Label, Orientation, Overlay as GtkOverlay, ResponseType,
@@ -10,10 +10,12 @@ use std::rc::Rc;
 use std::time::Duration;
 
 mod about;
+mod account;
 mod actions;
 mod advanced;
 mod after_capture;
 mod annotate;
+mod autosave;
 pub(crate) mod cloud;
 mod general;
 mod quick_access;
@@ -24,6 +26,7 @@ mod shortcuts;
 mod studio;
 mod theme_picker;
 pub(crate) mod ui_support;
+mod usage;
 pub(crate) mod windowing;
 
 /// Top inset for page content. The Windows surface removes the page-title row,
@@ -61,13 +64,6 @@ fn format_save_error(err: &anyhow::Error) -> String {
     }
 }
 
-#[derive(Clone, Copy)]
-enum SettingsToastKind {
-    Neutral,
-    Success,
-    Error,
-}
-
 /// Show the in-window settings toast.
 ///
 /// The label stays mapped (`visible=true`) and is toggled via opacity so the first
@@ -80,16 +76,10 @@ fn show_settings_toast(
     toast: &Label,
     generation: &Rc<Cell<u32>>,
     text: &str,
-    kind: SettingsToastKind,
     auto_hide: Option<Duration>,
 ) {
     toast.remove_css_class("settings-toast-success");
-    toast.remove_css_class("settings-toast-error");
-    match kind {
-        SettingsToastKind::Neutral => {}
-        SettingsToastKind::Success => toast.add_css_class("settings-toast-success"),
-        SettingsToastKind::Error => toast.add_css_class("settings-toast-error"),
-    }
+    toast.add_css_class("settings-toast-success");
     toast.set_text(text);
     toast.set_opacity(1.0);
     toast.queue_draw();
@@ -104,7 +94,6 @@ fn show_settings_toast(
             if generation.get() == gen {
                 toast.set_opacity(0.0);
                 toast.remove_css_class("settings-toast-success");
-                toast.remove_css_class("settings-toast-error");
             }
         });
     }
@@ -141,14 +130,28 @@ pub fn show_settings_window() -> anyhow::Result<()> {
             let _ = crate::daemon::start_daemon_subprocess();
         }
 
-        build_settings_window(application);
+        build_settings_window_at(application, None, None);
     });
 
     let _ = app.run_with_args::<String>(&[]);
     Ok(())
 }
 
-fn build_settings_window(app: &Application) {
+fn rebuild_settings_window(window: &ApplicationWindow, stack: &gtk4::Stack) {
+    let Some(app) = window.application() else {
+        return;
+    };
+    let page = stack.visible_child_name().map(|name| name.to_string());
+    let size = (window.width(), window.height());
+    window.close();
+    build_settings_window_at(&app, page.as_deref(), Some(size));
+}
+
+fn build_settings_window_at(
+    app: &Application,
+    initial_page: Option<&str>,
+    initial_size: Option<(i32, i32)>,
+) {
     use std::sync::Once;
     static INIT_ICONS: Once = Once::new();
     INIT_ICONS.call_once(|| {
@@ -165,12 +168,13 @@ fn build_settings_window(app: &Application) {
     let prefers_dark = prefers_dark_glass_theme();
     let reduced_transparency = prefers_reduced_transparency();
 
+    let (default_width, default_height) = initial_size.unwrap_or((900, 635));
     let window = ApplicationWindow::builder()
         .application(app)
         .title(t("ApexShot Settings"))
         .icon_name(crate::app_identity::icon_name())
-        .default_width(900)
-        .default_height(635)
+        .default_width(default_width)
+        .default_height(default_height)
         .build();
 
     window.set_decorated(false);
@@ -178,6 +182,7 @@ fn build_settings_window(app: &Application) {
 
     let root_box = GtkBox::new(Orientation::Vertical, 0);
     root_box.add_css_class("editor-root");
+    root_box.add_css_class("linux-settings");
     // Shared borderless chrome (header, full-height sidebar) with History.
     root_box.add_css_class("settings-shell");
     if !prefers_dark {
@@ -217,16 +222,18 @@ fn build_settings_window(app: &Application) {
         button.set_valign(Align::Center);
     }
 
+    let usage_refresh = Button::from_icon_name("view-refresh-symbolic");
+    usage_refresh.add_css_class("history-header-refresh");
+    usage_refresh.set_tooltip_text(Some(&t("Refresh")));
+    usage_refresh.set_valign(Align::Center);
+    usage_refresh.set_visible(false);
+    toolbar.append(&usage_refresh);
+
     let right_box = GtkBox::new(Orientation::Horizontal, 6);
     right_box.set_halign(Align::End);
     right_box.append(&min_btn);
     right_box.append(&close_btn);
     toolbar.append(&right_box);
-
-    // Grey until the user changes something; orange when there are unsaved edits.
-    let save_btn = Button::with_label(&t("Save"));
-    save_btn.add_css_class("settings-save-btn");
-    save_btn.set_sensitive(false);
 
     // Keep mapped at opacity 0 so the first "Settings saved" reveal allocates correctly.
     let toast = Label::new(Some(&t("")));
@@ -239,6 +246,24 @@ fn build_settings_window(app: &Application) {
     toast.set_can_target(false);
     let toast_generation = Rc::new(Cell::new(0u32));
 
+    let save_error_bar = GtkBox::new(Orientation::Horizontal, 10);
+    save_error_bar.add_css_class("settings-toast");
+    save_error_bar.add_css_class("settings-toast-error");
+    save_error_bar.add_css_class("settings-save-error");
+    save_error_bar.set_halign(Align::Center);
+    save_error_bar.set_valign(Align::End);
+    save_error_bar.set_margin_bottom(16);
+    save_error_bar.set_visible(false);
+    let save_error_label = Label::new(None);
+    save_error_label.set_valign(Align::Center);
+    save_error_label.set_wrap(true);
+    save_error_label.set_max_width_chars(52);
+    let save_error_retry = Button::with_label(&t("Retry"));
+    save_error_retry.add_css_class("settings-save-error-retry");
+    save_error_retry.set_valign(Align::Center);
+    save_error_bar.append(&save_error_label);
+    save_error_bar.append(&save_error_retry);
+
     let window_overlay = GtkOverlay::new();
     if !prefers_dark {
         window_overlay.add_css_class("editor-theme-light");
@@ -248,6 +273,7 @@ fn build_settings_window(app: &Application) {
     }
     window_overlay.set_child(Some(&root_box));
     window_overlay.add_overlay(&toast);
+    window_overlay.add_overlay(&save_error_bar);
 
     // The toolbar is appended to the right column, not the root: the sidebar
     // beside it runs the full window height.
@@ -299,18 +325,25 @@ fn build_settings_window(app: &Application) {
     sidebar_wrapper.append(&sidebar_scroller);
     install_window_drag(&sidebar_head, &window);
 
-    let save_box = GtkBox::new(Orientation::Vertical, 0);
-    save_box.add_css_class("settings-save-box");
-    save_box.set_halign(Align::Fill);
-    save_box.set_margin_start(8);
-    save_box.set_margin_end(8);
-    save_box.set_margin_bottom(10);
-    save_box.set_margin_top(6);
-    save_btn.set_hexpand(true);
-    save_box.append(&save_btn);
-    sidebar_wrapper.append(&save_box);
+    let stack = gtk4::Stack::new();
+    stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
+    stack.set_vexpand(true);
+
+    sidebar_wrapper.append(&account::build_account_footer({
+        let stack = stack.downgrade();
+        move |page| {
+            if let Some(stack) = stack.upgrade() {
+                stack.set_visible_child_name(page);
+            }
+        }
+    }));
 
     use crate::capture::editor::window::icon_names::custom;
+    let usage_icon = if prefers_dark {
+        custom::USAGE
+    } else {
+        custom::USAGE_LIGHT
+    };
     let labels = [
         ("General", custom::SETTINGS_SYMBOLIC),
         ("Shortcuts", custom::KEYBOARD_SHORTCUTS_SYMBOLIC),
@@ -319,14 +352,11 @@ fn build_settings_window(app: &Application) {
         ("Screenshots", custom::SCREENSHOOTER_SYMBOLIC),
         ("Annotate", custom::APP_ICON_DESIGN_SYMBOLIC),
         ("Cloud", custom::CLOUD_OUTLINE_THIN_SYMBOLIC),
+        ("Usage", usage_icon),
         ("Advanced", custom::SETTINGS_SYMBOLIC),
         ("Studio", custom::CLAPPERBOARD_SYMBOLIC),
         ("About", custom::INFO_SYMBOLIC),
     ];
-
-    let stack = gtk4::Stack::new();
-    stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
-    stack.set_vexpand(true);
 
     let mut nav_items = Vec::new();
 
@@ -409,6 +439,17 @@ fn build_settings_window(app: &Application) {
     shortcuts::install_shortcut_editors(&shortcuts, &window);
     let quick_access = build_quick_access_section(&config);
     let studio = studio::build_studio_section();
+    let usage = usage::build(
+        {
+            let stack = stack.downgrade();
+            move || {
+                if let Some(stack) = stack.upgrade() {
+                    stack.set_visible_child_name("6");
+                }
+            }
+        },
+        &usage_refresh,
+    );
 
     let screenshot_export_location_entry_pick = screenshots.export_location_entry.clone();
     let window_weak_picker = window.downgrade();
@@ -467,7 +508,13 @@ fn build_settings_window(app: &Application) {
     general_tab_section.append(&after_capture.wrapper);
 
     // Add them to stack
-    fn add_section(stack: &gtk4::Stack, widget: &impl IsA<gtk4::Widget>, name: &str, title: &str) {
+    fn add_section(
+        stack: &gtk4::Stack,
+        widget: &impl IsA<gtk4::Widget>,
+        name: &str,
+        title: &str,
+        header_action: Option<&Button>,
+    ) {
         let scroller = ScrolledWindow::new();
         scroller.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
         let vbox = GtkBox::new(Orientation::Vertical, 0);
@@ -476,14 +523,19 @@ fn build_settings_window(app: &Application) {
         vbox.set_margin_start(28);
         vbox.set_margin_end(28);
 
-        let header = GtkBox::new(Orientation::Vertical, 4);
+        let header = GtkBox::new(Orientation::Horizontal, 8);
         header.set_margin_bottom(16);
 
         let title_lbl = Label::new(Some(title));
         title_lbl.add_css_class("settings-page-title");
         title_lbl.set_halign(Align::Start);
-
+        title_lbl.set_valign(Align::Center);
+        title_lbl.set_hexpand(true);
         header.append(&title_lbl);
+        if let Some(action) = header_action {
+            action.set_valign(Align::Center);
+            header.append(action);
+        }
         vbox.append(&header);
 
         vbox.append(widget);
@@ -491,22 +543,31 @@ fn build_settings_window(app: &Application) {
         stack.add_titled(&scroller, Some(name), title);
     }
 
-    add_section(&stack, &general_tab_section, "0", &t("General"));
-    add_section(&stack, &shortcuts.section, "1", &t("Shortcuts"));
-    add_section(&stack, &quick_access.section, "2", &t("Quick Access"));
-    add_section(&stack, &recordings.section, "3", &t("Recording"));
-    add_section(&stack, &screenshots.section, "4", &t("Screenshots"));
-    add_section(&stack, &annotate.section, "5", &t("Annotate"));
-    add_section(&stack, &cloud.section, "6", &t("Cloud"));
-    add_section(&stack, &advanced.section, "7", &t("Advanced"));
-    add_section(&stack, &studio, "8", &t("Studio"));
-    add_section(&stack, &about.section, "9", &t("About"));
+    add_section(&stack, &general_tab_section, "0", &t("General"), None);
+    add_section(&stack, &shortcuts.section, "1", &t("Shortcuts"), None);
+    add_section(&stack, &quick_access.section, "2", &t("Quick Access"), None);
+    add_section(&stack, &recordings.section, "3", &t("Recording"), None);
+    add_section(&stack, &screenshots.section, "4", &t("Screenshots"), None);
+    add_section(&stack, &annotate.section, "5", &t("Annotate"), None);
+    add_section(&stack, &cloud.section, "6", &t("Cloud"), None);
+    add_section(
+        &stack,
+        &usage.section,
+        "7",
+        &t("Usage"),
+        Some(&usage.billing_button),
+    );
+    add_section(&stack, &advanced.section, "8", &t("Advanced"), None);
+    add_section(&stack, &studio, "9", &t("Studio"), None);
+    add_section(&stack, &about.section, "10", &t("About"), None);
 
     body_frame.append(&stack);
 
     // Update nav selection on stack change
     let nav_items_clone = nav_items.clone();
+    let usage_refresh_notify = usage_refresh.clone();
     stack.connect_visible_child_name_notify(move |s| {
+        usage_refresh_notify.set_visible(s.visible_child_name().as_deref() == Some("7"));
         if let Some(name) = s.visible_child_name() {
             if let Ok(idx) = name.parse::<usize>() {
                 for (i, (item, icon, label)) in nav_items_clone.iter().enumerate() {
@@ -523,7 +584,8 @@ fn build_settings_window(app: &Application) {
             }
         }
     });
-    stack.set_visible_child_name("0");
+    stack.set_visible_child_name(initial_page.unwrap_or("0"));
+    usage_refresh.set_visible(stack.visible_child_name().as_deref() == Some("7"));
 
     // Right column: the header bar sits above the page body so the sidebar
     // beside it can run the full window height.
@@ -536,7 +598,6 @@ fn build_settings_window(app: &Application) {
     root_box.append(&content_split);
     window.set_child(Some(&window_overlay));
 
-    // --- SAVE LOGIC ---
     let save_inputs = Rc::new(SaveInputs {
         start_at_login: general.start_at_login_check.clone(),
         play_sounds: general.play_sounds_check.clone(),
@@ -601,131 +662,11 @@ fn build_settings_window(app: &Application) {
         cloud_apexshot: cloud.apexshot_check.clone(),
         cloud_xbackbone: cloud.xbackbone_check.clone(),
         cloud_auto_upload: cloud.auto_upload_check.clone(),
+        cloud_auto_upload_sync: cloud.auto_upload_sync.clone(),
         xbackbone_url: cloud.xb_url_entry.clone(),
         xbackbone_api_token: cloud.xb_token_entry.clone(),
         ui_theme: general.theme_input.clone(),
         ui_language: general.ui_language_input.clone(),
-    });
-
-    // Dirty flag: grey (not clickable) until a control changes, then orange + enabled.
-    let save_dirty = Rc::new(Cell::new(false));
-    let save_busy = Rc::new(Cell::new(false));
-    let apply_save_button_state: Rc<dyn Fn()> = {
-        let save_btn = save_btn.clone();
-        let save_dirty = Rc::clone(&save_dirty);
-        let save_busy = Rc::clone(&save_busy);
-        Rc::new(move || {
-            if save_busy.get() {
-                save_btn.set_label(&t("Saving…"));
-                save_btn.remove_css_class("settings-save-btn-ready");
-                save_btn.set_sensitive(false);
-                return;
-            }
-            save_btn.set_label(&t("Save"));
-            if save_dirty.get() {
-                save_btn.add_css_class("settings-save-btn-ready");
-                save_btn.set_sensitive(true);
-            } else {
-                save_btn.remove_css_class("settings-save-btn-ready");
-                save_btn.set_sensitive(false);
-            }
-        })
-    };
-    apply_save_button_state();
-
-    let mark_save_dirty: Rc<dyn Fn()> = {
-        let save_dirty = Rc::clone(&save_dirty);
-        let save_busy = Rc::clone(&save_busy);
-        let apply_save_button_state = Rc::clone(&apply_save_button_state);
-        Rc::new(move || {
-            if save_busy.get() {
-                return;
-            }
-            if !save_dirty.get() {
-                save_dirty.set(true);
-                apply_save_button_state();
-            }
-        })
-    };
-    install_save_dirty_tracking(&save_inputs, Rc::clone(&mark_save_dirty));
-
-    // Save runs config + hotkey/autostart sync on the UI thread. Show immediate
-    // "Saving…" feedback on the next idle tick so the first click always paints
-    // a toast before that work freezes the main loop.
-    let trigger_save: Rc<dyn Fn()> = {
-        let save_inputs = Rc::clone(&save_inputs);
-        let toast = toast.clone();
-        let toast_generation = Rc::clone(&toast_generation);
-        let save_dirty = Rc::clone(&save_dirty);
-        let save_busy = Rc::clone(&save_busy);
-        let apply_save_button_state = Rc::clone(&apply_save_button_state);
-        let window = window.clone();
-        Rc::new(move || {
-            if save_busy.get() || !save_dirty.get() {
-                return;
-            }
-            save_busy.set(true);
-            apply_save_button_state();
-            show_settings_toast(
-                &toast,
-                &toast_generation,
-                &t("Saving…"),
-                SettingsToastKind::Neutral,
-                None,
-            );
-
-            let save_inputs = Rc::clone(&save_inputs);
-            let toast = toast.clone();
-            let toast_generation = Rc::clone(&toast_generation);
-            let save_dirty = Rc::clone(&save_dirty);
-            let save_busy = Rc::clone(&save_busy);
-            let apply_save_button_state = Rc::clone(&apply_save_button_state);
-            let window = window.clone();
-            gtk4::glib::idle_add_local_once(move || {
-                match save_settings(&save_inputs) {
-                    Ok(outcome) => {
-                        save_dirty.set(false);
-                        if outcome.language_changed {
-                            i18n::apply_gtk_direction(&crate::config::load_config().ui_language);
-                        }
-                        // Language and theme are baked into the window at build
-                        // time, so rebuild in place to apply them right away.
-                        if outcome.language_changed || outcome.theme_changed {
-                            if let Some(app) = window.application() {
-                                window.close();
-                                build_settings_window(&app);
-                                return;
-                            }
-                        }
-                        show_settings_toast(
-                            &toast,
-                            &toast_generation,
-                            &t("Settings saved"),
-                            SettingsToastKind::Success,
-                            Some(Duration::from_secs(2)),
-                        );
-                    }
-                    Err(e) => {
-                        // Keep dirty so the user can fix and retry (stays orange).
-                        let message = format_save_error(&e);
-                        eprintln!("[settings] Save failed: {e:#}");
-                        show_settings_toast(
-                            &toast,
-                            &toast_generation,
-                            &tfmt("Save failed: {message}", &[("message", &message)]),
-                            SettingsToastKind::Error,
-                            Some(Duration::from_secs(4)),
-                        );
-                    }
-                }
-                save_busy.set(false);
-                apply_save_button_state();
-            });
-        })
-    };
-    let trigger_save_click = Rc::clone(&trigger_save);
-    save_btn.connect_clicked(move |_| {
-        trigger_save_click();
     });
 
     install_checkbox_behaviors(
@@ -740,11 +681,62 @@ fn build_settings_window(app: &Application) {
         &quick_access.auto_close_interval_input,
     );
 
+    let save_state = Rc::new(std::cell::RefCell::new(actions::SaveState::new(
+        config.clone(),
+    )));
+    let saver = autosave::AutoSaver::new(
+        &window,
+        toast.clone(),
+        Rc::clone(&toast_generation),
+        save_error_bar.clone(),
+        save_error_label.clone(),
+        {
+            let save_inputs = Rc::clone(&save_inputs);
+            let save_state = Rc::clone(&save_state);
+            Rc::new(
+                move || match save_settings(&save_inputs, &mut save_state.borrow_mut()) {
+                    Ok(outcome) => autosave::AutoSaveResult::Saved {
+                        language_changed: outcome.language_changed,
+                        theme_changed: outcome.theme_changed,
+                    },
+                    Err(error) => autosave::AutoSaveResult::Failed(error),
+                },
+            )
+        },
+        {
+            let save_state = Rc::clone(&save_state);
+            Rc::new(move || save_state.borrow_mut().finish_runtime_updates())
+        },
+        {
+            let stack = stack.downgrade();
+            Rc::new(move |window: &ApplicationWindow| {
+                if let Some(stack) = stack.upgrade() {
+                    rebuild_settings_window(window, &stack);
+                }
+            })
+        },
+    );
+    install_save_dirty_tracking(&save_inputs, saver.mark_dirty());
+    save_error_retry.connect_clicked({
+        let saver = Rc::downgrade(&saver);
+        move |_| {
+            if let Some(saver) = saver.upgrade() {
+                saver.retry();
+            }
+        }
+    });
+    window.connect_close_request(move |_| {
+        if saver.flush().is_ok() {
+            gtk4::glib::Propagation::Proceed
+        } else {
+            gtk4::glib::Propagation::Stop
+        }
+    });
+
     window.present();
     crate::update_ui::present_if_needed(&window_overlay);
 }
 
-/// Wire every settings control so any edit flips Save from grey → orange (ready).
 fn install_save_dirty_tracking(inputs: &Rc<SaveInputs>, mark_dirty: Rc<dyn Fn()>) {
     let wire_check = |check: &gtk4::CheckButton| {
         let mark_dirty = Rc::clone(&mark_dirty);
@@ -835,7 +827,15 @@ fn install_save_dirty_tracking(inputs: &Rc<SaveInputs>, mark_dirty: Rc<dyn Fn()>
     wire_check(&inputs.telemetry_enabled);
     wire_check(&inputs.cloud_apexshot);
     wire_check(&inputs.cloud_xbackbone);
-    wire_check(&inputs.cloud_auto_upload);
+    {
+        let mark_dirty = Rc::clone(&mark_dirty);
+        let syncer = Rc::clone(&inputs.cloud_auto_upload_sync);
+        inputs.cloud_auto_upload.connect_toggled(move |_| {
+            if !syncer.is_syncing() {
+                mark_dirty();
+            }
+        });
+    }
     wire_entry(&inputs.xbackbone_url);
     wire_entry(&inputs.xbackbone_api_token);
     wire_theme(&inputs.ui_theme);

@@ -51,28 +51,29 @@ pub(super) fn wire_output_lifecycle(
     traffic_close: &Button,
     in_motion: Rc<Cell<bool>>,
     export_motion: super::super::motion_host::MotionExport,
+    studio_mark: super::super::studio_mark::StudioMark,
 ) {
     let state_copy = state.clone();
     let window_copy = window.downgrade();
     let copy_retry = copy_btn.downgrade();
     let copying = Rc::new(Cell::new(false));
     let copy_btn_click = copy_btn.clone();
+    let studio_mark_copy = studio_mark.clone();
     copy_btn.connect_clicked(move |_| {
         if copying.get() {
             return;
         }
         let capabilities = {
             let state = state_copy.lock().unwrap();
-            crate::studio_entitlement::capabilities_for_image_export(
-                state.static_image_transform,
-                state.source_upscale.factor() > 1,
-            )
+            state.studio_capabilities()
         };
         let Some(window) = window_copy.upgrade() else {
             return;
         };
         let retry = copy_retry.clone();
+        let studio_mark = studio_mark_copy.clone();
         if !crate::studio_upsell::gate(&window, capabilities, move || {
+            studio_mark.invalidate();
             if let Some(button) = retry.upgrade() {
                 button.emit_clicked();
             }
@@ -176,6 +177,7 @@ pub(super) fn wire_output_lifecycle(
     let upload_btn_click = upload_btn.clone();
     let window_upload_gate = window.downgrade();
     let upload_retry = upload_btn.downgrade();
+    let studio_mark_upload = studio_mark.clone();
     upload_btn.connect_clicked(move |_| {
         if uploading_click.get() {
             return;
@@ -183,16 +185,15 @@ pub(super) fn wire_output_lifecycle(
 
         let image_capabilities = {
             let state = state_upload.lock().unwrap();
-            crate::studio_entitlement::capabilities_for_image_export(
-                state.static_image_transform,
-                state.source_upscale.factor() > 1,
-            )
+            state.studio_capabilities()
         };
         let Some(window) = window_upload_gate.upgrade() else {
             return;
         };
         let retry = upload_retry.clone();
+        let studio_mark = studio_mark_upload.clone();
         if !crate::studio_upsell::gate(&window, image_capabilities, move || {
+            studio_mark.invalidate();
             if let Some(button) = retry.upgrade() {
                 button.emit_clicked();
             }
@@ -285,6 +286,7 @@ pub(super) fn wire_output_lifecycle(
     let export_busy = Rc::new(Cell::new(false));
     let export_spinner = save_spinner.clone();
     let export_btn = save_btn.clone();
+    let studio_mark_save = studio_mark.clone();
     save_btn.connect_clicked(move |_| {
         let state_save = state_save.clone();
         let path_save = path_save.clone();
@@ -297,6 +299,7 @@ pub(super) fn wire_output_lifecycle(
         let export_busy = export_busy.clone();
         let export_spinner = export_spinner.clone();
         let export_btn = export_btn.clone();
+        let studio_mark = studio_mark_save.clone();
         glib::idle_add_local_once(move || {
             if export_busy.get() || save_chooser_open.get() {
                 return;
@@ -306,17 +309,16 @@ pub(super) fn wire_output_lifecycle(
                 crate::studio_entitlement::capabilities_for_motion_export()
             } else {
                 let state = state_save.lock().unwrap();
-                crate::studio_entitlement::capabilities_for_image_export(
-                    state.static_image_transform,
-                    state.source_upscale.factor() > 1,
-                )
+                state.studio_capabilities()
             };
             let Some(gate_window) = window_save.upgrade() else {
                 return;
             };
             let retry = export_btn.clone();
-            if !crate::studio_upsell::gate(&gate_window, capabilities, move || retry.emit_clicked())
-            {
+            if !crate::studio_upsell::gate(&gate_window, capabilities, move || {
+                studio_mark.invalidate();
+                retry.emit_clicked();
+            }) {
                 return;
             }
 

@@ -12,6 +12,8 @@ pub mod preprocess;
 pub(crate) mod render;
 mod selection;
 mod state;
+/// The "Made with ApexShot" mark painted over unlicensed Studio previews.
+pub(crate) mod studio_watermark;
 #[allow(dead_code)]
 mod text_detect;
 pub mod types;

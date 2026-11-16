@@ -8,13 +8,8 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn save_edited_image(path: &Path, state: &EditorState) -> Result<(), EditorError> {
-    crate::studio_entitlement::ensure_export_allowed(
-        crate::studio_entitlement::capabilities_for_image_export(
-            state.static_image_transform,
-            state.source_upscale.factor() > 1,
-        ),
-    )
-    .map_err(|error| EditorError::ImageSave(error.to_string()))?;
+    crate::studio_entitlement::ensure_export_allowed(state.studio_capabilities())
+        .map_err(|error| EditorError::ImageSave(error.to_string()))?;
     let final_image = state.to_final_image()?;
     save_edited_image_snapshot(path, final_image)
 }
@@ -102,13 +97,8 @@ pub fn copy_uri_to_clipboard(path: &Path) -> Result<(), String> {
 }
 
 pub fn save_clipboard_image(dir: &Path, state: &EditorState) -> Result<PathBuf, EditorError> {
-    crate::studio_entitlement::ensure_export_allowed(
-        crate::studio_entitlement::capabilities_for_image_export(
-            state.static_image_transform,
-            state.source_upscale.factor() > 1,
-        ),
-    )
-    .map_err(|error| EditorError::ImageSave(error.to_string()))?;
+    crate::studio_entitlement::ensure_export_allowed(state.studio_capabilities())
+        .map_err(|error| EditorError::ImageSave(error.to_string()))?;
     let final_image = state.to_final_image()?;
     std::fs::create_dir_all(dir).map_err(|e| EditorError::ImageSave(e.to_string()))?;
     let stamp = SystemTime::now()

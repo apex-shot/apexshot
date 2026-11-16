@@ -676,7 +676,7 @@ mod tests {
             "the mirror must carry the layer"
         );
 
-        let still = state.to_final_image().expect("final renders");
+        let still = state.render_final_image().expect("final renders");
         // The shape is deliberately non-default (rotated, scaled, offset), so
         // the shaded region is not anchored to one corner. Scan the fill band
         // for shading at all instead of pinning a single pixel.

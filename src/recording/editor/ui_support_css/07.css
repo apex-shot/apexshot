@@ -235,12 +235,12 @@
                 padding: 0;
             }
 
-            /* Video lanes total 226px (36 + 48 + 56 + 56 + 30 gaps); the
-             * floor must sit at that exact height or empty space opens under
-             * the hide track. */
+            /* Video lanes total 154px (28 ruler + 8 + 42 video + 8 + 42 open
+             * lane + 8 + 18 resting lane); the floor must sit at that exact
+             * height or empty space opens under the last lane. */
             .recording-editor-card-board {
-                min-height: 226px;
-                padding: 0 0 10px 0;
+                min-height: 154px;
+                padding: 0 0 4px 0;
             }
 
             /* The Motion timeline reuses this board class with its own lanes
@@ -250,19 +250,20 @@
             }
 
             .recording-editor-card-ruler {
-                min-height: 36px;
+                min-height: 28px;
             }
 
             .recording-editor-card-video-track {
-                min-height: 56px;
+                min-height: 42px;
             }
 
-            .recording-editor-card-zoom-track {
-                min-height: 56px;
-            }
-
+            /* The lanes below the video lane rest thin and trade one open
+             * height: the floor rounds down so the animation's whole-pixel
+             * heights all fit inside it. */
+            .recording-editor-card-zoom-track,
+            .recording-editor-card-sound-track,
             .recording-editor-card-hide-track {
-                min-height: 56px;
+                min-height: 18px;
             }
 
             .recording-editor-tool-section {
@@ -480,6 +481,105 @@
             button.recording-editor-cursor-tab:checked label,
             button.recording-editor-cursor-tab:checked:hover label {
                 color: inherit;
+            }
+
+            /* The Clips panel's speed presets, on the same segmented track as
+             * the scopes above them. */
+            .recording-editor-clip-presets {
+                margin: 0 0 4px 0;
+                padding: 3px;
+                border-radius: 8px;
+                background: alpha(white, 0.06);
+            }
+
+            button.recording-editor-clip-preset {
+                min-height: 26px;
+                padding: 0 4px;
+                border: none;
+                border-radius: 6px;
+                background: transparent;
+                color: alpha(white, 0.52);
+                font-size: 12px;
+                font-weight: 500;
+            }
+
+            button.recording-editor-clip-preset label {
+                color: inherit;
+                font-size: 12px;
+                font-weight: 500;
+            }
+
+            button.recording-editor-clip-preset:hover {
+                color: alpha(white, 0.92);
+                background: transparent;
+            }
+
+            button.recording-editor-clip-preset:checked,
+            button.recording-editor-clip-preset:checked:hover {
+                background: alpha(white, 0.10);
+                color: alpha(white, 0.96);
+            }
+
+            button.recording-editor-clip-preset:checked label,
+            button.recording-editor-clip-preset:checked:hover label {
+                color: inherit;
+            }
+
+            /* Microphone modes: a two-column grid of tiles, each a name over
+             * its one-line summary. */
+            .recording-editor-mic-grid {
+                margin: 0 0 4px 0;
+            }
+
+            button.recording-editor-mic-tile {
+                min-height: 52px;
+                padding: 8px 4px;
+                border: none;
+                border-radius: 10px;
+                background: alpha(white, 0.04);
+            }
+
+            button.recording-editor-mic-tile:hover {
+                background: alpha(white, 0.07);
+            }
+
+            button.recording-editor-mic-tile:checked,
+            button.recording-editor-mic-tile:checked:hover {
+                background: alpha(#ff670d, 0.16);
+            }
+
+            .recording-editor-mic-tile-label {
+                color: alpha(white, 0.78);
+                font-size: 12px;
+                font-weight: 600;
+            }
+
+            .recording-editor-mic-tile-summary {
+                color: alpha(white, 0.42);
+                font-size: 10px;
+            }
+
+            button.recording-editor-mic-tile:checked .recording-editor-mic-tile-label {
+                color: #d5794e;
+            }
+
+            .recording-editor-clip-music-row {
+                margin: 0 0 4px 0;
+            }
+
+            button.recording-editor-clip-music-remove {
+                min-width: 40px;
+                min-height: 40px;
+                padding: 0;
+                border: none;
+                border-radius: 8px;
+                background: alpha(white, 0.06);
+                color: alpha(white, 0.78);
+            }
+
+            button.recording-editor-clip-music-remove:hover {
+                background: alpha(white, 0.10);
+                color: alpha(white, 0.96);
             }
 
             .recording-editor-click-live-preview {

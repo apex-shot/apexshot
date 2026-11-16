@@ -333,6 +333,7 @@ mod obfuscate_bar;
 mod picker_placement;
 mod static_transform_panel;
 mod stroke_bar;
+mod studio_mark;
 mod text_bar;
 mod toolbar;
 mod toolbar_controls;
@@ -1336,6 +1337,9 @@ fn setup_editor_window_full(
     // while the image scrolls and scales.
 
     let render_caches = canvas_render::CanvasRenderCaches::new();
+    // The Studio preview mark's licence cache, shared by the canvas and the
+    // Studio card retries that follow an activation.
+    let studio_mark = studio_mark::StudioMark::new();
 
     let BackgroundAssetCaches { wallpaper_cache } =
         background_assets::install_background_asset_loading(&drawing_area);
@@ -2771,6 +2775,7 @@ fn setup_editor_window_full(
         interactive_preview: &interactive_preview,
         wallpaper_cache: &wallpaper_cache,
         motion_runtime: &motion_host.session().runtime,
+        studio_mark: &studio_mark,
     });
 
     // Order must match `tool_button_index` in types.rs (used by click handlers + shortcuts).
@@ -2913,6 +2918,7 @@ fn setup_editor_window_full(
     });
 
     events::wire_editor_events(events::EventContext {
+        studio_mark: studio_mark.clone(),
         app: app.clone(),
         window: window.clone(),
         path: path.clone(),

@@ -102,6 +102,11 @@ impl RenderKey {
         if let VideoBackground::Wallpaper(path) = &state.background {
             paths.insert(path.clone());
         }
+        // The music is a render input of its own: changing the file behind the
+        // same path changes the export without touching a single setting.
+        if let Some(path) = state.sound.background_file.as_ref() {
+            paths.insert(path.clone());
+        }
         let dependencies = paths
             .iter()
             .map(|path| FileFingerprint::capture(path))

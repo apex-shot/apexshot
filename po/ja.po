@@ -4881,3 +4881,37 @@ msgstr "長いスクリーンショットではモーションを使用できま
 
 msgid "This screenshot is too long to animate. Scrolling captures and other long images stay in Static, where every annotation and export tool still works."
 msgstr "このスクリーンショットは長すぎてアニメーションできません。スクロールキャプチャなどの長い画像は静止モードのままで、すべての注釈ツールと書き出しツールを引き続き使用できます。"
+
+msgid "Account"
+msgstr "アカウント"
+
+msgid "Cloud storage"
+msgstr "クラウドストレージ"
+
+msgid "Email"
+msgstr "メールアドレス"
+
+msgid "Last updated"
+msgstr "最終更新"
+
+msgid "Loading usage…"
+msgstr "使用状況を読み込み中…"
+
+msgid "Plan"
+msgstr "プラン"
+
+msgid "Refreshing…"
+msgstr "更新中…"
+
+msgid ""
+"System default uses your desktop language. Changes are saved automatically."
+msgstr "システムのデフォルトはデスクトップの言語を使用します。変更は自動的に保存されます。"
+
+msgid "Unlimited"
+msgstr "無制限"
+
+msgid "Used"
+msgstr "使用済み"
+
+msgid "{used} of {limit}"
+msgstr "{used}（上限 {limit}）"

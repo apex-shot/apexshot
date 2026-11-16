@@ -4973,3 +4973,38 @@ msgstr "Movimento não está disponível para capturas longas"
 
 msgid "This screenshot is too long to animate. Scrolling captures and other long images stay in Static, where every annotation and export tool still works."
 msgstr "Esta captura é longa demais para ser animada. Capturas com rolagem e outras imagens longas ficam no modo Estático, onde todas as ferramentas de anotação e exportação continuam funcionando."
+
+msgid "Account"
+msgstr "Conta"
+
+msgid "Cloud storage"
+msgstr "Armazenamento em nuvem"
+
+msgid "Email"
+msgstr "E-mail"
+
+msgid "Last updated"
+msgstr "Última atualização"
+
+msgid "Loading usage…"
+msgstr "Carregando uso…"
+
+msgid "Plan"
+msgstr "Plano"
+
+msgid "Refreshing…"
+msgstr "Atualizando…"
+
+msgid ""
+"System default uses your desktop language. Changes are saved automatically."
+msgstr ""
+"A opção Padrão do sistema usa o idioma da sua área de trabalho. As alterações são salvas automaticamente."
+
+msgid "Unlimited"
+msgstr "Ilimitado"
+
+msgid "Used"
+msgstr "Usado"
+
+msgid "{used} of {limit}"
+msgstr "{used} de {limit}"

@@ -33,6 +33,8 @@ pub mod upgrade;
 #[rustfmt::skip]
 pub mod upload;
 
+#[path = "../../../src/cloud/usage.rs"]
+#[rustfmt::skip]
 pub mod usage;
 
 #[path = "../../../src/cloud/xbackbone.rs"]

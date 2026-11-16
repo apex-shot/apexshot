@@ -4907,3 +4907,37 @@ msgstr "الحركة غير متاحة للقطات الشاشة الطويلة"
 
 msgid "This screenshot is too long to animate. Scrolling captures and other long images stay in Static, where every annotation and export tool still works."
 msgstr "لقطة الشاشة هذه أطول من أن تُحرَّك. تبقى اللقطات المُمرَّرة والصور الطويلة الأخرى في الوضع الثابت، حيث تظل جميع أدوات التعليق والتصدير متاحة."
+
+msgid "Account"
+msgstr "الحساب"
+
+msgid "Cloud storage"
+msgstr "التخزين السحابي"
+
+msgid "Email"
+msgstr "البريد الإلكتروني"
+
+msgid "Last updated"
+msgstr "آخر تحديث"
+
+msgid "Loading usage…"
+msgstr "جاري تحميل الاستخدام…"
+
+msgid "Plan"
+msgstr "الخطة"
+
+msgid "Refreshing…"
+msgstr "جاري التحديث…"
+
+msgid ""
+"System default uses your desktop language. Changes are saved automatically."
+msgstr "يستخدم «افتراضي النظام» لغة سطح المكتب لديك. تُحفَظ التغييرات تلقائيًا."
+
+msgid "Unlimited"
+msgstr "غير محدود"
+
+msgid "Used"
+msgstr "المُستخدَم"
+
+msgid "{used} of {limit}"
+msgstr "{used} من {limit}"

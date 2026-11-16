@@ -4963,3 +4963,38 @@ msgstr "Движение недоступно для длинных скринш
 
 msgid "This screenshot is too long to animate. Scrolling captures and other long images stay in Static, where every annotation and export tool still works."
 msgstr "Этот скриншот слишком длинный для анимации. Скриншоты с прокруткой и другие длинные изображения остаются в статическом режиме, где по-прежнему работают все инструменты аннотаций и экспорта."
+
+msgid "Account"
+msgstr "Аккаунт"
+
+msgid "Cloud storage"
+msgstr "Облачное хранилище"
+
+msgid "Email"
+msgstr "Эл. почта"
+
+msgid "Last updated"
+msgstr "Последнее обновление"
+
+msgid "Loading usage…"
+msgstr "Загрузка данных об использовании…"
+
+msgid "Plan"
+msgstr "Тариф"
+
+msgid "Refreshing…"
+msgstr "Обновление…"
+
+msgid ""
+"System default uses your desktop language. Changes are saved automatically."
+msgstr ""
+"Вариант «Системный язык» использует язык рабочего стола. Изменения сохраняются автоматически."
+
+msgid "Unlimited"
+msgstr "Без ограничений"
+
+msgid "Used"
+msgstr "Использовано"
+
+msgid "{used} of {limit}"
+msgstr "{used} из {limit}"

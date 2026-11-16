@@ -135,6 +135,7 @@ pub(super) struct EventContext {
     pub stroke_size_list: gtk4::Box,
     pub in_motion: Rc<Cell<bool>>,
     pub export_motion: super::motion_host::MotionExport,
+    pub studio_mark: super::studio_mark::StudioMark,
 }
 
 pub(super) fn wire_editor_events(ctx: EventContext) {
@@ -226,6 +227,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         stroke_size_list,
         in_motion,
         export_motion,
+        studio_mark,
     } = ctx;
 
     let space_pan = SpacePanState::new();
@@ -284,6 +286,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         &traffic_close,
         in_motion.clone(),
         export_motion,
+        studio_mark,
     );
 
     // Tool-mode activation (Select/Background/Pen/.../Focus). Distinct toggle

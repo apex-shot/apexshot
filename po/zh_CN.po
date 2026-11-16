@@ -4871,3 +4871,37 @@ msgstr "长截图不支持动效"
 
 msgid "This screenshot is too long to animate. Scrolling captures and other long images stay in Static, where every annotation and export tool still works."
 msgstr "此截图过长，无法制作动画。滚动截图和其他长图会保留在静态模式中，所有标注和导出工具仍可使用。"
+
+msgid "Account"
+msgstr "账号"
+
+msgid "Cloud storage"
+msgstr "云存储"
+
+msgid "Email"
+msgstr "电子邮件"
+
+msgid "Last updated"
+msgstr "上次更新"
+
+msgid "Loading usage…"
+msgstr "正在加载用量……"
+
+msgid "Plan"
+msgstr "套餐"
+
+msgid "Refreshing…"
+msgstr "正在刷新……"
+
+msgid ""
+"System default uses your desktop language. Changes are saved automatically."
+msgstr "跟随系统会使用您的桌面语言。更改会自动保存。"
+
+msgid "Unlimited"
+msgstr "无限制"
+
+msgid "Used"
+msgstr "已使用"
+
+msgid "{used} of {limit}"
+msgstr "{used} / {limit}"

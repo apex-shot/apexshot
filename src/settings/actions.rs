@@ -5,6 +5,7 @@ use crate::{
 use gtk4::prelude::*;
 use gtk4::{Button, CheckButton, Entry, Scale};
 
+use super::cloud::AutoUploadSync;
 use super::select::SettingsSelect;
 use super::theme_picker::ThemePicker;
 use super::windowing::{install_autostart_entry_smart, uninstall_autostart_entry};
@@ -103,6 +104,7 @@ pub struct SaveInputs {
     pub cloud_apexshot: CheckButton,
     pub cloud_xbackbone: CheckButton,
     pub cloud_auto_upload: CheckButton,
+    pub cloud_auto_upload_sync: std::rc::Rc<AutoUploadSync>,
     pub xbackbone_url: Entry,
     pub xbackbone_api_token: Entry,
     pub ui_theme: ThemePicker,
@@ -164,9 +166,146 @@ pub struct SaveOutcome {
     pub theme_changed: bool,
 }
 
-pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<SaveOutcome> {
-    let previous_config = load_config().sanitized();
-    let mut config = previous_config.clone();
+pub(crate) struct SaveEffects {
+    pub language_changed: bool,
+    pub theme_changed: bool,
+    pub quick_access_runtime_changed: bool,
+    pub shortcuts_runtime_changed: bool,
+    pub sync_hotkeys: bool,
+    pub sync_autostart: bool,
+    pub daemon_affected: bool,
+}
+
+fn shortcuts_differ(a: &crate::config::AppConfig, b: &crate::config::AppConfig) -> bool {
+    a.shortcut_open_file != b.shortcut_open_file
+        || a.shortcut_open_from_clipboard != b.shortcut_open_from_clipboard
+        || a.shortcut_restore_recently_closed != b.shortcut_restore_recently_closed
+        || a.shortcut_toggle_overlays != b.shortcut_toggle_overlays
+        || a.shortcut_capture_menu != b.shortcut_capture_menu
+        || a.shortcut_capture_area != b.shortcut_capture_area
+        || a.shortcut_capture_crosshair != b.shortcut_capture_crosshair
+        || a.shortcut_capture_previous_area != b.shortcut_capture_previous_area
+        || a.shortcut_capture_fullscreen != b.shortcut_capture_fullscreen
+        || a.shortcut_capture_window != b.shortcut_capture_window
+        || a.shortcut_show_last_preview != b.shortcut_show_last_preview
+        || a.shortcut_save_last_capture != b.shortcut_save_last_capture
+        || a.shortcut_open_recording_ui != b.shortcut_open_recording_ui
+        || a.shortcut_record_screen != b.shortcut_record_screen
+        || a.shortcut_recording_stop_save != b.shortcut_recording_stop_save
+}
+
+fn daemon_needed(config: &crate::config::AppConfig) -> bool {
+    config.show_menu_bar_icon || screenshot_or_general_shortcuts_configured(config)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum DaemonAction {
+    Stop,
+    VisibilityOnly,
+    Restart,
+    VisibilityThenStart,
+}
+
+fn daemon_action(allow_respawn: bool, needed: bool, restart: bool) -> DaemonAction {
+    if !needed {
+        return DaemonAction::Stop;
+    }
+    if !allow_respawn {
+        return DaemonAction::VisibilityOnly;
+    }
+    if restart {
+        return DaemonAction::Restart;
+    }
+    DaemonAction::VisibilityThenStart
+}
+
+static DAEMON_FOLLOW_UPS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+pub(crate) struct SaveState {
+    pub applied: crate::config::AppConfig,
+    pending_hotkeys: bool,
+    pending_autostart: bool,
+    follow_ups: Vec<std::thread::JoinHandle<()>>,
+}
+
+impl SaveState {
+    pub(crate) fn new(config: crate::config::AppConfig) -> Self {
+        Self {
+            applied: config,
+            pending_hotkeys: false,
+            pending_autostart: false,
+            follow_ups: Vec::new(),
+        }
+    }
+
+    pub(crate) fn finish_runtime_updates(&mut self) {
+        for handle in std::mem::take(&mut self.follow_ups) {
+            if let Err(error) = handle.join() {
+                eprintln!("[settings] daemon follow-up panicked: {error:?}");
+            }
+        }
+    }
+}
+
+pub(crate) fn persist_and_apply(
+    state: &mut SaveState,
+    config: &crate::config::AppConfig,
+    persist: impl FnOnce(&crate::config::AppConfig) -> anyhow::Result<()>,
+    sync: impl FnOnce(&SaveEffects, &crate::config::AppConfig) -> anyhow::Result<()>,
+) -> anyhow::Result<SaveEffects> {
+    let mut effects = save_effects(&state.applied, config);
+    effects.sync_hotkeys |= state.pending_hotkeys;
+    effects.sync_autostart |= state.pending_autostart;
+    persist(config)?;
+    state.pending_hotkeys = effects.sync_hotkeys;
+    state.pending_autostart = effects.sync_autostart;
+    sync(&effects, config)?;
+    state.applied = config.clone();
+    state.pending_hotkeys = false;
+    state.pending_autostart = false;
+    Ok(effects)
+}
+
+pub(crate) fn save_effects(
+    previous: &crate::config::AppConfig,
+    config: &crate::config::AppConfig,
+) -> SaveEffects {
+    let language_changed = previous.ui_language != config.ui_language;
+    let theme_changed = previous.ui_theme != config.ui_theme;
+    let quick_access_runtime_changed = previous.quick_access_position
+        != config.quick_access_position
+        || (previous.quick_access_overlay_size - config.quick_access_overlay_size).abs()
+            > f64::EPSILON
+        || previous.quick_access_auto_close_enabled != config.quick_access_auto_close_enabled
+        || previous.quick_access_auto_close_action != config.quick_access_auto_close_action
+        || previous.quick_access_auto_close_interval != config.quick_access_auto_close_interval
+        || previous.quick_access_close_after_dragging != config.quick_access_close_after_dragging
+        || previous.quick_access_close_after_uploading != config.quick_access_close_after_uploading;
+    let shortcuts_runtime_changed = shortcuts_differ(previous, config);
+    let sync_autostart = previous.start_at_login != config.start_at_login;
+    let daemon_affected = quick_access_runtime_changed
+        || shortcuts_runtime_changed
+        || language_changed
+        || theme_changed
+        || previous.show_menu_bar_icon != config.show_menu_bar_icon
+        || daemon_needed(previous) != daemon_needed(config);
+    SaveEffects {
+        language_changed,
+        theme_changed,
+        quick_access_runtime_changed,
+        shortcuts_runtime_changed,
+        sync_hotkeys: shortcuts_runtime_changed,
+        sync_autostart,
+        daemon_affected,
+    }
+}
+
+pub fn save_settings(inputs: &SaveInputs, state: &mut SaveState) -> anyhow::Result<SaveOutcome> {
+    let mut config = load_config().sanitized();
+    inputs.cloud_auto_upload_sync.sync(
+        &inputs.cloud_auto_upload,
+        config.cloud_auto_upload_after_capture,
+    );
     config.start_at_login = inputs.start_at_login.is_active();
     config.ui_theme = inputs
         .ui_theme
@@ -284,109 +423,72 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<SaveOutcome> {
     config.xbackbone_api_token = inputs.xbackbone_api_token.text().to_string();
 
     let config = config.sanitized();
-    let quick_access_runtime_changed = previous_config.quick_access_position
-        != config.quick_access_position
-        || (previous_config.quick_access_overlay_size - config.quick_access_overlay_size).abs()
-            > f64::EPSILON
-        || previous_config.quick_access_auto_close_enabled
-            != config.quick_access_auto_close_enabled
-        || previous_config.quick_access_auto_close_action != config.quick_access_auto_close_action
-        || previous_config.quick_access_auto_close_interval
-            != config.quick_access_auto_close_interval
-        || previous_config.quick_access_close_after_dragging
-            != config.quick_access_close_after_dragging
-        || previous_config.quick_access_close_after_uploading
-            != config.quick_access_close_after_uploading;
+    let effects = persist_and_apply(
+        state,
+        &config,
+        |config| save_config(config).map(|_| ()),
+        |effects, config| {
+            if effects.sync_hotkeys {
+                crate::hotkeys::sync_hotkeys_from_app_config(config)?;
+                let _ = crate::hotkeys::sync_gnome_hotkeys_for_current_desktop(None);
+            }
+            if effects.sync_autostart {
+                if config.start_at_login {
+                    install_autostart_entry_smart()?;
+                } else {
+                    uninstall_autostart_entry()?;
+                }
+            }
+            Ok(())
+        },
+    )?;
+    inputs
+        .cloud_auto_upload_sync
+        .note_saved(config.cloud_auto_upload_after_capture);
 
-    let language_changed = previous_config.ui_language != config.ui_language;
-    let theme_changed = previous_config.ui_theme != config.ui_theme;
-    if language_changed {
+    if effects.language_changed {
         crate::i18n::init(&config.ui_language);
     }
 
-    let shortcuts_runtime_changed = previous_config.shortcut_open_file != config.shortcut_open_file
-        || previous_config.shortcut_open_from_clipboard != config.shortcut_open_from_clipboard
-        || previous_config.shortcut_restore_recently_closed
-            != config.shortcut_restore_recently_closed
-        || previous_config.shortcut_toggle_overlays != config.shortcut_toggle_overlays
-        || previous_config.shortcut_capture_menu != config.shortcut_capture_menu
-        || previous_config.shortcut_capture_area != config.shortcut_capture_area
-        || previous_config.shortcut_capture_crosshair != config.shortcut_capture_crosshair
-        || previous_config.shortcut_capture_previous_area != config.shortcut_capture_previous_area
-        || previous_config.shortcut_capture_fullscreen != config.shortcut_capture_fullscreen
-        || previous_config.shortcut_capture_window != config.shortcut_capture_window
-        || previous_config.shortcut_show_last_preview != config.shortcut_show_last_preview
-        || previous_config.shortcut_save_last_capture != config.shortcut_save_last_capture
-        || previous_config.shortcut_open_recording_ui != config.shortcut_open_recording_ui
-        || previous_config.shortcut_record_screen != config.shortcut_record_screen
-        || previous_config.shortcut_recording_stop_save != config.shortcut_recording_stop_save;
-
-    save_config(&config)?;
-    crate::hotkeys::sync_hotkeys_from_app_config(&config)?;
-    let _ = crate::hotkeys::sync_gnome_hotkeys_for_current_desktop(None);
-
-    if !crate::app_identity::portal_only()
-        || config.start_at_login != previous_config.start_at_login
-    {
-        if config.start_at_login {
-            install_autostart_entry_smart()?;
-        } else {
-            uninstall_autostart_entry()?;
-        }
-    }
-
-    // The daemon owns both the tray and global hotkey listeners. Keep it alive
-    // whenever either the tray is visible or any shortcut is configured; hiding
-    // the tray must not silently disable screenshot shortcuts.
-    let tray_visible = config.show_menu_bar_icon;
-    let daemon_needed = tray_visible || screenshot_or_general_shortcuts_configured(&config);
-    std::thread::spawn(move || {
-        if daemon_needed {
-            let _ = start_daemon_subprocess();
-        } else {
-            let _ = stop_daemon_via_dbus();
-        }
-    });
-
-    let allow_auto_respawn = should_auto_respawn_daemon_for_save();
-    std::thread::spawn(move || {
-        // Language and theme changes rebuild the settings UI in place, so
-        // restart the tray daemon alongside them instead of leaving it on the
-        // previous session.
-        if (language_changed || theme_changed) && allow_auto_respawn && stop_daemon_via_dbus() {
-            std::thread::sleep(std::time::Duration::from_millis(250));
-            if daemon_needed {
-                let _ = start_daemon_subprocess();
-            }
-            return;
-        }
-
-        if quick_access_runtime_changed || shortcuts_runtime_changed {
-            if allow_auto_respawn && stop_daemon_via_dbus() {
-                std::thread::sleep(std::time::Duration::from_millis(250));
-                if daemon_needed {
+    if effects.daemon_affected {
+        let restart = effects.language_changed
+            || effects.theme_changed
+            || effects.quick_access_runtime_changed
+            || effects.shortcuts_runtime_changed;
+        state.follow_ups.retain(|handle| !handle.is_finished());
+        let handle = std::thread::spawn(move || {
+            let _serial = DAEMON_FOLLOW_UPS.lock().unwrap_or_else(|e| e.into_inner());
+            let config = crate::config::load_config();
+            match daemon_action(
+                should_auto_respawn_daemon_for_save(),
+                daemon_needed(&config),
+                restart,
+            ) {
+                DaemonAction::Stop => {
+                    let _ = stop_daemon_via_dbus();
+                }
+                DaemonAction::VisibilityOnly => {
+                    let _ = set_daemon_tray_visibility(config.show_menu_bar_icon);
+                }
+                DaemonAction::Restart => {
+                    if stop_daemon_via_dbus() {
+                        std::thread::sleep(std::time::Duration::from_millis(250));
+                    }
                     let _ = start_daemon_subprocess();
                 }
-                return;
+                DaemonAction::VisibilityThenStart => {
+                    if !set_daemon_tray_visibility(config.show_menu_bar_icon) {
+                        let _ = start_daemon_subprocess();
+                    }
+                }
             }
-
-            if !allow_auto_respawn {
-                let _ = set_daemon_tray_visibility(tray_visible);
-                return;
-            }
-        }
-
-        if set_daemon_tray_visibility(tray_visible) {
-            return;
-        }
-        if daemon_needed && allow_auto_respawn {
-            let _ = start_daemon_subprocess();
-        }
-    });
+        });
+        state.follow_ups.push(handle);
+    }
 
     Ok(SaveOutcome {
-        language_changed,
-        theme_changed,
+        language_changed: effects.language_changed,
+        theme_changed: effects.theme_changed,
     })
 }
 
@@ -451,5 +553,243 @@ mod tests {
             ..Default::default()
         };
         assert!(!screenshot_or_general_shortcuts_configured(&config));
+    }
+
+    #[test]
+    fn unrelated_edits_trigger_no_side_effects() {
+        let previous = crate::config::AppConfig::default();
+        let mut next = previous.clone();
+        next.play_sounds = !next.play_sounds;
+        next.screenshot_format = "JPEG".into();
+        next.rec_filename_pattern = "shot-%Y".into();
+        let effects = super::save_effects(&previous, &next);
+        assert!(!effects.sync_hotkeys);
+        assert!(!effects.sync_autostart);
+        assert!(!effects.daemon_affected);
+    }
+
+    #[test]
+    fn shortcut_or_quick_access_edits_touch_hotkeys_and_daemon_once() {
+        let previous = crate::config::AppConfig::default();
+        let mut next = previous.clone();
+        next.shortcut_capture_area = "Ctrl+Alt+4".into();
+        let effects = super::save_effects(&previous, &next);
+        assert!(effects.sync_hotkeys);
+        assert!(effects.daemon_affected);
+        assert!(!effects.sync_autostart);
+
+        let mut next = previous.clone();
+        next.quick_access_overlay_size += 0.1;
+        let effects = super::save_effects(&previous, &next);
+        assert!(!effects.sync_hotkeys);
+        assert!(effects.daemon_affected);
+        assert!(!effects.sync_autostart);
+    }
+
+    #[test]
+    fn autostart_syncs_only_on_start_at_login_change() {
+        let previous = crate::config::AppConfig::default();
+        let mut next = previous.clone();
+        next.start_at_login = !next.start_at_login;
+        let effects = super::save_effects(&previous, &next);
+        assert!(effects.sync_autostart);
+        assert!(!effects.daemon_affected);
+
+        let effects = super::save_effects(&previous, &previous.clone());
+        assert!(!effects.sync_autostart);
+    }
+
+    #[test]
+    fn tray_or_session_changes_reach_the_daemon_but_not_hotkeys() {
+        let previous = crate::config::AppConfig::default();
+        let mut next = previous.clone();
+        next.show_menu_bar_icon = false;
+        let effects = super::save_effects(&previous, &next);
+        assert!(effects.daemon_affected);
+        assert!(!effects.sync_hotkeys);
+
+        let mut next = previous.clone();
+        next.ui_theme = "light".into();
+        let effects = super::save_effects(&previous, &next);
+        assert!(effects.daemon_affected);
+        assert!(effects.theme_changed);
+        assert!(!effects.sync_hotkeys);
+    }
+
+    #[test]
+    fn manual_daemon_sessions_never_restart_or_start() {
+        for restart in [false, true] {
+            assert_eq!(
+                super::daemon_action(false, true, restart),
+                super::DaemonAction::VisibilityOnly
+            );
+        }
+        assert_eq!(
+            super::daemon_action(false, false, true),
+            super::DaemonAction::Stop
+        );
+    }
+
+    #[test]
+    fn desktop_managed_sessions_restart_once_then_fall_back() {
+        assert_eq!(
+            super::daemon_action(true, true, true),
+            super::DaemonAction::Restart
+        );
+        assert_eq!(
+            super::daemon_action(true, true, false),
+            super::DaemonAction::VisibilityThenStart
+        );
+        assert_eq!(
+            super::daemon_action(true, false, false),
+            super::DaemonAction::Stop
+        );
+    }
+
+    #[test]
+    fn a_failed_effect_keeps_the_baseline_and_retries_it() {
+        let mut state = super::SaveState::new(crate::config::AppConfig::default());
+        let mut desired = crate::config::AppConfig::default();
+        desired.start_at_login = true;
+        let persists = std::cell::Cell::new(0u32);
+        let syncs = std::cell::Cell::new(0u32);
+
+        let first = super::persist_and_apply(
+            &mut state,
+            &desired,
+            |_| {
+                persists.set(persists.get() + 1);
+                Ok(())
+            },
+            |effects, _| {
+                syncs.set(syncs.get() + 1);
+                assert!(effects.sync_autostart);
+                Err(anyhow::anyhow!("autostart failed"))
+            },
+        );
+        assert!(first.is_err());
+        assert!(!state.applied.start_at_login);
+
+        let second = super::persist_and_apply(
+            &mut state,
+            &desired,
+            |_| {
+                persists.set(persists.get() + 1);
+                Ok(())
+            },
+            |effects, _| {
+                syncs.set(syncs.get() + 1);
+                assert!(effects.sync_autostart);
+                Ok(())
+            },
+        );
+        assert!(second.is_ok());
+        assert!(state.applied.start_at_login);
+        assert_eq!(persists.get(), 2);
+        assert_eq!(syncs.get(), 2);
+    }
+
+    #[test]
+    fn a_failed_persist_never_runs_effects() {
+        let mut state = super::SaveState::new(crate::config::AppConfig::default());
+        let mut desired = crate::config::AppConfig::default();
+        desired.start_at_login = true;
+        let sync_ran = std::cell::Cell::new(false);
+        let result = super::persist_and_apply(
+            &mut state,
+            &desired,
+            |_| Err(anyhow::anyhow!("disk full")),
+            |_, _| {
+                sync_ran.set(true);
+                Ok(())
+            },
+        );
+        assert!(result.is_err());
+        assert!(!sync_ran.get());
+        assert!(!state.applied.start_at_login);
+    }
+
+    #[test]
+    fn unfinished_theme_effects_stay_required_after_a_sync_failure() {
+        let mut state = super::SaveState::new(crate::config::AppConfig::default());
+        let mut desired = crate::config::AppConfig::default();
+        desired.ui_theme = "dark".into();
+        assert!(super::persist_and_apply(
+            &mut state,
+            &desired,
+            |_| Ok(()),
+            |_, _| Err(anyhow::anyhow!("sync failed"))
+        )
+        .is_err());
+        assert_ne!(state.applied.ui_theme, "dark");
+
+        let theme_seen = std::cell::Cell::new(false);
+        let result = super::persist_and_apply(
+            &mut state,
+            &desired,
+            |_| Ok(()),
+            |effects, _| {
+                theme_seen.set(effects.theme_changed);
+                Ok(())
+            },
+        );
+        assert!(result.is_ok());
+        assert!(theme_seen.get());
+        assert_eq!(state.applied.ui_theme, "dark");
+    }
+
+    #[test]
+    fn a_partially_applied_sync_is_retried_even_after_reverting() {
+        let mut desired = crate::config::AppConfig::default();
+        desired.start_at_login = true;
+        desired.shortcut_capture_area = "Ctrl+Alt+4".into();
+        let mut state = super::SaveState::new(crate::config::AppConfig::default());
+        let seen = std::cell::Cell::new(0u32);
+        let fails = std::cell::Cell::new(1u32);
+        let sync = |effects: &super::SaveEffects, _: &crate::config::AppConfig| {
+            seen.set(seen.get() + 1);
+            assert!(effects.sync_hotkeys);
+            assert!(effects.sync_autostart);
+            if fails.get() > 0 {
+                fails.set(fails.get() - 1);
+                return Err(anyhow::anyhow!("autostart failed after hotkeys ran"));
+            }
+            Ok(())
+        };
+        assert!(super::persist_and_apply(&mut state, &desired, |_| Ok(()), &sync).is_err());
+        assert!(!state.applied.start_at_login);
+
+        let reverted = crate::config::AppConfig::default();
+        let result = super::persist_and_apply(&mut state, &reverted, |_| Ok(()), &sync);
+        assert!(result.is_ok());
+        assert_eq!(seen.get(), 2);
+        assert!(!state.applied.start_at_login);
+
+        let third = super::persist_and_apply(
+            &mut state,
+            &reverted,
+            |_| Ok(()),
+            |e, _| {
+                assert!(!e.sync_hotkeys);
+                assert!(!e.sync_autostart);
+                Ok(())
+            },
+        );
+        assert!(third.is_ok());
+    }
+
+    #[test]
+    fn finish_runtime_updates_waits_for_scheduled_follow_ups() {
+        let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut state = super::SaveState::new(crate::config::AppConfig::default());
+        {
+            let flag = std::sync::Arc::clone(&flag);
+            state.follow_ups.push(std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(120));
+                flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            }));
+        }
+        state.finish_runtime_updates();
+        assert!(flag.load(std::sync::atomic::Ordering::SeqCst));
     }
 }
