@@ -478,7 +478,7 @@ fn build_cursor_motion_tab(
             }
             smooth_scale.set_value(cursor.smooth);
             speed_scale.set_value(cursor.speed);
-            idle_switch.set_active(cursor.hide_idle);
+            sync_switch(&idle_switch, cursor.hide_idle);
             idle_delay_scale.set_value(cursor.idle_ms);
             idle_delay_scale.set_sensitive(cursor.hide_idle);
             syncing.set(false);

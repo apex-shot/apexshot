@@ -48,6 +48,16 @@ fn bind_switch(
     });
 }
 
+/// Show `active` on a switch from a refresh. Only a real change is written:
+/// `set_active` ends the switch's toggle animation even when the value is
+/// unchanged, and a click only commits when that animation finishes, so the
+/// refresh that runs on every playback tick would cancel the user's click.
+fn sync_switch(switch: &Switch, active: bool) {
+    if switch.is_active() != active {
+        switch.set_active(active);
+    }
+}
+
 pub(super) struct ToolSidebar {
     pub widget: GtkBox,
     pub refresh: Rc<dyn Fn()>,
@@ -449,7 +459,7 @@ fn build_zoom_panel(
             let camera = guard.zoom_camera.clamped();
             speed_slider.set_value(camera.speed);
             smoothness_slider.set_value(camera.smoothness);
-            start_early.set_active(camera.start_early);
+            sync_switch(&start_early, camera.start_early);
             motion_blur_slider.set_value(camera.motion_blur);
             if let Some(clip) = &selected {
                 let mode = if clip.mode == ZoomMode::Auto && auto_available {
@@ -475,7 +485,7 @@ fn build_zoom_panel(
                     manual_btn.set_active(true);
                 }
             }
-            instant.set_active(selected.as_ref().is_some_and(|clip| clip.instant));
+            sync_switch(&instant, selected.as_ref().is_some_and(|clip| clip.instant));
             let selected_preset = selected
                 .as_ref()
                 .map(|clip| nearest_zoom_preset(clip.scale));
@@ -780,7 +790,7 @@ fn build_clip_scope_page(
             for (preset, button) in &preset_buttons {
                 button.set_active(speed.is_some_and(|speed| (speed - preset).abs() < 1e-6));
             }
-            mute.set_active(muted);
+            sync_switch(&mute, muted);
             presets.set_sensitive(can_edit);
             speed_slider.set_sensitive(can_edit);
             mute.set_sensitive(can_mute);
@@ -1074,7 +1084,7 @@ fn build_sound_scope_page(
             music_remove.set_visible(music.is_some());
             music_controls.set_sensitive(music.is_some());
             music_volume.set_value(music_level * 100.0);
-            mute_music.set_active(music_muted);
+            sync_switch(&mute_music, music_muted);
             syncing.set(false);
         }) as Rc<dyn Fn()>
     };
@@ -2322,7 +2332,7 @@ mod tests {
             "set_zoom_camera_start_early(active)",
             "speed_slider.set_value(camera.speed)",
             "smoothness_slider.set_value(camera.smoothness)",
-            "start_early.set_active(camera.start_early)",
+            "sync_switch(&start_early, camera.start_early)",
             "motion_blur_slider.set_value(camera.motion_blur)",
         ] {
             assert!(zoom.contains(control), "missing camera control: {control}");
@@ -2577,6 +2587,11 @@ mod tests {
         // switch's own state-set, before GTK had committed the new state, so
         // the refresh re-entered the toggle. Every switch goes through
         // bind_switch, which writes the model first and defers the pause.
+        //
+        // The refresh side goes through sync_switch: `set_active` ends the
+        // switch's toggle animation even when the value matches, and a click
+        // only commits once that animation finishes, so the refresh on every
+        // playback tick would cancel the click.
         for source in [
             include_str!("tool_sidebar.rs"),
             include_str!("tool_sidebar_cursor.rs"),
@@ -2598,6 +2613,14 @@ mod tests {
                 assert!(
                     compact.contains(&format!("bind_switch(&{name},")),
                     "{name} must pause playback through bind_switch"
+                );
+                assert!(
+                    !compact.contains(&format!("{name}.set_active(")),
+                    "{name} must be shown from a refresh through sync_switch, not set_active"
+                );
+                assert!(
+                    compact.contains(&format!("sync_switch(&{name},")),
+                    "{name} must be synced from its refresh through sync_switch"
                 );
             }
             assert!(
