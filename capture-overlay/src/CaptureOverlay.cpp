@@ -274,8 +274,25 @@ void CaptureOverlay::suppressLegacyToolRail()
     update();
 }
 
+void CaptureOverlay::requestExit(int code)
+{
+    // First request wins: once the selector is leaving, a later request must
+    // not rewrite the exit the caller is about to honour.
+    if (m_requestedExitCode == kNoExitRequested) {
+        m_requestedExitCode = code;
+    }
+    QApplication::exit(m_requestedExitCode);
+}
+
 void CaptureOverlay::focusAndRaiseOverlay()
 {
+    // The constructor and several callers schedule this through 0 ms and 100 ms
+    // timers. Once an exit has been requested those callbacks must not show the
+    // selector again after it was hidden for teardown.
+    if (m_requestedExitCode != kNoExitRequested) {
+        return;
+    }
+
     // Pin to full screen geometry (including panel regions), then request
     // fullscreen so the freeze can cover shell chrome instead of sitting
     // under it and painting a second status bar.
@@ -368,6 +385,7 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
     , m_overlayMode(overlayMode)
     , m_targetScreen(targetScreen)
     , m_selectionConfirmed(false)
+    , m_requestedExitCode(kNoExitRequested)
     , m_eventDesktopOrigin(0, 0)
     , m_hasEventDesktopOrigin(false)
     , m_hasSelection(false)
