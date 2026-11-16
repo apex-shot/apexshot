@@ -618,14 +618,100 @@ fn build_cursor_effects_tab(
             on_change();
         }
     });
+
+    let sound_label = Label::new(Some(&t("Sound")));
+    sound_label.add_css_class("recording-editor-zoom-kicker");
+    sound_label.set_xalign(0.0);
+    body.append(&sound_label);
+
+    let sound_row = GtkBox::new(Orientation::Horizontal, 6);
+    sound_row.add_css_class("recording-editor-click-effect-row");
+    sound_row.set_hexpand(true);
+    sound_row.set_homogeneous(true);
+    let sound_off = click_sound_card(&t("Off"));
+    let sound_soft = click_sound_card(&t("Soft"));
+    sound_soft.set_group(Some(&sound_off));
+    sound_row.append(&sound_off);
+    sound_row.append(&sound_soft);
+    body.append(&sound_row);
+
+    sound_off.connect_toggled({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        move |card| {
+            if syncing.get() || !card.is_active() {
+                return;
+            }
+            state.lock().unwrap().sound.click_sound = None;
+            on_change();
+        }
+    });
+    sound_soft.connect_toggled({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        move |card| {
+            if syncing.get() || !card.is_active() {
+                return;
+            }
+            state.lock().unwrap().sound.click_sound = Some("soft".to_owned());
+            on_change();
+        }
+    });
+
+    let volume =
+        FillSlider::new_with_value_text(&t("Volume"), |value, _, _| format!("{value:.0}%"));
+    volume.set_range(0.0, 100.0);
+    volume.set_increments(1.0, 5.0);
+    volume.connect_value_changed({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        move |slider| {
+            if syncing.get() {
+                return;
+            }
+            state.lock().unwrap().sound.click_sound_volume = slider.value() / 100.0;
+            on_change();
+        }
+    });
+
+    let preview = Button::with_label(&t("Preview"));
+    preview.add_css_class("recording-editor-secondary-button");
+    preview.set_valign(Align::Center);
+    preview.set_halign(Align::End);
+    preview.connect_clicked({
+        let state = state.clone();
+        move |_| {
+            let volume = state.lock().unwrap().sound.click_sound_volume;
+            crate::recording::editor::sound::preview_click(volume);
+        }
+    });
+
+    let volume_row = GtkBox::new(Orientation::Horizontal, 8);
+    volume_row.set_hexpand(true);
+    volume.widget().set_hexpand(true);
+    volume_row.append(&volume.widget());
+    volume_row.append(&preview);
+    body.append(&volume_row);
+
     let refresh = {
         let live = live.clone();
         let none_btn = none_btn.clone();
         let ripple_btn = ripple_btn.clone();
         let circle_btn = circle_btn.clone();
+        let sound_off = sound_off.clone();
+        let sound_soft = sound_soft.clone();
+        let volume = volume.clone();
+        let preview = preview.clone();
         let syncing = syncing.clone();
         Rc::new(move || {
-            let cursor = state.lock().unwrap().cursor;
+            let guard = state.lock().unwrap();
+            let cursor = guard.cursor;
+            let click_sound = guard.sound.click_sound.clone();
+            let click_volume = guard.sound.click_sound_volume;
+            drop(guard);
             syncing.set(true);
             match cursor.click_effect {
                 ClickEffect::None => none_btn.set_active(true),
@@ -636,6 +722,15 @@ fn build_cursor_effects_tab(
                 // changed; the effect still renders from the saved value.
                 ClickEffect::Spotlight | ClickEffect::Echo => {}
             }
+            let click_on = click_sound.is_some();
+            if click_on {
+                sound_soft.set_active(true);
+            } else {
+                sound_off.set_active(true);
+            }
+            volume.set_value(click_volume * 100.0);
+            volume.set_sensitive(click_on);
+            preview.set_sensitive(click_on);
             live.queue_draw();
             syncing.set(false);
         }) as Rc<dyn Fn()>
@@ -733,6 +828,21 @@ fn click_effect_card(effect: ClickEffect) -> ToggleButton {
     name.set_xalign(0.5);
     column.append(&name);
     card.set_child(Some(&column));
+    card
+}
+
+/// A click-sound card: the same surface as an effect card, with the label
+/// doing the work because the sound has no shape to draw.
+fn click_sound_card(label: &str) -> ToggleButton {
+    let card = ToggleButton::new();
+    card.add_css_class("recording-editor-click-effect-card");
+    card.set_has_frame(false);
+    card.set_hexpand(true);
+    let name = Label::new(Some(label));
+    name.add_css_class("recording-editor-click-effect-label");
+    name.set_xalign(0.5);
+    name.set_valign(Align::Center);
+    card.set_child(Some(&name));
     card
 }
 

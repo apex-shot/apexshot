@@ -17,6 +17,7 @@ pub mod project;
 pub mod recording_id;
 pub(crate) mod ripple_preview;
 pub mod sidecar;
+pub mod sound;
 pub mod sound_peaks;
 pub mod ui_support;
 pub(crate) mod window;

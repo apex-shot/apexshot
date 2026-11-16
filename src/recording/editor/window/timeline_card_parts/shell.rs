@@ -6,6 +6,7 @@ const LANE_GAP: f64 = 8.0;
 pub fn build_timeline_card(
     state: Arc<Mutex<VideoEditState>>,
     media: Rc<RefCell<Option<MediaFile>>>,
+    sound: Rc<SoundSync>,
     filmstrip: Rc<RefCell<Vec<gtk4::gdk_pixbuf::Pixbuf>>>,
     on_change: Rc<dyn Fn()>,
     window: &impl IsA<Widget>,
@@ -626,11 +627,12 @@ pub fn build_timeline_card(
 
     let pause: Rc<dyn Fn()> = {
         let media = media.clone();
+        let sound = sound.clone();
         let playing = playing.clone();
         let play_button = play_button.clone();
         let paint = paint.clone();
         Rc::new(move || {
-            pause_playback(&media, &playing, &play_button, &paint);
+            pause_playback(&media, &sound, &playing, &play_button, &paint);
         })
     };
 
@@ -829,10 +831,11 @@ pub fn build_timeline_card(
     play_button.connect_clicked({
         let state = state.clone();
         let media = media.clone();
+        let sound = sound.clone();
         let playing = playing.clone();
         let play_button = play_button.clone();
         let redraw = redraw.clone();
-        move |_| toggle_playback(&state, &media, &playing, &play_button, &redraw)
+        move |_| toggle_playback(&state, &media, &sound, &playing, &play_button, &redraw)
     });
 
     skip_back.connect_clicked({
@@ -911,6 +914,7 @@ pub fn build_timeline_card(
     {
         let state = state.clone();
         let media = media.clone();
+        let sound = sound.clone();
         let playing = playing.clone();
         let play_button = play_button.clone();
         let redraw = redraw.clone();
@@ -918,7 +922,7 @@ pub fn build_timeline_card(
         let zoom_level_bar = zoom_level_bar.clone();
         let zoom_scale = zoom_scale.clone();
         glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
-            tick_playback(&state, &media, &playing, &play_button, &redraw);
+            tick_playback(&state, &media, &sound, &playing, &play_button, &redraw);
             // The bar's travel follows the track, so a resize has to re-place
             // it; `place_zoom_level_bar` is a no-op when nothing moved.
             place_zoom_level_bar(&zoom_level_track, &zoom_level_bar, zoom_scale.value() / 100.0);
@@ -1315,7 +1319,7 @@ mod tests {
             .find("playback_position(guard.playhead_seconds)")
             .expect("the tick resolves the retained position before it advances");
         let stopped = tick
-            .find("stop_playback_at_end(state, media, playing, play_button, redraw);")
+            .find("stop_playback_at_end(state, media, sound, playing, play_button, redraw);")
             .expect("a composition with nothing retained must stop");
         assert!(
             resolved < stopped,

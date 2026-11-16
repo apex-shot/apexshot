@@ -18,6 +18,7 @@ use super::model::{
     DEFAULT_CURSOR_IDLE_MS, DEFAULT_CURSOR_SHADOW, DEFAULT_CURSOR_SIZE, DEFAULT_CURSOR_SMOOTH,
     DEFAULT_CURSOR_SPEED, DEFAULT_ROTATE_ON_X_MOVEMENT_RATIO,
 };
+use super::sound::SoundSettings;
 
 pub const VIDEO_PROJECT_VERSION: u32 = 1;
 
@@ -60,6 +61,9 @@ pub struct VideoProjectFile {
     pub crop: Option<CropFile>,
     pub background: BackgroundFile,
     pub background_padding: f64,
+    /// Master volume, microphone mode, background music and click sound.
+    #[serde(default)]
+    pub sound: SoundSettings,
     // The radius was persisted but never rendered, so older sidecars carry
     // non-zero values that were never visible. It defaults to 0 rather than
     // inheriting the old default, which would round every existing project.
@@ -988,6 +992,7 @@ impl VideoEditState {
             crop: self.crop.map(crop_to_file),
             background: background_to_file(&self.background),
             background_padding: self.background_padding,
+            sound: self.sound.clone().clamped(),
             background_corner_radius: self.background_corner_radius,
             dimension_preset: dimension_to_file(self.dimension_preset),
             custom_width: self.custom_width,
@@ -1057,6 +1062,7 @@ impl VideoEditState {
         self.crop = file.crop.map(crop_from_file);
         self.background = background_from_file(file.background);
         self.background_padding = file.background_padding;
+        self.sound = file.sound.clamped();
         self.background_corner_radius = file.background_corner_radius;
         self.dimension_preset = dimension_from_file(file.dimension_preset);
         self.custom_width = file.custom_width;

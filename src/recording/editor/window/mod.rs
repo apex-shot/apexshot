@@ -19,6 +19,7 @@ mod media_library;
 mod preview;
 #[allow(dead_code)]
 mod rail;
+mod sound_player;
 mod squircle_clip;
 mod timeline_card;
 mod tool_section;
@@ -170,6 +171,8 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
         InitialVideo::AsyncLoad(path) => Some(MediaFile::for_filename(path)),
         InitialVideo::None => Some(MediaFile::new()),
     }));
+    // The composition's own sound, played beside the muted video stream.
+    let sound = Rc::new(sound_player::SoundSync::new());
     let exporting = Rc::new(Cell::new(false));
     let export_flow_active: export_flow::FlowActive = Rc::new(Cell::new(false));
     let export_cancellation = Arc::new(AtomicBool::new(false));
@@ -266,6 +269,7 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
     let (timeline, paint, pause_playback) = timeline_card::build_timeline_card(
         state.clone(),
         media.clone(),
+        sound,
         filmstrip.clone(),
         ping.clone(),
         &window,

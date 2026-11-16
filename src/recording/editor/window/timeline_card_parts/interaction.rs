@@ -1,12 +1,13 @@
 pub fn toggle_playback(
     state: &Arc<Mutex<VideoEditState>>,
     media: &Rc<RefCell<Option<MediaFile>>>,
+    sound: &Rc<SoundSync>,
     playing: &Rc<Cell<bool>>,
     play_button: &Button,
     redraw: &Rc<dyn Fn()>,
 ) {
     if playing.get() {
-        pause_playback(media, playing, play_button, redraw);
+        pause_playback(media, sound, playing, play_button, redraw);
         return;
     }
 
@@ -28,6 +29,7 @@ pub fn toggle_playback(
             media_file.pause();
         }
         playing.set(false);
+        sound.stop();
         set_play_icon(play_button, "media-playback-start-symbolic");
         redraw();
         return;
@@ -35,18 +37,20 @@ pub fn toggle_playback(
     if let Some(media_file) = media.borrow().as_ref() {
         media_file.pause();
         media_file.seek((seek_to * 1_000_000.0) as i64);
-        media_file.set_muted(muted);
+        set_video_muted(media_file, sound, muted);
         if (speed - 1.0).abs() <= 1e-6 {
             media_file.play();
         }
     }
     playing.set(true);
+    drive_sound(state, sound, true);
     set_play_icon(play_button, "media-playback-pause-symbolic");
     redraw();
 }
 
 pub fn pause_playback(
     media: &Rc<RefCell<Option<MediaFile>>>,
+    sound: &Rc<SoundSync>,
     playing: &Rc<Cell<bool>>,
     play_button: &Button,
     refresh: &Rc<dyn Fn()>,
@@ -57,9 +61,43 @@ pub fn pause_playback(
     if let Some(media_file) = media.borrow().as_ref() {
         media_file.pause();
     }
+    sound.stop();
     playing.set(false);
     set_play_icon(play_button, "media-playback-start-symbolic");
     refresh();
+}
+
+/// Keep the composition's sound in step with the preview: start it, restart it
+/// after a seek or an edit, and let it go when the preview stops. The plan is
+/// built only when the player actually needs one.
+fn drive_sound(state: &Arc<Mutex<VideoEditState>>, sound: &Rc<SoundSync>, playing: bool) {
+    let (time, key) = {
+        let guard = state.lock().unwrap();
+        (
+            guard.playhead_seconds,
+            crate::recording::editor::sound::change_key(&guard),
+        )
+    };
+    let planned = state.clone();
+    sound.update(playing, time, key, move || {
+        let guard = planned.lock().unwrap();
+        SoundPlan::from_state(&guard)
+    });
+}
+
+/// Mute the video stream, which carries no sound of its own while the sound
+/// player runs: the composition's sound has every clip's mute, the music and
+/// the clicks in it, none of which the video stream knows about.
+fn set_video_muted(media_file: &MediaFile, sound: &Rc<SoundSync>, muted: bool) {
+    if sound.available() {
+        media_file.set_muted(true);
+        return;
+    }
+    // Without a sound player the video keeps its own track. Toggling first is
+    // what reaches the sink: GTK skips a set that matches the current value,
+    // and the audio server may have restored a stale mute on this stream.
+    media_file.set_muted(true);
+    media_file.set_muted(muted);
 }
 
 pub fn set_play_icon(button: &Button, icon_name: &str) {
@@ -90,6 +128,7 @@ pub fn nudge_playhead(
 pub fn tick_playback(
     state: &Arc<Mutex<VideoEditState>>,
     media: &Rc<RefCell<Option<MediaFile>>>,
+    sound: &Rc<SoundSync>,
     playing: &Rc<Cell<bool>>,
     play_button: &Button,
     redraw: &Rc<dyn Fn()>,
@@ -97,6 +136,7 @@ pub fn tick_playback(
     if !playing.get() {
         return;
     }
+    drive_sound(state, sound, true);
 
     let resolved = {
         let guard = state.lock().unwrap();
@@ -112,7 +152,7 @@ pub fn tick_playback(
             })
     };
     let Some((base_timeline, source_t, end, speed)) = resolved else {
-        stop_playback_at_end(state, media, playing, play_button, redraw);
+        stop_playback_at_end(state, media, sound, playing, play_button, redraw);
         return;
     };
 
@@ -176,7 +216,7 @@ pub fn tick_playback(
         let reached = guard.playhead_seconds >= end - 1e-3;
         drop(guard);
         if reached {
-            stop_playback_at_end(state, media, playing, play_button, redraw);
+            stop_playback_at_end(state, media, sound, playing, play_button, redraw);
         } else {
             redraw();
         }
@@ -233,12 +273,12 @@ pub fn tick_playback(
             if media_file.is_playing() {
                 media_file.pause();
             }
-            media_file.set_muted(muted);
+            set_video_muted(media_file, sound, muted);
             if actual.is_some_and(|seconds| (seconds - seek_to).abs() > 1e-4) {
                 media_file.seek((seek_to * 1_000_000.0) as i64);
             }
         }
-        stop_playback_at_end(state, media, playing, play_button, redraw);
+        stop_playback_at_end(state, media, sound, playing, play_button, redraw);
         return;
     }
     if let Some(media_file) = media.borrow().as_ref() {
@@ -258,7 +298,7 @@ pub fn tick_playback(
                 media_file.play();
             }
         }
-        media_file.set_muted(muted);
+        set_video_muted(media_file, sound, muted);
     }
     redraw();
 }
@@ -266,11 +306,13 @@ pub fn tick_playback(
 fn stop_playback_at_end(
     state: &Arc<Mutex<VideoEditState>>,
     media: &Rc<RefCell<Option<MediaFile>>>,
+    sound: &Rc<SoundSync>,
     playing: &Rc<Cell<bool>>,
     play_button: &Button,
     redraw: &Rc<dyn Fn()>,
 ) {
     playing.set(false);
+    sound.stop();
     let first_source = {
         let mut guard = state.lock().unwrap();
         let first = guard.first_playable_position();

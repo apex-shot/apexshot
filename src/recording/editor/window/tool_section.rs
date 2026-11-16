@@ -17,7 +17,7 @@ pub(super) struct ToolSection {
 /// Icons follow the reference — media, cursor, a frame grid, and a saved
 /// take — rather than one button per `EditorTool`. The tools a bare recording
 /// opens with (Cursor, Background) map onto the media and cursor icons; the
-/// timeline-driven panels (Zoom, Hide, Clip) are reached by selecting a clip
+/// timeline-driven panels (Zoom, Hide, Clips) are reached by selecting a clip
 /// in the timeline, and the fourth icon is the placeholder for the take
 /// library, which is not built yet.
 pub(super) fn build_tool_section(
@@ -60,12 +60,12 @@ pub(super) fn build_tool_section(
     // Frame and motion tools. These drive the timeline rather than the
     // sidebar, so selecting one hands the sidebar back to whatever the
     // timeline currently has selected.
-    let frames = tool_icon_button(
+    let clips = tool_icon_button(
         icon_names::custom::OVERLAPPING_WINDOWS_SYMBOLIC,
-        &t("Frames"),
+        &t("Clips"),
     );
-    frames.set_tooltip_text(Some(&t("Frames")));
-    frames.connect_clicked({
+    clips.set_tooltip_text(Some(&t("Clips")));
+    clips.connect_clicked({
         let state = state.clone();
         let on_change = on_change.clone();
         move |button| {
@@ -76,7 +76,7 @@ pub(super) fn build_tool_section(
             on_change();
         }
     });
-    root.append(&frames);
+    root.append(&clips);
 
     // The take library is not built yet; the icon marks where it goes.
     let takes = tool_icon_button(icon_names::custom::MARKER_SYMBOLIC, &t("Takes"));
@@ -87,14 +87,14 @@ pub(super) fn build_tool_section(
     let refresh = {
         let background = background.clone();
         let cursor = cursor.clone();
-        let frames = frames.clone();
+        let clips = clips.clone();
         Rc::new(move || {
             let tool = state.lock().unwrap().selected_tool;
             // Timeline has its own icon; the other two go inactive while a
             // timeline selection drives the panel below.
             background.set_active(tool == EditorTool::Background);
             cursor.set_active(tool == EditorTool::Cursor);
-            frames.set_active(tool == EditorTool::Timeline);
+            clips.set_active(tool == EditorTool::Timeline);
         }) as Rc<dyn Fn()>
     };
 

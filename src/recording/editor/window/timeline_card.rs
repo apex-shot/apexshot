@@ -4,7 +4,9 @@ use crate::recording::editor::model::{
     snap_range_to_target, snap_to_target, usable_media_timestamp_seconds, VideoEditState, ZoomMode,
     DEFAULT_CURSOR_HIDE_DURATION_SECONDS, DEFAULT_ZOOM_DURATION_SECONDS,
 };
+use crate::recording::editor::sound::SoundPlan;
 use crate::recording::editor::sound_peaks::Peaks;
+use crate::recording::editor::window::sound_player::SoundSync;
 use crate::recording::editor::window::tool_sidebar::format_clip_speed;
 use gtk4::gdk;
 use gtk4::glib;

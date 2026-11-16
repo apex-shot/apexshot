@@ -4,16 +4,18 @@ use crate::recording::editor::model::{
     VideoEditState, ZoomMode, MAX_CLIP_SPEED, MAX_CURSOR_SIZE, MAX_CURSOR_SPEED, MIN_CLIP_SPEED,
     MIN_CURSOR_SIZE, MIN_CURSOR_SPEED, ZOOM_SCALE_PRESETS,
 };
+use crate::recording::editor::sound::MicPreset;
 use gtk4::{
     gdk, glib, prelude::*, Align, Box as GtkBox, Button, DrawingArea, EventControllerMotion,
-    GestureClick, GestureDrag, Grid, Image, Label, Orientation, Overlay, PolicyType,
-    ScrolledWindow, Switch, ToggleButton, Widget, Window,
+    FileChooserAction, FileChooserNative, FileFilter, GestureClick, GestureDrag, Grid, Image,
+    Justification, Label, Orientation, Overlay, PolicyType, ResponseType, ScrolledWindow, Switch,
+    ToggleButton, Widget, Window,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-use crate::i18n::t;
+use crate::i18n::{t, tfmt};
 
 pub(super) const TOOL_SIDEBAR_WIDTH: i32 = 288;
 
@@ -482,6 +484,13 @@ struct ClipPanel {
     refresh: Rc<dyn Fn()>,
 }
 
+/// One scope of the Clips panel: the widgets plus the refresh that reads the
+/// model back into them.
+struct ClipsPage {
+    widget: GtkBox,
+    refresh: Rc<dyn Fn()>,
+}
+
 fn build_clip_panel(
     state: Arc<Mutex<VideoEditState>>,
     on_change: Rc<dyn Fn()>,
@@ -495,15 +504,160 @@ fn build_clip_panel(
     let header = GtkBox::new(Orientation::Horizontal, 8);
     header.add_css_class("recording-editor-zoom-header");
     header.set_hexpand(true);
-    let title = Label::new(Some(&t("Clip")));
+    let title = Label::new(Some(&t("Clips")));
     title.add_css_class("recording-editor-zoom-title");
     title.set_xalign(0.0);
     title.set_hexpand(true);
     header.append(&title);
 
-    let body = GtkBox::new(Orientation::Vertical, 0);
+    // The scopes reuse the Cursor panel's sub-tab styling so the sidebar has
+    // one segmented control, not two that nearly match.
+    let tabs = GtkBox::new(Orientation::Horizontal, 0);
+    tabs.add_css_class("recording-editor-cursor-tabs");
+    tabs.set_hexpand(true);
+    tabs.set_homogeneous(true);
+    let clip_tab = cursor_tab_button(&t("Clip"));
+    let sound_tab = cursor_tab_button(&t("Sound"));
+    sound_tab.set_group(Some(&clip_tab));
+    clip_tab.set_active(true);
+    tabs.append(&clip_tab);
+    tabs.append(&sound_tab);
+
+    let clip_page = build_clip_scope_page(state.clone(), on_change.clone(), pause_playback);
+    let sound_page = build_sound_scope_page(state.clone(), on_change);
+    clip_page.widget.set_visible(true);
+    sound_page.widget.set_visible(false);
+
+    let pages = GtkBox::new(Orientation::Vertical, 0);
+    pages.set_hexpand(true);
+    pages.append(&clip_page.widget);
+    pages.append(&sound_page.widget);
+
+    let scroll = ScrolledWindow::new();
+    scroll.add_css_class("recording-editor-zoom-scroll");
+    scroll.set_policy(PolicyType::Never, PolicyType::Automatic);
+    scroll.set_vexpand(true);
+    scroll.set_hexpand(true);
+    scroll.set_child(Some(&pages));
+
+    panel.append(&header);
+    panel.append(&tabs);
+    panel.append(&scroll);
+
+    clip_tab.connect_toggled({
+        let clip_page = clip_page.widget.clone();
+        let sound_page = sound_page.widget.clone();
+        move |button| {
+            if button.is_active() {
+                clip_page.set_visible(true);
+                sound_page.set_visible(false);
+            }
+        }
+    });
+    sound_tab.connect_toggled({
+        let clip_page = clip_page.widget.clone();
+        let sound_page = sound_page.widget.clone();
+        move |button| {
+            if button.is_active() {
+                clip_page.set_visible(false);
+                sound_page.set_visible(true);
+            }
+        }
+    });
+
+    // A new selection opens the Clip scope; the choice otherwise stays where
+    // the user left it, so browsing the Sound settings does not get undone by
+    // a refresh that happens to run.
+    let last_selection = Rc::new(Cell::new(None::<usize>));
+    let refresh = {
+        let panel = panel.clone();
+        let refresh_clip = clip_page.refresh;
+        let refresh_sound = sound_page.refresh;
+        let clip_tab = clip_tab.clone();
+        let state = state.clone();
+        let last_selection = last_selection.clone();
+        Rc::new(move || {
+            panel.set_visible(true);
+            let selection = state.lock().unwrap().selected_segment;
+            if selection.is_some() && selection != last_selection.get() {
+                clip_tab.set_active(true);
+            }
+            last_selection.set(selection);
+            refresh_clip();
+            refresh_sound();
+        }) as Rc<dyn Fn()>
+    };
+
+    ClipPanel {
+        widget: panel,
+        refresh,
+    }
+}
+
+/// The speed presets the Clip scope offers, in the order the row lays them
+/// out. A preset outside the model's speed range is left off the row.
+const SPEED_PRESETS: [f64; 5] = [0.5, 1.0, 1.5, 2.0, 3.0];
+
+fn build_clip_scope_page(
+    state: Arc<Mutex<VideoEditState>>,
+    on_change: Rc<dyn Fn()>,
+    pause_playback: PausePlayback,
+) -> ClipsPage {
+    let body = GtkBox::new(Orientation::Vertical, 8);
     body.add_css_class("recording-editor-zoom-body");
     body.set_hexpand(true);
+
+    let syncing = Rc::new(Cell::new(false));
+
+    let count = Label::new(None);
+    count.add_css_class("recording-editor-zoom-hint");
+    count.set_xalign(0.0);
+
+    let hint = Label::new(Some(&t(
+        "Select a clip on the timeline to change its speed and sound.",
+    )));
+    hint.add_css_class("recording-editor-zoom-hint");
+    hint.set_wrap(true);
+    hint.set_xalign(0.0);
+    hint.set_max_width_chars(34);
+
+    let speed_label = Label::new(Some(&t("Speed")));
+    speed_label.add_css_class("recording-editor-zoom-kicker");
+    speed_label.set_xalign(0.0);
+
+    let presets = GtkBox::new(Orientation::Horizontal, 0);
+    presets.add_css_class("recording-editor-clip-presets");
+    presets.set_hexpand(true);
+    presets.set_homogeneous(true);
+    let mut preset_buttons: Vec<(f64, ToggleButton)> = Vec::new();
+    for speed in SPEED_PRESETS {
+        if !(MIN_CLIP_SPEED..=MAX_CLIP_SPEED).contains(&speed) {
+            continue;
+        }
+        let button = ToggleButton::with_label(&format_clip_speed(speed));
+        button.add_css_class("recording-editor-clip-preset");
+        button.set_has_frame(false);
+        button.set_hexpand(true);
+        button.connect_toggled({
+            let state = state.clone();
+            let on_change = on_change.clone();
+            let syncing = syncing.clone();
+            move |button| {
+                if syncing.get() || !button.is_active() {
+                    return;
+                }
+                state.lock().unwrap().set_selected_clip_speed(speed);
+                on_change();
+            }
+        });
+        presets.append(&button);
+        preset_buttons.push((speed, button));
+    }
+    if let Some((_, first)) = preset_buttons.first() {
+        for (_, button) in preset_buttons.iter().skip(1) {
+            button.set_group(Some(first));
+        }
+    }
 
     let speed_slider =
         FillSlider::new_with_value_text(&t("Speed"), |value, _, _| format_clip_speed(value));
@@ -514,7 +668,6 @@ fn build_clip_panel(
     // at the left edge. Editors that ship this control let the value be dragged
     // to anything in range rather than forcing it to a preset.
     speed_slider.set_logarithmic(true);
-    let syncing = Rc::new(Cell::new(false));
     speed_slider.connect_value_changed({
         let state = state.clone();
         let on_change = on_change.clone();
@@ -531,18 +684,14 @@ fn build_clip_panel(
         }
     });
 
-    let audio_header = GtkBox::new(Orientation::Horizontal, 8);
-    audio_header.add_css_class("recording-editor-zoom-section-row");
-    audio_header.set_hexpand(true);
-    let audio_label = Label::new(Some(&t("Audio")));
-    audio_label.add_css_class("recording-editor-zoom-kicker");
-    audio_label.set_xalign(0.0);
-    audio_header.append(&audio_label);
+    let sound_label = Label::new(Some(&t("Sound")));
+    sound_label.add_css_class("recording-editor-zoom-kicker");
+    sound_label.set_xalign(0.0);
 
     let mute_row = GtkBox::new(Orientation::Horizontal, 8);
     mute_row.add_css_class("recording-editor-zoom-classic");
     mute_row.set_hexpand(true);
-    let mute_label = Label::new(Some(&t("Mute")));
+    let mute_label = Label::new(Some(&t("Mute clip")));
     mute_label.add_css_class("recording-editor-zoom-classic-label");
     mute_label.set_xalign(0.0);
     mute_label.set_hexpand(true);
@@ -553,21 +702,6 @@ fn build_clip_panel(
     mute.set_halign(Align::End);
     mute_row.append(&mute_label);
     mute_row.append(&mute);
-
-    body.append(&speed_slider.widget());
-    body.append(&audio_header);
-    body.append(&mute_row);
-
-    let scroll = ScrolledWindow::new();
-    scroll.add_css_class("recording-editor-zoom-scroll");
-    scroll.set_policy(PolicyType::Never, PolicyType::Automatic);
-    scroll.set_vexpand(true);
-    scroll.set_hexpand(true);
-    scroll.set_child(Some(&body));
-
-    panel.append(&header);
-    panel.append(&scroll);
-
     mute.connect_state_set({
         let state = state.clone();
         let on_change = on_change.clone();
@@ -582,31 +716,352 @@ fn build_clip_panel(
             gtk4::glib::Propagation::Proceed
         }
     });
+
+    body.append(&count);
+    body.append(&hint);
+    body.append(&speed_label);
+    body.append(&presets);
+    body.append(&speed_slider.widget());
+    body.append(&sound_label);
+    body.append(&mute_row);
+
     let refresh = {
-        let panel = panel.clone();
-        let mute = mute.clone();
+        let count = count.clone();
+        let hint = hint.clone();
+        let presets = presets.clone();
+        let preset_buttons = preset_buttons.clone();
         let speed_slider = speed_slider.clone();
+        let mute = mute.clone();
         let syncing = syncing.clone();
         Rc::new(move || {
             let guard = state.lock().unwrap();
-            panel.set_visible(true);
             let speed = guard.selected_clip_speed();
             let muted = guard.selected_clip_muted().unwrap_or(false);
-            let can_edit = speed.is_some() && !guard.video_locked;
+            let slots = guard.placed_segment_slots();
+            let total = slots.len();
+            let selected = guard.selected_segment.and_then(|selected| {
+                slots
+                    .iter()
+                    .position(|slot| slot.0 == selected)
+                    .map(|position| position + 1)
+            });
+            let can_edit = selected.is_some() && !guard.video_locked;
             let can_mute = can_edit && guard.has_audio_track() && !guard.audio_locked;
+            drop(guard);
+            let current = selected.map_or_else(String::new, |current| current.to_string());
+            let total = total.to_string();
+            count.set_text(&tfmt(
+                "Clip {current} of {total}",
+                &[("current", current.as_str()), ("total", total.as_str())],
+            ));
+            count.set_visible(selected.is_some());
+            hint.set_visible(selected.is_none());
             syncing.set(true);
             if let Some(speed) = speed {
                 speed_slider.set_value(speed);
             }
+            for (preset, button) in &preset_buttons {
+                button.set_active(speed.is_some_and(|speed| (speed - preset).abs() < 1e-6));
+            }
             mute.set_active(muted);
+            presets.set_sensitive(can_edit);
             speed_slider.set_sensitive(can_edit);
             mute.set_sensitive(can_mute);
             syncing.set(false);
         }) as Rc<dyn Fn()>
     };
 
-    ClipPanel {
-        widget: panel,
+    ClipsPage {
+        widget: body,
+        refresh,
+    }
+}
+
+fn build_sound_scope_page(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) -> ClipsPage {
+    let body = GtkBox::new(Orientation::Vertical, 8);
+    body.add_css_class("recording-editor-zoom-body");
+    body.set_hexpand(true);
+
+    let syncing = Rc::new(Cell::new(false));
+
+    let volume_label = Label::new(Some(&t("Volume")));
+    volume_label.add_css_class("recording-editor-zoom-kicker");
+    volume_label.set_xalign(0.0);
+    let volume_slider =
+        FillSlider::new_with_value_text(&t("Volume"), |value, _, _| format!("{value:.0}%"));
+    volume_slider.set_range(0.0, 100.0);
+    volume_slider.set_increments(1.0, 5.0);
+    volume_slider.connect_value_changed({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        move |slider| {
+            if syncing.get() {
+                return;
+            }
+            state.lock().unwrap().sound.volume = slider.value() / 100.0;
+            on_change();
+        }
+    });
+
+    let no_sound = Label::new(Some(&t(
+        "This recording has no sound. Turn on the microphone or system audio before recording.",
+    )));
+    no_sound.add_css_class("recording-editor-zoom-hint");
+    no_sound.set_wrap(true);
+    no_sound.set_xalign(0.0);
+    no_sound.set_max_width_chars(34);
+
+    let mic_label = Label::new(Some(&t("Microphone")));
+    mic_label.add_css_class("recording-editor-zoom-kicker");
+    mic_label.set_xalign(0.0);
+
+    let mic_grid = Grid::new();
+    mic_grid.add_css_class("recording-editor-mic-grid");
+    mic_grid.set_column_spacing(6);
+    mic_grid.set_row_spacing(6);
+    mic_grid.set_column_homogeneous(true);
+    mic_grid.set_hexpand(true);
+    let mut mic_tiles: Vec<(MicPreset, ToggleButton)> = Vec::new();
+    for (index, preset) in MicPreset::ALL.iter().enumerate() {
+        let tile = ToggleButton::new();
+        tile.add_css_class("recording-editor-mic-tile");
+        tile.set_has_frame(false);
+        tile.set_hexpand(true);
+        let inner = GtkBox::new(Orientation::Vertical, 2);
+        inner.set_valign(Align::Center);
+        let name = Label::new(Some(&preset.label()));
+        name.add_css_class("recording-editor-mic-tile-label");
+        name.set_xalign(0.5);
+        let summary = Label::new(Some(&preset.summary()));
+        summary.add_css_class("recording-editor-mic-tile-summary");
+        summary.set_xalign(0.5);
+        summary.set_justify(Justification::Center);
+        summary.set_wrap(true);
+        summary.set_max_width_chars(14);
+        inner.append(&name);
+        inner.append(&summary);
+        tile.set_child(Some(&inner));
+        tile.set_tooltip_text(Some(&preset.description()));
+        tile.connect_toggled({
+            let state = state.clone();
+            let on_change = on_change.clone();
+            let syncing = syncing.clone();
+            let preset = *preset;
+            move |tile| {
+                if syncing.get() || !tile.is_active() {
+                    return;
+                }
+                state.lock().unwrap().sound.microphone_preset = preset;
+                on_change();
+            }
+        });
+        mic_grid.attach(&tile, (index % 2) as i32, (index / 2) as i32, 1, 1);
+        mic_tiles.push((*preset, tile));
+    }
+    if let Some((_, first)) = mic_tiles.first() {
+        for (_, tile) in mic_tiles.iter().skip(1) {
+            tile.set_group(Some(first));
+        }
+    }
+
+    let music_label = Label::new(Some(&t("Background music")));
+    music_label.add_css_class("recording-editor-zoom-kicker");
+    music_label.set_xalign(0.0);
+
+    let music_row = GtkBox::new(Orientation::Horizontal, 6);
+    music_row.add_css_class("recording-editor-clip-music-row");
+    music_row.set_hexpand(true);
+    let music_picker = Button::new();
+    music_picker.add_css_class("recording-editor-bg-image-row");
+    music_picker.set_has_frame(false);
+    music_picker.set_hexpand(true);
+    let picker_inner = GtkBox::new(Orientation::Horizontal, 8);
+    let music_name = Label::new(Some(&t("Select music…")));
+    music_name.set_hexpand(true);
+    music_name.set_xalign(0.0);
+    music_name.set_ellipsize(gtk4::pango::EllipsizeMode::Middle);
+    let browse = Image::from_icon_name(icon_names::shipped::FOLDER_OPEN_REGULAR);
+    browse.set_pixel_size(13);
+    picker_inner.append(&music_name);
+    picker_inner.append(&browse);
+    music_picker.set_child(Some(&picker_inner));
+    let music_remove = Button::new();
+    music_remove.add_css_class("recording-editor-clip-music-remove");
+    music_remove.set_has_frame(false);
+    let remove_icon = Image::from_icon_name(icon_names::custom::USER_TRASH_SYMBOLIC);
+    remove_icon.set_pixel_size(13);
+    music_remove.set_child(Some(&remove_icon));
+    music_remove.set_tooltip_text(Some(&t("Remove music")));
+    music_row.append(&music_picker);
+    music_row.append(&music_remove);
+
+    let music_controls = GtkBox::new(Orientation::Vertical, 8);
+    music_controls.set_hexpand(true);
+    let music_volume =
+        FillSlider::new_with_value_text(&t("Music volume"), |value, _, _| format!("{value:.0}%"));
+    music_volume.set_range(0.0, 100.0);
+    music_volume.set_increments(1.0, 5.0);
+    music_volume.connect_value_changed({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        move |slider| {
+            if syncing.get() {
+                return;
+            }
+            state.lock().unwrap().sound.background_volume = slider.value() / 100.0;
+            on_change();
+        }
+    });
+    let mute_music_row = GtkBox::new(Orientation::Horizontal, 8);
+    mute_music_row.add_css_class("recording-editor-zoom-classic");
+    mute_music_row.set_hexpand(true);
+    let mute_music_label = Label::new(Some(&t("Mute music")));
+    mute_music_label.add_css_class("recording-editor-zoom-classic-label");
+    mute_music_label.set_xalign(0.0);
+    mute_music_label.set_hexpand(true);
+    mute_music_label.set_valign(Align::Center);
+    let mute_music = Switch::new();
+    mute_music.add_css_class("recording-editor-zoom-switch");
+    mute_music.set_valign(Align::Center);
+    mute_music.set_halign(Align::End);
+    mute_music_row.append(&mute_music_label);
+    mute_music_row.append(&mute_music);
+    music_controls.append(&music_volume.widget());
+    music_controls.append(&mute_music_row);
+
+    // One chooser at a time: a second click while the dialog is up would open
+    // another native dialog on top of the first.
+    let chooser_slot: Rc<RefCell<Option<FileChooserNative>>> = Rc::new(RefCell::new(None));
+    music_picker.connect_clicked({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let chooser_slot = chooser_slot.clone();
+        move |picker| {
+            if chooser_slot.borrow().is_some() {
+                return;
+            }
+            let window = picker
+                .root()
+                .and_then(|root| root.downcast::<Window>().ok());
+            let chooser = FileChooserNative::new(
+                Some(&t("Choose background music")),
+                window.as_ref(),
+                FileChooserAction::Open,
+                Some(&t("Select")),
+                Some(&t("Cancel")),
+            );
+            let filter = FileFilter::new();
+            filter.set_name(Some(&t("Audio")));
+            filter.add_mime_type("audio/*");
+            for pattern in [
+                "*.mp3", "*.wav", "*.m4a", "*.aac", "*.ogg", "*.flac", "*.opus",
+            ] {
+                filter.add_pattern(pattern);
+            }
+            chooser.set_filter(&filter);
+            let state = state.clone();
+            let on_change = on_change.clone();
+            let slot = Rc::downgrade(&chooser_slot);
+            chooser.connect_response(move |chooser, response| {
+                let path = (response == ResponseType::Accept)
+                    .then(|| chooser.file().and_then(|file| file.path()))
+                    .flatten();
+                chooser.hide();
+                if let Some(slot) = slot.upgrade() {
+                    slot.borrow_mut().take();
+                }
+                let Some(path) = path else {
+                    return;
+                };
+                state.lock().unwrap().sound.background_file = Some(path);
+                on_change();
+            });
+            *chooser_slot.borrow_mut() = Some(chooser.clone());
+            chooser.show();
+        }
+    });
+    music_remove.connect_clicked({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        move |_| {
+            if syncing.get() {
+                return;
+            }
+            state.lock().unwrap().sound.background_file = None;
+            on_change();
+        }
+    });
+    mute_music.connect_state_set({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        move |_, active| {
+            if !syncing.get() {
+                state.lock().unwrap().sound.mute_background = active;
+                on_change();
+            }
+            gtk4::glib::Propagation::Proceed
+        }
+    });
+
+    body.append(&volume_label);
+    body.append(&volume_slider.widget());
+    body.append(&no_sound);
+    body.append(&mic_label);
+    body.append(&mic_grid);
+    body.append(&music_label);
+    body.append(&music_row);
+    body.append(&music_controls);
+
+    let refresh = {
+        let volume_slider = volume_slider.clone();
+        let no_sound = no_sound.clone();
+        let mic_grid = mic_grid.clone();
+        let mic_tiles = mic_tiles.clone();
+        let music_name = music_name.clone();
+        let music_remove = music_remove.clone();
+        let music_controls = music_controls.clone();
+        let music_volume = music_volume.clone();
+        let mute_music = mute_music.clone();
+        let syncing = syncing.clone();
+        Rc::new(move || {
+            let guard = state.lock().unwrap();
+            let volume = guard.sound.volume;
+            let preset = guard.sound.microphone_preset;
+            let music = guard.sound.background_file.clone();
+            let music_level = guard.sound.background_volume;
+            let music_muted = guard.sound.mute_background;
+            let has_audio = guard.has_audio_track();
+            drop(guard);
+            syncing.set(true);
+            volume_slider.set_value(volume * 100.0);
+            volume_slider.set_sensitive(has_audio);
+            no_sound.set_visible(!has_audio);
+            mic_grid.set_sensitive(has_audio);
+            for (tile_preset, tile) in &mic_tiles {
+                tile.set_active(*tile_preset == preset);
+            }
+            let name = music
+                .as_ref()
+                .and_then(|path| path.file_name())
+                .map_or_else(
+                    || t("Select music…"),
+                    |name| name.to_string_lossy().into_owned(),
+                );
+            music_name.set_text(&name);
+            music_remove.set_visible(music.is_some());
+            music_controls.set_sensitive(music.is_some());
+            music_volume.set_value(music_level * 100.0);
+            mute_music.set_active(music_muted);
+            syncing.set(false);
+        }) as Rc<dyn Fn()>
+    };
+
+    ClipsPage {
+        widget: body,
         refresh,
     }
 }
@@ -2056,5 +2511,69 @@ mod tests {
                 "cursor and background panels keep the shared slider margin"
             );
         }
+    }
+
+    #[test]
+    fn the_clips_panel_covers_the_clip_and_sound_scopes() {
+        let source = include_str!("tool_sidebar.rs");
+        let start = source
+            .find("fn build_clip_panel(")
+            .expect("the Clips panel is built by build_clip_panel");
+        let end = source
+            .find("\n/// Format a clip speed")
+            .expect("the Clips panel ends before the speed formatter");
+        let clips = &source[start..end];
+        assert!(
+            clips.contains("cursor_tab_button(&t(\"Clip\"))")
+                && clips.contains("cursor_tab_button(&t(\"Sound\"))")
+                && clips.contains("sound_tab.set_group(Some(&clip_tab))"),
+            "the Clips panel must open with the Clip and Sound scopes"
+        );
+        assert!(
+            clips.contains("const SPEED_PRESETS: [f64; 5] = [0.5, 1.0, 1.5, 2.0, 3.0];")
+                && clips.contains("set_selected_clip_speed(speed);")
+                && clips.contains("button.add_css_class(\"recording-editor-clip-preset\");"),
+            "the Clip scope must offer the five speed presets"
+        );
+        assert!(
+            clips.contains("for (index, preset) in MicPreset::ALL.iter().enumerate()")
+                && clips.contains("recording-editor-mic-tile-label")
+                && clips.contains("recording-editor-mic-tile-summary")
+                && clips.contains("tile.set_tooltip_text(Some(&preset.description()));"),
+            "the Sound scope must build a tile per microphone mode from MicPreset::ALL"
+        );
+        assert!(
+            clips.contains("FileChooserNative::new(")
+                && clips.contains("t(\"Choose background music\")")
+                && clips.contains("\"*.mp3\"")
+                && clips.contains("t(\"Remove music\")")
+                && clips.contains("sound.background_file = Some(path);"),
+            "the Sound scope must let a music file be picked and removed"
+        );
+    }
+
+    #[test]
+    fn the_effects_page_offers_the_click_sound_and_its_preview() {
+        let panel = include_str!("tool_sidebar_cursor.rs");
+        let start = panel
+            .find("fn build_cursor_effects_tab(")
+            .expect("the Effects page has a builder");
+        let end = panel
+            .find("fn click_effect_card(")
+            .expect("the effect card helper follows the Effects page");
+        let effects = &panel[start..end];
+        assert!(
+            effects.contains("click_sound_card(&t(\"Off\"))")
+                && effects.contains("click_sound_card(&t(\"Soft\"))")
+                && effects.contains("sound.click_sound = None;")
+                && effects.contains("sound.click_sound = Some(\"soft\".to_owned());"),
+            "the Effects page must offer the Off and Soft click sounds"
+        );
+        assert!(
+            effects.contains("FillSlider::new_with_value_text(&t(\"Volume\")")
+                && effects.contains("sound.click_sound_volume = slider.value() / 100.0;")
+                && effects.contains("preview_click(volume);"),
+            "the click sound must have a volume and a preview that plays it"
+        );
     }
 }
