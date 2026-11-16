@@ -3,7 +3,45 @@ use crate::i18n::t;
 use gtk4::prelude::*;
 use gtk4::{glib, Align, Box as GtkBox, Button, CheckButton, Entry, Label, Orientation};
 #[cfg(not(target_os = "windows"))]
+use std::cell::Cell;
+#[cfg(not(target_os = "windows"))]
 use std::process::Command;
+#[cfg(not(target_os = "windows"))]
+use std::rc::Rc;
+
+#[cfg(not(target_os = "windows"))]
+pub struct AutoUploadSync {
+    last_persisted: Cell<bool>,
+    syncing: Cell<bool>,
+}
+
+#[cfg(not(target_os = "windows"))]
+impl AutoUploadSync {
+    pub fn new(persisted: bool) -> Self {
+        Self {
+            last_persisted: Cell::new(persisted),
+            syncing: Cell::new(false),
+        }
+    }
+
+    pub fn is_syncing(&self) -> bool {
+        self.syncing.get()
+    }
+
+    pub fn sync(&self, check: &CheckButton, persisted: bool) {
+        if persisted == self.last_persisted.get() {
+            return;
+        }
+        self.last_persisted.set(persisted);
+        self.syncing.set(true);
+        check.set_active(persisted);
+        self.syncing.set(false);
+    }
+
+    pub fn note_saved(&self, persisted: bool) {
+        self.last_persisted.set(persisted);
+    }
+}
 
 pub struct CloudSettingsWidgets {
     pub section: GtkBox,
@@ -12,6 +50,8 @@ pub struct CloudSettingsWidgets {
     pub apexshot_check: CheckButton,
     pub xbackbone_check: CheckButton,
     pub auto_upload_check: CheckButton,
+    #[cfg(not(target_os = "windows"))]
+    pub auto_upload_sync: Rc<AutoUploadSync>,
     pub xb_url_entry: Entry,
     pub xb_token_entry: Entry,
 }
@@ -76,6 +116,9 @@ pub fn build_cloud_section(config: &AppConfig) -> CloudSettingsWidgets {
 
     let auto_upload_check = CheckButton::new();
     auto_upload_check.set_active(config.cloud_auto_upload_after_capture);
+    #[cfg(not(target_os = "windows"))]
+    let auto_upload_sync = Rc::new(AutoUploadSync::new(config.cloud_auto_upload_after_capture));
+
     let auto_hbox = GtkBox::new(Orientation::Horizontal, 12);
     auto_hbox.set_hexpand(true);
     let auto_label = Label::new(Some(&t("Upload after capture")));
@@ -101,6 +144,9 @@ pub fn build_cloud_section(config: &AppConfig) -> CloudSettingsWidgets {
     dest_frame.append(&build_row!(&auto_hbox, true));
 
     section.append(&dest_frame);
+
+    #[cfg(not(target_os = "windows"))]
+    install_auto_upload_observer(&section, &auto_upload_check, &auto_upload_sync);
 
     // --- ApexShot Cloud panel ---
     let apexshot_panel = build_apexshot_panel(config);
@@ -139,6 +185,8 @@ pub fn build_cloud_section(config: &AppConfig) -> CloudSettingsWidgets {
         apexshot_check,
         xbackbone_check,
         auto_upload_check,
+        #[cfg(not(target_os = "windows"))]
+        auto_upload_sync,
         xb_url_entry: xb_panel.url_entry,
         xb_token_entry: xb_panel.token_entry,
     }
@@ -520,6 +568,63 @@ fn build_table_row(content: &impl IsA<gtk4::Widget>) -> gtk4::Box {
     row
 }
 
+#[cfg(not(target_os = "windows"))]
+fn install_auto_upload_observer(
+    section: &GtkBox,
+    check: &CheckButton,
+    syncer: &Rc<AutoUploadSync>,
+) {
+    let check_weak = check.downgrade();
+    let check_for_update = check_weak.clone();
+    let syncer = Rc::clone(syncer);
+    let update: Rc<dyn Fn()> = Rc::new(move || {
+        if let Some(check) = check_for_update.upgrade() {
+            let persisted = crate::config::load_config().cloud_auto_upload_after_capture;
+            syncer.sync(&check, persisted);
+        }
+    });
+
+    let monitor = crate::config::config_path().and_then(|config_file| {
+        let dir = gtk4::gio::File::for_path(config_file.parent()?);
+        dir.monitor_directory(
+            gtk4::gio::FileMonitorFlags::WATCH_MOVES,
+            gtk4::gio::Cancellable::NONE,
+        )
+        .ok()
+        .map(|monitor| (monitor, config_file))
+    });
+
+    match monitor {
+        Some((monitor, config_file)) => {
+            monitor.connect_changed({
+                let update = Rc::clone(&update);
+                move |_, file, other_file, _| {
+                    let touched = file.path().as_deref() == Some(config_file.as_path())
+                        || other_file
+                            .and_then(|other| other.path())
+                            .is_some_and(|path| path == config_file);
+                    if touched {
+                        update();
+                    }
+                }
+            });
+            section.connect_map(move |_| {
+                let _monitor = &monitor;
+                update();
+            });
+        }
+        None => {
+            glib::timeout_add_seconds_local(2, move || {
+                if check_weak.upgrade().is_none() {
+                    return glib::ControlFlow::Break;
+                }
+                update();
+                glib::ControlFlow::Continue
+            });
+        }
+    }
+}
+
 /// How a signed-out user connects. Linux can fall back to the terminal; on
 /// Windows the Connect button's dialog is the only path, so say so.
 #[cfg(target_os = "windows")]
@@ -595,6 +700,66 @@ pub(crate) fn spawn_apexshot_login() {
         "Could not open Settings",
         "Open ApexShot Settings → Cloud to connect your ApexShot Cloud account.",
     );
+}
+
+#[cfg(all(test, not(target_os = "windows")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auto_upload_sync_mirrors_only_real_persisted_changes() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let check = CheckButton::new();
+            let syncer = Rc::new(AutoUploadSync::new(false));
+            let saw_syncing = Rc::new(Cell::new(false));
+            let saw_user_toggle = Rc::new(Cell::new(false));
+            check.connect_toggled({
+                let syncer = Rc::clone(&syncer);
+                let saw_syncing = Rc::clone(&saw_syncing);
+                let saw_user_toggle = Rc::clone(&saw_user_toggle);
+                move |_| {
+                    if syncer.is_syncing() {
+                        saw_syncing.set(true);
+                    } else {
+                        saw_user_toggle.set(true);
+                    }
+                }
+            });
+
+            syncer.sync(&check, true);
+            assert!(check.is_active());
+            assert!(saw_syncing.get());
+            assert!(!saw_user_toggle.get());
+
+            check.set_active(false);
+            assert!(saw_user_toggle.get());
+            syncer.sync(&check, true);
+            assert!(!check.is_active());
+
+            syncer.note_saved(false);
+            syncer.sync(&check, false);
+            assert!(!check.is_active());
+        }) else {
+            eprintln!("skipping: no display available");
+            return;
+        };
+    }
+
+    #[test]
+    fn a_save_reconciles_the_checkbox_against_freshly_persisted_state() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let check = CheckButton::new();
+            check.set_active(false);
+            let syncer = AutoUploadSync::new(false);
+            syncer.sync(&check, true);
+            let desired = check.is_active();
+            assert!(desired);
+            syncer.note_saved(desired);
+        }) else {
+            eprintln!("skipping: no display available");
+            return;
+        };
+    }
 }
 
 #[cfg(all(test, target_os = "windows"))]

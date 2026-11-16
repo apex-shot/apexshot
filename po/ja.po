@@ -4875,3 +4875,37 @@ msgstr "この ffmpeg ビルドには HEVC エンコーダーがありません"
 
 msgid "Uploaded, but the link could not be copied: {error}"
 msgstr "アップロードしましたが、リンクをコピーできませんでした: {error}"
+
+msgid "Account"
+msgstr "アカウント"
+
+msgid "Cloud storage"
+msgstr "クラウドストレージ"
+
+msgid "Email"
+msgstr "メールアドレス"
+
+msgid "Last updated"
+msgstr "最終更新"
+
+msgid "Loading usage…"
+msgstr "使用状況を読み込み中…"
+
+msgid "Plan"
+msgstr "プラン"
+
+msgid "Refreshing…"
+msgstr "更新中…"
+
+msgid ""
+"System default uses your desktop language. Changes are saved automatically."
+msgstr "システムのデフォルトはデスクトップの言語を使用します。変更は自動的に保存されます。"
+
+msgid "Unlimited"
+msgstr "無制限"
+
+msgid "Used"
+msgstr "使用済み"
+
+msgid "{used} of {limit}"
+msgstr "{used}（上限 {limit}）"

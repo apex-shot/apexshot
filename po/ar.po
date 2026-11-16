@@ -4901,3 +4901,37 @@ msgstr "إصدار ffmpeg هذا لا يحتوي على مُرمِّز HEVC"
 
 msgid "Uploaded, but the link could not be copied: {error}"
 msgstr "تم الرفع، لكن تعذّر نسخ الرابط: {error}"
+
+msgid "Account"
+msgstr "الحساب"
+
+msgid "Cloud storage"
+msgstr "التخزين السحابي"
+
+msgid "Email"
+msgstr "البريد الإلكتروني"
+
+msgid "Last updated"
+msgstr "آخر تحديث"
+
+msgid "Loading usage…"
+msgstr "جاري تحميل الاستخدام…"
+
+msgid "Plan"
+msgstr "الخطة"
+
+msgid "Refreshing…"
+msgstr "جاري التحديث…"
+
+msgid ""
+"System default uses your desktop language. Changes are saved automatically."
+msgstr "يستخدم «افتراضي النظام» لغة سطح المكتب لديك. تُحفَظ التغييرات تلقائيًا."
+
+msgid "Unlimited"
+msgstr "غير محدود"
+
+msgid "Used"
+msgstr "المُستخدَم"
+
+msgid "{used} of {limit}"
+msgstr "{used} من {limit}"
