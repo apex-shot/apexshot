@@ -440,20 +440,16 @@ fn build_cursor_motion_tab(
         on_change.clone(),
         |cursor, value| cursor.idle_ms = value,
     );
-    idle_switch.connect_state_set({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        let syncing = syncing.clone();
-        let pause_playback = pause_playback.clone();
-        move |_, active| {
-            if !syncing.get() {
-                pause_playback();
-                state.lock().unwrap().cursor.hide_idle = active;
-                on_change();
-            }
-            glib::Propagation::Proceed
-        }
-    });
+    bind_switch(
+        &idle_switch,
+        syncing.clone(),
+        pause_playback.clone(),
+        on_change.clone(),
+        {
+            let state = state.clone();
+            move |active| state.lock().unwrap().cursor.hide_idle = active
+        },
+    );
 
     let refresh = {
         let focused_btn = focused_btn.clone();

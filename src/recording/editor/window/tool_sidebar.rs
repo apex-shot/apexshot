@@ -21,6 +21,33 @@ pub(super) const TOOL_SIDEBAR_WIDTH: i32 = 288;
 
 pub(super) type PausePlayback = Rc<dyn Fn()>;
 
+/// Bind a sidebar switch. The model takes the new value straight away; the
+/// pause and the editor-wide refresh wait for the next idle. Both used to run
+/// inside the switch's own `state-set`, before GTK had committed the new
+/// state, and the refresh re-enters the switch it was called from: it writes
+/// the value back under `syncing` while the toggle is still in flight, and the
+/// sound player is torn down inside the signal.
+fn bind_switch(
+    switch: &Switch,
+    syncing: Rc<Cell<bool>>,
+    pause_playback: PausePlayback,
+    on_change: Rc<dyn Fn()>,
+    apply: impl Fn(bool) + 'static,
+) {
+    switch.connect_state_set(move |_, active| {
+        if !syncing.get() {
+            apply(active);
+            let pause_playback = pause_playback.clone();
+            let on_change = on_change.clone();
+            glib::idle_add_local_once(move || {
+                pause_playback();
+                on_change();
+            });
+        }
+        glib::Propagation::Proceed
+    });
+}
+
 pub(super) struct ToolSidebar {
     pub widget: GtkBox,
     pub refresh: Rc<dyn Fn()>,
@@ -370,34 +397,26 @@ fn build_zoom_panel(
             on_change();
         }
     });
-    instant.connect_state_set({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        let pause_playback = pause_playback.clone();
-        let syncing = syncing.clone();
-        move |_, active| {
-            if !syncing.get() {
-                pause_playback();
-                state.lock().unwrap().set_selected_zoom_instant(active);
-                on_change();
-            }
-            gtk4::glib::Propagation::Proceed
-        }
-    });
-    start_early.connect_state_set({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        let pause_playback = pause_playback.clone();
-        let syncing = syncing.clone();
-        move |_, active| {
-            if !syncing.get() {
-                pause_playback();
-                state.lock().unwrap().set_zoom_camera_start_early(active);
-                on_change();
-            }
-            gtk4::glib::Propagation::Proceed
-        }
-    });
+    bind_switch(
+        &instant,
+        syncing.clone(),
+        pause_playback.clone(),
+        on_change.clone(),
+        {
+            let state = state.clone();
+            move |active| state.lock().unwrap().set_selected_zoom_instant(active)
+        },
+    );
+    bind_switch(
+        &start_early,
+        syncing.clone(),
+        pause_playback.clone(),
+        on_change.clone(),
+        {
+            let state = state.clone();
+            move |active| state.lock().unwrap().set_zoom_camera_start_early(active)
+        },
+    );
     let refresh = {
         let panel = panel.clone();
         let auto_btn = auto_btn.clone();
@@ -523,8 +542,8 @@ fn build_clip_panel(
     tabs.append(&clip_tab);
     tabs.append(&sound_tab);
 
-    let clip_page = build_clip_scope_page(state.clone(), on_change.clone(), pause_playback);
-    let sound_page = build_sound_scope_page(state.clone(), on_change);
+    let clip_page = build_clip_scope_page(state.clone(), on_change.clone(), pause_playback.clone());
+    let sound_page = build_sound_scope_page(state.clone(), on_change, pause_playback);
     clip_page.widget.set_visible(true);
     sound_page.widget.set_visible(false);
 
@@ -702,20 +721,18 @@ fn build_clip_scope_page(
     mute.set_halign(Align::End);
     mute_row.append(&mute_label);
     mute_row.append(&mute);
-    mute.connect_state_set({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        let syncing = syncing.clone();
-        let pause_playback = pause_playback.clone();
-        move |_, active| {
-            if !syncing.get() {
-                pause_playback();
+    bind_switch(
+        &mute,
+        syncing.clone(),
+        pause_playback.clone(),
+        on_change.clone(),
+        {
+            let state = state.clone();
+            move |active| {
                 state.lock().unwrap().set_selected_clip_muted(active);
-                on_change();
             }
-            gtk4::glib::Propagation::Proceed
-        }
-    });
+        },
+    );
 
     body.append(&count);
     body.append(&hint);
@@ -777,7 +794,11 @@ fn build_clip_scope_page(
     }
 }
 
-fn build_sound_scope_page(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) -> ClipsPage {
+fn build_sound_scope_page(
+    state: Arc<Mutex<VideoEditState>>,
+    on_change: Rc<dyn Fn()>,
+    pause_playback: PausePlayback,
+) -> ClipsPage {
     let body = GtkBox::new(Orientation::Vertical, 8);
     body.add_css_class("recording-editor-zoom-body");
     body.set_hexpand(true);
@@ -994,18 +1015,16 @@ fn build_sound_scope_page(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn F
             on_change();
         }
     });
-    mute_music.connect_state_set({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        let syncing = syncing.clone();
-        move |_, active| {
-            if !syncing.get() {
-                state.lock().unwrap().sound.mute_background = active;
-                on_change();
-            }
-            gtk4::glib::Propagation::Proceed
-        }
-    });
+    bind_switch(
+        &mute_music,
+        syncing.clone(),
+        pause_playback.clone(),
+        on_change.clone(),
+        {
+            let state = state.clone();
+            move |active| state.lock().unwrap().sound.mute_background = active
+        },
+    );
 
     body.append(&volume_label);
     body.append(&volume_slider.widget());
@@ -2549,6 +2568,73 @@ mod tests {
                 && clips.contains("t(\"Remove music\")")
                 && clips.contains("sound.background_file = Some(path);"),
             "the Sound scope must let a music file be picked and removed"
+        );
+    }
+
+    #[test]
+    fn every_sidebar_switch_pauses_through_the_shared_binding() {
+        // A toggle used to pause and refresh the whole editor inside the
+        // switch's own state-set, before GTK had committed the new state, so
+        // the refresh re-entered the toggle. Every switch goes through
+        // bind_switch, which writes the model first and defers the pause.
+        for source in [
+            include_str!("tool_sidebar.rs"),
+            include_str!("tool_sidebar_cursor.rs"),
+        ] {
+            let production = source
+                .split("\n#[cfg(test)]")
+                .next()
+                .expect("the sidebar's production source");
+            let compact: String = production.chars().filter(|c| !c.is_whitespace()).collect();
+            let mut switches = 0;
+            for line in production.lines() {
+                let Some(rest) = line.trim().strip_prefix("let ") else {
+                    continue;
+                };
+                let Some(name) = rest.strip_suffix(" = Switch::new();") else {
+                    continue;
+                };
+                switches += 1;
+                assert!(
+                    compact.contains(&format!("bind_switch(&{name},")),
+                    "{name} must pause playback through bind_switch"
+                );
+            }
+            assert!(
+                switches > 0,
+                "the sidebar builds its switches with Switch::new()"
+            );
+        }
+        let source = include_str!("tool_sidebar.rs");
+        let production = source
+            .split("\n#[cfg(test)]")
+            .next()
+            .expect("the sidebar's production source");
+        let start = production
+            .find("fn bind_switch(")
+            .expect("the shared switch binding");
+        let rest = &production[start + 1..];
+        let end = rest.find("\n}\n").expect("the binding closes");
+        let binding = &production[start..start + 1 + end];
+        let bound = production.matches("connect_state_set").count();
+        assert_eq!(
+            bound,
+            binding.matches("connect_state_set").count(),
+            "bind_switch is the only place a sidebar switch binds its state-set"
+        );
+        assert_eq!(bound, 1, "the shared binding connects one handler");
+        assert!(
+            !include_str!("tool_sidebar_cursor.rs").contains("connect_state_set"),
+            "cursor switches go through bind_switch, not a raw state-set handler"
+        );
+        let apply_at = binding.find("apply(active)").expect("the model write");
+        let idle_at = binding
+            .find("idle_add_local_once")
+            .expect("the deferred pause");
+        let pause_at = binding.find("pause_playback();").expect("the pause call");
+        assert!(
+            apply_at < idle_at && idle_at < pause_at,
+            "the model takes the value first and the pause runs on the next idle"
         );
     }
 
