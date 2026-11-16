@@ -80,6 +80,13 @@ public:
     int captureDelaySeconds() const { return m_captureDelaySeconds; }
     bool countdownHandledInOverlay() const { return true; }
     void focusAndRaiseOverlay();
+    /// Finish the overlay with `code` from wherever the request originates.
+    /// Qt ignores QApplication::exit() while no event loop is running, which is
+    /// the case during the startup pumps, so the code is also remembered and
+    /// the caller honours it before entering app.exec().
+    void requestExit(int code);
+    int requestedExitCode() const { return m_requestedExitCode; }
+    static constexpr int kNoExitRequested = -1;
     void openRecordingPanelForShortcut();
     /// Configure the selector launched from the unified pre-capture toolbar.
     /// It keeps the Frame controls but suppresses the legacy side tool rail.
@@ -337,6 +344,7 @@ private:
     QScreen*  m_targetScreen;
     QRect     m_selection;
     bool      m_selectionConfirmed;
+    int       m_requestedExitCode;
     QPoint    m_eventDesktopOrigin;
     bool      m_hasEventDesktopOrigin;
     bool      m_hasSelection;

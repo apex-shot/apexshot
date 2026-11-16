@@ -382,6 +382,22 @@ else()
             PRIVATE Qt5::Gui Qt5::DBus Qt5::Test
         )
         add_test(NAME apexshot-capture-tests COMMAND apexshot-capture-tests)
+
+        # The selector is started for real and cancelled through its control
+        # socket while it is still settling, so this covers the startup window
+        # that unit tests cannot reach.
+        add_executable(apexshot-capture-cancel-startup-tests
+            tests/CancelDuringStartupTests.cpp
+        )
+        target_include_directories(apexshot-capture-cancel-startup-tests PRIVATE src)
+        target_link_libraries(apexshot-capture-cancel-startup-tests
+            PRIVATE Qt5::Gui Qt5::Network Qt5::Test
+        )
+        add_dependencies(apexshot-capture-cancel-startup-tests apexshot-capture)
+        add_test(NAME apexshot-capture-cancel-startup-tests
+            COMMAND apexshot-capture-cancel-startup-tests)
+        set_tests_properties(apexshot-capture-cancel-startup-tests PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;APEXSHOT_CAPTURE_UNDER_TEST=$<TARGET_FILE:apexshot-capture>")
     endif()
 
     install(TARGETS apexshot-capture

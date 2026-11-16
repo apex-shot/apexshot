@@ -477,6 +477,11 @@ fn write_message(message: serde_json::Value) -> std::io::Result<()> {
 }
 
 fn capture_to_png(capture: CaptureData) -> anyhow::Result<serde_json::Value> {
+    use image::{
+        codecs::png::{CompressionType, FilterType, PngEncoder},
+        ImageEncoder,
+    };
+
     let image = image::RgbaImage::from_raw(capture.width, capture.height, capture.pixels)
         .ok_or_else(|| anyhow::anyhow!("Invalid screenshot pixels"))?;
     let path = std::env::temp_dir().join(format!(
@@ -490,13 +495,19 @@ fn capture_to_png(capture: CaptureData) -> anyhow::Result<serde_json::Value> {
         .create_new(true)
         .mode(0o600)
         .open(&path)?;
-    if let Err(error) = crate::utils::png_io::encode(
-        &mut file,
-        image.as_raw(),
-        capture.width,
-        capture.height,
-        image::ColorType::Rgba8,
-    ) {
+    // Helper transport only: the C++ overlay decodes this file and deletes it
+    // immediately, so spend the CPU budget on latency instead of ratio. The
+    // PNG stays lossless. Screenshots saved for the user keep the normal
+    // compression in `utils::png_io`.
+    let encoded =
+        PngEncoder::new_with_quality(&mut file, CompressionType::Fast, FilterType::NoFilter)
+            .write_image(
+                image.as_raw(),
+                capture.width,
+                capture.height,
+                image::ColorType::Rgba8,
+            );
+    if let Err(error) = encoded {
         let _ = std::fs::remove_file(&path);
         return Err(error.into());
     }
@@ -731,21 +742,37 @@ mod tests {
 
     #[test]
     fn helper_png_round_trips_rgba_pixels_losslessly() {
-        let pixels = vec![7, 31, 201, 0, 240, 17, 85, 123];
-        let capture = CaptureData::new(pixels.clone(), 2, 1, PixelFormat::RGBA32);
+        use std::os::unix::fs::PermissionsExt;
+
+        // Three rows so the encoder cannot get away with a single row filter,
+        // varied channels, and both fully transparent and fully opaque pixels.
+        let pixels = vec![
+            7, 31, 201, 0, 240, 17, 85, 123, 0, 0, 0, 255, 13, 200, 4, 128, 255, 255, 255, 0, 90,
+            12, 73, 64,
+        ];
+        let capture = CaptureData::new(pixels.clone(), 2, 3, PixelFormat::RGBA32);
         let message = capture_to_png(capture).expect("helper PNG should encode");
         let path = PathBuf::from(message["path"].as_str().expect("PNG path"));
+        let metadata = std::fs::metadata(&path).expect("helper PNG metadata");
         let bytes = std::fs::read(&path);
         let cleanup = std::fs::remove_file(&path);
         let bytes = bytes.expect("helper PNG should be readable");
         cleanup.expect("helper PNG should be removed");
+
+        assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            &bytes[..8],
+            &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a],
+            "helper transport must still be a real PNG"
+        );
+
         let decoded = image::load_from_memory(&bytes)
             .expect("helper PNG should decode")
             .to_rgba8();
-
         assert_eq!(decoded.as_raw(), &pixels);
+        assert_eq!(decoded.dimensions(), (2, 3));
         assert_eq!(message["width"].as_u64(), Some(2));
-        assert_eq!(message["height"].as_u64(), Some(1));
+        assert_eq!(message["height"].as_u64(), Some(3));
     }
 
     #[test]

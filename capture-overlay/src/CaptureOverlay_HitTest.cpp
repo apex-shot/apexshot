@@ -64,7 +64,7 @@ void CaptureOverlay::confirmSelection()
     m_selectionConfirmed = true;
     QApplication::processEvents();
     QThread::msleep(120);
-    QApplication::exit(0);
+    requestExit(0);
 }
 
 void CaptureOverlay::confirmRecordingSelection()
@@ -84,7 +84,7 @@ void CaptureOverlay::confirmRecordingSelection()
     releaseKeyboard();
     hide();
     QApplication::processEvents();
-    QApplication::exit(0);
+    requestExit(0);
 }
 
 void CaptureOverlay::onCountdownTick()
@@ -121,7 +121,7 @@ void CaptureOverlay::onCountdownTick()
     m_selectionConfirmed = true;
     QApplication::processEvents();
     QThread::msleep(120);
-    QApplication::exit(0);
+    requestExit(0);
 }
 
 void CaptureOverlay::resetRecordingPanelToAreaMode(bool keepSelection)
@@ -162,9 +162,9 @@ void CaptureOverlay::cancelSelection()
     }
     releaseKeyboard();
     if (m_recordConfigRequested) {
-        QApplication::exit(6); // kExitRecordConfigUpdated
+        requestExit(6); // kExitRecordConfigUpdated
     } else {
-        QApplication::exit(1);
+        requestExit(1);
     }
 }
 

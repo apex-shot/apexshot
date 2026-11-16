@@ -1248,9 +1248,9 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
 
     CaptureOverlay* overlay = overlayWindows.front().get();
 
-    QObject::connect(&sessionServer, &QLocalServer::newConnection, [&sessionServer, &overlayWindows, &app]() {
+    QObject::connect(&sessionServer, &QLocalServer::newConnection, [&sessionServer, &overlayWindows, &overlay]() {
         while (QLocalSocket* socket = sessionServer.nextPendingConnection()) {
-            QObject::connect(socket, &QLocalSocket::readyRead, [socket, &overlayWindows, &app]() {
+            QObject::connect(socket, &QLocalSocket::readyRead, [socket, &overlayWindows, &overlay]() {
                 const QByteArray payload = socket->readAll().trimmed();
                 handleOverlayControlPayload(
                     payload,
@@ -1259,11 +1259,11 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
                             overlayWindow->focusAndRaiseOverlay();
                         }
                     },
-                    [&overlayWindows, &app]() {
+                    [&overlayWindows, &overlay]() {
                         for (const auto& overlayWindow : overlayWindows) {
                             overlayWindow->hide();
                         }
-                        app.exit(1);
+                        overlay->requestExit(1);
                     });
             });
             QObject::connect(socket, &QLocalSocket::disconnected, socket, &QObject::deleteLater);
@@ -1276,11 +1276,11 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
                             overlayWindow->focusAndRaiseOverlay();
                         }
                     },
-                    [&overlayWindows, &app]() {
+                    [&overlayWindows, &overlay]() {
                         for (const auto& overlayWindow : overlayWindows) {
                             overlayWindow->hide();
                         }
-                        app.exit(1);
+                        overlay->requestExit(1);
                     });
             }
         }
@@ -1291,11 +1291,14 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
     }
     QApplication::processEvents(QEventLoop::AllEvents, 100);
     // One more raise after the compositor has applied fullscreen / exclusive
-    // zone rules (GNOME often settles geometry one frame late).
-    for (const auto& overlayWindow : overlayWindows) {
-        overlayWindow->focusAndRaiseOverlay();
+    // zone rules (GNOME often settles geometry one frame late). Skip it once a
+    // cancel has arrived so the dismissed selector is not shown again.
+    if (overlay->requestedExitCode() == CaptureOverlay::kNoExitRequested) {
+        for (const auto& overlayWindow : overlayWindows) {
+            overlayWindow->focusAndRaiseOverlay();
+        }
+        QApplication::processEvents(QEventLoop::AllEvents, 100);
     }
-    QApplication::processEvents(QEventLoop::AllEvents, 100);
 
     // Align freeze underlay to the *actual* mapped window rect so panel chrome
     // is not painted twice when the compositor maps us into the work area.
@@ -1346,7 +1349,20 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
         }
     }
 
-    const int ret = app.exec();
+    // A cancel from the control socket (or Escape) and a fast selection can
+    // both land while the startup pumps above are draining events. Qt ignores
+    // QApplication::exit() while no event loop is running, so honour the
+    // remembered request instead of entering a loop that would sit on a
+    // selector the user already dismissed or confirmed.
+    const int startupExitCode = overlay->requestedExitCode();
+    if (startupExitCode != CaptureOverlay::kNoExitRequested) {
+        std::fprintf(stderr,
+                     "apexshot-capture: exit requested during startup (code %d)\n",
+                     startupExitCode);
+    }
+    const int ret = startupExitCode == CaptureOverlay::kNoExitRequested
+                      ? app.exec()
+                      : startupExitCode;
     if (interactiveOverlayMode) {
         sessionServer.close();
         QLocalServer::removeServer(sessionSocketPath);

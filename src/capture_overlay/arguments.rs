@@ -182,5 +182,16 @@ fn quick_capture_menu_result_json(
 fn build_crosshair_args(config: &crate::config::AppConfig) -> Vec<String> {
     let mut args = vec!["--crosshair-capture".into()];
     append_screenshot_timer_args(&mut args, config);
+    // The crosshair selector freezes the screen before it becomes visible, and
+    // the still it captures can include the pointer. Forward both settings so
+    // the shortcut matches Settings instead of always taking overlay defaults.
+    args.push(format!(
+        "--freeze-selection-bg={}",
+        if config.screenshot_freeze_screen { 1 } else { 0 }
+    ));
+    args.push(format!(
+        "--screenshot-cursor={}",
+        if config.screenshot_show_cursor { 1 } else { 0 }
+    ));
     args
 }

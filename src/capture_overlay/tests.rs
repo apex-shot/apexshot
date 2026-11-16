@@ -26,10 +26,64 @@ mod tests {
             screenshot_timer_interval: 0,
             ..AppConfig::default()
         };
-        assert_eq!(
-            build_crosshair_args(&config),
-            vec!["--crosshair-capture", "--hide-timer"]
-        );
+        let args = build_crosshair_args(&config);
+        assert!(args.contains(&"--crosshair-capture".to_string()));
+        // The crosshair route stays minimal: no area selector, no capture menu,
+        // and none of the recording panel's settings.
+        for unexpected in [
+            "--area-init",
+            "--capture-menu",
+            "--open-recording-ui",
+            "--selection-cursor=Crosshair",
+            "--show-zoom-preview=1",
+            "--rec-controls",
+            "--no-hidpi",
+            "--recording-unavailable",
+        ] {
+            assert!(
+                !args.contains(&unexpected.to_string()),
+                "crosshair args must not carry {unexpected}: {args:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn crosshair_capture_forwards_freeze_and_cursor_settings() {
+        let defaults = build_crosshair_args(&AppConfig::default());
+        assert!(defaults.contains(&"--freeze-selection-bg=1".to_string()));
+        assert!(defaults.contains(&"--screenshot-cursor=1".to_string()));
+
+        let frozen_without_cursor = AppConfig {
+            screenshot_freeze_screen: true,
+            screenshot_show_cursor: false,
+            ..AppConfig::default()
+        };
+        let args = build_crosshair_args(&frozen_without_cursor);
+        assert!(args.contains(&"--freeze-selection-bg=1".to_string()));
+        assert!(args.contains(&"--screenshot-cursor=0".to_string()));
+
+        let unfrozen_with_cursor = AppConfig {
+            screenshot_freeze_screen: false,
+            screenshot_show_cursor: true,
+            ..AppConfig::default()
+        };
+        let args = build_crosshair_args(&unfrozen_with_cursor);
+        assert!(args.contains(&"--freeze-selection-bg=0".to_string()));
+        assert!(args.contains(&"--screenshot-cursor=1".to_string()));
+    }
+
+    #[test]
+    fn crosshair_capture_keeps_timer_args_alongside_settings() {
+        let timed = AppConfig {
+            screenshot_timer_interval: 3,
+            screenshot_freeze_screen: false,
+            ..AppConfig::default()
+        };
+        let args = build_crosshair_args(&timed);
+        assert!(args.contains(&"--show-timer".to_string()));
+        assert!(args.contains(&"--timer-seconds=3".to_string()));
+        assert!(args.contains(&"--freeze-selection-bg=0".to_string()));
+        assert!(args.contains(&"--screenshot-cursor=1".to_string()));
     }
 
     #[test]
