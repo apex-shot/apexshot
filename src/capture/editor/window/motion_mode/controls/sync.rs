@@ -99,7 +99,11 @@ pub(super) fn make_redraw(
     let syncing = parts.shared.inspector_syncing.clone();
     let last_had_text = Rc::new(std::cell::Cell::new(false));
     let last_had_clip = Rc::new(std::cell::Cell::new(false));
+    let sync_lanes = parts.timeline.sync_lanes.clone();
     Rc::new(move || {
+        // A selection made anywhere (inspector, clip menu, undo, an added
+        // clip) brings its lane forward before the lanes repaint.
+        sync_lanes();
         let runtime = session.borrow();
         playhead_clock.set_text(&super::super::super::motion_timeline::format_clock(
             runtime.motion.playhead,

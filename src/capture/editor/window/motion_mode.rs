@@ -18,6 +18,7 @@ mod transition;
 mod typography;
 mod upscale_preview;
 mod watermark;
+mod watermark_pad;
 mod widgets;
 
 pub(super) use appearance::build_motion_appearance_panel;
@@ -30,8 +31,8 @@ pub(in crate::capture::editor::window) use position_pad::MotionPositionPad;
 use preview::draw_motion_preview;
 pub(super) use session::{MotionHoverTrack, MotionRuntime, MotionSession};
 pub(super) use transition::{
-    apply_editor_mode, install_confirm_overlay, request_enter_motion, request_leave_motion,
-    show_motion_tool_page, MotionModeChrome,
+    apply_editor_mode, install_confirm_overlay, is_long_image, long_image_motion_tooltip,
+    request_enter_motion, request_leave_motion, show_motion_tool_page, MotionModeChrome,
 };
 pub(super) use watermark::build_motion_watermark_panel;
 pub(in crate::capture::editor::window) use widgets::{

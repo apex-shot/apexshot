@@ -784,14 +784,27 @@ mod tests {
             let composition =
                 motion_background_composition(source_w, source_h, &small, None).compute();
             if source_w < 1600.0 {
+                // The preview fills its panel past 1:1, so a small still is
+                // never left at its pixel size in an empty stage: one side
+                // meets the 24px-inset panel and neither overflows it.
                 let scene = super::motion_preview_scene_rect(
                     1600.0,
                     1000.0,
                     composition.canvas_width,
                     composition.canvas_height,
                 );
-                assert!((scene.2 - composition.canvas_width).abs() < 1e-9);
-                assert!((scene.3 - composition.canvas_height).abs() < 1e-9);
+                let (bounds_w, bounds_h) = (1600.0 - 48.0, 1000.0 - 48.0);
+                assert!(scene.2 > composition.canvas_width);
+                assert!(scene.2 <= bounds_w + 1e-9 && scene.3 <= bounds_h + 1e-9);
+                assert!(
+                    (scene.2 - bounds_w).abs() < 1e-9 || (scene.3 - bounds_h).abs() < 1e-9
+                );
+                assert!(
+                    (scene.2 / scene.3
+                        - composition.canvas_width / composition.canvas_height)
+                        .abs()
+                        < 1e-9
+                );
             }
         }
     }

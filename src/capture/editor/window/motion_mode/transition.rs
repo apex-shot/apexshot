@@ -82,10 +82,29 @@ pub(in crate::capture::editor::window) fn annotations_need_snapshot(state: &Edit
     !state.actions.is_empty()
 }
 
+/// Height-to-width ratio past which a still counts as a long screenshot.
+/// The tallest phone screens run about 2.33:1 (21:9) and a portrait monitor
+/// 1.8:1; a scrolling capture of two and a half screens is already past this.
+const LONG_IMAGE_RATIO: f64 = 2.4;
+
+/// Whether the still is a long screenshot, such as a scrolling capture.
+/// Motion frames the whole still on one card, so a page this tall would shrink
+/// to an unreadable strip, and each frame would composite far more pixels than
+/// any screen holds. Those captures stay in Static.
+pub(in crate::capture::editor::window) fn is_long_image(width: u32, height: u32) -> bool {
+    width > 0 && f64::from(height) / f64::from(width) > LONG_IMAGE_RATIO
+}
+
+pub(in crate::capture::editor::window) fn long_image_motion_tooltip() -> String {
+    t("Motion isn't available for long screenshots")
+}
+
 #[derive(Clone, Copy)]
 enum ConfirmKind {
     ToMotion,
     ToStatic,
+    /// A notice, not a question: the still is too long for Motion.
+    LongImage,
 }
 
 pub(in crate::capture::editor::window) fn request_enter_motion(
@@ -99,10 +118,23 @@ pub(in crate::capture::editor::window) fn request_enter_motion(
     if empty_drop_zone {
         return;
     }
-    let needs_confirm = {
+    let (long_image, needs_confirm) = {
         let guard = state.lock().unwrap();
-        annotations_need_snapshot(&guard) && !load_config().skip_static_to_motion_confirm
+        let (width, height) = guard.working_image.dimensions();
+        (
+            is_long_image(width, height),
+            annotations_need_snapshot(&guard) && !load_config().skip_static_to_motion_confirm,
+        )
     };
+    if long_image {
+        show_confirm(
+            window,
+            confirm_overlay,
+            ConfirmKind::LongImage,
+            Rc::new(|| {}),
+        );
+        return;
+    }
     if needs_confirm {
         show_confirm(
             window,
@@ -152,7 +184,13 @@ fn show_confirm(
             t("Motion effect segments can't be edited in Static mode and will be cleared if you continue."),
             "motion_to_static",
         ),
+        ConfirmKind::LongImage => (
+            long_image_motion_tooltip(),
+            t("This screenshot is too long to animate. Scrolling captures and other long images stay in Static, where every annotation and export tool still works."),
+            "",
+        ),
     };
+    let notice = matches!(kind, ConfirmKind::LongImage);
 
     let card = GtkBox::new(Orientation::Vertical, 12);
     card.add_css_class("editor-motion-confirm-card");
@@ -188,12 +226,16 @@ fn show_confirm(
     // instead of the two buttons huddling together on the right.
     let buttons_spacer = GtkBox::new(Orientation::Horizontal, 0);
     buttons_spacer.set_hexpand(true);
-    let cont = Button::with_label(&t("Continue"));
+    let cont = Button::with_label(&if notice { t("Got it") } else { t("Continue") });
     cont.set_has_frame(false);
     cont.add_css_class("editor-done-button");
     buttons.append(&cancel);
     buttons.append(&buttons_spacer);
     buttons.append(&cont);
+
+    // A notice has nothing to cancel or skip: it only acknowledges.
+    skip.set_visible(!notice);
+    cancel.set_visible(!notice);
 
     card.append(&title_label);
     card.append(&body_label);
@@ -211,7 +253,7 @@ fn show_confirm(
         let skip = skip.clone();
         let skip_field = skip_field.to_string();
         move |_| {
-            if skip.is_active() {
+            if skip.is_active() && !skip_field.is_empty() {
                 let mut config = load_config();
                 match skip_field.as_str() {
                     "static_to_motion" => config.skip_static_to_motion_confirm = true,
@@ -231,4 +273,28 @@ pub(in crate::capture::editor::window) fn install_confirm_overlay(
 ) {
     root_overlay.add_overlay(confirm);
     root_overlay.set_clip_overlay(confirm, true);
+}
+
+#[cfg(test)]
+mod long_image_tests {
+    use super::is_long_image;
+
+    #[test]
+    fn scrolling_captures_are_long_but_screens_and_phones_are_not() {
+        // Screens: landscape, ultrawide, portrait monitor, tall phone.
+        for (width, height) in [
+            (1920, 1080),
+            (5120, 1440),
+            (1080, 1920),
+            (1170, 2532),
+            (1644, 3840),
+        ] {
+            assert!(!is_long_image(width, height), "{width}x{height}");
+        }
+        // A stitched page and a narrow scrolling region.
+        for (width, height) in [(1920, 9000), (1920, 4800), (800, 2600)] {
+            assert!(is_long_image(width, height), "{width}x{height}");
+        }
+        assert!(!is_long_image(0, 100));
+    }
 }

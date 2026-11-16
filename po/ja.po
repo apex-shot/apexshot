@@ -4875,3 +4875,9 @@ msgstr "この ffmpeg ビルドには HEVC エンコーダーがありません"
 
 msgid "Uploaded, but the link could not be copied: {error}"
 msgstr "アップロードしましたが、リンクをコピーできませんでした: {error}"
+
+msgid "Motion isn't available for long screenshots"
+msgstr "長いスクリーンショットではモーションを使用できません"
+
+msgid "This screenshot is too long to animate. Scrolling captures and other long images stay in Static, where every annotation and export tool still works."
+msgstr "このスクリーンショットは長すぎてアニメーションできません。スクロールキャプチャなどの長い画像は静止モードのままで、すべての注釈ツールと書き出しツールを引き続き使用できます。"

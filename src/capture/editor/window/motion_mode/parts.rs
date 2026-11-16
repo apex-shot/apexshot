@@ -51,6 +51,8 @@ pub(in crate::capture::editor::window) struct MotionTimelineParts {
     pub playhead_overlay: DrawingArea,
     pub hover_playhead: DrawingArea,
     pub playhead_hovered: Rc<Cell<bool>>,
+    /// Bring a new selection's lane forward and ease the compact lanes.
+    pub sync_lanes: Rc<dyn Fn()>,
 }
 
 pub(in crate::capture::editor::window) struct MotionPanelParts {

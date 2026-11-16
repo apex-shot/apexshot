@@ -4901,3 +4901,9 @@ msgstr "إصدار ffmpeg هذا لا يحتوي على مُرمِّز HEVC"
 
 msgid "Uploaded, but the link could not be copied: {error}"
 msgstr "تم الرفع، لكن تعذّر نسخ الرابط: {error}"
+
+msgid "Motion isn't available for long screenshots"
+msgstr "الحركة غير متاحة للقطات الشاشة الطويلة"
+
+msgid "This screenshot is too long to animate. Scrolling captures and other long images stay in Static, where every annotation and export tool still works."
+msgstr "لقطة الشاشة هذه أطول من أن تُحرَّك. تبقى اللقطات المُمرَّرة والصور الطويلة الأخرى في الوضع الثابت، حيث تظل جميع أدوات التعليق والتصدير متاحة."

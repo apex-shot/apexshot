@@ -4957,3 +4957,9 @@ msgstr "В этой сборке ffmpeg нет кодировщика HEVC"
 
 msgid "Uploaded, but the link could not be copied: {error}"
 msgstr "Загружено, но не удалось скопировать ссылку: {error}"
+
+msgid "Motion isn't available for long screenshots"
+msgstr "Движение недоступно для длинных скриншотов"
+
+msgid "This screenshot is too long to animate. Scrolling captures and other long images stay in Static, where every annotation and export tool still works."
+msgstr "Этот скриншот слишком длинный для анимации. Скриншоты с прокруткой и другие длинные изображения остаются в статическом режиме, где по-прежнему работают все инструменты аннотаций и экспорта."
