@@ -289,16 +289,6 @@ pub fn capabilities_for_static_image(transform: StaticImageTransform) -> StudioC
     }
 }
 
-pub fn capabilities_for_image_export(
-    transform: StaticImageTransform,
-    upscale: bool,
-) -> StudioCapabilities {
-    StudioCapabilities {
-        image_upscale: upscale,
-        ..capabilities_for_static_image(transform)
-    }
-}
-
 /// The still-image export's capabilities: the frozen pose plus the
 /// decorative appearance. The caller computes `style` because only the
 /// document knows its appearance.
@@ -860,8 +850,11 @@ mod tests {
     #[test]
     fn neural_upscale_requires_studio_without_changing_free_image_exports() {
         let transform = StaticImageTransform::default();
-        assert!(!capabilities_for_image_export(transform, false).requires_studio());
-        let capabilities = capabilities_for_image_export(transform, true);
+        assert!(!capabilities_for_static_image(transform).requires_studio());
+        let capabilities = StudioCapabilities {
+            image_upscale: true,
+            ..capabilities_for_static_image(transform)
+        };
         assert!(capabilities.image_upscale);
         assert!(capabilities.requires_studio());
         let path = scratch_path();

@@ -527,11 +527,54 @@ impl EditorState {
         Ok(())
     }
 
+    /// The final still every output path writes: save, copy, upload and
+    /// export. A Studio-styled still fails closed here, so no output can skip
+    /// the licence check.
     pub fn to_final_image(&self) -> Result<RgbaImage, EditorError> {
+        crate::studio_entitlement::ensure_export_allowed(self.studio_capabilities())
+            .map_err(|error| EditorError::ImageSave(error.to_string()))?;
+        self.render_final_image()
+    }
+
+    /// Whether the still uses a Studio presentation control: a frame style or
+    /// an outside border, or a scene shadow the background layout leaves
+    /// visible around the image. The Background panel (fill, padding, insert,
+    /// alignment, blur, radius, noise) and frame ratios are free.
+    pub(crate) fn uses_studio_style(&self) -> bool {
+        if self.frame_style != FrameStyle::Default || self.border_thickness > 0.0 {
+            return true;
+        }
+        let layout = self.background_layout_for(&self.working_image);
+        if layout.shadow.is_none() {
+            return false;
+        }
+        // A card that fills the canvas leaves the shadow nothing to show in.
+        let image = layout.image_rect;
+        const EPSILON: f64 = 0.5;
+        image.x > EPSILON
+            || image.y > EPSILON
+            || layout.canvas_width - (image.x + image.width) > EPSILON
+            || layout.canvas_height - (image.y + image.height) > EPSILON
+    }
+
+    pub(crate) fn studio_capabilities(&self) -> crate::studio_entitlement::StudioCapabilities {
+        crate::studio_entitlement::StudioCapabilities {
+            image_upscale: self.source_upscale.factor() > 1,
+            ..crate::studio_entitlement::capabilities_for_image_style(
+                self.static_image_transform,
+                self.uses_studio_style(),
+            )
+        }
+    }
+
+    /// Flatten the still without the Studio check. Previews (the upscale
+    /// before/after comparison) and tests of the render itself use this;
+    /// anything that leaves the editor must go through `to_final_image`.
+    pub(crate) fn render_final_image(&self) -> Result<RgbaImage, EditorError> {
         self.validate_upscale_export(self.source_upscale)
             .map_err(EditorError::ImageSave)?;
         if self.source_upscale.factor() > 1 {
-            return self.upscaled_export_state(true)?.to_final_image();
+            return self.upscaled_export_state(true)?.render_final_image();
         }
         let image = if !self.static_image_transform.is_identity() {
             self.to_static_transformed_image()
@@ -1238,7 +1281,11 @@ fn apply_corner_radius(image: &mut RgbaImage, radius: f64) {
 mod tests {
     use image::RgbaImage;
 
+    use super::EditorState;
     use super::{apply_corner_radius, render_shadow_layer};
+    use crate::capture::editor::types::{BackgroundStyle, CropAspectRatio, DrawColor, FrameStyle};
+    use crate::capture::editor::upscale::SourceUpscale;
+    use crate::recording::editor::model::{MotionSceneShadow, MotionSceneShadowPreset};
 
     #[test]
     fn corner_radius_antialiases_top_right_edge() {
@@ -1259,6 +1306,132 @@ mod tests {
         );
         assert_eq!(image.get_pixel(39, 0)[3], 0);
         assert_eq!(image.get_pixel(20, 20)[3], 255);
+    }
+
+    fn studio_document() -> EditorState {
+        EditorState::new(RgbaImage::from_pixel(
+            100,
+            80,
+            image::Rgba([240, 0, 0, 255]),
+        ))
+    }
+
+    fn blue_fill() -> BackgroundStyle {
+        BackgroundStyle::PlainColor(DrawColor::new(0.0, 0.0, 1.0, 1.0))
+    }
+
+    /// A spread cast shadow, synced the way the Background panel syncs it so
+    /// the shadow fields the render reads match the layer.
+    fn cast_shadow(state: &mut EditorState) {
+        state.scene_shadow = MotionSceneShadow {
+            preset: MotionSceneShadowPreset::Spread,
+            opacity: 0.6,
+            light: (0.0, 0.0),
+        };
+        state.sync_shadow_fields();
+    }
+
+    #[test]
+    fn default_appearance_is_free() {
+        assert!(!studio_document().uses_studio_style());
+    }
+
+    #[test]
+    fn background_panel_controls_stay_free_and_frame_styles_do_not() {
+        let mut background = studio_document();
+        background.background_style = blue_fill();
+        background.background_padding = 16.0;
+        background.background_blur = 0.5;
+        background.background_corner_radius = 20.0;
+        background.background_noise = 0.5;
+        background.background_insert = 10.0;
+        assert!(
+            !background.uses_studio_style(),
+            "the Background panel is free"
+        );
+
+        let mut style = studio_document();
+        style.frame_style = FrameStyle::InsetLight;
+        assert!(style.uses_studio_style());
+
+        let mut ratio = studio_document();
+        ratio.background_style = blue_fill();
+        ratio.background_padding = 16.0;
+        ratio.background_aspect_ratio = CropAspectRatio::Square;
+        assert!(!ratio.uses_studio_style(), "frame ratios stay free");
+    }
+
+    #[test]
+    fn a_stale_padding_without_a_fill_stays_free() {
+        let mut state = studio_document();
+        state.background_padding = 16.0;
+        assert!(!state.uses_studio_style());
+    }
+
+    #[test]
+    fn a_scene_shadow_is_studio_only_once_padding_reveals_it() {
+        let mut state = studio_document();
+        cast_shadow(&mut state);
+        assert!(
+            !state.uses_studio_style(),
+            "no background, nothing to reveal"
+        );
+        state.background_style = blue_fill();
+        state.background_padding = 16.0;
+        assert!(state.uses_studio_style());
+        state.scene_shadow.preset = MotionSceneShadowPreset::None;
+        state.sync_shadow_fields();
+        assert!(!state.uses_studio_style());
+    }
+
+    #[test]
+    fn a_styled_document_is_locked_and_a_clean_one_is_not() {
+        let mut styled = studio_document();
+        styled.frame_style = FrameStyle::InsetLight;
+        let error = styled
+            .to_final_image()
+            .expect_err("a styled still fails closed");
+        assert!(error.to_string().contains("Studio"), "{error}");
+        assert!(
+            studio_document().to_final_image().is_ok(),
+            "a clean still stays free"
+        );
+        let mut wallpapered = studio_document();
+        wallpapered.background_style = blue_fill();
+        wallpapered.background_padding = 16.0;
+        wallpapered.background_corner_radius = 20.0;
+        assert!(
+            wallpapered.to_final_image().is_ok(),
+            "a fill, padding and rounded corners stay free"
+        );
+        let _entitlement = crate::studio_entitlement::test_studio_entitlement();
+        assert_eq!(
+            styled.to_final_image().unwrap(),
+            styled.render_final_image().unwrap()
+        );
+    }
+
+    #[test]
+    fn studio_gates_only_nonidentity_final_output() {
+        let mut state = studio_document();
+        state.static_image_transform.perspective = 0.4;
+        assert!(state.to_final_image().is_ok());
+        state.static_image_transform.yaw = 12.0;
+        assert!(state.render_final_image().is_ok());
+        assert!(state.to_final_image().is_err());
+        let _entitlement = crate::studio_entitlement::test_studio_entitlement();
+        assert_eq!(
+            state.to_final_image().unwrap(),
+            state.render_final_image().unwrap()
+        );
+    }
+
+    #[test]
+    fn studio_capabilities_follow_the_upscale_mode() {
+        let mut state = studio_document();
+        assert!(!state.studio_capabilities().image_upscale);
+        state.source_upscale = SourceUpscale::Neural2x;
+        assert!(state.studio_capabilities().image_upscale);
     }
 
     #[test]

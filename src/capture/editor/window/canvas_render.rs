@@ -30,6 +30,7 @@ use crate::capture::editor::{
     },
     selection::{action_bounds_with_padding, action_resize_handles},
     state::EditorState,
+    studio_watermark::ScreenRect,
     types::{frame_needs_canvas, AnnotationAction, BackgroundStyle, Rect, Tool, ViewTransform},
     ui_support::{DockedBarInset, EDITOR_TOP_CHROME_HEIGHT},
 };
@@ -40,6 +41,7 @@ use super::motion_mode::MotionRuntime;
 use super::motion_render::{
     draw_frozen_card, paint_card_shadow, static_card_appearance, MotionStage,
 };
+use super::studio_mark::{self, StudioMark};
 
 /// Working width for the on-screen gradient fill. A gradient is smooth, so the
 /// paint stretches this across the canvas; matching the video editor's preview
@@ -449,6 +451,9 @@ pub(super) struct CanvasDrawInputs<'a> {
     /// image filter, then repaints once they stop.
     pub interactive_preview: &'a InteractivePreview,
     pub wallpaper_cache: &'a Rc<RefCell<HashMap<PathBuf, ImageSurface>>>,
+    /// The Studio preview mark's licence cache, shared with the retry paths
+    /// that follow an activation.
+    pub studio_mark: &'a StudioMark,
     /// The shared Motion runtime; its `background_surface` is where the
     /// Appearance inspector already decoded the selected wallpaper.
     pub motion_runtime: &'a Rc<RefCell<MotionRuntime>>,
@@ -471,6 +476,7 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
         interactive_preview,
         wallpaper_cache,
         motion_runtime,
+        studio_mark,
     } = input;
 
     let state_draw = state.clone();
@@ -492,6 +498,8 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
     let interactive_preview = interactive_preview.clone();
     let wallpaper_cache = wallpaper_cache.clone();
     let motion_runtime = motion_runtime.clone();
+    let studio_mark_draw = studio_mark.clone();
+    studio_mark::install_refresh(drawing_area, state.clone(), studio_mark.clone());
     drawing_area.set_draw_func(move |widget, context, width, height| {
         // Appearance edits live in the Motion history, so the toolbar's Undo has
         // to stay reachable while the still's own stack is empty. Read it before
@@ -541,6 +549,7 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
             hovered_text_action_index,
             arrow_editing_controls,
             interactive_frame,
+            studio_style,
         ) = {
             let st = state_draw.lock().unwrap();
             let (can_undo, can_redo) = st.history_availability();
@@ -600,6 +609,9 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
                     || st.active_text_is_dragging
                     || st.arrow_control_dragging.is_some()
                     || interactive_preview.active(),
+                // The Studio preview mark is due for this document. The check is
+                // arithmetic, so it stays under the same lock as the rest.
+                st.uses_studio_style(),
             )
         };
 
@@ -717,6 +729,41 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
             virtual_w * canvas_t.scale,
             virtual_h * canvas_t.scale,
         );
+
+        // The Studio preview mark, in widget pixels: the whole composition, the
+        // card as the frame last placed it, and the drawing area. It is skipped
+        // while cropping.
+        let studio_canvas = ScreenRect {
+            x: canvas_t.offset_x,
+            y: canvas_t.offset_y,
+            width: virtual_w * canvas_t.scale,
+            height: virtual_h * canvas_t.scale,
+        };
+        let studio_visible = ScreenRect {
+            x: 0.0,
+            y: 0.0,
+            width: f64::from(width),
+            height: f64::from(height),
+        };
+        let paint_studio_mark = |context: &Context, card: ViewTransform| {
+            if selected_tool == Tool::Crop {
+                return;
+            }
+            let card = ScreenRect {
+                x: card.offset_x,
+                y: card.offset_y,
+                width: image_width * card.scale,
+                height: image_height * card.scale,
+            };
+            studio_mark_draw.paint(
+                context,
+                studio_style,
+                &working_image,
+                studio_canvas,
+                card,
+                studio_visible,
+            );
+        };
 
         // The image transform is fixed by the layout before anything is
         // painted, so the base layer below can come from a cache.
@@ -1297,6 +1344,7 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
                 shadow_offset_x,
                 shadow_offset_y,
             );
+            paint_studio_mark(context, t);
             *transform_draw.lock().unwrap() = t;
             return;
         }
@@ -1454,6 +1502,11 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
         let _ = context.restore();
 
         let _ = context.restore();
+
+        // The Studio preview mark goes over the card and its annotations, and
+        // under the selection chrome.
+        paint_studio_mark(context, t);
+
         let _ = context.save();
         context.translate(t.offset_x, t.offset_y);
         context.scale(t.scale, t.scale);

@@ -9,7 +9,7 @@ fn identity_transform_keeps_the_existing_still_render_path() {
         image::Rgba([12, 34, 56, 255]),
     ));
     assert_eq!(
-        state.to_final_image().expect("identity still renders"),
+        state.render_final_image().expect("identity still renders"),
         state.to_rendered_image().expect("legacy path renders"),
     );
 }
@@ -23,7 +23,9 @@ fn frozen_motion_pose_keeps_the_background_fixed() {
     ));
     state.background_style = BackgroundStyle::PlainColor(DrawColor::new(0.0, 0.0, 1.0, 1.0));
     state.background_padding = 48.0;
-    let before = state.to_final_image().expect("background still renders");
+    let before = state
+        .render_final_image()
+        .expect("background still renders");
     state.static_image_transform = StaticImageTransform {
         yaw: 0.0,
         pitch: -24.0,
@@ -32,7 +34,9 @@ fn frozen_motion_pose_keeps_the_background_fixed() {
         pos_x: 0.35,
         pos_y: -0.2,
     };
-    let after = state.to_final_image().expect("transformed still renders");
+    let after = state
+        .render_final_image()
+        .expect("transformed still renders");
     assert_eq!(before.dimensions(), after.dimensions());
     assert_eq!(before.get_pixel(0, 0), after.get_pixel(0, 0));
     assert_ne!(before, after);
@@ -59,14 +63,14 @@ fn annotations_move_with_the_frozen_motion_card() {
         shadow: false,
     });
     let before = state
-        .to_final_image()
+        .render_final_image()
         .expect("untransformed annotations render");
     state.static_image_transform = StaticImageTransform {
         pos_x: 0.25,
         ..Default::default()
     };
     let transformed = state
-        .to_final_image()
+        .render_final_image()
         .expect("transformed annotations render");
     let red_bounds = |image: &RgbaImage| {
         image
@@ -120,8 +124,8 @@ fn crop_tool_keeps_the_frozen_pose_in_export() {
     };
     state.set_tool_without_rebuild(Tool::Crop);
     let stored = state.static_image_transform;
-    let crop_export = state.to_final_image().expect("crop-mode export");
+    let crop_export = state.render_final_image().expect("crop-mode export");
     state.set_tool_without_rebuild(Tool::Background);
     assert_eq!(state.static_image_transform, stored);
-    assert_eq!(state.to_final_image().unwrap(), crop_export);
+    assert_eq!(state.render_final_image().unwrap(), crop_export);
 }
