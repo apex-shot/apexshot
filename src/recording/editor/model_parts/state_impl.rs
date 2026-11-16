@@ -31,6 +31,7 @@ impl VideoEditState {
             clipboard: None,
             background: VideoBackground::None,
             background_padding: 24.0,
+            sound: Default::default(),
             // The radius was previously non-zero but never read by any
             // renderer, so the old value was invisible. It starts at 0 now
             // that the Background panel actually drives it — a non-zero

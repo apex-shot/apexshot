@@ -207,8 +207,8 @@ pub fn draw_video_clip(
 ///
 /// The band used to live inside the video lane alone, so it stopped at the
 /// lane seam while the ruler carried its own dim. Drawing it once, over the
-/// three lanes, makes the whole area past the clip read as one frosted region
-/// from the ruler to the bottom of the stack.
+/// video lane and the secondary rows, makes the whole area past the clip read
+/// as one frosted region from the ruler to the bottom of the stack.
 pub fn draw_extend_region(
     state: &Arc<Mutex<VideoEditState>>,
     hovered: bool,
@@ -844,6 +844,437 @@ pub fn draw_zoom_suggestion(
         let zoom_label = t("Zoom");
         let _ = cr.show_text(&zoom_label);
     }
+}
+
+/// One secondary lane at whatever height it is eased to: the full drawing, the
+/// thin resting strip, or a cross-fade of both while the lanes trade height.
+pub fn draw_fading_lane(
+    cr: &gtk4::cairo::Context,
+    width: i32,
+    height: i32,
+    progress: f64,
+    full: &dyn Fn(&gtk4::cairo::Context, i32, i32),
+    thin: &dyn Fn(&gtk4::cairo::Context, i32, i32),
+) {
+    if progress >= 0.999 {
+        full(cr, width, height);
+    } else if progress <= 0.001 {
+        thin(cr, width, height);
+    } else {
+        cr.push_group();
+        thin(cr, width, height);
+        let _ = cr.pop_group_to_source();
+        let _ = cr.paint_with_alpha(1.0 - progress);
+        cr.push_group();
+        full(cr, width, height);
+        let _ = cr.pop_group_to_source();
+        let _ = cr.paint_with_alpha(progress);
+    }
+}
+
+/// A resting lane: its name at the left edge and one slim bar per clip. A bar
+/// running under the name fades in from transparent, so the name never sits on
+/// solid colour.
+pub fn draw_thin_lane(
+    state: &VideoEditState,
+    label: &str,
+    bars: &[(f64, f64, (f64, f64, f64, f64))],
+    light: bool,
+    cr: &gtk4::cairo::Context,
+    width: i32,
+    height: i32,
+) {
+    let w = width.max(1) as f64;
+    let h = height.max(1) as f64;
+    cr.select_font_face(
+        crate::typography::UI_FONT_FAMILY,
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Bold,
+    );
+    cr.set_font_size(12.0);
+    let extents = cr.text_extents(label).ok();
+    let text_w = extents.map_or(40.0, |extents| extents.x_advance());
+    let text_h = extents.map_or(9.0, |extents| extents.height());
+    let label_x = 6.0;
+    let label_end = label_x + text_w;
+    let fade_end = label_end + 40.0;
+
+    let bar_h = (h - 4.0).max(3.0);
+    let y = (h - bar_h) / 2.0;
+    for &(start, end, fill) in bars {
+        let x0 = state.time_to_x(start, w);
+        let x1 = state.time_to_x(end, w).max(x0 + 4.0);
+        rounded_rect(cr, x0, y, x1 - x0, bar_h, (bar_h * 0.35).min(5.0));
+        if x0 < fade_end {
+            let fade = gtk4::cairo::LinearGradient::new(0.0, 0.0, fade_end, 0.0);
+            fade.add_color_stop_rgba(0.0, fill.0, fill.1, fill.2, 0.0);
+            fade.add_color_stop_rgba(label_end / fade_end, fill.0, fill.1, fill.2, fill.3 * 0.15);
+            fade.add_color_stop_rgba(1.0, fill.0, fill.1, fill.2, fill.3);
+            let _ = cr.set_source(&fade);
+        } else {
+            cr.set_source_rgba(fill.0, fill.1, fill.2, fill.3);
+        }
+        let _ = cr.fill();
+    }
+    let ink = if light { 0.0 } else { 1.0 };
+    cr.set_source_rgba(ink, ink, ink, 0.6);
+    cr.move_to(label_x, (h + text_h) / 2.0);
+    let _ = cr.show_text(label);
+}
+
+/// The Zoom lane resting: its clips as slim blue bars.
+pub fn draw_thin_zoom_lane(
+    state: &VideoEditState,
+    light: bool,
+    cr: &gtk4::cairo::Context,
+    width: i32,
+    height: i32,
+) {
+    let bars: Vec<(f64, f64, (f64, f64, f64, f64))> = state
+        .zoom_clips
+        .iter()
+        .map(|clip| (clip.start, clip.end, (0.0, 0.0, 1.0, 0.95)))
+        .collect();
+    draw_thin_lane(state, &t("Zoom"), &bars, light, cr, width, height);
+}
+
+/// The Cursor lane resting: its hide clips as slim rose bars.
+pub fn draw_thin_cursor_lane(
+    state: &VideoEditState,
+    light: bool,
+    cr: &gtk4::cairo::Context,
+    width: i32,
+    height: i32,
+) {
+    let bars: Vec<(f64, f64, (f64, f64, f64, f64))> = state
+        .cursor_hide_clips
+        .iter()
+        .map(|clip| (clip.start, clip.end, (0.4, 0.0, 0.2, 0.95)))
+        .collect();
+    draw_thin_lane(state, &t("Cursor"), &bars, light, cr, width, height);
+}
+
+/// The Sound lane resting: one slim bar per kept piece, in its sound fill so a
+/// silent piece already reads quieter than the rest.
+pub fn draw_thin_sound_lane(
+    state: &VideoEditState,
+    light: bool,
+    cr: &gtk4::cairo::Context,
+    width: i32,
+    height: i32,
+) {
+    let bars: Vec<(f64, f64, (f64, f64, f64, f64))> = state
+        .placed_segment_slots()
+        .into_iter()
+        .map(|(index, start, _, _)| {
+            let muted = state.is_muted() || state.segment_is_muted(index);
+            (
+                start,
+                start + state.segment_timeline_duration(index),
+                sound_tone(light, muted).fill,
+            )
+        })
+        .collect();
+    draw_thin_lane(state, &t("Sound"), &bars, light, cr, width, height);
+}
+
+/// The sound lane's colours: the pill, the waveform inside it and the ring a
+/// selected piece draws.
+#[derive(Clone, Copy)]
+struct SoundTone {
+    fill: (f64, f64, f64, f64),
+    wave: (f64, f64, f64, f64),
+    edge: (f64, f64, f64, f64),
+}
+
+fn sound_tone(light: bool, muted: bool) -> SoundTone {
+    let mut tone = if light {
+        SoundTone {
+            fill: (0.90, 0.86, 0.99, 1.0),
+            wave: (0.40, 0.24, 0.76, 0.95),
+            edge: (0.34, 0.18, 0.68, 1.0),
+        }
+    } else {
+        SoundTone {
+            fill: (0.19, 0.13, 0.34, 1.0),
+            wave: (0.72, 0.58, 1.0, 0.95),
+            edge: (0.80, 0.70, 1.0, 1.0),
+        }
+    };
+    if muted {
+        // A muted piece keeps its span and its ring; the fill and the waveform
+        // drop back so "silent" reads differently from "quiet".
+        tone.fill.3 = 0.45;
+        tone.wave.3 = 0.35;
+    }
+    tone
+}
+
+/// The expanded sound lane: one pill per cut piece, its waveform inside it.
+///
+/// A piece's pill is the piece itself, so the row reads as the same
+/// composition the video lane shows. The waveform is the recording's loudness
+/// over the footage under each column; a piece with no measurement yet shows a
+/// flat line instead of an empty pill.
+pub fn draw_sound_lane(
+    state: &Arc<Mutex<VideoEditState>>,
+    peaks: Option<&Peaks>,
+    light: bool,
+    cr: &gtk4::cairo::Context,
+    width: i32,
+    height: i32,
+) {
+    let state = state.lock().unwrap();
+    if !state.has_source_video() {
+        return;
+    }
+    let w = width.max(1) as f64;
+    let h = height.max(1) as f64;
+    let step = 3.0;
+    let inset = 4.0;
+
+    for (index, composition_start, _, _) in state.placed_segment_slots() {
+        let x0 = state.time_to_x(composition_start, w);
+        let x1 = state
+            .time_to_x(
+                composition_start + state.segment_timeline_duration(index),
+                w,
+            )
+            .max(x0 + 22.0);
+        let pill_w = x1 - x0;
+        let y = 2.0;
+        let pill_h = (h - 4.0).max(10.0);
+        let muted = state.is_muted() || state.segment_is_muted(index);
+        let tone = sound_tone(light, muted);
+
+        rounded_rect(cr, x0, y, pill_w, pill_h, 8.0);
+        cr.set_source_rgba(tone.fill.0, tone.fill.1, tone.fill.2, tone.fill.3);
+        let _ = cr.fill();
+
+        let wave_left = x0 + inset;
+        let wave_right = x1 - inset;
+        match peaks {
+            Some(peaks) if wave_right > wave_left => {
+                let tallest = (pill_h - 8.0).max(2.0);
+                let bar_w = 2.0;
+                let mut x = wave_left;
+                while x < wave_right {
+                    let level = sound_level(&state, peaks, w, x, (x + step).min(wave_right));
+                    let bar_h = (f64::from(level).sqrt() * tallest).max(1.0);
+                    let bar_y = y + (pill_h - bar_h) / 2.0;
+                    rounded_rect(cr, x, bar_y, bar_w, bar_h, bar_w / 2.0);
+                    cr.set_source_rgba(tone.wave.0, tone.wave.1, tone.wave.2, tone.wave.3);
+                    let _ = cr.fill();
+                    x += step;
+                }
+            }
+            _ => {
+                cr.set_source_rgba(tone.wave.0, tone.wave.1, tone.wave.2, tone.wave.3);
+                cr.set_line_width(1.0);
+                cr.move_to(wave_left, y + pill_h / 2.0);
+                cr.line_to(wave_right.max(wave_left), y + pill_h / 2.0);
+                let _ = cr.stroke();
+            }
+        }
+
+        if muted {
+            // Hatch the pill so a silent piece reads as struck out at a
+            // glance, without changing the span it keeps.
+            let _ = cr.save();
+            rounded_rect(cr, x0, y, pill_w, pill_h, 8.0);
+            cr.clip();
+            cr.set_source_rgba(tone.wave.0, tone.wave.1, tone.wave.2, 0.30);
+            cr.set_line_width(1.0);
+            let pitch = 6.0;
+            let mut offset = -pill_h;
+            while offset < pill_w {
+                cr.move_to(x0 + offset, y + pill_h);
+                cr.line_to(x0 + offset + pill_h, y);
+                let _ = cr.stroke();
+                offset += pitch;
+            }
+            let _ = cr.restore();
+        }
+
+        cr.select_font_face(
+            crate::typography::UI_FONT_FAMILY,
+            gtk4::cairo::FontSlant::Normal,
+            gtk4::cairo::FontWeight::Normal,
+        );
+        cr.set_font_size(11.0);
+        let padding = 6.0;
+        let baseline = y + pill_h * 0.62;
+        let right = x1 - inset;
+        let speed = state.segment_speed(index);
+        let speed_label = ((speed - 1.0).abs() > 1e-9).then(|| format_clip_speed(speed));
+        // A muted piece carries one chip across its mark, its word and its
+        // speed, so no label sits straight on the waveform bars.
+        let mut chip_painted = false;
+        if muted {
+            let glyph = 12.0;
+            let glyph_x = x0 + inset;
+            let text_x = glyph_x + glyph + 4.0;
+            let muted_label = t("Muted");
+            let muted_w = text_width(cr, &muted_label);
+            if text_x + muted_w <= right {
+                let speed_x = text_x + muted_w + 6.0;
+                let chip_right = match speed_label.as_ref() {
+                    Some(label) if speed_x + text_width(cr, label) <= right => {
+                        speed_x + text_width(cr, label)
+                    }
+                    _ => text_x + muted_w,
+                };
+                draw_label_chip(cr, glyph_x - 4.0, chip_right + 4.0, baseline, tone.fill);
+                chip_painted = true;
+                draw_mute_glyph(cr, glyph_x, y + (pill_h - glyph) / 2.0, glyph, tone.edge);
+                cr.set_source_rgba(tone.edge.0, tone.edge.1, tone.edge.2, tone.edge.3);
+                cr.move_to(text_x, baseline);
+                let _ = cr.show_text(&muted_label);
+                // The speed follows the mute mark and its word, so the two
+                // never sit on top of each other on a silent piece.
+                if chip_right > text_x + muted_w {
+                    if let Some(label) = speed_label.as_ref() {
+                        cr.move_to(speed_x, baseline);
+                        let _ = cr.show_text(label);
+                    }
+                }
+            }
+        }
+        if let Some(label) = speed_label.as_ref() {
+            if !chip_painted {
+                let label_w = text_width(cr, label);
+                if x0 + padding + label_w <= right {
+                    draw_label_chip(
+                        cr,
+                        x0 + padding - 4.0,
+                        x0 + padding + label_w + 4.0,
+                        baseline,
+                        tone.fill,
+                    );
+                    cr.set_source_rgba(tone.edge.0, tone.edge.1, tone.edge.2, tone.edge.3);
+                    cr.move_to(x0 + padding, baseline);
+                    let _ = cr.show_text(label);
+                }
+            }
+        }
+
+        if state.selected_segment == Some(index) {
+            rounded_rect(
+                cr,
+                x0 + 1.0,
+                y + 1.0,
+                (pill_w - 2.0).max(0.0),
+                (pill_h - 2.0).max(0.0),
+                7.0,
+            );
+            cr.set_source_rgba(tone.edge.0, tone.edge.1, tone.edge.2, tone.edge.3);
+            cr.set_line_width(2.0);
+            let _ = cr.stroke();
+        }
+    }
+}
+
+/// The recording's loudness between two x positions, mapped through the
+/// retained footage so a cut, a reordered piece or a speed change reads the
+/// source it actually plays.
+fn sound_level(
+    state: &VideoEditState,
+    peaks: &Peaks,
+    width: f64,
+    from_x: f64,
+    to_x: f64,
+) -> f32 {
+    let source_at = |x: f64| {
+        state
+            .playback_position(state.x_to_time(x, width))
+            .map(|(_, source)| source)
+    };
+    match (source_at(from_x), source_at(to_x)) {
+        (Some(from), Some(to)) => peaks.level(from, to),
+        _ => 0.0,
+    }
+}
+
+/// The width `label` takes at the current font.
+fn text_width(cr: &gtk4::cairo::Context, label: &str) -> f64 {
+    cr.text_extents(label)
+        .map(|extents| {
+            extents
+                .x_advance()
+                .max(extents.x_bearing() + extents.width())
+        })
+        .unwrap_or(0.0)
+}
+
+/// The opaque chip a lane label sits on: without it the text and the waveform
+/// bars share the same violet and the label is hard to read.
+fn draw_label_chip(
+    cr: &gtk4::cairo::Context,
+    left: f64,
+    right: f64,
+    baseline: f64,
+    fill: (f64, f64, f64, f64),
+) {
+    let chip_h = 16.0;
+    // Centre the chip on the text's own box rather than on its baseline, so
+    // the ink sits evenly inside it.
+    let centre = cr.font_extents().map_or(baseline - chip_h / 4.0, |extents| {
+        baseline + (extents.descent() - extents.ascent()) / 2.0
+    });
+    rounded_rect(
+        cr,
+        left,
+        centre - chip_h / 2.0,
+        (right - left).max(0.0),
+        chip_h,
+        4.0,
+    );
+    cr.set_source_rgba(fill.0, fill.1, fill.2, 1.0);
+    let _ = cr.fill();
+}
+
+/// A speaker with a cross, `size` square, drawn from its top-left corner.
+fn draw_mute_glyph(
+    cr: &gtk4::cairo::Context,
+    x: f64,
+    y: f64,
+    size: f64,
+    colour: (f64, f64, f64, f64),
+) {
+    let _ = cr.save();
+    cr.set_source_rgba(colour.0, colour.1, colour.2, colour.3);
+    let point = |across: f64, down: f64| (x + across * size, y + down * size);
+    let body = [
+        (0.08, 0.36),
+        (0.30, 0.36),
+        (0.55, 0.14),
+        (0.55, 0.86),
+        (0.30, 0.64),
+        (0.08, 0.64),
+    ];
+    for (index, (across, down)) in body.iter().enumerate() {
+        let (across, down) = point(*across, *down);
+        if index == 0 {
+            cr.move_to(across, down);
+        } else {
+            cr.line_to(across, down);
+        }
+    }
+    cr.close_path();
+    let _ = cr.fill();
+
+    cr.set_line_width(0.10 * size);
+    cr.set_line_cap(gtk4::cairo::LineCap::Round);
+    for (from_across, from_down, to_across, to_down) in
+        [(0.68, 0.36, 0.94, 0.64), (0.94, 0.36, 0.68, 0.64)]
+    {
+        let (from_across, from_down) = point(from_across, from_down);
+        let (to_across, to_down) = point(to_across, to_down);
+        cr.move_to(from_across, from_down);
+        cr.line_to(to_across, to_down);
+        let _ = cr.stroke();
+    }
+    let _ = cr.restore();
 }
 
 #[derive(Clone, Copy)]

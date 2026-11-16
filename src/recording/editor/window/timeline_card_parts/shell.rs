@@ -1,6 +1,12 @@
+/// Row metrics of the compact dock, in logical pixels.
+const RULER_HEIGHT: f64 = 28.0;
+const VIDEO_LANE_HEIGHT: f64 = 42.0;
+const LANE_GAP: f64 = 8.0;
+
 pub fn build_timeline_card(
     state: Arc<Mutex<VideoEditState>>,
     media: Rc<RefCell<Option<MediaFile>>>,
+    sound: Rc<SoundSync>,
     filmstrip: Rc<RefCell<Vec<gtk4::gdk_pixbuf::Pixbuf>>>,
     on_change: Rc<dyn Fn()>,
     window: &impl IsA<Widget>,
@@ -17,6 +23,11 @@ pub fn build_timeline_card(
     card.set_hexpand(true);
 
     let playing = Rc::new(Cell::new(false));
+    // The lane stack is chrome, not an edit: what is open and how far each
+    // lane is through its ease never reaches the persisted state.
+    let lanes_state: Rc<RefCell<TimelineLanes>> = Rc::new(RefCell::new(TimelineLanes::default()));
+    let lane_controls = LaneControls::new(lanes_state.clone());
+    let peaks: Rc<RefCell<Option<Arc<Peaks>>>> = Rc::new(RefCell::new(None));
     let (playhead_clock, duration_clock) = {
         let guard = state.lock().unwrap();
         let playhead_clock = Label::new(Some(&format_clock(guard.playhead_seconds)));
@@ -32,7 +43,6 @@ pub fn build_timeline_card(
     let skip_forward = icon_button("media-skip-forward-symbolic", &t("Skip forward 1s"));
 
     let zoom = labeled_tool_button("zoom-fit-best-symbolic", &t("Zoom"), &t("Add zoom at playhead"));
-    let hide = labeled_tool_button("view-conceal-symbolic", &t("Hide"), &t("Hide cursor at playhead"));
     let split = labeled_tool_button(
         icon_names::custom::SQUARE_SPLIT_HORIZONTAL_SYMBOLIC,
         &t("Split"),
@@ -100,7 +110,6 @@ pub fn build_timeline_card(
     left.set_halign(Align::Start);
     left.set_hexpand(true);
     left.append(&zoom);
-    left.append(&hide);
     left.append(&split);
     left.append(&detect);
 
@@ -135,7 +144,7 @@ pub fn build_timeline_card(
     let ruler = DrawingArea::new();
     ruler.add_css_class("recording-editor-card-ruler");
     ruler.set_hexpand(true);
-    ruler.set_size_request(-1, 36);
+    ruler.set_size_request(-1, RULER_HEIGHT as i32);
     ruler.set_draw_func({
         let state = state.clone();
         move |area, cr, width, height| {
@@ -157,10 +166,9 @@ pub fn build_timeline_card(
     let video_track = DrawingArea::new();
     video_track.add_css_class("recording-editor-card-video-track");
     video_track.set_hexpand(true);
-    // Motion's source lane is the reference for this clip, and it sits on the
-    // 56px `card-zoom-track` floor. Matching it is what makes the two editors
-    // line up, so this lane is 56px rather than a shorter 48px one.
-    video_track.set_size_request(-1, 56);
+    // The compact rows: the video lane carries the picture, so it keeps the
+    // full 42px and the effect lanes below trade one open row between them.
+    video_track.set_size_request(-1, VIDEO_LANE_HEIGHT as i32);
     video_track.set_draw_func({
         let state = state.clone();
         let hovered_video = hovered_video.clone();
@@ -184,79 +192,157 @@ pub fn build_timeline_card(
     let zoom_track = DrawingArea::new();
     zoom_track.add_css_class("recording-editor-card-zoom-track");
     zoom_track.set_hexpand(true);
-    zoom_track.set_size_request(-1, 56);
+    zoom_track.set_tooltip_text(Some(&t("Zoom")));
+    zoom_track.set_size_request(-1, LANE_OPEN_HEIGHT as i32);
     zoom_track.set_draw_func({
         let state = state.clone();
         let hover_zoom_time = hover_zoom_time.clone();
         let dragging_zoom = dragging_zoom.clone();
+        let lanes_state = lanes_state.clone();
         move |area, cr, width, height| {
-            draw_zoom_clips(
-                &state,
-                hover_zoom_time.get(),
-                dragging_zoom.get(),
-                widget_is_light(area),
+            let (progress, open) = {
+                let lanes = lanes_state.borrow();
+                (
+                    lanes.progress()[TimelineLane::Zoom.index()],
+                    lanes.is_open(TimelineLane::Zoom),
+                )
+            };
+            let light = widget_is_light(area);
+            // Hover ghosts belong to the open lane only: a resting strip has
+            // no room for the pill a click would place.
+            let hover = hover_zoom_time.get().filter(|_| open);
+            draw_fading_lane(
                 cr,
                 width,
                 height,
-            );
-            // The ghost draws on top of the lane: it previews what a click
-            // would place, so it has to read over whatever is already there.
-            if let Some(start) = hover_zoom_time.get() {
-                if dragging_zoom.get().is_none() {
-                    let guard = state.lock().unwrap();
-                    draw_clipboard_ghost(
-                        &guard,
+                progress,
+                &|cr: &gtk4::cairo::Context, width: i32, height: i32| {
+                    draw_zoom_clips(
+                        &state,
+                        hover,
+                        dragging_zoom.get(),
+                        light,
                         cr,
-                        width as f64,
-                        height as f64,
-                        start,
-                        widget_is_light(area),
-                        true,
+                        width,
+                        height,
                     );
-                }
-            }
+                    // The ghost draws on top of the lane: it previews what a
+                    // click would place, so it has to read over whatever is
+                    // already there.
+                    if let Some(start) = hover {
+                        if dragging_zoom.get().is_none() {
+                            let guard = state.lock().unwrap();
+                            draw_clipboard_ghost(
+                                &guard,
+                                cr,
+                                width as f64,
+                                height as f64,
+                                start,
+                                light,
+                                true,
+                            );
+                        }
+                    }
+                },
+                &|cr: &gtk4::cairo::Context, width: i32, height: i32| {
+                    let guard = state.lock().unwrap();
+                    draw_thin_zoom_lane(&guard, light, cr, width, height);
+                },
+            );
+        }
+    });
+
+    let sound_track = DrawingArea::new();
+    sound_track.add_css_class("recording-editor-card-sound-track");
+    sound_track.set_hexpand(true);
+    sound_track.set_tooltip_text(Some(&t("Sound")));
+    sound_track.set_size_request(-1, LANE_THIN_HEIGHT as i32);
+    sound_track.set_draw_func({
+        let state = state.clone();
+        let peaks = peaks.clone();
+        let lanes_state = lanes_state.clone();
+        move |area, cr, width, height| {
+            let progress = lanes_state.borrow().progress()[TimelineLane::Sound.index()];
+            let light = widget_is_light(area);
+            let peaks = peaks.borrow().clone();
+            draw_fading_lane(
+                cr,
+                width,
+                height,
+                progress,
+                &|cr: &gtk4::cairo::Context, width: i32, height: i32| {
+                    draw_sound_lane(&state, peaks.as_deref(), light, cr, width, height)
+                },
+                &|cr: &gtk4::cairo::Context, width: i32, height: i32| {
+                    let guard = state.lock().unwrap();
+                    draw_thin_sound_lane(&guard, light, cr, width, height);
+                },
+            );
         }
     });
 
     let hide_track = DrawingArea::new();
     hide_track.add_css_class("recording-editor-card-hide-track");
     hide_track.set_hexpand(true);
-    hide_track.set_size_request(-1, 56);
+    hide_track.set_tooltip_text(Some(&t("Cursor")));
+    hide_track.set_size_request(-1, LANE_THIN_HEIGHT as i32);
     hide_track.set_draw_func({
         let state = state.clone();
         let hover_hide_time = hover_hide_time.clone();
         let dragging_hide = dragging_hide.clone();
+        let lanes_state = lanes_state.clone();
         move |area, cr, width, height| {
-            draw_cursor_hide_clips(
-                &state,
-                hover_hide_time.get(),
-                dragging_hide.get(),
-                widget_is_light(area),
+            let (progress, open) = {
+                let lanes = lanes_state.borrow();
+                (
+                    lanes.progress()[TimelineLane::Cursor.index()],
+                    lanes.is_open(TimelineLane::Cursor),
+                )
+            };
+            let light = widget_is_light(area);
+            let hover = hover_hide_time.get().filter(|_| open);
+            draw_fading_lane(
                 cr,
                 width,
                 height,
-            );
-            // Same copied-clip preview as the Zoom lane above.
-            if let Some(start) = hover_hide_time.get() {
-                if dragging_hide.get().is_none() {
-                    let guard = state.lock().unwrap();
-                    draw_clipboard_ghost(
-                        &guard,
+                progress,
+                &|cr: &gtk4::cairo::Context, width: i32, height: i32| {
+                    draw_cursor_hide_clips(
+                        &state,
+                        hover,
+                        dragging_hide.get(),
+                        light,
                         cr,
-                        width as f64,
-                        height as f64,
-                        start,
-                        widget_is_light(area),
-                        false,
+                        width,
+                        height,
                     );
-                }
-            }
+                    // Same copied-clip preview as the Zoom lane above.
+                    if let Some(start) = hover {
+                        if dragging_hide.get().is_none() {
+                            let guard = state.lock().unwrap();
+                            draw_clipboard_ghost(
+                                &guard,
+                                cr,
+                                width as f64,
+                                height as f64,
+                                start,
+                                light,
+                                false,
+                            );
+                        }
+                    }
+                },
+                &|cr: &gtk4::cairo::Context, width: i32, height: i32| {
+                    let guard = state.lock().unwrap();
+                    draw_thin_cursor_lane(&guard, light, cr, width, height);
+                },
+            );
         }
     });
 
-    // The frosted extend region is one layer over the three lanes, so it spans
-    // the video, zoom and hide rows (and the gaps between them) instead of
-    // stopping at the video lane's seam.
+    // The frosted extend region is one layer over the video lane and every
+    // secondary row, so it spans the video, Zoom, Sound and Cursor lanes (and
+    // the gaps between them) instead of stopping at the video lane's seam.
     let extend_layer = DrawingArea::new();
     extend_layer.add_css_class("recording-editor-card-extend");
     extend_layer.set_hexpand(true);
@@ -294,11 +380,12 @@ pub fn build_timeline_card(
         })
     };
 
-    let lanes = GtkBox::new(Orientation::Vertical, 10);
+    let lanes = GtkBox::new(Orientation::Vertical, LANE_GAP as i32);
     lanes.add_css_class("recording-editor-card-tracks");
     lanes.set_hexpand(true);
     lanes.append(&video_track);
     lanes.append(&zoom_track);
+    lanes.append(&sound_track);
     lanes.append(&hide_track);
 
     let lane_overlay = Overlay::new();
@@ -309,7 +396,7 @@ pub fn build_timeline_card(
     // clip instead of being covered by its rounded corner.
     lane_overlay.add_overlay(&extend_layer);
 
-    let tracks = GtkBox::new(Orientation::Vertical, 10);
+    let tracks = GtkBox::new(Orientation::Vertical, LANE_GAP as i32);
     tracks.add_css_class("recording-editor-card-tracks");
     tracks.set_hexpand(true);
     tracks.append(&ruler);
@@ -319,6 +406,88 @@ pub fn build_timeline_card(
     board.add_css_class("recording-editor-card-board");
     board.set_hexpand(true);
     board.set_child(Some(&tracks));
+
+    // Which rows exist, from one snapshot of the model, so a lane cannot
+    // appear or vanish halfway through a repaint. The lanes ease on the frame
+    // clock only while they move: the callback ends once they all arrive, so
+    // an idle timeline costs no frames.
+    let present = Rc::new(Cell::new([true, false, false]));
+    let sync_lanes: Rc<dyn Fn()> = {
+        let state = state.clone();
+        let lanes_state = lanes_state.clone();
+        let tracks = tracks.clone();
+        let zoom_track = zoom_track.clone();
+        let sound_track = sound_track.clone();
+        let hide_track = hide_track.clone();
+        let present = present.clone();
+        let running = Rc::new(Cell::new(false));
+        Rc::new(move || {
+            let (shown, selection) = {
+                let guard = state.lock().unwrap();
+                (
+                    [
+                        true,
+                        guard.has_audio_track(),
+                        !guard.cursor_hide_clips.is_empty(),
+                    ],
+                    (guard.selected_zoom, guard.selected_cursor_hide),
+                )
+            };
+            present.set(shown);
+            let rows = [
+                (&zoom_track, shown[0]),
+                (&sound_track, shown[1]),
+                (&hide_track, shown[2]),
+            ];
+            for (track, exists) in rows {
+                // Only on change: a `set_visible` re-measures the card, and
+                // this runs on every repaint.
+                if track.get_visible() != exists {
+                    track.set_visible(exists);
+                }
+            }
+            let (heights, moving) = {
+                let mut lanes = lanes_state.borrow_mut();
+                lanes.follow_selection(selection.0, selection.1);
+                lanes.retain_present(shown);
+                (lanes.heights(shown), !lanes.settled())
+            };
+            apply_lane_heights(&zoom_track, &sound_track, &hide_track, heights);
+            if !moving || running.replace(true) {
+                return;
+            }
+            let lanes_state = lanes_state.clone();
+            let present = present.clone();
+            let zoom_track = zoom_track.clone();
+            let sound_track = sound_track.clone();
+            let hide_track = hide_track.clone();
+            let running = running.clone();
+            let last = Cell::new(None::<i64>);
+            tracks.add_tick_callback(move |_, clock| {
+                let now = clock.frame_time();
+                let dt = last
+                    .replace(Some(now))
+                    .map(|previous| (now - previous) as f64 / 1_000_000.0)
+                    .unwrap_or(0.0)
+                    .min(0.1);
+                let (heights, moving) = {
+                    let mut lanes = lanes_state.borrow_mut();
+                    let moving = lanes.step(dt);
+                    (lanes.heights(present.get()), moving)
+                };
+                apply_lane_heights(&zoom_track, &sound_track, &hide_track, heights);
+                zoom_track.queue_draw();
+                sound_track.queue_draw();
+                hide_track.queue_draw();
+                if moving {
+                    glib::ControlFlow::Continue
+                } else {
+                    running.set(false);
+                    glib::ControlFlow::Break
+                }
+            });
+        })
+    };
 
     let playhead = DrawingArea::new();
     playhead.add_css_class("recording-editor-card-playhead");
@@ -342,6 +511,61 @@ pub fn build_timeline_card(
     board.add_overlay(&playhead);
     bind_board_hover(&tracks, state.clone(), hover_time, playhead.clone());
 
+    // The waveform is measured once per source, off the main thread, the way
+    // the filmstrip is: a recording is decoded to one peak per 20 ms bucket
+    // and the lane reads those buckets under each of its columns.
+    let peaks_source: Rc<RefCell<Option<PathBuf>>> = Rc::new(RefCell::new(None));
+    let peaks_generation = Rc::new(Cell::new(0u64));
+    let kick_peaks: Rc<dyn Fn()> = {
+        let state = state.clone();
+        let peaks = peaks.clone();
+        let peaks_source = peaks_source.clone();
+        let peaks_generation = peaks_generation.clone();
+        let sound_track = sound_track.clone();
+        Rc::new(move || {
+            let (path, has_audio) = {
+                let guard = state.lock().unwrap();
+                (guard.metadata.path.clone(), guard.has_audio_track())
+            };
+            if !has_audio {
+                *peaks_source.borrow_mut() = None;
+                let dropped = peaks.borrow_mut().take();
+                if dropped.is_some() {
+                    sound_track.queue_draw();
+                }
+                return;
+            }
+            if peaks_source.borrow().as_ref() == Some(&path) {
+                return;
+            }
+            *peaks_source.borrow_mut() = Some(path.clone());
+            *peaks.borrow_mut() = None;
+            let generation = peaks_generation.get().wrapping_add(1);
+            peaks_generation.set(generation);
+            let (sender, receiver) = async_channel::bounded(1);
+            std::thread::spawn(move || {
+                let measured = crate::recording::editor::sound_peaks::measure_peaks(&path);
+                let _ = sender.send_blocking(measured);
+            });
+            glib::spawn_future_local({
+                let peaks = peaks.clone();
+                let peaks_generation = peaks_generation.clone();
+                let sound_track = sound_track.clone();
+                async move {
+                    let Ok(measured) = receiver.recv().await else {
+                        return;
+                    };
+                    // A newer source was loaded while this one decoded.
+                    if peaks_generation.get() != generation {
+                        return;
+                    }
+                    *peaks.borrow_mut() = measured.map(Arc::new);
+                    sound_track.queue_draw();
+                }
+            });
+        })
+    };
+
     let scroll_adj = Adjustment::new(0.0, 0.0, 1.0, 0.1, 1.0, 1.0);
     let scroll_syncing = Rc::new(Cell::new(false));
     sync_scroll_adj(&scroll_adj, &state.lock().unwrap(), &scroll_syncing);
@@ -350,19 +574,25 @@ pub fn build_timeline_card(
         let ruler = ruler.clone();
         let video_track = video_track.clone();
         let zoom_track = zoom_track.clone();
+        let sound_track = sound_track.clone();
         let hide_track = hide_track.clone();
         let extend_layer = extend_layer.clone();
         let playhead = playhead.clone();
         let playhead_clock = playhead_clock.clone();
         let duration_clock = duration_clock.clone();
         let zoom = zoom.clone();
-        let hide = hide.clone();
         let detect = detect.clone();
         let analyzing = analyzing.clone();
         let state = state.clone();
         let scroll_adj = scroll_adj.clone();
         let scroll_syncing = scroll_syncing.clone();
+        let sync_lanes = sync_lanes.clone();
+        let kick_peaks = kick_peaks.clone();
         Rc::new(move || {
+            // How a selection made anywhere — a click on a clip, the panel, a
+            // new clip the tool row just placed — brings its lane forward.
+            sync_lanes();
+            kick_peaks();
             {
                 let guard = state.lock().unwrap();
                 playhead_clock.set_text(&format_clock(guard.playhead_seconds));
@@ -373,11 +603,6 @@ pub fn build_timeline_card(
                 } else {
                     zoom.remove_css_class("recording-editor-timeline-tool-active");
                 }
-                if guard.selected_cursor_hide.is_some() {
-                    hide.add_css_class("recording-editor-timeline-tool-active");
-                } else {
-                    hide.remove_css_class("recording-editor-timeline-tool-active");
-                }
                 detect.set_sensitive(
                     guard.has_source_video() && !guard.zoom_locked && !analyzing.get(),
                 );
@@ -386,6 +611,7 @@ pub fn build_timeline_card(
             extend_layer.queue_draw();
             video_track.queue_draw();
             zoom_track.queue_draw();
+            sound_track.queue_draw();
             hide_track.queue_draw();
             playhead.queue_draw();
         })
@@ -401,11 +627,12 @@ pub fn build_timeline_card(
 
     let pause: Rc<dyn Fn()> = {
         let media = media.clone();
+        let sound = sound.clone();
         let playing = playing.clone();
         let play_button = play_button.clone();
         let paint = paint.clone();
         Rc::new(move || {
-            pause_playback(&media, &playing, &play_button, &paint);
+            pause_playback(&media, &sound, &playing, &play_button, &paint);
         })
     };
 
@@ -457,26 +684,6 @@ pub fn build_timeline_card(
                     .position(|clip| playhead >= clip.start && playhead <= clip.end)
                 {
                     select_zoom(&mut guard, Some(index));
-                }
-            }
-            drop(guard);
-            redraw();
-        }
-    });
-
-    hide.connect_clicked({
-        let state = state.clone();
-        let redraw = redraw.clone();
-        move |_| {
-            let mut guard = state.lock().unwrap();
-            if guard.add_cursor_hide_at_playhead().is_none() {
-                let playhead = guard.playhead_seconds;
-                if let Some(index) = guard
-                    .cursor_hide_clips
-                    .iter()
-                    .position(|clip| playhead >= clip.start && playhead <= clip.end)
-                {
-                    select_cursor_hide(&mut guard, Some(index));
                 }
             }
             drop(guard);
@@ -624,10 +831,11 @@ pub fn build_timeline_card(
     play_button.connect_clicked({
         let state = state.clone();
         let media = media.clone();
+        let sound = sound.clone();
         let playing = playing.clone();
         let play_button = play_button.clone();
         let redraw = redraw.clone();
-        move |_| toggle_playback(&state, &media, &playing, &play_button, &redraw)
+        move |_| toggle_playback(&state, &media, &sound, &playing, &play_button, &redraw)
     });
 
     skip_back.connect_clicked({
@@ -666,6 +874,7 @@ pub fn build_timeline_card(
         dragging_video.clone(),
         pause.clone(),
         redraw.clone(),
+        lane_controls.clone(),
     );
     bind_zoom_track(
         &zoom_track,
@@ -677,6 +886,7 @@ pub fn build_timeline_card(
         dragging_zoom.clone(),
         pause.clone(),
         redraw.clone(),
+        lane_controls.clone(),
     );
     bind_hide_track(
         &hide_track,
@@ -688,11 +898,23 @@ pub fn build_timeline_card(
         dragging_hide.clone(),
         pause.clone(),
         redraw.clone(),
+        lane_controls.clone(),
     );
+    bind_sound_lane(
+        &sound_track,
+        state.clone(),
+        lane_controls.clone(),
+        redraw.clone(),
+    );
+    // Presence, the open lane and the starting heights all come from this
+    // first pass, so the card is laid out right before its first frame.
+    sync_lanes();
+    kick_peaks();
 
     {
         let state = state.clone();
         let media = media.clone();
+        let sound = sound.clone();
         let playing = playing.clone();
         let play_button = play_button.clone();
         let redraw = redraw.clone();
@@ -700,7 +922,7 @@ pub fn build_timeline_card(
         let zoom_level_bar = zoom_level_bar.clone();
         let zoom_scale = zoom_scale.clone();
         glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
-            tick_playback(&state, &media, &playing, &play_button, &redraw);
+            tick_playback(&state, &media, &sound, &playing, &play_button, &redraw);
             // The bar's travel follows the track, so a resize has to re-place
             // it; `place_zoom_level_bar` is a no-op when nothing moved.
             place_zoom_level_bar(&zoom_level_track, &zoom_level_bar, zoom_scale.value() / 100.0);
@@ -722,6 +944,26 @@ pub fn build_timeline_card(
     shell.append(&card);
 
     (shell, paint, pause)
+}
+
+/// Give each secondary lane its whole-pixel height, resizing only the lanes
+/// whose height actually changed: a `set_size_request` re-measures the card,
+/// and this runs once per frame of the ease.
+fn apply_lane_heights(
+    zoom_track: &DrawingArea,
+    sound_track: &DrawingArea,
+    hide_track: &DrawingArea,
+    heights: [i32; 3],
+) {
+    for (track, height) in [
+        (zoom_track, heights[TimelineLane::Zoom.index()]),
+        (sound_track, heights[TimelineLane::Sound.index()]),
+        (hide_track, heights[TimelineLane::Cursor.index()]),
+    ] {
+        if track.height_request() != height {
+            track.set_size_request(-1, height);
+        }
+    }
 }
 
 /// Line the transport up with the canvas, not with the dock it sits in.
@@ -1077,7 +1319,7 @@ mod tests {
             .find("playback_position(guard.playhead_seconds)")
             .expect("the tick resolves the retained position before it advances");
         let stopped = tick
-            .find("stop_playback_at_end(state, media, playing, play_button, redraw);")
+            .find("stop_playback_at_end(state, media, sound, playing, play_button, redraw);")
             .expect("a composition with nothing retained must stop");
         assert!(
             resolved < stopped,
@@ -1212,7 +1454,7 @@ mod tests {
         ));
         for (start_marker, end_marker) in [
             ("pub fn bind_zoom_track(", "\npub fn bind_hide_track("),
-            ("pub fn bind_hide_track(", "\npub fn bind_track_cursor("),
+            ("pub fn bind_hide_track(", "\npub fn bind_sound_lane("),
         ] {
             let start = production.find(start_marker).expect("the track binding");
             let rest = &production[start..];

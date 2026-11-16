@@ -861,6 +861,15 @@ pub(crate) fn export_edited_to_cancellable(
     if let Some(progress) = state.export_progress.as_ref() {
         progress.set_phase(ExportPhase::Finishing);
     }
+    if state.sound.shapes_export() {
+        if let Err(error) = add_export_sound(state, &path, cancellation) {
+            if cancellation_requested(cancellation) {
+                let _ = std::fs::remove_file(&path);
+                anyhow::bail!("export cancelled");
+            }
+            return Err(error);
+        }
+    }
     super::export_cache::remember_if_inputs_unchanged(input_snapshot, state, &path, cancellation);
     if cancellation_requested(cancellation) {
         super::export_cache::forget(&path);
@@ -871,6 +880,107 @@ pub(crate) fn export_edited_to_cancellable(
         progress.set_phase(ExportPhase::Finished);
     }
     Ok(path)
+}
+
+/// Lay the composition's sound over the finished export.
+///
+/// The video stream is copied, never re-encoded: the sound graph is mixed into
+/// AAC beside it, and the result replaces the export only once ffmpeg has
+/// written it in full. A composition with nothing audible loses the track the
+/// export carried, so muting a recording really does export silence.
+fn add_export_sound(
+    state: &VideoEditState,
+    video: &Path,
+    cancellation: Option<&AtomicBool>,
+) -> anyhow::Result<()> {
+    let plan = super::sound::SoundPlan::from_state(state);
+    let click = if plan.has_cues() {
+        let path = video.with_extension(format!(
+            "click-{}-{}.wav",
+            std::process::id(),
+            EXPORT_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::write(&path, super::sound::CLICK_WAV)
+            .with_context(|| format!("could not write the click sound to {}", path.display()))?;
+        Some(path)
+    } else {
+        None
+    };
+    let result = mux_export_sound(video, &plan, click.as_deref(), cancellation);
+    if let Some(click) = click.as_deref() {
+        let _ = std::fs::remove_file(click);
+    }
+    result
+}
+
+fn mux_export_sound(
+    video: &Path,
+    plan: &super::sound::SoundPlan,
+    click: Option<&Path>,
+    cancellation: Option<&AtomicBool>,
+) -> anyhow::Result<()> {
+    let temp = video.with_extension(format!(
+        "sound-{}-{}.mp4",
+        std::process::id(),
+        EXPORT_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    let mut args: Vec<String> = ["-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i"]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    args.push(video.to_string_lossy().into_owned());
+    let graph = plan.graph_from(0.0, click, 1);
+    match &graph {
+        Some(graph) => {
+            for input in &graph.inputs {
+                if input.looped {
+                    push_args(&mut args, &["-stream_loop", "-1"]);
+                }
+                if input.seek > 0.0 {
+                    push_args(&mut args, &["-ss"]);
+                    args.push(format!("{:.6}", input.seek));
+                }
+                push_args(&mut args, &["-i"]);
+                args.push(input.path.to_string_lossy().into_owned());
+            }
+            push_args(&mut args, &["-filter_complex"]);
+            args.push(graph.graph.clone());
+            push_args(
+                &mut args,
+                &[
+                    "-map", "0:v:0", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+                ],
+            );
+            if plan.mono() {
+                push_args(&mut args, &["-ac", "1"]);
+            }
+        }
+        None => {
+            // Nothing in the composition is audible. An export that carries a
+            // track has to lose it, or the muted recording plays anyway.
+            if !probe_has_audio(video)? {
+                return Ok(());
+            }
+            push_args(&mut args, &["-map", "0:v:0", "-c:v", "copy", "-an"]);
+        }
+    }
+    push_args(&mut args, &["-t"]);
+    args.push(format!("{:.6}", plan.duration()));
+    push_args(&mut args, &["-movflags", "+faststart", "-f", "mp4"]);
+    args.push(temp.to_string_lossy().into_owned());
+    if let Err(error) = run_ffmpeg_cancellable_progress(&args, &temp, cancellation, None, None) {
+        let _ = std::fs::remove_file(&temp);
+        return Err(error);
+    }
+    if let Err(error) = std::fs::rename(&temp, video) {
+        let _ = std::fs::remove_file(&temp);
+        return Err(anyhow!("could not replace the export: {error}"));
+    }
+    Ok(())
+}
+
+fn push_args(args: &mut Vec<String>, values: &[&str]) {
+    args.extend(values.iter().map(|value| (*value).to_string()));
 }
 
 fn ensure_studio_export_allowed(state: &VideoEditState) -> anyhow::Result<()> {

@@ -41,6 +41,7 @@ pub fn show_clip_menu(
     y: f64,
     state: Arc<Mutex<VideoEditState>>,
     on_change: Rc<dyn Fn()>,
+    lanes: LaneControls,
 ) -> Popover {
     let popover = Popover::new();
     popover.add_css_class("recording-editor-clip-menu-popover");
@@ -110,6 +111,38 @@ pub fn show_clip_menu(
                 },
             });
         }
+        items.push(MenuItem {
+            icon: "view-conceal-symbolic",
+            label: t("Hide cursor here"),
+            danger: false,
+            action: {
+                let state = state.clone();
+                let on_change = on_change.clone();
+                let lanes = lanes.clone();
+                Rc::new(move || {
+                    {
+                        let mut guard = state.lock().unwrap();
+                        if !guard.video_locked {
+                            // Place a hide at the playhead, or select the one
+                            // already covering it. Either way the row comes
+                            // forward, since it appears with the first clip.
+                            if guard.add_cursor_hide_at_playhead().is_none() {
+                                let playhead = guard.playhead_seconds;
+                                if let Some(index) =
+                                    guard.cursor_hide_clips.iter().position(|clip| {
+                                        playhead >= clip.start && playhead <= clip.end
+                                    })
+                                {
+                                    select_cursor_hide(&mut guard, Some(index));
+                                }
+                            }
+                            lanes.open(TimelineLane::Cursor);
+                        }
+                    }
+                    on_change();
+                })
+            },
+        });
         items.push(MenuItem {
             icon: icon_names::custom::USER_TRASH_SYMBOLIC,
             label: t("Delete"),
@@ -338,7 +371,7 @@ fn menu_row(item: MenuItem, popover: &Popover) -> Button {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn a_video_clip_is_offered_delete_and_mute_only() {
+    fn a_video_clip_is_offered_its_own_edits_only() {
         let menu = include_str!("clip_menu.rs");
         let source = menu
             .split("#[cfg(test)]")
@@ -381,6 +414,55 @@ mod tests {
         assert!(
             source.contains("if can_paste && !is_video {"),
             "paste must stay out of the video menu while the overlays keep it"
+        );
+    }
+
+    #[test]
+    fn the_cursor_hide_row_lives_in_the_video_menu_not_the_tool_row() {
+        let menu = include_str!("clip_menu.rs");
+        let source = menu
+            .split("#[cfg(test)]")
+            .next()
+            .expect("the menu's production source");
+        let start = source
+            .find("let mut items: Vec<MenuItem> = if is_video {")
+            .expect("the video branch of the item list");
+        let video = {
+            let rest = &source[start + 1..];
+            let end = rest
+                .find("\n    } else {")
+                .expect("the overlay branch follows the video branch");
+            &source[start..start + 1 + end]
+        };
+        assert!(
+            video.contains("label: t(\"Hide cursor here\")"),
+            "the video clip must offer the cursor hide where the clip is"
+        );
+        assert!(
+            video.contains("guard.add_cursor_hide_at_playhead()"),
+            "the row places its hide clip at the playhead"
+        );
+        assert!(
+            video.contains("lanes.open(TimelineLane::Cursor)"),
+            "and brings the Cursor lane forward, since the row appears with it"
+        );
+
+        let shell = include_str!("shell.rs");
+        let toolbar = shell
+            .split("#[cfg(test)]")
+            .next()
+            .expect("the card's production source");
+        assert!(
+            !toolbar.contains("labeled_tool_button(\"view-conceal-symbolic\""),
+            "the tool row keeps Zoom, Split and Detect only"
+        );
+        assert!(
+            !toolbar.contains("hide.connect_clicked"),
+            "the Hide button and its handler are gone"
+        );
+        assert!(
+            !toolbar.contains("selected_cursor_hide.is_some()"),
+            "nothing on the tool row is left to mark active for a hide clip"
         );
     }
 

@@ -1,12 +1,13 @@
 pub fn toggle_playback(
     state: &Arc<Mutex<VideoEditState>>,
     media: &Rc<RefCell<Option<MediaFile>>>,
+    sound: &Rc<SoundSync>,
     playing: &Rc<Cell<bool>>,
     play_button: &Button,
     redraw: &Rc<dyn Fn()>,
 ) {
     if playing.get() {
-        pause_playback(media, playing, play_button, redraw);
+        pause_playback(media, sound, playing, play_button, redraw);
         return;
     }
 
@@ -28,6 +29,7 @@ pub fn toggle_playback(
             media_file.pause();
         }
         playing.set(false);
+        sound.stop();
         set_play_icon(play_button, "media-playback-start-symbolic");
         redraw();
         return;
@@ -35,18 +37,20 @@ pub fn toggle_playback(
     if let Some(media_file) = media.borrow().as_ref() {
         media_file.pause();
         media_file.seek((seek_to * 1_000_000.0) as i64);
-        media_file.set_muted(muted);
+        set_video_muted(media_file, sound, muted);
         if (speed - 1.0).abs() <= 1e-6 {
             media_file.play();
         }
     }
     playing.set(true);
+    drive_sound(state, sound, true);
     set_play_icon(play_button, "media-playback-pause-symbolic");
     redraw();
 }
 
 pub fn pause_playback(
     media: &Rc<RefCell<Option<MediaFile>>>,
+    sound: &Rc<SoundSync>,
     playing: &Rc<Cell<bool>>,
     play_button: &Button,
     refresh: &Rc<dyn Fn()>,
@@ -57,9 +61,43 @@ pub fn pause_playback(
     if let Some(media_file) = media.borrow().as_ref() {
         media_file.pause();
     }
+    sound.stop();
     playing.set(false);
     set_play_icon(play_button, "media-playback-start-symbolic");
     refresh();
+}
+
+/// Keep the composition's sound in step with the preview: start it, restart it
+/// after a seek or an edit, and let it go when the preview stops. The plan is
+/// built only when the player actually needs one.
+fn drive_sound(state: &Arc<Mutex<VideoEditState>>, sound: &Rc<SoundSync>, playing: bool) {
+    let (time, key) = {
+        let guard = state.lock().unwrap();
+        (
+            guard.playhead_seconds,
+            crate::recording::editor::sound::change_key(&guard),
+        )
+    };
+    let planned = state.clone();
+    sound.update(playing, time, key, move || {
+        let guard = planned.lock().unwrap();
+        SoundPlan::from_state(&guard)
+    });
+}
+
+/// Mute the video stream, which carries no sound of its own while the sound
+/// player runs: the composition's sound has every clip's mute, the music and
+/// the clicks in it, none of which the video stream knows about.
+fn set_video_muted(media_file: &MediaFile, sound: &Rc<SoundSync>, muted: bool) {
+    if sound.available() {
+        media_file.set_muted(true);
+        return;
+    }
+    // Without a sound player the video keeps its own track. Toggling first is
+    // what reaches the sink: GTK skips a set that matches the current value,
+    // and the audio server may have restored a stale mute on this stream.
+    media_file.set_muted(true);
+    media_file.set_muted(muted);
 }
 
 pub fn set_play_icon(button: &Button, icon_name: &str) {
@@ -90,6 +128,7 @@ pub fn nudge_playhead(
 pub fn tick_playback(
     state: &Arc<Mutex<VideoEditState>>,
     media: &Rc<RefCell<Option<MediaFile>>>,
+    sound: &Rc<SoundSync>,
     playing: &Rc<Cell<bool>>,
     play_button: &Button,
     redraw: &Rc<dyn Fn()>,
@@ -97,6 +136,7 @@ pub fn tick_playback(
     if !playing.get() {
         return;
     }
+    drive_sound(state, sound, true);
 
     let resolved = {
         let guard = state.lock().unwrap();
@@ -112,7 +152,7 @@ pub fn tick_playback(
             })
     };
     let Some((base_timeline, source_t, end, speed)) = resolved else {
-        stop_playback_at_end(state, media, playing, play_button, redraw);
+        stop_playback_at_end(state, media, sound, playing, play_button, redraw);
         return;
     };
 
@@ -176,7 +216,7 @@ pub fn tick_playback(
         let reached = guard.playhead_seconds >= end - 1e-3;
         drop(guard);
         if reached {
-            stop_playback_at_end(state, media, playing, play_button, redraw);
+            stop_playback_at_end(state, media, sound, playing, play_button, redraw);
         } else {
             redraw();
         }
@@ -233,12 +273,12 @@ pub fn tick_playback(
             if media_file.is_playing() {
                 media_file.pause();
             }
-            media_file.set_muted(muted);
+            set_video_muted(media_file, sound, muted);
             if actual.is_some_and(|seconds| (seconds - seek_to).abs() > 1e-4) {
                 media_file.seek((seek_to * 1_000_000.0) as i64);
             }
         }
-        stop_playback_at_end(state, media, playing, play_button, redraw);
+        stop_playback_at_end(state, media, sound, playing, play_button, redraw);
         return;
     }
     if let Some(media_file) = media.borrow().as_ref() {
@@ -258,7 +298,7 @@ pub fn tick_playback(
                 media_file.play();
             }
         }
-        media_file.set_muted(muted);
+        set_video_muted(media_file, sound, muted);
     }
     redraw();
 }
@@ -266,11 +306,13 @@ pub fn tick_playback(
 fn stop_playback_at_end(
     state: &Arc<Mutex<VideoEditState>>,
     media: &Rc<RefCell<Option<MediaFile>>>,
+    sound: &Rc<SoundSync>,
     playing: &Rc<Cell<bool>>,
     play_button: &Button,
     redraw: &Rc<dyn Fn()>,
 ) {
     playing.set(false);
+    sound.stop();
     let first_source = {
         let mut guard = state.lock().unwrap();
         let first = guard.first_playable_position();
@@ -396,6 +438,7 @@ pub fn bind_video_clip(
     dragging: Rc<Cell<Option<usize>>>,
     pause: Rc<dyn Fn()>,
     redraw: Rc<dyn Fn()>,
+    lanes: LaneControls,
 ) {
     let click = GestureClick::new();
     click.set_button(1);
@@ -583,6 +626,7 @@ pub fn bind_video_clip(
         let state = state.clone();
         let media = media.clone();
         let redraw = redraw.clone();
+        let lanes = lanes.clone();
         move |gesture, _, x, y| {
             let width = gesture
                 .widget()
@@ -636,6 +680,7 @@ pub fn bind_video_clip(
                         redraw();
                     }
                 }),
+                lanes.clone(),
             );
         }
     });
@@ -652,18 +697,35 @@ pub fn bind_zoom_track(
     dragging: Rc<Cell<Option<usize>>>,
     pause: Rc<dyn Fn()>,
     redraw: Rc<dyn Fn()>,
+    lanes: LaneControls,
 ) {
     let click = GestureClick::new();
     click.set_button(1);
+    // A press on a resting lane opens it, so the drag that may follow must not
+    // trim, move or extend anything: the thin strip only summarises its clips.
+    let resting_press = Rc::new(Cell::new(false));
     click.connect_pressed({
         let state = state.clone();
         let redraw = redraw.clone();
+        let lanes = lanes.clone();
+        let resting_press = resting_press.clone();
         move |gesture, _, x, _| {
             let width = gesture
                 .widget()
                 .map(|widget| widget.allocated_width().max(1) as f64)
                 .unwrap_or(1.0);
+            let resting = !lanes.is_open(TimelineLane::Zoom);
+            resting_press.set(resting);
             let mut guard = state.lock().unwrap();
+            if resting {
+                if let Some(index) = zoom_clip_at(&guard, width, x) {
+                    select_zoom(&mut guard, Some(index));
+                }
+                drop(guard);
+                lanes.open(TimelineLane::Zoom);
+                redraw();
+                return;
+            }
             if near_playhead(&guard, width, x) {
                 return;
             }
@@ -696,7 +758,13 @@ pub fn bind_zoom_track(
         let resize_anchor = resize_anchor.clone();
         let dragging = dragging.clone();
         let pause = pause.clone();
+        let resting_press = resting_press.clone();
         move |gesture, x, _| {
+            if resting_press.replace(false) {
+                dragging.set(None);
+                drag_kind.set(None);
+                return;
+            }
             let width = gesture
                 .widget()
                 .map(|widget| widget.allocated_width().max(1) as f64)
@@ -817,7 +885,12 @@ pub fn bind_zoom_track(
         {
             let state = state.clone();
             let set_band_hover = set_band_hover.clone();
+            let lanes = lanes.clone();
             Rc::new(move |width, x| {
+                // A resting lane shows no grips and offers no resize cursor.
+                if !lanes.is_open(TimelineLane::Zoom) {
+                    return (TrackCursor::None, None, None);
+                }
                 let guard = state.lock().unwrap();
                 if near_playhead(&guard, width, x) {
                     set_band_hover(false);
@@ -854,7 +927,11 @@ pub fn bind_zoom_track(
     menu.connect_pressed({
         let state = state.clone();
         let redraw = redraw.clone();
+        let lanes = lanes.clone();
         move |gesture, _, x, y| {
+            if !lanes.is_open(TimelineLane::Zoom) {
+                return;
+            }
             let width = gesture
                 .widget()
                 .map(|widget| widget.allocated_width().max(1) as f64)
@@ -884,6 +961,7 @@ pub fn bind_zoom_track(
                 y,
                 state.clone(),
                 redraw.clone(),
+                lanes.clone(),
             );
         }
     });
@@ -900,18 +978,35 @@ pub fn bind_hide_track(
     dragging: Rc<Cell<Option<usize>>>,
     pause: Rc<dyn Fn()>,
     redraw: Rc<dyn Fn()>,
+    lanes: LaneControls,
 ) {
     let click = GestureClick::new();
     click.set_button(1);
+    // Same rule as the Zoom lane: a press on the resting strip opens the lane
+    // and the drag that may follow must not trim or move anything.
+    let resting_press = Rc::new(Cell::new(false));
     click.connect_pressed({
         let state = state.clone();
         let redraw = redraw.clone();
+        let lanes = lanes.clone();
+        let resting_press = resting_press.clone();
         move |gesture, _, x, _| {
             let width = gesture
                 .widget()
                 .map(|widget| widget.allocated_width().max(1) as f64)
                 .unwrap_or(1.0);
+            let resting = !lanes.is_open(TimelineLane::Cursor);
+            resting_press.set(resting);
             let mut guard = state.lock().unwrap();
+            if resting {
+                if let Some(index) = cursor_hide_clip_at(&guard, width, x) {
+                    select_cursor_hide(&mut guard, Some(index));
+                }
+                drop(guard);
+                lanes.open(TimelineLane::Cursor);
+                redraw();
+                return;
+            }
             if near_playhead(&guard, width, x) {
                 return;
             }
@@ -943,7 +1038,13 @@ pub fn bind_hide_track(
         let resize_anchor = resize_anchor.clone();
         let dragging = dragging.clone();
         let pause = pause.clone();
+        let resting_press = resting_press.clone();
         move |gesture, x, _| {
+            if resting_press.replace(false) {
+                dragging.set(None);
+                drag_kind.set(None);
+                return;
+            }
             let width = gesture
                 .widget()
                 .map(|widget| widget.allocated_width().max(1) as f64)
@@ -1063,7 +1164,12 @@ pub fn bind_hide_track(
         {
             let state = state.clone();
             let set_band_hover = set_band_hover.clone();
+            let lanes = lanes.clone();
             Rc::new(move |width, x| {
+                // A resting lane shows no grips and offers no resize cursor.
+                if !lanes.is_open(TimelineLane::Cursor) {
+                    return (TrackCursor::None, None, None);
+                }
                 let guard = state.lock().unwrap();
                 if near_playhead(&guard, width, x) {
                     set_band_hover(false);
@@ -1098,7 +1204,11 @@ pub fn bind_hide_track(
     menu.connect_pressed({
         let state = state.clone();
         let redraw = redraw.clone();
+        let lanes = lanes.clone();
         move |gesture, _, x, y| {
+            if !lanes.is_open(TimelineLane::Cursor) {
+                return;
+            }
             let width = gesture
                 .widget()
                 .map(|widget| widget.allocated_width().max(1) as f64)
@@ -1128,10 +1238,51 @@ pub fn bind_hide_track(
                 y,
                 state.clone(),
                 redraw.clone(),
+                lanes.clone(),
             );
         }
     });
     area.add_controller(menu);
+}
+
+/// Pressing the sound lane opens it and picks the piece under the pointer, so
+/// the Clip panel edits the sound of the piece that was clicked. The lane has
+/// no clips of its own: it draws the composition's pieces and their waveform.
+pub fn bind_sound_lane(
+    area: &DrawingArea,
+    state: Arc<Mutex<VideoEditState>>,
+    lanes: LaneControls,
+    redraw: Rc<dyn Fn()>,
+) {
+    let click = GestureClick::new();
+    click.set_button(1);
+    click.connect_pressed({
+        let state = state.clone();
+        let redraw = redraw.clone();
+        let lanes = lanes.clone();
+        move |gesture, _, x, _| {
+            let width = gesture
+                .widget()
+                .map(|widget| widget.allocated_width().max(1) as f64)
+                .unwrap_or(1.0);
+            {
+                let mut guard = state.lock().unwrap();
+                // The piece under the pointer is the one the video lane draws
+                // there, so the click selects it exactly as a click on the
+                // video clip would.
+                let segment = video_layout(&guard, width)
+                    .into_iter()
+                    .find(|&(_, _, x0, x1)| x >= x0 && x <= x1)
+                    .map(|(_, segment, _, _)| segment);
+                if let Some(index) = segment {
+                    select_video(&mut guard, Some(index));
+                }
+            }
+            lanes.open(TimelineLane::Sound);
+            redraw();
+        }
+    });
+    area.add_controller(click);
 }
 
 pub fn bind_track_cursor(
