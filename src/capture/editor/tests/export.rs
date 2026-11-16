@@ -37,7 +37,7 @@ fn appearance_export_dimensions_match_rendered_frames() {
                         let rendered = state
                             .upscaled_export_state(false)
                             .unwrap()
-                            .to_final_image()
+                            .render_final_image()
                             .unwrap();
                         assert_eq!(state.export_dimensions(upscale), rendered.dimensions(), "{style:?}, filled={filled}, tilted={tilted}, aspect={aspect:?}, upscale={upscale:?}");
                     }
@@ -69,7 +69,7 @@ fn appearance_upscale_checks_the_final_canvas_before_inference() {
         .contains("16-megapixel"));
     state.source_upscale = SourceUpscale::Neural4x;
     assert!(state
-        .to_final_image()
+        .render_final_image()
         .unwrap_err()
         .to_string()
         .contains("16-megapixel"));
@@ -83,12 +83,12 @@ fn neural_image_export_grows_the_result_without_modifying_the_document() {
         image::Rgba([200, 100, 50, 255]),
     ));
     state.source_upscale = SourceUpscale::Neural2x;
-    let result = state.to_final_image().unwrap();
+    let result = state.render_final_image().unwrap();
     assert_eq!(result.dimensions(), (24, 16));
     assert_eq!(state.base_image.dimensions(), (12, 8));
     assert_eq!(state.working_image.dimensions(), (12, 8));
     let snapshot = state.export_snapshot();
-    let result = std::thread::spawn(move || snapshot().to_final_image().unwrap())
+    let result = std::thread::spawn(move || snapshot().render_final_image().unwrap())
         .join()
         .unwrap();
     assert_eq!(result.dimensions(), (24, 16));
@@ -111,7 +111,7 @@ fn neural_exports_draw_vector_annotations_over_the_enhanced_source() {
     state.actions.push(line);
     state.source_upscale = SourceUpscale::Neural2x;
 
-    let static_result = state.to_final_image().unwrap();
+    let static_result = state.render_final_image().unwrap();
     assert_eq!(static_result.dimensions(), (24, 16));
     let center = static_result.get_pixel(12, 8);
     assert!(
@@ -172,11 +172,11 @@ fn image_export_snapshot_renders_in_a_worker_without_live_editor_state() {
     state.shadow_blur = 6.0;
     state.shadow_offset_x = 2.0;
     state.shadow_offset_y = 5.0;
-    let expected = state.to_final_image().unwrap();
+    let expected = state.render_final_image().unwrap();
     let snapshot = state.export_snapshot();
     state.background_padding = 100.0;
     state.actions.clear();
-    let actual = std::thread::spawn(move || snapshot().to_final_image().unwrap())
+    let actual = std::thread::spawn(move || snapshot().render_final_image().unwrap())
         .join()
         .unwrap();
     assert_eq!(actual, expected);
@@ -203,7 +203,7 @@ fn final_image_applies_focus_overlay() {
     });
     state.rebuild_effect_layer();
 
-    let final_image = state.to_final_image().unwrap();
+    let final_image = state.render_final_image().unwrap();
     let inside = *final_image.get_pixel(4, 4);
     let outside = *final_image.get_pixel(1, 1);
 
@@ -221,7 +221,7 @@ fn final_image_shadow_does_not_replace_background_with_black_mask() {
     state.background_padding = 40.0;
     state.shadow_opacity = 0.45;
 
-    let final_image = state.to_final_image().expect("final image");
+    let final_image = state.render_final_image().expect("final image");
     let corner = *final_image.get_pixel(0, 0);
 
     assert_ne!(corner, image::Rgba([0, 0, 0, 255]));
@@ -239,7 +239,7 @@ fn final_image_background_keeps_screenshot_at_native_scale_by_default() {
     state.shadow_opacity = 0.0;
     state.background_corner_radius = 0.0;
 
-    let final_image = state.to_final_image().expect("final image");
+    let final_image = state.render_final_image().expect("final image");
 
     // A fill floors the stored 0px padding to the shared breathing room, so
     // the canvas grows by that gap on each side while the screenshot itself
@@ -268,7 +268,7 @@ fn final_image_card_shadow_visibly_darkens_pixels_below_card() {
     state.shadow_offset_x = 0.0;
     state.shadow_offset_y = 24.0;
 
-    let final_image = state.to_final_image().expect("final image");
+    let final_image = state.render_final_image().expect("final image");
     let shadow_pixel = *final_image.get_pixel(final_image.width() / 2, 290);
 
     assert!(
@@ -297,7 +297,7 @@ fn final_image_draws_annotations_on_top_of_background_padding() {
         stroke_size: 4.0,
     });
 
-    let final_image = state.to_final_image().expect("final image");
+    let final_image = state.render_final_image().expect("final image");
     // Canvas is 120x120; screenshot at (10, 10); stroke maps to canvas y=2, x=2..8.
     let pixel = *final_image.get_pixel(5, 2);
     assert!(
@@ -376,7 +376,7 @@ fn final_image_draws_border_on_top_of_wallpaper_background() {
     state.border_thickness = 6.0;
     state.border_color = DrawColor::new(1.0, 0.0, 0.0, 1.0);
 
-    let final_image = state.to_final_image().expect("final image");
+    let final_image = state.render_final_image().expect("final image");
     // Canvas is 120x120 with the screenshot at (10, 10); the outside border
     // sits around the card, so sample just left of the image edge.
     let edge = *final_image.get_pixel(9, 60);
@@ -410,7 +410,7 @@ fn retro_draws_thin_border_with_solid_window_behind_card() {
     state.border_thickness = spec.border_thickness;
     state.border_color = spec.border_color;
 
-    let final_image = state.to_final_image().expect("final image");
+    let final_image = state.render_final_image().expect("final image");
     let (w, h) = (final_image.width(), final_image.height());
     let x = w / 2;
     let is_gray = |px: &image::Rgba<u8>| px[0] == 100 && px[1] == 100 && px[2] == 100;
@@ -473,7 +473,7 @@ fn retro_window_renders_without_background_and_follows_radius() {
     state.border_thickness = spec.border_thickness;
     state.border_color = spec.border_color;
 
-    let final_image = state.to_final_image().expect("final image");
+    let final_image = state.render_final_image().expect("final image");
     // Canvas grows to hold the thin border plus the offset window.
     assert!(
         final_image.width() > 400 && final_image.height() > 400,
@@ -536,7 +536,7 @@ fn retro_border_stays_sharp_when_radius_is_zero() {
     state.border_thickness = spec.border_thickness;
     state.border_color = spec.border_color;
 
-    let final_image = state.to_final_image().expect("final image");
+    let final_image = state.render_final_image().expect("final image");
     // Mitered frame: the extreme outer corner is border, not a rounded cutout.
     let corner = *final_image.get_pixel(1, 1);
     assert_eq!(
@@ -569,7 +569,7 @@ fn inset_border_paints_inside_the_card_edge() {
         state.border_thickness = spec.border_thickness;
         state.border_color = spec.border_color;
 
-        let final_image = state.to_final_image().expect("final image");
+        let final_image = state.render_final_image().expect("final image");
         // No outside frame: canvas stays image + padding, edge pixel is backdrop.
         assert_eq!(final_image.width(), 560);
         assert_eq!(
@@ -614,7 +614,7 @@ fn attached_outside_borders_have_no_background_seam_at_rounded_corners() {
         state.frame_style = style;
         state.border_thickness = spec.border_thickness;
         state.border_color = spec.border_color;
-        let output = state.to_final_image().expect("rounded border image");
+        let output = state.render_final_image().expect("rounded border image");
         let safe_expand = state.border_thickness * 2.0 - 1.0;
         let mut checked = 0;
         for y in 90..145 {
@@ -667,7 +667,7 @@ fn attached_inset_borders_cover_the_images_rounded_corner_edge() {
         state.frame_style = style;
         state.border_thickness = spec.border_thickness;
         state.border_color = spec.border_color;
-        let output = state.to_final_image().expect("rounded inset image");
+        let output = state.render_final_image().expect("rounded inset image");
         let inset = state.border_thickness * 2.0 - 1.0;
         let color = spec.border_color;
         let expected = [
@@ -711,7 +711,9 @@ fn attached_border_fill_preserves_transparency_and_unaffected_presets() {
     state.frame_style = FrameStyle::Border;
     state.border_thickness = FrameStyle::Border.spec().border_thickness;
     state.border_color = FrameStyle::Border.spec().border_color;
-    let output = state.to_final_image().expect("transparent bordered image");
+    let output = state
+        .render_final_image()
+        .expect("transparent bordered image");
     assert_eq!(
         output.get_pixel(output.width() / 2, output.height() / 2)[3],
         0
@@ -862,7 +864,7 @@ fn outline_floats_a_hairline_off_the_card_with_a_gap() {
     state.border_thickness = spec.border_thickness;
     state.border_color = spec.border_color;
 
-    let final_image = state.to_final_image().expect("final image");
+    let final_image = state.render_final_image().expect("final image");
     // Card lands at (80, 80): 1px ring covering y=77, background gap at y=79.
     let ring = *final_image.get_pixel(280, 77);
     assert!(
@@ -896,7 +898,7 @@ fn bevel_export_draws_a_thin_two_tone_edge_without_backing() {
     state.border_thickness = spec.border_thickness;
     state.border_color = spec.border_color;
 
-    let final_image = state.to_final_image().expect("final image");
+    let final_image = state.render_final_image().expect("final image");
     assert!(final_image.width() > 400 && final_image.width() <= 406);
     assert!(final_image.height() > 400 && final_image.height() <= 406);
     assert_eq!(
@@ -927,7 +929,7 @@ fn stack_preset_fans_diagonally_top_right_and_bottom_left() {
     state.border_thickness = spec.border_thickness;
     state.border_color = spec.border_color;
 
-    let final_image = state.to_final_image().expect("final image");
+    let final_image = state.render_final_image().expect("final image");
     // Card stays centered at (20, 20); the center-pivot sheet peeks above
     // the top edge on the right half and below the bottom edge on the left.
     let top = *final_image.get_pixel(100, 19);
@@ -974,7 +976,7 @@ fn stack2_preset_draws_two_backing_sheets_like_stacked_prints() {
     state.border_thickness = spec.border_thickness;
     state.border_color = spec.border_color;
 
-    let final_image = state.to_final_image().expect("final image");
+    let final_image = state.render_final_image().expect("final image");
     // Padding 80 at scale 0.5 => 40px base; the framed stack is centered,
     // so the card sits at (48, 54) with fanned sheets behind it. Sample the
     // far sheet left of the near sheet's left edge.
@@ -1021,7 +1023,7 @@ fn liquid_glass_lights_the_band_from_the_top_and_stays_translucent() {
     state.border_thickness = spec.border_thickness;
     state.border_color = spec.border_color;
 
-    let frame = state.to_final_image().expect("final image");
+    let frame = state.render_final_image().expect("final image");
     let luma = |px: &image::Rgba<u8>| {
         0.2126 * f64::from(px[0]) + 0.7152 * f64::from(px[1]) + 0.0722 * f64::from(px[2])
     };
@@ -1087,7 +1089,7 @@ fn glass_presets_blend_their_band_over_the_fill() {
         state.background_corner_radius = 20.0;
         state.frame_style = style;
         state.border_thickness = style.spec().border_thickness;
-        state.to_final_image().expect("final image")
+        state.render_final_image().expect("final image")
     };
     let luma = |px: &image::Rgba<u8>| {
         0.2126 * f64::from(px[0]) + 0.7152 * f64::from(px[1]) + 0.0722 * f64::from(px[2])
@@ -1144,7 +1146,7 @@ fn pearl_stays_visible_on_a_white_screenshot() {
         state.frame_style = style;
         state.border_thickness = style.spec().border_thickness;
         state.border_color = style.spec().border_color;
-        state.to_final_image().expect("final image")
+        state.render_final_image().expect("final image")
     };
     let clean = render(FrameStyle::Default);
     let pearl = render(FrameStyle::InsetLight);
@@ -1219,7 +1221,7 @@ fn glass_frost_siblings_share_the_3px_edge_with_opposite_tints() {
         state.frame_style = style;
         state.border_thickness = spec.border_thickness;
         state.border_color = spec.border_color;
-        let frame = state.to_final_image().expect("final image");
+        let frame = state.render_final_image().expect("final image");
         band_luma[index] = luma(frame.get_pixel(280, 481));
     }
     assert!(
@@ -1309,7 +1311,7 @@ fn dump_liquid_glass_preview() {
         state.frame_style = FrameStyle::Liquid;
         state.border_thickness = spec.border_thickness;
         state.border_color = spec.border_color;
-        let out = state.to_final_image().expect("final image");
+        let out = state.render_final_image().expect("final image");
         image::save_buffer(
             output.join(format!("glass-{name}.png")),
             &out,
@@ -1334,7 +1336,7 @@ fn dump_liquid_glass_preview() {
             state.frame_style = style;
             state.border_thickness = spec.border_thickness;
             state.border_color = spec.border_color;
-            let out = state.to_final_image().expect("tinted final image");
+            let out = state.render_final_image().expect("tinted final image");
             out.save(output.join(format!("glass-{name}.png")))
                 .expect("tinted sample");
         }
@@ -1352,7 +1354,7 @@ fn dump_liquid_glass_preview() {
             state.frame_style = style;
             state.border_thickness = spec.border_thickness;
             state.border_color = spec.border_color;
-            let out = state.to_final_image().expect("frame final image");
+            let out = state.render_final_image().expect("frame final image");
             out.save(output.join(format!("frame-{name}.png")))
                 .expect("frame sample");
         }
@@ -1373,7 +1375,7 @@ fn dump_liquid_glass_preview() {
         state.frame_style = style;
         state.border_thickness = spec.border_thickness;
         state.border_color = spec.border_color;
-        let out = state.to_final_image().expect("final image");
+        let out = state.render_final_image().expect("final image");
         image::save_buffer(
             output.join(format!("glass-{name}.png")),
             &out,
@@ -1391,7 +1393,7 @@ fn dump_liquid_glass_preview() {
     state.frame_style = FrameStyle::Liquid;
     state.border_thickness = spec.border_thickness;
     state.border_color = spec.border_color;
-    let out = state.to_final_image().expect("final image");
+    let out = state.render_final_image().expect("final image");
     let mut flat =
         image::RgbaImage::from_pixel(out.width(), out.height(), image::Rgba([0, 0, 0, 255]));
     image::imageops::overlay(&mut flat, &out, 0, 0);
@@ -1415,9 +1417,9 @@ fn final_image_background_noise_grains_the_fill_but_not_the_card() {
     state.shadow_opacity = 0.0;
     state.background_corner_radius = 0.0;
 
-    let flat = state.to_final_image().expect("final image");
+    let flat = state.render_final_image().expect("final image");
     state.background_noise = 0.8;
-    let grainy = state.to_final_image().expect("final image");
+    let grainy = state.render_final_image().expect("final image");
 
     let fill = image::Rgba([20, 20, 20, 255]);
     assert_eq!(
@@ -1451,7 +1453,7 @@ fn final_image_without_a_fill_never_grains_the_transparent_surround() {
     state.background_style = BackgroundStyle::None;
     state.background_noise = 1.0;
 
-    let out = state.to_final_image().expect("final image");
+    let out = state.render_final_image().expect("final image");
 
     assert_eq!(out.dimensions(), (40, 30));
     assert_eq!(*out.get_pixel(0, 0), image::Rgba([90, 90, 90, 255]));
@@ -1502,9 +1504,9 @@ fn final_image_background_blur_softens_the_fill_and_keeps_grain_crisp() {
             / (values.len() - 1) as f64
     };
 
-    let sharp = state.to_final_image().expect("final image");
+    let sharp = state.render_final_image().expect("final image");
     state.background_blur = 1.0;
-    let blurred = state.to_final_image().expect("final image");
+    let blurred = state.render_final_image().expect("final image");
 
     assert!(
         ramp(&row(&sharp)) <= 4,
@@ -1526,7 +1528,7 @@ fn final_image_background_blur_softens_the_fill_and_keeps_grain_crisp() {
     // instead of being smoothed into the blurred background.
     let blurred_flat = flat_run(&blurred);
     state.background_noise = 1.0;
-    let grainy = state.to_final_image().expect("final image");
+    let grainy = state.render_final_image().expect("final image");
     let grainy_flat = flat_run(&grainy);
 
     assert!(
@@ -1562,7 +1564,7 @@ fn final_image_renders_a_gradient_background_from_its_spec() {
     state.shadow_opacity = 0.0;
     state.background_corner_radius = 0.0;
 
-    let out = state.to_final_image().expect("final image");
+    let out = state.render_final_image().expect("final image");
     // Row 2 is fill only (the top padding band). Angle 0 runs left-to-right,
     // so the band's left edge is the first stop and its right edge the last.
     let left = *out.get_pixel(1, 2);
@@ -1606,7 +1608,7 @@ fn scene_shadow_survives_the_export_snapshot() {
 
     // The exported still shades its fill, so the layer is really painted and
     // not merely carried along.
-    let out = state.to_final_image().expect("final image");
+    let out = state.render_final_image().expect("final image");
     let shaded =
         (0..out.height()).any(|y| (0..out.width()).any(|x| out.get_pixel(x, y).0[0] < 250));
     assert!(shaded, "the exported still must show the Cast light layer");
@@ -1651,7 +1653,7 @@ fn dump_scene_shadow_styles() {
             };
             state.sync_shadow_fields();
 
-            let still = state.to_final_image().expect("still renders");
+            let still = state.render_final_image().expect("still renders");
             let label = format!("shadow-{:?}-{name}.png", preset).to_lowercase();
             still
                 .save(output.join(label))

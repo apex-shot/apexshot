@@ -1125,8 +1125,12 @@ fn render_comparison(
     checkpoint(cancel)?;
     let Some((motion, (width, height))) = frame else {
         return Ok((
-            before.to_final_image().map_err(|error| error.to_string())?,
-            after.to_final_image().map_err(|error| error.to_string())?,
+            before
+                .render_final_image()
+                .map_err(|error| error.to_string())?,
+            after
+                .render_final_image()
+                .map_err(|error| error.to_string())?,
         ));
     };
     let background_path = match motion.appearance.background_fill_type {
