@@ -1,0 +1,158 @@
+            .settings-scale-readout {
+                font-size: 12px;
+                font-weight: 500;
+                opacity: 0.55;
+            }
+
+            .usage-status {
+                font-size: 12px;
+                opacity: 0.6;
+            }
+
+            .usage-status-error {
+                color: #ff7c2f;
+                opacity: 1;
+            }
+
+            .usage-state-title {
+                font-size: 15px;
+                opacity: 0.9;
+            }
+
+            .usage-progress {
+                min-width: 0;
+            }
+
+            .usage-progress trough {
+                min-width: 0;
+                min-height: 8px;
+                padding: 0;
+                border: none;
+                border-radius: 999px;
+                background-color: alpha(white, 0.07);
+            }
+
+            .usage-progress progress {
+                min-height: 8px;
+                min-width: 6px;
+                padding: 0;
+                border: none;
+                border-radius: 999px;
+                background-image: none;
+                background-color: #ff670d;
+            }
+
+            .editor-root.editor-theme-light .usage-progress trough {
+                background-color: alpha(#111827, 0.09);
+            }
+
+            .settings-account-chip {
+                padding: 8px 10px;
+                border-radius: 8px;
+            }
+
+            .linux-settings button.settings-account-chip {
+                background-image: none;
+                background-color: transparent;
+                border: none;
+                box-shadow: none;
+            }
+
+            .linux-settings button.settings-account-chip:hover {
+                background-color: alpha(white, 0.06);
+            }
+
+            .settings-account-avatar {
+                background: linear-gradient(145deg, #965032, #532d28);
+                border: 1px solid rgba(255, 166, 112, 0.26);
+                color: #fff3eb;
+                border-radius: 50%;
+                font-size: 12px;
+                font-weight: 700;
+            }
+
+            .settings-account-name {
+                font-size: 12px;
+                font-weight: 600;
+            }
+
+            .settings-account-detail {
+                font-size: 11px;
+                opacity: 0.6;
+            }
+
+            .linux-settings.editor-theme-light button.settings-account-chip:hover {
+                background-color: alpha(#111827, 0.05);
+            }
+
+            .settings-save-error {
+                padding: 8px 8px 8px 14px;
+            }
+
+            .editor-root button.settings-save-error-retry {
+                border-radius: 999px;
+                padding: 2px 12px;
+                min-height: 0;
+            }
+
+            .linux-settings .quick-access-overlay-card .settings-table-row {
+                padding: 10px 18px;
+            }
+
+            .linux-settings .quick-access-overlay-card scale {
+                padding: 0;
+                margin: 0;
+                min-height: 20px;
+            }
+
+            .linux-settings .quick-access-overlay-card scale trough {
+                min-height: 4px;
+                margin: 0;
+                padding: 0;
+                border: none;
+                border-radius: 999px;
+                background-image: none;
+                background-color: alpha(white, 0.10);
+            }
+
+            .linux-settings .quick-access-overlay-card scale highlight {
+                min-height: 4px;
+                margin: 0;
+                padding: 0;
+                border: none;
+                border-radius: 999px;
+                background-image: none;
+                background-color: #ff670d;
+            }
+
+            .linux-settings .quick-access-overlay-card scale slider {
+                min-width: 14px;
+                min-height: 14px;
+                padding: 0;
+                margin: -5px 0;
+                border: none;
+                border-radius: 999px;
+                background-image: none;
+                background-color: #f1f1f3;
+                box-shadow: none;
+            }
+
+            .linux-settings.editor-theme-light .quick-access-overlay-card scale trough {
+                background-color: alpha(#111827, 0.10);
+            }
+
+            .linux-settings.editor-theme-light .quick-access-overlay-card scale slider {
+                background-color: #ffffff;
+                border: 1px solid alpha(#111827, 0.16);
+            }
+
+            .linux-settings button.settings-select {
+                min-height: 28px;
+                padding: 0 10px;
+                border: none;
+                border-radius: 8px;
+            }
+
+            .linux-settings button.settings-select label {
+                padding: 0;
+            }

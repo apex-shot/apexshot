@@ -4977,3 +4977,38 @@ msgstr "Dieser ffmpeg-Build hat keinen HEVC-Encoder"
 
 msgid "Uploaded, but the link could not be copied: {error}"
 msgstr "Hochgeladen, aber der Link konnte nicht kopiert werden: {error}"
+
+msgid "Account"
+msgstr "Konto"
+
+msgid "Cloud storage"
+msgstr "Cloud-Speicher"
+
+msgid "Email"
+msgstr "E-Mail"
+
+msgid "Last updated"
+msgstr "Zuletzt aktualisiert"
+
+msgid "Loading usage…"
+msgstr "Nutzung wird geladen…"
+
+msgid "Plan"
+msgstr "Tarif"
+
+msgid "Refreshing…"
+msgstr "Wird aktualisiert…"
+
+msgid ""
+"System default uses your desktop language. Changes are saved automatically."
+msgstr ""
+"Systemstandard verwendet die Sprache Ihres Desktops. Änderungen werden automatisch gespeichert."
+
+msgid "Unlimited"
+msgstr "Unbegrenzt"
+
+msgid "Used"
+msgstr "Verwendet"
+
+msgid "{used} of {limit}"
+msgstr "{used} von {limit}"

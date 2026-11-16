@@ -4865,3 +4865,37 @@ msgstr "此 ffmpeg 版本没有 HEVC 编码器"
 
 msgid "Uploaded, but the link could not be copied: {error}"
 msgstr "已上传，但无法复制链接：{error}"
+
+msgid "Account"
+msgstr "账号"
+
+msgid "Cloud storage"
+msgstr "云存储"
+
+msgid "Email"
+msgstr "电子邮件"
+
+msgid "Last updated"
+msgstr "上次更新"
+
+msgid "Loading usage…"
+msgstr "正在加载用量……"
+
+msgid "Plan"
+msgstr "套餐"
+
+msgid "Refreshing…"
+msgstr "正在刷新……"
+
+msgid ""
+"System default uses your desktop language. Changes are saved automatically."
+msgstr "跟随系统会使用您的桌面语言。更改会自动保存。"
+
+msgid "Unlimited"
+msgstr "无限制"
+
+msgid "Used"
+msgstr "已使用"
+
+msgid "{used} of {limit}"
+msgstr "{used} / {limit}"

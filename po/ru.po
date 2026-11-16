@@ -4957,3 +4957,38 @@ msgstr "В этой сборке ffmpeg нет кодировщика HEVC"
 
 msgid "Uploaded, but the link could not be copied: {error}"
 msgstr "Загружено, но не удалось скопировать ссылку: {error}"
+
+msgid "Account"
+msgstr "Аккаунт"
+
+msgid "Cloud storage"
+msgstr "Облачное хранилище"
+
+msgid "Email"
+msgstr "Эл. почта"
+
+msgid "Last updated"
+msgstr "Последнее обновление"
+
+msgid "Loading usage…"
+msgstr "Загрузка данных об использовании…"
+
+msgid "Plan"
+msgstr "Тариф"
+
+msgid "Refreshing…"
+msgstr "Обновление…"
+
+msgid ""
+"System default uses your desktop language. Changes are saved automatically."
+msgstr ""
+"Вариант «Системный язык» использует язык рабочего стола. Изменения сохраняются автоматически."
+
+msgid "Unlimited"
+msgstr "Без ограничений"
+
+msgid "Used"
+msgstr "Использовано"
+
+msgid "{used} of {limit}"
+msgstr "{used} из {limit}"

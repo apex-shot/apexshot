@@ -1,8 +1,6 @@
 use crate::config::AppConfig;
 use crate::i18n::t;
-use gtk4::{
-    prelude::*, Align, Box as GtkBox, CheckButton, Label, Orientation, PositionType, Scale,
-};
+use gtk4::{prelude::*, Align, Box as GtkBox, CheckButton, Label, Orientation, Scale};
 
 use std::rc::Rc;
 
@@ -56,81 +54,70 @@ pub fn build_quick_access_section(config: &AppConfig) -> QuickAccessSettingsWidg
     section.append(&overlay_title);
 
     let overlay_frame = build_frame();
+    overlay_frame.add_css_class("quick-access-overlay-card");
 
     // Position
     let position_input = SettingsSelect::new(
         ["Left", "Right"].map(|pos| (pos, t(pos))),
         &config.quick_access_position,
     );
+    position_input.widget().set_hexpand(true);
+    position_input.widget().set_halign(Align::Fill);
     let pos_hbox = GtkBox::new(Orientation::Horizontal, 12);
     pos_hbox.set_hexpand(true);
     let pos_label = Label::new(Some(&t("Position")));
     pos_label.set_xalign(0.0);
     pos_label.set_hexpand(true);
+    let pos_controls = GtkBox::new(Orientation::Horizontal, 0);
+    pos_controls.set_size_request(220, -1);
+    pos_controls.set_hexpand(false);
+    pos_controls.set_halign(Align::End);
+    pos_controls.append(position_input.widget());
     pos_hbox.append(&pos_label);
-    pos_hbox.append(position_input.widget());
+    pos_hbox.append(&pos_controls);
     overlay_frame.append(&build_row!(&pos_hbox, false));
 
     // Overlay Size
     let overlay_size_input = Scale::with_range(Orientation::Horizontal, 0.5, 1.5, 0.1);
     overlay_size_input.set_value(config.quick_access_overlay_size);
     overlay_size_input.set_digits(1);
+    overlay_size_input.add_css_class("quick-access-overlay-size");
 
     let size_vbox = GtkBox::new(Orientation::Vertical, 4);
+    size_vbox.set_size_request(220, -1);
+    size_vbox.set_hexpand(false);
+    size_vbox.set_halign(Align::End);
 
-    if cfg!(target_os = "windows") {
-        // A compact track with its value beside it. Tick marks and the
-        // Min/Def/Max row read as a measuring instrument, not a preference.
-        overlay_size_input.set_size_request(180, -1);
-        overlay_size_input.set_hexpand(false);
+    overlay_size_input.set_draw_value(false);
+    overlay_size_input.set_size_request(180, -1);
+    overlay_size_input.set_hexpand(false);
 
-        let step_row = GtkBox::new(Orientation::Horizontal, 12);
-        step_row.set_valign(Align::Center);
-        step_row.append(&overlay_size_input);
+    let step_row = GtkBox::new(Orientation::Horizontal, 8);
+    step_row.set_valign(Align::Center);
+    step_row.append(&overlay_size_input);
 
-        let readout = Label::new(None);
-        readout.add_css_class("settings-scale-readout");
-        readout.set_xalign(1.0);
-        readout.set_width_chars(4);
-        step_row.append(&readout);
+    let readout = Label::new(None);
+    readout.add_css_class("settings-scale-readout");
+    readout.set_xalign(1.0);
+    readout.set_width_chars(4);
+    step_row.append(&readout);
 
-        let write_readout: Rc<dyn Fn()> = {
-            let scale = overlay_size_input.clone();
-            let readout = readout.downgrade();
-            Rc::new(move || {
-                if let Some(readout) = readout.upgrade() {
-                    readout.set_text(&format!("{}%", (scale.value() * 100.0).round() as i32));
-                }
-            })
-        };
-        write_readout();
-        {
-            let write_readout = Rc::clone(&write_readout);
-            overlay_size_input.connect_value_changed(move |_| write_readout());
-        }
-
-        size_vbox.append(&step_row);
-    } else {
-        overlay_size_input.set_size_request(220, -1);
-        overlay_size_input.add_mark(0.5, PositionType::Bottom, None);
-        overlay_size_input.add_mark(1.0, PositionType::Bottom, None);
-        overlay_size_input.add_mark(1.5, PositionType::Bottom, None);
-        size_vbox.append(&overlay_size_input);
-
-        let size_caption_row = GtkBox::new(Orientation::Horizontal, 0);
-        for (text, align) in [
-            ("Min", Align::Start),
-            ("Def", Align::Center),
-            ("Max", Align::End),
-        ] {
-            let caption = Label::new(Some(&t(text)));
-            caption.add_css_class("settings-scale-caption");
-            caption.set_hexpand(true);
-            caption.set_halign(align);
-            size_caption_row.append(&caption);
-        }
-        size_vbox.append(&size_caption_row);
+    let write_readout: Rc<dyn Fn()> = {
+        let scale = overlay_size_input.clone();
+        let readout = readout.downgrade();
+        Rc::new(move || {
+            if let Some(readout) = readout.upgrade() {
+                readout.set_text(&format!("{}%", (scale.value() * 100.0).round() as i32));
+            }
+        })
+    };
+    write_readout();
+    {
+        let write_readout = Rc::clone(&write_readout);
+        overlay_size_input.connect_value_changed(move |_| write_readout());
     }
+
+    size_vbox.append(&step_row);
 
     let size_hbox = GtkBox::new(Orientation::Horizontal, 12);
     size_hbox.set_hexpand(true);

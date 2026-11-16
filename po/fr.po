@@ -4987,3 +4987,38 @@ msgstr "Cette version de ffmpeg n'a pas d'encodeur HEVC"
 
 msgid "Uploaded, but the link could not be copied: {error}"
 msgstr "Téléversé, mais le lien n'a pas pu être copié : {error}"
+
+msgid "Account"
+msgstr "Compte"
+
+msgid "Cloud storage"
+msgstr "Stockage cloud"
+
+msgid "Email"
+msgstr "E-mail"
+
+msgid "Last updated"
+msgstr "Dernière mise à jour"
+
+msgid "Loading usage…"
+msgstr "Chargement de l'utilisation…"
+
+msgid "Plan"
+msgstr "Offre"
+
+msgid "Refreshing…"
+msgstr "Actualisation…"
+
+msgid ""
+"System default uses your desktop language. Changes are saved automatically."
+msgstr ""
+"L'option « Langue du système » utilise la langue de votre bureau. Les modifications sont enregistrées automatiquement."
+
+msgid "Unlimited"
+msgstr "Illimité"
+
+msgid "Used"
+msgstr "Utilisé"
+
+msgid "{used} of {limit}"
+msgstr "{used} sur {limit}"

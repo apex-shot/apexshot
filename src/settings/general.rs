@@ -83,7 +83,7 @@ pub fn build_general_section(config: &AppConfig) -> GeneralSettingsWidgets {
     language_option.set_xalign(0.0);
     language_option.set_hexpand(true);
     let language_help = Label::new(Some(&t(
-        "System default uses your desktop language. Changes apply after Save.",
+        "System default uses your desktop language. Changes are saved automatically.",
     )));
     language_help.add_css_class("dim-label");
     language_help.set_wrap(true);

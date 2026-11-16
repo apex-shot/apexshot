@@ -5,4 +5,5 @@ pub mod destination;
 pub mod listing;
 pub mod upgrade;
 pub mod upload;
+pub mod usage;
 pub mod xbackbone;

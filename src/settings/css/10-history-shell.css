@@ -52,7 +52,7 @@
                 opacity: 0.45;
             }
 
-            .history-root .history-header-refresh {
+            .settings-shell .history-header-refresh {
                 min-width: 30px;
                 min-height: 30px;
                 padding: 0;
@@ -65,8 +65,8 @@
                 color: alpha(white, 0.75);
             }
 
-            .history-root .history-header-refresh:hover,
-            .history-root .history-header-refresh:focus {
+            .settings-shell .history-header-refresh:hover,
+            .settings-shell .history-header-refresh:focus {
                 background-color: alpha(white, 0.10);
                 color: white;
             }
@@ -267,12 +267,12 @@
                 background-color: alpha(#111827, 0.08);
             }
 
-            .editor-root.editor-theme-light.history-root .history-header-refresh {
+            .editor-root.editor-theme-light.settings-shell .history-header-refresh {
                 color: alpha(#111827, 0.70);
             }
 
-            .editor-root.editor-theme-light.history-root .history-header-refresh:hover,
-            .editor-root.editor-theme-light.history-root .history-header-refresh:focus {
+            .editor-root.editor-theme-light.settings-shell .history-header-refresh:hover,
+            .editor-root.editor-theme-light.settings-shell .history-header-refresh:focus {
                 background-color: alpha(#111827, 0.08);
                 color: #1d2129;
             }
