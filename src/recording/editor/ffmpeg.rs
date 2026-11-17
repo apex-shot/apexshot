@@ -1418,9 +1418,12 @@ fn build_composite_convert_args(
     }
     // Turn the prepared video layer into a rounded card. The mask's luma
     // becomes the frame's alpha, so the fill behind it shows at the corners.
+    // The mask loops forever (`-loop 1`), and `alphamerge` otherwise keeps
+    // repeating the last video frame while that input runs, so `shortest=1`
+    // ends the card when the footage ends and the export finishes.
     if rounded_mask.is_some() {
         filter.push_str(&format!(
-            "[vcard0];[vcard0][{mask_index}:v]alphamerge,format=yuva420p"
+            "[vcard0];[vcard0][{mask_index}:v]alphamerge=shortest=1,format=yuva420p"
         ));
     }
     if use_wallpaper {
@@ -3603,6 +3606,13 @@ mod tests {
         assert!(
             graph.contains("alphamerge"),
             "the card must take the mask's alpha: {graph}"
+        );
+        // The mask loops for the whole export, so a plain `alphamerge` would
+        // keep repeating the last footage frame and the export would never
+        // reach its end; the merge has to stop with the footage.
+        assert!(
+            graph.contains("alphamerge=shortest=1"),
+            "a looping mask must not keep the export alive past the footage: {graph}"
         );
         assert!(
             graph.contains("overlay=(W-w)/2:(H-h)/2:format=auto"),
