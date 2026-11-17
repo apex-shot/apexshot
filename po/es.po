@@ -5019,3 +5019,54 @@ msgstr "Usado"
 
 msgid "{used} of {limit}"
 msgstr "{used} de {limit}"
+
+msgid "Activate a license"
+msgstr "Activar una licencia"
+
+msgid "ApexShot Studio"
+msgstr "ApexShot Studio"
+
+msgid "Included updates ended {date}."
+msgstr "Las actualizaciones incluidas terminaron el {date}."
+
+msgid "License"
+msgstr "Licencia"
+
+msgid "License key"
+msgstr "Clave de licencia"
+
+msgid "Needs attention"
+msgstr "Requiere atención"
+
+msgid "Not activated on this device."
+msgstr "No activado en este dispositivo."
+
+msgid "Open ApexShot anytime for Settings, shortcuts, and preferences"
+msgstr "Abre ApexShot cuando quieras para ver ajustes, atajos y preferencias"
+
+msgid "Other device"
+msgstr "Otro dispositivo"
+
+msgid "Paste your license key"
+msgstr "Pega tu clave de licencia"
+
+msgid "Replace…"
+msgstr "Reemplazar…"
+
+msgid "The saved license couldn't be verified."
+msgstr "No se pudo verificar la licencia guardada."
+
+msgid "This build can't verify Studio licenses."
+msgstr "Esta compilación no puede verificar licencias de Studio."
+
+msgid "This license belongs to another device."
+msgstr "Esta licencia pertenece a otro dispositivo."
+
+msgid "Unavailable"
+msgstr "No disponible"
+
+msgid "Updates ended"
+msgstr "Actualizaciones finalizadas"
+
+msgid "Updates included through {date}."
+msgstr "Actualizaciones incluidas hasta el {date}."
