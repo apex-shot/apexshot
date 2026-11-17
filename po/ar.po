@@ -4995,3 +4995,180 @@ msgstr "انتهت التحديثات"
 
 msgid "Updates included through {date}."
 msgstr "التحديثات مضمّنة حتى {date}."
+
+msgid "0 B/s"
+msgstr "0 بايت/ث"
+
+msgid "An export is still running. Let it finish, then try again."
+msgstr "لا يزال التصدير قيد التشغيل. انتظر حتى ينتهي، ثم حاول مرة أخرى."
+
+msgid "ApexShot could not close every window. Close them, then try again."
+msgstr "تعذّر على ApexShot إغلاق كل النوافذ. أغلقها، ثم حاول مرة أخرى."
+
+msgid "ApexShot is up to date"
+msgstr "ApexShot محدَّث"
+
+msgid "ApexShot v{version} is being installed. Keep this window open."
+msgstr "جارٍ تثبيت ApexShot v{version}. أبقِ هذه النافذة مفتوحة."
+
+msgid "ApexShot v{version} is installed."
+msgstr "تم تثبيت ApexShot v{version}."
+
+msgid "ApexShot v{version} is ready. Your current work will not be interrupted."
+msgstr "ApexShot v{version} جاهز. لن يتم مقاطعة عملك الحالي."
+
+msgid "ApexShot window"
+msgstr "نافذة ApexShot"
+
+msgid "Could not check the release: {error}"
+msgstr "تعذّر التحقق من الإصدار: {error}"
+
+msgid "Could not create the update folder: {error}"
+msgstr "تعذّر إنشاء مجلد التحديث: {error}"
+
+msgid "Could not find a local cache folder for the update."
+msgstr "تعذّر العثور على مجلد ذاكرة تخزين مؤقت محلي للتحديث."
+
+msgid "Could not finish the update: {error}"
+msgstr "تعذّر إكمال التحديث: {error}"
+
+msgid "Could not install the GNOME extension update."
+msgstr "تعذّر تثبيت تحديث إضافة GNOME."
+
+msgid "Could not reach the Flatpak service: {error}"
+msgstr "تعذّر الوصول إلى خدمة Flatpak: {error}"
+
+msgid "Could not reach the package service: {error}"
+msgstr "تعذّر الوصول إلى خدمة الحزم: {error}"
+
+msgid "Could not read the checksums: {error}"
+msgstr "تعذّرت قراءة المجاميع الاختبارية: {error}"
+
+msgid "Could not save the update: {error}"
+msgstr "تعذّر حفظ التحديث: {error}"
+
+msgid "Could not start the package manager: {error}"
+msgstr "تعذّر تشغيل مدير الحزم: {error}"
+
+msgid "Enhancement works up to 1 MP and 4096 px per edge. Crop this {width} × {height} image to use it."
+msgstr "يعمل التحسين حتى 1 ميغابكسل و4096 بكسل لكل حافة. اقتصّ هذه الصورة {width} × {height} لاستخدامه."
+
+msgid "Finish your recording first"
+msgstr "أنهِ التسجيل أولاً"
+
+msgid "Image editor"
+msgstr "محرر الصور"
+
+msgid "Installation was cancelled."
+msgstr "تم إلغاء التثبيت."
+
+msgid "Installing restarts ApexShot, which would stop the recording in progress."
+msgstr "يؤدي التثبيت إلى إعادة تشغيل ApexShot، مما سيوقف التسجيل الجاري."
+
+msgid "Installing update"
+msgstr "جارٍ تثبيت التحديث"
+
+msgid "Log out and back in to finish updating the GNOME extension."
+msgstr "سجّل الخروج ثم سجّل الدخول مجددًا لإنهاء تحديث إضافة GNOME."
+
+msgid "Preparing to install"
+msgstr "جارٍ التحضير للتثبيت"
+
+msgid "Refreshing the GNOME extension..."
+msgstr "جارٍ تحديث إضافة GNOME..."
+
+msgid "Restart ApexShot"
+msgstr "إعادة تشغيل ApexShot"
+
+msgid "Restart ApexShot to use the new version."
+msgstr "أعد تشغيل ApexShot لاستخدام الإصدار الجديد."
+
+msgid "Saving your work…"
+msgstr "جارٍ حفظ عملك…"
+
+msgid "Setup"
+msgstr "الإعداد"
+
+msgid "The Flatpak update could not start: {error}"
+msgstr "تعذّر بدء تحديث Flatpak: {error}"
+
+msgid "The Flatpak update failed."
+msgstr "فشل تحديث Flatpak."
+
+msgid "The Flatpak update stopped without finishing."
+msgstr "توقف تحديث Flatpak قبل أن يكتمل."
+
+msgid "The download did not match the published checksum."
+msgstr "لا يطابق التنزيل المجموع الاختباري المنشور."
+
+msgid "The download stopped: {error}"
+msgstr "توقف التنزيل: {error}"
+
+msgid "The installer starts as soon as these windows have saved and closed."
+msgstr "يبدأ المثبّت فور حفظ هذه النوافذ وإغلاقها."
+
+msgid "The package manager could not install the update."
+msgstr "تعذّر على مدير الحزم تثبيت التحديث."
+
+msgid "The package service could not install the update."
+msgstr "تعذّر على خدمة الحزم تثبيت التحديث."
+
+msgid "The package service refused the update: {error}"
+msgstr "رفضت خدمة الحزم التحديث: {error}"
+
+msgid "The package service stopped without finishing."
+msgstr "توقفت خدمة الحزم قبل أن تكتمل."
+
+msgid "The release did not publish a checksum for {name}."
+msgstr "لم ينشر الإصدار مجموعًا اختباريًا لـ {name}."
+
+msgid "The release did not publish checksums."
+msgstr "لم ينشر الإصدار مجاميع اختبارية."
+
+msgid "The server sent an empty download."
+msgstr "أرسل الخادم تنزيلاً فارغًا."
+
+msgid "The update package is missing."
+msgstr "حزمة التحديث مفقودة."
+
+msgid "These windows close while ApexShot updates and reopen with your edits afterwards:"
+msgstr "تُغلق هذه النوافذ أثناء تحديث ApexShot ثم تُعاد فتحها بتعديلاتك بعد ذلك:"
+
+msgid "This installation is managed by Nix. Update the ApexShot flake input and rebuild your configuration, or upgrade its Nix profile entry."
+msgstr "تتم إدارة هذا التثبيت بواسطة Nix. حدّث مُدخل flake الخاص بـ ApexShot وأعد بناء الإعدادات، أو رقِّ إدخاله في ملف تعريف Nix."
+
+msgid "This release does not include a package for this system."
+msgstr "لا يتضمن هذا الإصدار حزمة لهذا النظام."
+
+msgid "This system needs the terminal updater."
+msgstr "يحتاج هذا النظام إلى أداة التحديث في الطرفية."
+
+msgid "This version is not in your Flatpak repository yet. Try again later."
+msgstr "هذا الإصدار غير متوفر في مستودع Flatpak لديك بعد. حاول مرة أخرى لاحقًا."
+
+msgid "Tidying the startup entries..."
+msgstr "جارٍ ترتيب عناصر بدء التشغيل..."
+
+msgid "Update ApexShot"
+msgstr "تحديث ApexShot"
+
+msgid "Updating..."
+msgstr "جارٍ التحديث..."
+
+msgid "Verifying download..."
+msgstr "جارٍ التحقق من التنزيل..."
+
+msgid "Video editor"
+msgstr "محرر الفيديو"
+
+msgid "Waiting for permission..."
+msgstr "في انتظار الإذن..."
+
+msgid "Your windows will reopen with your edits."
+msgstr "ستُعاد فتح نوافذك مع تعديلاتك."
+
+msgid "Your work will reopen"
+msgstr "سيُعاد فتح عملك"
+
+msgid "{label} ({count})"
+msgstr "{label} ({count})"

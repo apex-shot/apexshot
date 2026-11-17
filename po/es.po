@@ -5070,3 +5070,180 @@ msgstr "Actualizaciones finalizadas"
 
 msgid "Updates included through {date}."
 msgstr "Actualizaciones incluidas hasta el {date}."
+
+msgid "0 B/s"
+msgstr "0 B/s"
+
+msgid "An export is still running. Let it finish, then try again."
+msgstr "Todavía hay una exportación en curso. Deja que termine y vuelve a intentarlo."
+
+msgid "ApexShot could not close every window. Close them, then try again."
+msgstr "ApexShot no pudo cerrar todas las ventanas. Ciérralas y vuelve a intentarlo."
+
+msgid "ApexShot is up to date"
+msgstr "ApexShot está actualizado"
+
+msgid "ApexShot v{version} is being installed. Keep this window open."
+msgstr "Se está instalando ApexShot v{version}. Mantén esta ventana abierta."
+
+msgid "ApexShot v{version} is installed."
+msgstr "ApexShot v{version} está instalado."
+
+msgid "ApexShot v{version} is ready. Your current work will not be interrupted."
+msgstr "ApexShot v{version} está listo. Tu trabajo actual no se interrumpirá."
+
+msgid "ApexShot window"
+msgstr "Ventana de ApexShot"
+
+msgid "Could not check the release: {error}"
+msgstr "No se pudo comprobar la versión: {error}"
+
+msgid "Could not create the update folder: {error}"
+msgstr "No se pudo crear la carpeta de la actualización: {error}"
+
+msgid "Could not find a local cache folder for the update."
+msgstr "No se encontró una carpeta de caché local para la actualización."
+
+msgid "Could not finish the update: {error}"
+msgstr "No se pudo completar la actualización: {error}"
+
+msgid "Could not install the GNOME extension update."
+msgstr "No se pudo instalar la actualización de la extensión de GNOME."
+
+msgid "Could not reach the Flatpak service: {error}"
+msgstr "No se pudo contactar con el servicio de Flatpak: {error}"
+
+msgid "Could not reach the package service: {error}"
+msgstr "No se pudo contactar con el servicio de paquetes: {error}"
+
+msgid "Could not read the checksums: {error}"
+msgstr "No se pudieron leer las sumas de comprobación: {error}"
+
+msgid "Could not save the update: {error}"
+msgstr "No se pudo guardar la actualización: {error}"
+
+msgid "Could not start the package manager: {error}"
+msgstr "No se pudo iniciar el gestor de paquetes: {error}"
+
+msgid "Enhancement works up to 1 MP and 4096 px per edge. Crop this {width} × {height} image to use it."
+msgstr "La mejora funciona hasta 1 MP y 4096 px por lado. Recorta esta imagen de {width} × {height} para usarla."
+
+msgid "Finish your recording first"
+msgstr "Termina primero la grabación"
+
+msgid "Image editor"
+msgstr "Editor de imágenes"
+
+msgid "Installation was cancelled."
+msgstr "Se canceló la instalación."
+
+msgid "Installing restarts ApexShot, which would stop the recording in progress."
+msgstr "La instalación reinicia ApexShot, lo que detendría la grabación en curso."
+
+msgid "Installing update"
+msgstr "Instalando actualización"
+
+msgid "Log out and back in to finish updating the GNOME extension."
+msgstr "Cierra la sesión y vuelve a iniciarla para terminar de actualizar la extensión de GNOME."
+
+msgid "Preparing to install"
+msgstr "Preparando la instalación"
+
+msgid "Refreshing the GNOME extension..."
+msgstr "Actualizando la extensión de GNOME..."
+
+msgid "Restart ApexShot"
+msgstr "Reiniciar ApexShot"
+
+msgid "Restart ApexShot to use the new version."
+msgstr "Reinicia ApexShot para usar la nueva versión."
+
+msgid "Saving your work…"
+msgstr "Guardando tu trabajo…"
+
+msgid "Setup"
+msgstr "Configuración"
+
+msgid "The Flatpak update could not start: {error}"
+msgstr "No se pudo iniciar la actualización de Flatpak: {error}"
+
+msgid "The Flatpak update failed."
+msgstr "La actualización de Flatpak falló."
+
+msgid "The Flatpak update stopped without finishing."
+msgstr "La actualización de Flatpak se detuvo sin terminar."
+
+msgid "The download did not match the published checksum."
+msgstr "La descarga no coincide con la suma de comprobación publicada."
+
+msgid "The download stopped: {error}"
+msgstr "La descarga se detuvo: {error}"
+
+msgid "The installer starts as soon as these windows have saved and closed."
+msgstr "El instalador se inicia en cuanto estas ventanas se hayan guardado y cerrado."
+
+msgid "The package manager could not install the update."
+msgstr "El gestor de paquetes no pudo instalar la actualización."
+
+msgid "The package service could not install the update."
+msgstr "El servicio de paquetes no pudo instalar la actualización."
+
+msgid "The package service refused the update: {error}"
+msgstr "El servicio de paquetes rechazó la actualización: {error}"
+
+msgid "The package service stopped without finishing."
+msgstr "El servicio de paquetes se detuvo sin terminar."
+
+msgid "The release did not publish a checksum for {name}."
+msgstr "La versión no publicó una suma de comprobación para {name}."
+
+msgid "The release did not publish checksums."
+msgstr "La versión no publicó sumas de comprobación."
+
+msgid "The server sent an empty download."
+msgstr "El servidor envió una descarga vacía."
+
+msgid "The update package is missing."
+msgstr "Falta el paquete de actualización."
+
+msgid "These windows close while ApexShot updates and reopen with your edits afterwards:"
+msgstr "Estas ventanas se cierran mientras ApexShot se actualiza y se vuelven a abrir después con tus cambios:"
+
+msgid "This installation is managed by Nix. Update the ApexShot flake input and rebuild your configuration, or upgrade its Nix profile entry."
+msgstr "Esta instalación la gestiona Nix. Actualiza la entrada flake de ApexShot y vuelve a compilar tu configuración, o actualiza su entrada en el perfil de Nix."
+
+msgid "This release does not include a package for this system."
+msgstr "Esta versión no incluye un paquete para este sistema."
+
+msgid "This system needs the terminal updater."
+msgstr "Este sistema necesita el actualizador de la terminal."
+
+msgid "This version is not in your Flatpak repository yet. Try again later."
+msgstr "Esta versión aún no está en tu repositorio de Flatpak. Vuelve a intentarlo más tarde."
+
+msgid "Tidying the startup entries..."
+msgstr "Ordenando las entradas de inicio..."
+
+msgid "Update ApexShot"
+msgstr "Actualizar ApexShot"
+
+msgid "Updating..."
+msgstr "Actualizando..."
+
+msgid "Verifying download..."
+msgstr "Verificando la descarga..."
+
+msgid "Video editor"
+msgstr "Editor de vídeo"
+
+msgid "Waiting for permission..."
+msgstr "Esperando permiso..."
+
+msgid "Your windows will reopen with your edits."
+msgstr "Tus ventanas se volverán a abrir con tus cambios."
+
+msgid "Your work will reopen"
+msgstr "Tu trabajo se volverá a abrir"
+
+msgid "{label} ({count})"
+msgstr "{label} ({count})"

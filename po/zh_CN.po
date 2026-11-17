@@ -4959,3 +4959,180 @@ msgstr "更新已结束"
 
 msgid "Updates included through {date}."
 msgstr "包含截至 {date} 的更新。"
+
+msgid "0 B/s"
+msgstr "0 B/s"
+
+msgid "An export is still running. Let it finish, then try again."
+msgstr "仍有导出正在进行。请等待其完成后重试。"
+
+msgid "ApexShot could not close every window. Close them, then try again."
+msgstr "ApexShot 无法关闭所有窗口。请关闭它们后重试。"
+
+msgid "ApexShot is up to date"
+msgstr "ApexShot 已是最新版本"
+
+msgid "ApexShot v{version} is being installed. Keep this window open."
+msgstr "正在安装 ApexShot v{version}。请保持此窗口打开。"
+
+msgid "ApexShot v{version} is installed."
+msgstr "ApexShot v{version} 已安装。"
+
+msgid "ApexShot v{version} is ready. Your current work will not be interrupted."
+msgstr "ApexShot v{version} 已就绪。您当前的工作不会被中断。"
+
+msgid "ApexShot window"
+msgstr "ApexShot 窗口"
+
+msgid "Could not check the release: {error}"
+msgstr "无法检查该版本：{error}"
+
+msgid "Could not create the update folder: {error}"
+msgstr "无法创建更新文件夹：{error}"
+
+msgid "Could not find a local cache folder for the update."
+msgstr "找不到用于更新的本地缓存文件夹。"
+
+msgid "Could not finish the update: {error}"
+msgstr "无法完成更新：{error}"
+
+msgid "Could not install the GNOME extension update."
+msgstr "无法安装 GNOME 扩展更新。"
+
+msgid "Could not reach the Flatpak service: {error}"
+msgstr "无法连接 Flatpak 服务：{error}"
+
+msgid "Could not reach the package service: {error}"
+msgstr "无法连接软件包服务：{error}"
+
+msgid "Could not read the checksums: {error}"
+msgstr "无法读取校验和：{error}"
+
+msgid "Could not save the update: {error}"
+msgstr "无法保存更新：{error}"
+
+msgid "Could not start the package manager: {error}"
+msgstr "无法启动软件包管理器：{error}"
+
+msgid "Enhancement works up to 1 MP and 4096 px per edge. Crop this {width} × {height} image to use it."
+msgstr "增强功能支持最大 1 MP、每边 4096 px 的图像。裁剪这张 {width} × {height} 的图像即可使用。"
+
+msgid "Finish your recording first"
+msgstr "请先结束录制"
+
+msgid "Image editor"
+msgstr "图像编辑器"
+
+msgid "Installation was cancelled."
+msgstr "安装已取消。"
+
+msgid "Installing restarts ApexShot, which would stop the recording in progress."
+msgstr "安装会重启 ApexShot，这会停止正在进行的录制。"
+
+msgid "Installing update"
+msgstr "正在安装更新"
+
+msgid "Log out and back in to finish updating the GNOME extension."
+msgstr "请注销后重新登录，以完成 GNOME 扩展的更新。"
+
+msgid "Preparing to install"
+msgstr "正在准备安装"
+
+msgid "Refreshing the GNOME extension..."
+msgstr "正在刷新 GNOME 扩展..."
+
+msgid "Restart ApexShot"
+msgstr "重启 ApexShot"
+
+msgid "Restart ApexShot to use the new version."
+msgstr "重启 ApexShot 以使用新版本。"
+
+msgid "Saving your work…"
+msgstr "正在保存您的工作…"
+
+msgid "Setup"
+msgstr "设置向导"
+
+msgid "The Flatpak update could not start: {error}"
+msgstr "无法开始 Flatpak 更新：{error}"
+
+msgid "The Flatpak update failed."
+msgstr "Flatpak 更新失败。"
+
+msgid "The Flatpak update stopped without finishing."
+msgstr "Flatpak 更新在完成前停止了。"
+
+msgid "The download did not match the published checksum."
+msgstr "下载的文件与发布的校验和不匹配。"
+
+msgid "The download stopped: {error}"
+msgstr "下载已停止：{error}"
+
+msgid "The installer starts as soon as these windows have saved and closed."
+msgstr "这些窗口保存并关闭后，安装程序会立即启动。"
+
+msgid "The package manager could not install the update."
+msgstr "软件包管理器无法安装此更新。"
+
+msgid "The package service could not install the update."
+msgstr "软件包服务无法安装此更新。"
+
+msgid "The package service refused the update: {error}"
+msgstr "软件包服务拒绝了此更新：{error}"
+
+msgid "The package service stopped without finishing."
+msgstr "软件包服务在完成前停止了。"
+
+msgid "The release did not publish a checksum for {name}."
+msgstr "该版本未发布 {name} 的校验和。"
+
+msgid "The release did not publish checksums."
+msgstr "该版本未发布校验和。"
+
+msgid "The server sent an empty download."
+msgstr "服务器发送的下载内容为空。"
+
+msgid "The update package is missing."
+msgstr "缺少更新软件包。"
+
+msgid "These windows close while ApexShot updates and reopen with your edits afterwards:"
+msgstr "以下窗口会在 ApexShot 更新期间关闭，之后会连同您的编辑一起重新打开："
+
+msgid "This installation is managed by Nix. Update the ApexShot flake input and rebuild your configuration, or upgrade its Nix profile entry."
+msgstr "此安装由 Nix 管理。请更新 ApexShot 的 flake 输入并重新构建配置，或升级其 Nix 配置文件条目。"
+
+msgid "This release does not include a package for this system."
+msgstr "此版本不包含适用于此系统的软件包。"
+
+msgid "This system needs the terminal updater."
+msgstr "此系统需要使用终端更新程序。"
+
+msgid "This version is not in your Flatpak repository yet. Try again later."
+msgstr "此版本尚未进入您的 Flatpak 仓库。请稍后重试。"
+
+msgid "Tidying the startup entries..."
+msgstr "正在整理启动项..."
+
+msgid "Update ApexShot"
+msgstr "更新 ApexShot"
+
+msgid "Updating..."
+msgstr "正在更新..."
+
+msgid "Verifying download..."
+msgstr "正在验证下载..."
+
+msgid "Video editor"
+msgstr "视频编辑器"
+
+msgid "Waiting for permission..."
+msgstr "正在等待授权..."
+
+msgid "Your windows will reopen with your edits."
+msgstr "您的窗口会连同您的编辑一起重新打开。"
+
+msgid "Your work will reopen"
+msgstr "您的工作将重新打开"
+
+msgid "{label} ({count})"
+msgstr "{label}（{count}）"
