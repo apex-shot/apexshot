@@ -1015,6 +1015,7 @@ impl VideoEditState {
         }
     }
 
+    #[cfg(test)]
     pub fn set_selected_zoom_easing(&mut self, easing: ZoomEasing) {
         if self.zoom_locked {
             return;
@@ -1048,6 +1049,7 @@ impl VideoEditState {
         }
     }
 
+    #[cfg(test)]
     pub fn set_selected_zoom_ease_ms(&mut self, ease_ms: u32) {
         if self.zoom_locked {
             return;

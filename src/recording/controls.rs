@@ -689,7 +689,6 @@ pub fn prepare_overlay_recording_request(
         crate::gnome_shell::current_session_supports_gnome_shell_overlay();
     let use_shell_mask = should_use_shell_mask_for_request(request, shell_overlay_available);
     app_config.rec_controls = request.controls;
-    app_config.rec_display_time = true; // always show recording time in top bar
     app_config.rec_hidpi = request.hidpi;
     app_config.rec_notifications = request.notifications;
     app_config.rec_cursor = true;
@@ -698,7 +697,6 @@ pub fn prepare_overlay_recording_request(
     app_config.rec_countdown = request.countdown;
     app_config.rec_mic = request.mic;
     app_config.rec_speaker = request.speaker;
-    app_config.rec_video_format = 0;
     // `rec_video_max_res` is deliberately not taken from the request: neither
     // quick access offers a resolution picker any more, so the request only
     // echoes the value the overlay was launched with. Writing that echo back
@@ -1799,7 +1797,6 @@ mod tests {
             PathBuf::from("/tmp/apexshot-recordings/ApexShot Recording 2026-03-25 at 12-00-00.mp4")
         );
         assert_eq!(prepared.updated_app_config.rec_controls, true);
-        assert_eq!(prepared.updated_app_config.rec_display_time, true);
         assert_eq!(prepared.updated_app_config.rec_hidpi, true);
         assert_eq!(prepared.updated_app_config.rec_notifications, false);
         assert_eq!(prepared.updated_app_config.rec_cursor, true);
@@ -1808,7 +1805,6 @@ mod tests {
         assert_eq!(prepared.updated_app_config.last_selection_y, Some(20));
         assert_eq!(prepared.updated_app_config.last_selection_w, Some(640));
         assert_eq!(prepared.updated_app_config.last_selection_h, Some(480));
-        assert_eq!(prepared.updated_app_config.rec_video_format, 0);
         // The stale request value must not overwrite what Settings saved.
         assert_eq!(prepared.updated_app_config.rec_video_max_res, 5);
         assert_eq!(prepared.updated_app_config.rec_video_fps, 3);
@@ -1920,7 +1916,6 @@ mod tests {
                 "saved resolution index {video_max_res} must keep its cap"
             );
             assert_eq!(prepared.recording_config.fps, expected_fps);
-            assert_eq!(prepared.updated_app_config.rec_video_format, 0);
             assert_eq!(
                 prepared.updated_app_config.rec_video_max_res, video_max_res,
                 "the saved resolution must survive the request untouched"

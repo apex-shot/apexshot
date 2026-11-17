@@ -51,10 +51,7 @@ pub mod utils;
 // Re-export commonly used types
 pub use backend::{CaptureData, DisplayBackend, DisplayError, DisplayResult, PixelFormat};
 pub use capture::{quick_save, save_capture, ImageFormat, SaveConfig, SaveError, SaveResult};
-pub use config::{
-    config_path, load_config, save_config, AppConfig, DEFAULT_PREVIEW_AUTO_CLOSE_SECONDS,
-    MAX_PREVIEW_AUTO_CLOSE_SECONDS, MIN_PREVIEW_AUTO_CLOSE_SECONDS,
-};
+pub use config::{config_path, load_config, save_config, AppConfig};
 pub use ocr::{
     copy_to_clipboard, extract_text, extract_text_from_path, ContentSource, OcrConfig, OcrError,
     OcrOutput, OcrResult,

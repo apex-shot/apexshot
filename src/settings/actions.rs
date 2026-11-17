@@ -63,6 +63,7 @@ pub struct SaveInputs {
     pub rec_copy_to_clipboard: CheckButton,
     pub rec_save: CheckButton,
     pub rec_open_video_editor: CheckButton,
+    pub rec_auto_zoom_on_import: CheckButton,
     pub quick_access_position: SettingsSelect,
     pub quick_access_overlay_size: Scale,
     pub quick_access_auto_close_enabled: CheckButton,
@@ -91,7 +92,6 @@ pub struct SaveInputs {
     pub shortcut_capture_crosshair: Button,
     pub shortcut_capture_previous_area: Button,
     pub shortcut_capture_fullscreen: Button,
-    pub shortcut_capture_window: Button,
     pub shortcut_show_last_preview: Button,
     pub shortcut_save_last_capture: Button,
     pub shortcut_record_screen: Button,
@@ -186,7 +186,6 @@ fn shortcuts_differ(a: &crate::config::AppConfig, b: &crate::config::AppConfig) 
         || a.shortcut_capture_crosshair != b.shortcut_capture_crosshair
         || a.shortcut_capture_previous_area != b.shortcut_capture_previous_area
         || a.shortcut_capture_fullscreen != b.shortcut_capture_fullscreen
-        || a.shortcut_capture_window != b.shortcut_capture_window
         || a.shortcut_show_last_preview != b.shortcut_show_last_preview
         || a.shortcut_save_last_capture != b.shortcut_save_last_capture
         || a.shortcut_open_recording_ui != b.shortcut_open_recording_ui
@@ -353,6 +352,7 @@ pub fn save_settings(inputs: &SaveInputs, state: &mut SaveState) -> anyhow::Resu
     config.rec_after_capture_copy_to_clipboard = inputs.rec_copy_to_clipboard.is_active();
     config.rec_after_capture_save = inputs.rec_save.is_active();
     config.rec_video_open_editor = inputs.rec_open_video_editor.is_active();
+    config.rec_video_auto_zoom_on_import = inputs.rec_auto_zoom_on_import.is_active();
     config.quick_access_position = combo_value(&inputs.quick_access_position, "Left");
     config.quick_access_overlay_size = inputs.quick_access_overlay_size.value();
     config.quick_access_auto_close_enabled = inputs.quick_access_auto_close_enabled.is_active();
@@ -398,8 +398,6 @@ pub fn save_settings(inputs: &SaveInputs, state: &mut SaveState) -> anyhow::Resu
     config.shortcut_capture_previous_area =
         button_label_value(&inputs.shortcut_capture_previous_area);
     config.shortcut_capture_fullscreen = button_label_value(&inputs.shortcut_capture_fullscreen);
-    // Keep the legacy direct-window shortcut unset; Quick Capture still offers Window.
-    config.shortcut_capture_window.clear();
     config.shortcut_show_last_preview = button_label_value(&inputs.shortcut_show_last_preview);
     config.shortcut_save_last_capture = button_label_value(&inputs.shortcut_save_last_capture);
     config.shortcut_open_recording_ui.clear();
@@ -545,7 +543,6 @@ mod tests {
             shortcut_capture_area: String::new(),
             shortcut_capture_crosshair: String::new(),
             shortcut_capture_fullscreen: String::new(),
-            shortcut_capture_window: String::new(),
             shortcut_show_last_preview: String::new(),
             shortcut_open_recording_ui: String::new(),
             shortcut_record_screen: String::new(),

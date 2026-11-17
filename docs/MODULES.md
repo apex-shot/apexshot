@@ -16,11 +16,10 @@ This document provides detailed information about every module and submodule in 
 
 **Key Types:**
 - `AppConfig` — Root configuration struct containing all settings categories
-- `DEFAULT_PREVIEW_AUTO_CLOSE_SECONDS`, `MIN_PREVIEW_AUTO_CLOSE_SECONDS`, `MAX_PREVIEW_AUTO_CLOSE_SECONDS` — Preview timeout constants
 
 **Config Categories:**
-- General: `play_sounds`, `start_at_login`, `show_menu_bar_icon`, `preview_auto_close_seconds`
-- Storage: `export_location`, `screenshot_export_location`, `video_export_location`, `hide_desktop_icons_while_capturing`
+- General: `play_sounds`, `start_at_login`, `show_menu_bar_icon`
+- Storage: `export_location`, `screenshot_export_location`, `video_export_location`
 - Screenshots: format, cursor, timer, after-capture actions (`after_capture_save`, `after_capture_copy_file_to_clipboard`, `after_capture_show_quick_access`, `after_capture_open_annotate`)
 - Recording: format, fps, quality, overlays, audio (mic/speaker), countdown
 - Annotation: tool preferences, plus image-export lifecycle (`annotate_close_after_export`, `annotate_overwrite_original_image`)

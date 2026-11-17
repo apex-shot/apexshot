@@ -42,7 +42,11 @@ pub fn build_timeline_card(
     let skip_back = icon_button("media-skip-backward-symbolic", &t("Skip back 1s"));
     let skip_forward = icon_button("media-skip-forward-symbolic", &t("Skip forward 1s"));
 
-    let zoom = labeled_tool_button("zoom-fit-best-symbolic", &t("Zoom"), &t("Click where to zoom in"));
+    let zoom = labeled_tool_button(
+        "zoom-fit-best-symbolic",
+        &t("Zoom"),
+        &t("Add zoom: click the preview to place it"),
+    );
     let split = labeled_tool_button(
         icon_names::custom::SQUARE_SPLIT_HORIZONTAL_SYMBOLIC,
         &t("Split"),
@@ -1093,6 +1097,23 @@ mod tests {
         balance_width, zoom_thumb_height, ZOOM_BAR_INSET, ZOOM_BAR_MIN_HEIGHT, ZOOM_BAR_WIDTH,
     };
     use crate::recording::editor::window::tool_sidebar::TOOL_SIDEBAR_WIDTH;
+
+    #[test]
+    fn the_zoom_tool_promises_the_placement_prompt_it_arms() {
+        let source = include_str!("shell.rs");
+        let production = source
+            .split("\n#[cfg(test)]")
+            .next()
+            .expect("the shell's production source");
+        assert!(
+            production.contains("&t(\"Add zoom: click the preview to place it\")"),
+            "the Zoom tool must say where the click lands"
+        );
+        assert!(
+            !production.contains("&t(\"Click where to zoom in\")"),
+            "the toolbar no longer drops a zoom at the playhead"
+        );
+    }
 
     /// Measured on a 1400px-wide window: the canvas runs 14..1094 and the
     /// transport, centred in the full-width dock, lands at 775.5. The spacer

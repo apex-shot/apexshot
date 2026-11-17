@@ -36,7 +36,7 @@ fn build_cursor_panel(
     tabs.append(&motion_tab);
     tabs.append(&effects_tab);
 
-    let style = build_cursor_style_tab(state.clone(), on_change.clone());
+    let style = build_cursor_style_tab(state.clone(), on_change.clone(), pause_playback.clone());
     let motion = build_cursor_motion_tab(state.clone(), on_change.clone(), pause_playback.clone());
     let effects = build_cursor_effects_tab(state.clone(), on_change.clone());
     style.widget.set_visible(true);
@@ -230,6 +230,7 @@ fn write_cursor(
 fn build_cursor_style_tab(
     state: Arc<Mutex<VideoEditState>>,
     on_change: Rc<dyn Fn()>,
+    pause_playback: PausePlayback,
 ) -> CursorPanel {
     let body = GtkBox::new(Orientation::Vertical, 8);
     body.add_css_class("recording-editor-zoom-body");
@@ -306,9 +307,26 @@ fn build_cursor_style_tab(
     size_row.scale.set_increments(0.05, 0.25);
     shadow_row.scale.set_range(0.0, 1.0);
     shadow_row.scale.set_increments(0.05, 0.1);
+
+    let default_row = GtkBox::new(Orientation::Horizontal, 8);
+    default_row.add_css_class("recording-editor-zoom-classic");
+    default_row.set_hexpand(true);
+    let default_label = Label::new(Some(&t("Always use the default cursor")));
+    default_label.add_css_class("recording-editor-zoom-classic-label");
+    default_label.set_xalign(0.0);
+    default_label.set_hexpand(true);
+    default_label.set_valign(Align::Center);
+    let always_default = Switch::new();
+    always_default.add_css_class("recording-editor-zoom-switch");
+    always_default.set_valign(Align::Center);
+    always_default.set_halign(Align::End);
+    default_row.append(&default_label);
+    default_row.append(&always_default);
+
     style_section.body.append(&grid);
     style_section.body.append(&size_row.widget);
     style_section.body.append(&shadow_row.widget);
+    style_section.body.append(&default_row);
     body.append(&style_section.root);
 
     let syncing = Rc::new(Cell::new(false));
@@ -323,14 +341,25 @@ fn build_cursor_style_tab(
         &shadow_row.scale,
         syncing.clone(),
         state.clone(),
-        on_change,
+        on_change.clone(),
         |cursor, value| cursor.shadow = value,
+    );
+    bind_switch(
+        &always_default,
+        syncing.clone(),
+        pause_playback,
+        on_change,
+        {
+            let state = state.clone();
+            move |active| state.lock().unwrap().cursor.always_use_default = active
+        },
     );
 
     let refresh = {
         let cards = cards;
         let size_scale = size_row.scale.clone();
         let shadow_scale = shadow_row.scale.clone();
+        let always_default = always_default.clone();
         let syncing = syncing.clone();
         Rc::new(move || {
             let cursor = state.lock().unwrap().cursor;
@@ -341,6 +370,7 @@ fn build_cursor_style_tab(
             syncing.set(true);
             size_scale.set_value(cursor.size);
             shadow_scale.set_value(cursor.shadow);
+            sync_switch(&always_default, cursor.always_use_default);
             syncing.set(false);
         }) as Rc<dyn Fn()>
     };
@@ -384,8 +414,6 @@ fn build_cursor_motion_tab(
     movement_section.body.append(&smooth_row.widget);
     movement_section.body.append(&speed_row.widget);
 
-    let visibility_section = sidebar_section(&t("Visibility"), true, false);
-
     let shake_row = GtkBox::new(Orientation::Horizontal, 8);
     shake_row.add_css_class("recording-editor-zoom-classic");
     shake_row.set_hexpand(true);
@@ -399,12 +427,9 @@ fn build_cursor_motion_tab(
     shake_switch.set_halign(Align::End);
     shake_row.append(&shake_label);
     shake_row.append(&shake_switch);
-    body.append(&shake_row);
+    movement_section.body.append(&shake_row);
 
-    let rotation_label = Label::new(Some(&t("Rotation")));
-    rotation_label.add_css_class("recording-editor-zoom-kicker");
-    rotation_label.set_xalign(0.0);
-    body.append(&rotation_label);
+    let rotation_section = sidebar_section(&t("Rotation"), true, false);
 
     let rotation_modes = GtkBox::new(Orientation::Horizontal, 0);
     rotation_modes.add_css_class("recording-editor-cursor-segments");
@@ -421,18 +446,20 @@ fn build_cursor_motion_tab(
     directional_btn.set_group(Some(&velocity_btn));
     rotation_modes.append(&velocity_btn);
     rotation_modes.append(&directional_btn);
-    body.append(&rotation_modes);
+    rotation_section.body.append(&rotation_modes);
 
     let tilt_row = cursor_slider_row(&t("Tilt amount"));
     tilt_row.scale.set_range(0.0, 1.0);
     tilt_row.scale.set_increments(0.05, 0.1);
-    body.append(&tilt_row.widget);
+    rotation_section.body.append(&tilt_row.widget);
 
     let angle_slider =
         FillSlider::new_with_value_text(&t("Base angle"), |value, _, _| format!("{value:.0}°"));
     angle_slider.set_range(-180.0, 180.0);
     angle_slider.set_increments(5.0, 45.0);
-    body.append(&angle_slider.widget());
+    rotation_section.body.append(&angle_slider.widget());
+
+    let visibility_section = sidebar_section(&t("Visibility"), true, false);
 
     let idle_row = GtkBox::new(Orientation::Horizontal, 8);
     idle_row.add_css_class("recording-editor-zoom-classic");
@@ -449,18 +476,10 @@ fn build_cursor_motion_tab(
     idle_row.append(&idle_switch);
 
     let idle_delay_row = cursor_slider_row(&t("Idle delay"));
-    idle_delay_row.scale.set_range(120.0, 4000.0);
+    idle_delay_row.scale.set_range(120.0, 5000.0);
     idle_delay_row.scale.set_increments(40.0, 200.0);
     visibility_section.body.append(&idle_row);
     visibility_section.body.append(&idle_delay_row.widget);
-
-    body.append(&movement_section.root);
-    body.append(&visibility_section.root);
-
-    let tail_label = Label::new(Some(&t("Cursor at the end")));
-    tail_label.add_css_class("recording-editor-zoom-kicker");
-    tail_label.set_xalign(0.0);
-    body.append(&tail_label);
 
     let loop_row = GtkBox::new(Orientation::Horizontal, 8);
     loop_row.add_css_class("recording-editor-zoom-classic");
@@ -475,21 +494,25 @@ fn build_cursor_motion_tab(
     loop_switch.set_halign(Align::End);
     loop_row.append(&loop_label);
     loop_row.append(&loop_switch);
-    body.append(&loop_row);
+    visibility_section.body.append(&loop_row);
 
     let loop_delay_row = FillSlider::new_with_value_text(&t("Loop before end"), |value, _, _| {
         format!("{:.1}s", value / 1000.0)
     });
     loop_delay_row.set_range(1000.0, 4000.0);
     loop_delay_row.set_increments(50.0, 250.0);
-    body.append(&loop_delay_row.widget());
+    visibility_section.body.append(&loop_delay_row.widget());
 
     let stop_row = FillSlider::new_with_value_text(&t("Stop at the end"), |value, _, _| {
         format!("{:.1}s", value / 1000.0)
     });
     stop_row.set_range(0.0, 5000.0);
     stop_row.set_increments(50.0, 250.0);
-    body.append(&stop_row.widget());
+    visibility_section.body.append(&stop_row.widget());
+
+    body.append(&movement_section.root);
+    body.append(&rotation_section.root);
+    body.append(&visibility_section.root);
 
     let syncing = Rc::new(Cell::new(false));
     focused_btn.connect_clicked({

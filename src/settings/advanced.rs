@@ -72,14 +72,17 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
     // HiDPI/Retina suffix
     let retina_suffix_check = CheckButton::new();
     retina_suffix_check.set_active(config.adv_retina_suffix);
-    let retina_hbox = GtkBox::new(Orientation::Horizontal, 12);
-    retina_hbox.set_hexpand(true);
-    let lbl_retina = Label::new(Some(&t("Add @2x suffix for HiDPI screenshots")));
-    lbl_retina.set_xalign(0.0);
-    lbl_retina.set_hexpand(true);
-    retina_hbox.append(&lbl_retina);
-    retina_hbox.append(&retina_suffix_check);
-    filename_frame.append(&build_row!(&retina_hbox, false));
+    // Only the Windows shell applies the @2x suffix, so the row is Windows-only.
+    if cfg!(windows) {
+        let retina_hbox = GtkBox::new(Orientation::Horizontal, 12);
+        retina_hbox.set_hexpand(true);
+        let lbl_retina = Label::new(Some(&t("Add @2x suffix for HiDPI screenshots")));
+        lbl_retina.set_xalign(0.0);
+        lbl_retina.set_hexpand(true);
+        retina_hbox.append(&lbl_retina);
+        retina_hbox.append(&retina_suffix_check);
+        filename_frame.append(&build_row!(&retina_hbox, false));
+    }
 
     section.append(&filename_frame);
 
@@ -121,14 +124,17 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
     // Keep line breaks
     let ocr_line_breaks_check = CheckButton::new();
     ocr_line_breaks_check.set_active(config.adv_ocr_keep_line_breaks);
-    let ocr_breaks_hbox = GtkBox::new(Orientation::Horizontal, 12);
-    ocr_breaks_hbox.set_hexpand(true);
-    let lbl_breaks = Label::new(Some(&t("Preserve line breaks")));
-    lbl_breaks.set_xalign(0.0);
-    lbl_breaks.set_hexpand(true);
-    ocr_breaks_hbox.append(&lbl_breaks);
-    ocr_breaks_hbox.append(&ocr_line_breaks_check);
-    ocr_frame.append(&build_row!(&ocr_breaks_hbox, true));
+    // Only the Windows OCR path honours this toggle, so the row is Windows-only.
+    if cfg!(windows) {
+        let ocr_breaks_hbox = GtkBox::new(Orientation::Horizontal, 12);
+        ocr_breaks_hbox.set_hexpand(true);
+        let lbl_breaks = Label::new(Some(&t("Preserve line breaks")));
+        lbl_breaks.set_xalign(0.0);
+        lbl_breaks.set_hexpand(true);
+        ocr_breaks_hbox.append(&lbl_breaks);
+        ocr_breaks_hbox.append(&ocr_line_breaks_check);
+        ocr_frame.append(&build_row!(&ocr_breaks_hbox, true));
+    }
 
     section.append(&ocr_frame);
 

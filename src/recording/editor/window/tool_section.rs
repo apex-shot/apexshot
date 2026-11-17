@@ -14,12 +14,10 @@ pub(super) struct ToolSection {
 /// The tool bar that caps the left column: one icon per tool, with the
 /// selected tool's controls stacked directly beneath it.
 ///
-/// Icons follow the reference — media, cursor, a frame grid, and a saved
-/// take — rather than one button per `EditorTool`. The tools a bare recording
-/// opens with (Cursor, Background) map onto the media and cursor icons; the
-/// timeline-driven panels (Zoom, Hide, Clips) are reached by selecting a clip
-/// in the timeline, and the fourth icon is the placeholder for the take
-/// library, which is not built yet.
+/// Icons follow the reference — media, cursor, and a frame grid — rather than
+/// one button per `EditorTool`. The tools a bare recording opens with (Cursor,
+/// Background) map onto the media and cursor icons; the timeline-driven panels
+/// (Zoom, Hide, Clips) are reached by selecting a clip in the timeline.
 pub(super) fn build_tool_section(
     state: Arc<Mutex<VideoEditState>>,
     on_change: Rc<dyn Fn()>,
@@ -77,12 +75,6 @@ pub(super) fn build_tool_section(
         }
     });
     root.append(&clips);
-
-    // The take library is not built yet; the icon marks where it goes.
-    let takes = tool_icon_button(icon_names::custom::MARKER_SYMBOLIC, &t("Takes"));
-    takes.set_tooltip_text(Some(&t("Takes — coming soon")));
-    takes.set_sensitive(false);
-    root.append(&takes);
 
     let refresh = {
         let background = background.clone();
@@ -145,17 +137,23 @@ mod tests {
             source.contains("Orientation::Horizontal"),
             "the tool bar lays its icons out in a row"
         );
-        // Four icons, matching the reference bar.
+        // Three icons, matching the reference bar.
         for icon in [
             "IMAGE_ALT_SYMBOLIC",
             "POINTER_PRIMARY_CLICK",
             "OVERLAPPING_WINDOWS_SYMBOLIC",
-            "MARKER_SYMBOLIC",
         ] {
             assert!(
                 source.contains(icon),
                 "the tool bar must keep the {icon} icon"
             );
         }
+        // Built at runtime so the assertion does not match itself.
+        let take_icon = ["MARKER", "_SYMBOLIC"].concat();
+        let take_label = ["Takes ", "— coming soon"].concat();
+        assert!(
+            !source.contains(&take_icon) && !source.contains(&take_label),
+            "the disabled take rail button is gone until the library exists"
+        );
     }
 }

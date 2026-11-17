@@ -773,6 +773,9 @@ msgstr "打开标注工具"
 msgid "Open Video Editor"
 msgstr "打开视频编辑器"
 
+msgid "Automatic zoom on import"
+msgstr "导入时自动缩放"
+
 msgid "Open File:"
 msgstr "打开文件："
 

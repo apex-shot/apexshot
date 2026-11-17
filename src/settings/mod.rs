@@ -623,6 +623,7 @@ fn build_settings_window_at(
         rec_copy_to_clipboard: after_capture.rec_copy_to_clipboard.clone(),
         rec_save: after_capture.rec_save.clone(),
         rec_open_video_editor: after_capture.rec_open_video_editor.clone(),
+        rec_auto_zoom_on_import: after_capture.rec_auto_zoom_on_import.clone(),
         quick_access_position: quick_access.position_input.clone(),
         quick_access_overlay_size: quick_access.overlay_size_input.clone(),
         quick_access_auto_close_enabled: quick_access.auto_close_enabled_check.clone(),
@@ -649,7 +650,6 @@ fn build_settings_window_at(
         shortcut_capture_crosshair: shortcuts.capture_crosshair_btn.clone(),
         shortcut_capture_previous_area: shortcuts.capture_prev_btn.clone(),
         shortcut_capture_fullscreen: shortcuts.capture_fullscreen_btn.clone(),
-        shortcut_capture_window: shortcuts.capture_window_btn.clone(),
         shortcut_show_last_preview: shortcuts.show_last_preview_btn.clone(),
         shortcut_save_last_capture: shortcuts.save_last_capture_btn.clone(),
         shortcut_record_screen: shortcuts.record_screen_btn.clone(),
@@ -789,6 +789,7 @@ fn install_save_dirty_tracking(inputs: &Rc<SaveInputs>, mark_dirty: Rc<dyn Fn()>
     wire_check(&inputs.rec_copy_to_clipboard);
     wire_check(&inputs.rec_save);
     wire_check(&inputs.rec_open_video_editor);
+    wire_check(&inputs.rec_auto_zoom_on_import);
     wire_combo(&inputs.quick_access_position);
     wire_scale(&inputs.quick_access_overlay_size);
     wire_check(&inputs.quick_access_auto_close_enabled);
@@ -815,7 +816,6 @@ fn install_save_dirty_tracking(inputs: &Rc<SaveInputs>, mark_dirty: Rc<dyn Fn()>
     wire_shortcut_btn(&inputs.shortcut_capture_crosshair);
     wire_shortcut_btn(&inputs.shortcut_capture_previous_area);
     wire_shortcut_btn(&inputs.shortcut_capture_fullscreen);
-    wire_shortcut_btn(&inputs.shortcut_capture_window);
     wire_shortcut_btn(&inputs.shortcut_show_last_preview);
     wire_shortcut_btn(&inputs.shortcut_save_last_capture);
     wire_shortcut_btn(&inputs.shortcut_record_screen);
