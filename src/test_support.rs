@@ -37,6 +37,9 @@
 //! on stderr saying why. That is the fallback for a stripped-down machine, not
 //! the expected path: CI installs `libgtk-4-bin`, which ships the daemon.
 //!
+//! The private display is Linux only. Off Linux (the Windows UI shares this
+//! file) GTK initializes on the platform's own display, as it did before.
+//!
 //! ## Why mutating the environment is safe here
 //!
 //! `std::env::set_var` is process-wide, so the switch happens on the GTK thread
@@ -48,24 +51,16 @@
 //! genuinely needs the session must use `APEXSHOT_TEST_USE_DESKTOP=1`, where the
 //! harness leaves the environment untouched.
 
-use std::net::TcpStream;
 use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
-use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::OnceLock;
-use std::time::{Duration, Instant};
 
 type Job = Box<dyn FnOnce() + Send + 'static>;
 
 /// The test binary's GTK thread, or `Err(())` when GTK cannot be used in this
 /// process (no display server, or another thread already owns GTK).
 static GTK_THREAD: OnceLock<Result<Sender<Job>, ()>> = OnceLock::new();
-
-/// The private broadway daemon this process started, if any. Kept for its pid
-/// so the exit handler can stop it; the daemon also carries a parent-death
-/// signal, so it cannot outlive the test binary even if it is killed.
-static DAEMON_PID: AtomicI32 = AtomicI32::new(0);
 
 /// Set by the exit handler so the GTK thread stops pumping before the daemon
 /// goes away; otherwise GTK reads the closed connection and prints
@@ -190,7 +185,20 @@ fn use_private_display() -> bool {
         );
         return true;
     }
-    let Some(display) = start_broadwayd() else {
+    use_broadway_display()
+}
+
+/// Off Linux there is no broadway daemon to start (and no parent-death signal
+/// to tie it to the test binary), so GTK uses the platform's own display, as
+/// it always has on the Windows runners.
+#[cfg(not(target_os = "linux"))]
+fn use_broadway_display() -> bool {
+    true
+}
+
+#[cfg(target_os = "linux")]
+fn use_broadway_display() -> bool {
+    let Some(display) = broadway::start_broadwayd() else {
         eprintln!(
             "test_support: no broadway daemon could be started; skipping GTK-dependent \
              assertions (install libgtk-4-bin for gtk4-broadwayd, or set \
@@ -216,108 +224,126 @@ fn use_private_display() -> bool {
     true
 }
 
-/// Start a private broadway daemon on a free display number and return it.
-fn start_broadwayd() -> Option<u32> {
-    let candidates = broadwayd_candidates();
-    for binary in &candidates {
-        for display in 1..=16u32 {
-            // broadwayd serves display `:N` on TCP port 8080 + N.
-            let port = 8080 + display as u16;
+/// The private broadway daemon. Linux only: it relies on `PR_SET_PDEATHSIG`
+/// so the daemon cannot outlive the test binary.
+#[cfg(target_os = "linux")]
+mod broadway {
+    use super::SHUTTING_DOWN;
+    use std::net::TcpStream;
+    use std::process::{Child, Command, Stdio};
+    use std::sync::atomic::{AtomicI32, Ordering};
+    use std::sync::OnceLock;
+    use std::time::{Duration, Instant};
+
+    /// The private broadway daemon this process started, if any. Kept for its
+    /// pid so the exit handler can stop it; the daemon also carries a
+    /// parent-death signal, so it cannot outlive the test binary even if it is
+    /// killed.
+    static DAEMON_PID: AtomicI32 = AtomicI32::new(0);
+
+    /// Start a private broadway daemon on a free display number and return it.
+    pub(super) fn start_broadwayd() -> Option<u32> {
+        let candidates = broadwayd_candidates();
+        for binary in &candidates {
+            for display in 1..=16u32 {
+                // broadwayd serves display `:N` on TCP port 8080 + N.
+                let port = 8080 + display as u16;
+                if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                    continue;
+                }
+                let Ok(mut child) = spawn_broadwayd(binary, display) else {
+                    // Not executable, or gone: try the next candidate.
+                    break;
+                };
+                if wait_for_broadwayd(&mut child, port) {
+                    let pid = child.id() as i32;
+                    DAEMON_PID.store(pid, Ordering::Relaxed);
+                    // `Child` is dropped without waiting on purpose: the daemon is
+                    // meant to outlive this call and is stopped by the exit handler
+                    // and the parent-death signal.
+                    std::mem::forget(child);
+                    register_exit_handler();
+                    return Some(display);
+                }
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+        None
+    }
+
+    /// The broadway daemon binaries on `PATH`, in the order to try them.
+    fn broadwayd_candidates() -> Vec<std::path::PathBuf> {
+        let Some(path) = std::env::var_os("PATH") else {
+            return Vec::new();
+        };
+        std::env::split_paths(&path)
+            .flat_map(|dir| {
+                ["gtk4-broadwayd", "broadwayd"]
+                    .into_iter()
+                    .map(move |name| dir.join(name))
+            })
+            .filter(|candidate| candidate.is_file())
+            .collect()
+    }
+
+    fn spawn_broadwayd(binary: &std::path::Path, display: u32) -> std::io::Result<Child> {
+        use std::os::unix::process::CommandExt;
+        let mut command = Command::new(binary);
+        command
+            .arg(format!(":{display}"))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        // The daemon must not outlive the test binary, including when it is killed.
+        // The signal is tied to the thread that spawns it, so this runs on the GTK
+        // thread, which lives as long as the binary.
+        unsafe {
+            command.pre_exec(|| {
+                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        command.spawn()
+    }
+
+    /// Whether the daemon is answering on `port`, or has died trying.
+    fn wait_for_broadwayd(child: &mut Child, port: u16) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
             if TcpStream::connect(("127.0.0.1", port)).is_ok() {
-                continue;
+                return true;
             }
-            let Ok(mut child) = spawn_broadwayd(binary, display) else {
-                // Not executable, or gone: try the next candidate.
-                break;
-            };
-            if wait_for_broadwayd(&mut child, port) {
-                let pid = child.id() as i32;
-                DAEMON_PID.store(pid, Ordering::Relaxed);
-                // `Child` is dropped without waiting on purpose: the daemon is
-                // meant to outlive this call and is stopped by the exit handler
-                // and the parent-death signal.
-                std::mem::forget(child);
-                register_exit_handler();
-                return Some(display);
+            if child.try_wait().is_ok_and(|status| status.is_some()) {
+                return false;
             }
-            let _ = child.kill();
-            let _ = child.wait();
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        false
+    }
+
+    extern "C" fn stop_daemon() {
+        let pid = DAEMON_PID.load(Ordering::Relaxed);
+        if pid > 0 {
+            // Let the GTK thread leave its pump first, so it is not reading the
+            // connection when the daemon closes it.
+            SHUTTING_DOWN.store(true, Ordering::Relaxed);
+            std::thread::sleep(Duration::from_millis(20));
+            // The daemon is ours; SIGTERM lets it remove its socket.
+            unsafe {
+                libc::kill(pid, libc::SIGTERM);
+            }
         }
     }
-    None
-}
 
-/// The broadway daemon binaries on `PATH`, in the order to try them.
-fn broadwayd_candidates() -> Vec<std::path::PathBuf> {
-    let Some(path) = std::env::var_os("PATH") else {
-        return Vec::new();
-    };
-    std::env::split_paths(&path)
-        .flat_map(|dir| {
-            ["gtk4-broadwayd", "broadwayd"]
-                .into_iter()
-                .map(move |name| dir.join(name))
-        })
-        .filter(|candidate| candidate.is_file())
-        .collect()
-}
-
-fn spawn_broadwayd(binary: &std::path::Path, display: u32) -> std::io::Result<Child> {
-    use std::os::unix::process::CommandExt;
-    let mut command = Command::new(binary);
-    command
-        .arg(format!(":{display}"))
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    // The daemon must not outlive the test binary, including when it is killed.
-    // The signal is tied to the thread that spawns it, so this runs on the GTK
-    // thread, which lives as long as the binary.
-    unsafe {
-        command.pre_exec(|| {
-            if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
+    /// Register [`stop_daemon`] once, so the daemon is stopped when the test binary
+    /// exits rather than lingering until the next run needs its port.
+    fn register_exit_handler() {
+        static REGISTERED: OnceLock<()> = OnceLock::new();
+        REGISTERED.get_or_init(|| unsafe {
+            libc::atexit(stop_daemon);
         });
     }
-    command.spawn()
-}
-
-/// Whether the daemon is answering on `port`, or has died trying.
-fn wait_for_broadwayd(child: &mut Child, port: u16) -> bool {
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while Instant::now() < deadline {
-        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
-            return true;
-        }
-        if child.try_wait().is_ok_and(|status| status.is_some()) {
-            return false;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    false
-}
-
-extern "C" fn stop_daemon() {
-    let pid = DAEMON_PID.load(Ordering::Relaxed);
-    if pid > 0 {
-        // Let the GTK thread leave its pump first, so it is not reading the
-        // connection when the daemon closes it.
-        SHUTTING_DOWN.store(true, Ordering::Relaxed);
-        std::thread::sleep(Duration::from_millis(20));
-        // The daemon is ours; SIGTERM lets it remove its socket.
-        unsafe {
-            libc::kill(pid, libc::SIGTERM);
-        }
-    }
-}
-
-/// Register [`stop_daemon`] once, so the daemon is stopped when the test binary
-/// exits rather than lingering until the next run needs its port.
-fn register_exit_handler() {
-    static REGISTERED: OnceLock<()> = OnceLock::new();
-    REGISTERED.get_or_init(|| unsafe {
-        libc::atexit(stop_daemon);
-    });
 }
