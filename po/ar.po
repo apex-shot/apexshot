@@ -5172,3 +5172,21 @@ msgstr "سيُعاد فتح عملك"
 
 msgid "{label} ({count})"
 msgstr "{label} ({count})"
+
+msgid "Uploading video"
+msgstr "جارٍ رفع الفيديو"
+
+msgid "{sent} of {total}"
+msgstr "{sent} من {total}"
+
+msgid "Link copied to clipboard"
+msgstr "تم نسخ الرابط إلى الحافظة"
+
+msgid "The link will be copied when you return to this window"
+msgstr "سيتم نسخ الرابط عند عودتك إلى هذه النافذة"
+
+msgid "Switch back to the editor to copy the link"
+msgstr "عُد إلى المحرر لنسخ الرابط"
+
+msgid "Open link"
+msgstr "فتح الرابط"

@@ -5229,3 +5229,21 @@ msgstr "Ваша работа откроется снова"
 
 msgid "{label} ({count})"
 msgstr "{label} ({count})"
+
+msgid "Uploading video"
+msgstr "Загрузка видео"
+
+msgid "{sent} of {total}"
+msgstr "{sent} из {total}"
+
+msgid "Link copied to clipboard"
+msgstr "Ссылка скопирована в буфер обмена"
+
+msgid "The link will be copied when you return to this window"
+msgstr "Ссылка скопируется, когда вы вернётесь в это окно"
+
+msgid "Switch back to the editor to copy the link"
+msgstr "Вернитесь в редактор, чтобы скопировать ссылку"
+
+msgid "Open link"
+msgstr "Открыть ссылку"

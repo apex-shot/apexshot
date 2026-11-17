@@ -5136,3 +5136,21 @@ msgstr "您的工作将重新打开"
 
 msgid "{label} ({count})"
 msgstr "{label}（{count}）"
+
+msgid "Uploading video"
+msgstr "正在上传视频"
+
+msgid "{sent} of {total}"
+msgstr "{sent} / {total}"
+
+msgid "Link copied to clipboard"
+msgstr "链接已复制到剪贴板"
+
+msgid "The link will be copied when you return to this window"
+msgstr "返回此窗口后将复制链接"
+
+msgid "Switch back to the editor to copy the link"
+msgstr "返回编辑器以复制链接"
+
+msgid "Open link"
+msgstr "打开链接"

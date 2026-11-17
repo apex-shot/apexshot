@@ -5239,3 +5239,21 @@ msgstr "Seu trabalho será reaberto"
 
 msgid "{label} ({count})"
 msgstr "{label} ({count})"
+
+msgid "Uploading video"
+msgstr "Enviando o vídeo"
+
+msgid "{sent} of {total}"
+msgstr "{sent} de {total}"
+
+msgid "Link copied to clipboard"
+msgstr "Link copiado para a área de transferência"
+
+msgid "The link will be copied when you return to this window"
+msgstr "O link será copiado quando você voltar a esta janela"
+
+msgid "Switch back to the editor to copy the link"
+msgstr "Volte ao editor para copiar o link"
+
+msgid "Open link"
+msgstr "Abrir link"

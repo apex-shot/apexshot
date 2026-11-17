@@ -3,11 +3,13 @@
 //! Provides consistent clipboard operations across all capture modes
 //! (area, fullscreen, crosshair, OCR, preview overlay, editor).
 
+use std::cell::RefCell;
 use std::io::Write;
 use std::path::Path;
+use std::rc::Rc;
 
-use gtk4::glib::prelude::ToValue;
-use gtk4::prelude::DisplayExt;
+use gtk4::glib::prelude::{ObjectExt, ToValue};
+use gtk4::prelude::{DisplayExt, GtkWindowExt};
 
 /// True only on the thread running the GTK main loop. GDK is not thread-safe:
 /// calling clipboard APIs from a worker thread (e.g. the daemon's capture or
@@ -252,6 +254,51 @@ pub fn copy_text_to_gtk_clipboard(text: &str) -> Result<(), String> {
         .ok_or_else(|| "No GTK display is available for clipboard access".to_string())?;
     display.clipboard().set_text(text);
     Ok(())
+}
+
+/// Copy text once `window` holds keyboard focus, or immediately when it already
+/// does.
+///
+/// A Wayland compositor only accepts a clipboard selection from the client
+/// whose window is focused, so a copy issued while the user is in another app
+/// is dropped even though GDK reports success. Deferring the copy until the
+/// window becomes active keeps a share link that arrives after a long
+/// background upload instead of losing it. Returns true when the text was
+/// copied immediately.
+pub fn copy_text_when_window_active(window: &gtk4::Window, text: &str) -> bool {
+    copy_text_when_window_active_then(window, text, || {})
+}
+
+/// Like [`copy_text_when_window_active`], but runs `after` once a deferred copy
+/// lands. `after` does not run when the text is copied immediately.
+pub fn copy_text_when_window_active_then(
+    window: &gtk4::Window,
+    text: &str,
+    after: impl Fn() + 'static,
+) -> bool {
+    if window.is_active() {
+        let _ = copy_text_to_gtk_clipboard(text);
+        return true;
+    }
+
+    let text = text.to_string();
+    let after: Rc<dyn Fn()> = Rc::new(after);
+    let handler: Rc<RefCell<Option<gtk4::glib::SignalHandlerId>>> = Rc::new(RefCell::new(None));
+    let connection = {
+        let handler = handler.clone();
+        window.connect_is_active_notify(move |window| {
+            if !window.is_active() {
+                return;
+            }
+            let _ = copy_text_to_gtk_clipboard(&text);
+            if let Some(id) = handler.borrow_mut().take() {
+                window.disconnect(id);
+            }
+            after();
+        })
+    };
+    *handler.borrow_mut() = Some(connection);
+    false
 }
 
 /// Normalize image bytes to PNG: screenshots may be saved as JPEG/WebP, but
