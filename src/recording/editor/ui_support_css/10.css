@@ -429,3 +429,80 @@
             .editor-reduced-transparency .editor-theme-light .recording-editor-export-options-card button.recording-editor-export-action:not(.recording-editor-export-primary) {
                 background: #f4f2ee;
             }
+
+            /* ── Sidebar cards ───────────────────────────────────────────────
+             * Each tool group in the right column is a raised card with an
+             * uppercase title and a fold chevron, the same recipe the image
+             * editor's inspector uses. Scoped to the tools column so the class
+             * names stay free of the image editor's own sections. */
+            .recording-editor-tools-column .video-editor-section {
+                padding: 12px;
+                margin-bottom: 4px;
+                border-radius: 10px;
+                background: alpha(white, 0.045);
+            }
+
+            .editor-theme-light .recording-editor-tools-column .video-editor-section {
+                background: alpha(#111827, 0.05);
+            }
+
+            .recording-editor-tools-column .video-editor-section-title {
+                color: rgba(255, 255, 255, 0.46);
+                font-size: 10px;
+                font-weight: 600;
+                letter-spacing: 0.6px;
+                margin-top: 4px;
+            }
+
+            .editor-theme-light .recording-editor-tools-column .video-editor-section-title {
+                color: rgba(17, 24, 39, 0.56);
+            }
+
+            .recording-editor-tools-column .video-editor-disclosure-header {
+                min-height: 24px;
+            }
+
+            .recording-editor-tools-column .video-editor-disclosure-header:hover .video-editor-section-title {
+                color: rgba(255, 255, 255, 0.72);
+            }
+
+            .editor-theme-light .recording-editor-tools-column .video-editor-disclosure-header:hover .video-editor-section-title {
+                color: rgba(17, 24, 39, 0.72);
+            }
+
+            .recording-editor-tools-column .video-editor-disclosure-chevron {
+                min-width: 12px;
+                color: rgba(255, 255, 255, 0.5);
+            }
+
+            .editor-theme-light .recording-editor-tools-column .video-editor-disclosure-chevron {
+                color: rgba(17, 24, 39, 0.5);
+            }
+
+            /* A card body already spaces its rows, so the controls drop the
+             * margins they carried as a flat list. */
+            .recording-editor-tools-column .video-editor-section .recording-editor-fill-slider,
+            .recording-editor-tools-column .video-editor-section .recording-editor-zoom-classic,
+            .recording-editor-tools-column .video-editor-section .recording-editor-zoom-chips,
+            .recording-editor-tools-column .video-editor-section .recording-editor-bg-options,
+            .recording-editor-tools-column .video-editor-section .recording-editor-click-effect-row {
+                margin: 0;
+            }
+
+            /* Studio tier badge on a card header: a small warm pill, hidden
+             * once Studio is unlocked. The image editor's copy is scoped to its
+             * own root, so the recording editor carries this one. */
+            .recording-editor-root .editor-studio-badge {
+                color: #ff9250;
+                background: rgba(255, 103, 13, 0.16);
+                border-radius: 999px;
+                padding: 1px 7px;
+                font-size: 9px;
+                font-weight: 700;
+                letter-spacing: 0.5px;
+            }
+
+            .recording-editor-root.editor-theme-light .editor-studio-badge {
+                color: #c2410c;
+                background: rgba(255, 103, 13, 0.12);
+            }

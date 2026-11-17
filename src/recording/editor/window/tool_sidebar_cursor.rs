@@ -223,6 +223,8 @@ fn build_cursor_style_tab(
     hint.set_xalign(0.0);
     body.append(&hint);
 
+    let style_section = sidebar_section(&t("Style"), true, false);
+
     let grid = Grid::new();
     grid.add_css_class("recording-editor-cursor-grid");
     grid.set_column_spacing(8);
@@ -279,16 +281,16 @@ fn build_cursor_style_tab(
             card.set_group(Some(&first));
         }
     }
-    body.append(&grid);
-
     let size_row = cursor_slider_row(&t("Size"));
     let shadow_row = cursor_slider_row(&t("Shadow"));
     size_row.scale.set_range(MIN_CURSOR_SIZE, MAX_CURSOR_SIZE);
     size_row.scale.set_increments(0.05, 0.25);
     shadow_row.scale.set_range(0.0, 1.0);
     shadow_row.scale.set_increments(0.05, 0.1);
-    body.append(&size_row.widget);
-    body.append(&shadow_row.widget);
+    style_section.body.append(&grid);
+    style_section.body.append(&size_row.widget);
+    style_section.body.append(&shadow_row.widget);
+    body.append(&style_section.root);
 
     let syncing = Rc::new(Cell::new(false));
     bind_cursor_f64(
@@ -340,10 +342,7 @@ fn build_cursor_motion_tab(
     body.add_css_class("recording-editor-cursor-tab-body");
     body.set_hexpand(true);
 
-    let preset_label = Label::new(Some(&t("PRESET")));
-    preset_label.add_css_class("recording-editor-zoom-kicker");
-    preset_label.set_xalign(0.0);
-    body.append(&preset_label);
+    let movement_section = sidebar_section(&t("Movement"), true, false);
 
     let presets = GtkBox::new(Orientation::Horizontal, 8);
     presets.add_css_class("recording-editor-motion-preset-row");
@@ -353,7 +352,6 @@ fn build_cursor_motion_tab(
     let smooth_btn = motion_preset_card(&t("Smooth"), &t("Softer follow"));
     presets.append(&focused_btn);
     presets.append(&smooth_btn);
-    body.append(&presets);
 
     let smooth_row = cursor_slider_row(&t("Smoothing"));
     let speed_row = cursor_slider_row(&t("Speed"));
@@ -363,8 +361,11 @@ fn build_cursor_motion_tab(
         .scale
         .set_range(MIN_CURSOR_SPEED, MAX_CURSOR_SPEED);
     speed_row.scale.set_increments(0.05, 0.25);
-    body.append(&smooth_row.widget);
-    body.append(&speed_row.widget);
+    movement_section.body.append(&presets);
+    movement_section.body.append(&smooth_row.widget);
+    movement_section.body.append(&speed_row.widget);
+
+    let visibility_section = sidebar_section(&t("Visibility"), true, false);
 
     let idle_row = GtkBox::new(Orientation::Horizontal, 8);
     idle_row.add_css_class("recording-editor-zoom-classic");
@@ -379,12 +380,15 @@ fn build_cursor_motion_tab(
     idle_switch.set_halign(Align::End);
     idle_row.append(&idle_label);
     idle_row.append(&idle_switch);
-    body.append(&idle_row);
 
     let idle_delay_row = cursor_slider_row(&t("Idle delay"));
     idle_delay_row.scale.set_range(120.0, 4000.0);
     idle_delay_row.scale.set_increments(40.0, 200.0);
-    body.append(&idle_delay_row.widget);
+    visibility_section.body.append(&idle_row);
+    visibility_section.body.append(&idle_delay_row.widget);
+
+    body.append(&movement_section.root);
+    body.append(&visibility_section.root);
 
     let syncing = Rc::new(Cell::new(false));
     focused_btn.connect_clicked({
@@ -559,10 +563,7 @@ fn build_cursor_effects_tab(
     }
     body.append(&live);
 
-    let click_label = Label::new(Some(&t("CLICK EFFECT")));
-    click_label.add_css_class("recording-editor-zoom-kicker");
-    click_label.set_xalign(0.0);
-    body.append(&click_label);
+    let clicks_section = sidebar_section(&t("Clicks"), true, false);
     let click_row = GtkBox::new(Orientation::Horizontal, 6);
     click_row.add_css_class("recording-editor-click-effect-row");
     click_row.set_hexpand(true);
@@ -575,7 +576,7 @@ fn build_cursor_effects_tab(
     click_row.append(&none_btn);
     click_row.append(&ripple_btn);
     click_row.append(&circle_btn);
-    body.append(&click_row);
+    clicks_section.body.append(&click_row);
 
     let syncing = Rc::new(Cell::new(false));
     none_btn.connect_toggled({
@@ -615,10 +616,7 @@ fn build_cursor_effects_tab(
         }
     });
 
-    let sound_label = Label::new(Some(&t("Sound")));
-    sound_label.add_css_class("recording-editor-zoom-kicker");
-    sound_label.set_xalign(0.0);
-    body.append(&sound_label);
+    let sound_section = sidebar_section(&t("Sound"), true, false);
 
     let sound_row = GtkBox::new(Orientation::Horizontal, 6);
     sound_row.add_css_class("recording-editor-click-effect-row");
@@ -629,7 +627,7 @@ fn build_cursor_effects_tab(
     sound_soft.set_group(Some(&sound_off));
     sound_row.append(&sound_off);
     sound_row.append(&sound_soft);
-    body.append(&sound_row);
+    sound_section.body.append(&sound_row);
 
     sound_off.connect_toggled({
         let state = state.clone();
@@ -690,7 +688,10 @@ fn build_cursor_effects_tab(
     volume.widget().set_hexpand(true);
     volume_row.append(&volume.widget());
     volume_row.append(&preview);
-    body.append(&volume_row);
+    sound_section.body.append(&volume_row);
+
+    body.append(&clicks_section.root);
+    body.append(&sound_section.root);
 
     let refresh = {
         let live = live.clone();

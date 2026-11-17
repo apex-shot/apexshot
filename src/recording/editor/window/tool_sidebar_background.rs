@@ -309,14 +309,17 @@ fn build_background_panel(
     // them. They follow the pages inside the scroll rather than pinning to the
     // panel's bottom edge: a pinned footer left a tall field of empty space
     // between a short Custom or Image page and the sliders. Here they sit
-    // right under whichever page is open, and the wallpaper grid scrolls in
-    // its own capped viewport above them so 60 tiles never push them away.
+    // right under whichever page is open, in their own card, and the wallpaper
+    // grid scrolls in its own capped viewport above them so 60 tiles never
+    // push them away.
+    let frame_section = sidebar_section(&t("Frame"), true, false);
     let options = GtkBox::new(Orientation::Vertical, 6);
     options.add_css_class("recording-editor-bg-options");
     options.set_hexpand(true);
     options.append(&padding_row.widget);
     options.append(&radius_row.widget);
-    body.append(&options);
+    frame_section.body.append(&options);
+    body.append(&frame_section.root);
 
     let scroll = ScrolledWindow::new();
     scroll.add_css_class("recording-editor-zoom-scroll");

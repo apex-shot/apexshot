@@ -244,6 +244,7 @@
             }
 
             .editor-theme-light button.recording-editor-cursor-tab:hover {
+                background: transparent;
                 color: alpha(#1d2129, 0.88);
             }
 
@@ -262,6 +263,7 @@
             }
 
             .editor-theme-light button.recording-editor-clip-preset:hover {
+                background: transparent;
                 color: alpha(#1d2129, 0.88);
             }
 
@@ -370,6 +372,11 @@
 
             .editor-theme-light button.recording-editor-zoom-mode-btn {
                 color: alpha(#1d2129, 0.52);
+            }
+
+            .editor-theme-light button.recording-editor-zoom-mode-btn:hover {
+                background: transparent;
+                color: alpha(#1d2129, 0.88);
             }
 
             .editor-theme-light button.recording-editor-zoom-mode-btn:checked,
