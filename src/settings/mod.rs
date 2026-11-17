@@ -133,6 +133,7 @@ pub fn show_settings_window() -> anyhow::Result<()> {
         build_settings_window_at(application, None, None);
     });
 
+    crate::graceful_close::close_windows_on_sigterm(&app, || true);
     let _ = app.run_with_args::<String>(&[]);
     Ok(())
 }

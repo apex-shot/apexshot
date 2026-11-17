@@ -502,6 +502,29 @@ English, Spanish, French, German, Italian, Portuguese, Chinese (Simplified), Jap
 
 ---
 
+### Update Window (`src/update_window/`, `src/gnome_extension.rs`)
+
+**Purpose:** The standalone GTK4 window that resolves a release's assets,
+downloads and checksum-verifies them, installs through the system package
+service (or `pkexec`), refreshes the GNOME extension, and offers to restart the
+daemon. A native install first asks every open window to close through its own
+close handlers, so the editors persist their sessions, then reopens the same
+files after the install. `apexshot update-window [--force]` opens it; the
+daemon and tray launch it as their own processes.
+
+**Submodules:**
+- `mod.rs` — `show()`, `check_and_show()`, `--force` parsing, snooze handling, restart path, reopening closed windows, single-instance name and the `Present` interface a second launch calls
+- `window.rs` — Pages (available, downloading, ready, recording open, windows open, installing, done, failed), the SIGTERM-and-wait step behind "Install now", and their wiring
+- `ui.rs` — Shared layout (brand mark, fact cards, action rows, install pages), including reopening windows when an install is cancelled or fails
+- `running.rs` — The `/proc` scan for open windows and the GTK-owning pid, the public command that reopens each kind, its summary lines, and the recording check that asks the daemon
+- `../graceful_close.rs` — The SIGTERM handler each GTK window process installs so a signal closes its windows through the normal close path
+- `release.rs` — Release asset discovery, RPM/DEB/Arch selection, `SHA256SUMS` verification
+- `download.rs` — Streaming download thread with progress, cancellation, and `.part` files
+- `install.rs` — PackageKit, `pkexec`, and Flatpak install backends plus post-install fixups
+- `../gnome_extension.rs` — Extension install/refresh shared with onboarding
+
+---
+
 ### Cloud Module (`src/cloud/`)
 
 **Purpose:** Upload captures and recordings to remote destinations, and read back what an ApexShot Cloud account already holds.

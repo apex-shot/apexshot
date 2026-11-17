@@ -2,7 +2,7 @@ use std::sync::mpsc::Sender;
 
 #[derive(Debug, Clone)]
 pub enum TrayAction {
-    OpenUpdate(String),
+    OpenUpdate,
     QuickCapture,
     CaptureArea,
     CaptureCrosshair,
@@ -208,13 +208,10 @@ impl ksni::Tray for ApexShotTray {
                 "Update available · v{version}",
                 &[("version", &update.version)],
             );
-            let release_url = update.release_url.clone();
             menu.push(
                 StandardItem {
                     label,
-                    activate: Box::new(move |tray: &mut Self| {
-                        tray.send(TrayAction::OpenUpdate(release_url.clone()))
-                    }),
+                    activate: Box::new(move |tray: &mut Self| tray.send(TrayAction::OpenUpdate)),
                     ..Default::default()
                 }
                 .into(),

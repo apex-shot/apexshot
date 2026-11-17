@@ -46,7 +46,7 @@ pub use recording_handlers::{
 #[derive(Debug, Clone, PartialEq)]
 pub enum DaemonAction {
     UpdateAvailable(crate::update::UpdateInfo),
-    OpenUpdate(String),
+    OpenUpdate,
     QuickCapture,
     CaptureArea,
     CaptureCrosshair,
@@ -82,7 +82,7 @@ pub enum DaemonAction {
 impl From<TrayAction> for DaemonAction {
     fn from(action: TrayAction) -> Self {
         match action {
-            TrayAction::OpenUpdate(url) => Self::OpenUpdate(url),
+            TrayAction::OpenUpdate => Self::OpenUpdate,
             TrayAction::QuickCapture => Self::QuickCapture,
             TrayAction::CaptureArea => Self::CaptureArea,
             TrayAction::CaptureCrosshair => Self::CaptureCrosshair,
@@ -106,6 +106,10 @@ pub(super) struct DaemonState {
     pub(super) last_capture_path: Option<std::path::PathBuf>,
     pub(super) preview_child: Option<std::process::Child>,
     pub(super) save_capture_child: Option<std::process::Child>,
+    /// Whether a recording session reported itself through this daemon. The
+    /// session usually runs in another process, so the daemon cannot ask its
+    /// own in-process state alone.
+    pub(super) recording_active: bool,
     /// Channel to send GTK work to the main OS thread. `None` when the daemon
     /// owns the main thread itself (legacy / test mode).
     pub(super) gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>,
@@ -476,6 +480,7 @@ pub(super) async fn run_daemon_inner(
         last_capture_path: None,
         preview_child: None,
         save_capture_child: None,
+        recording_active: false,
         gtk_tx,
     }));
 
@@ -644,6 +649,18 @@ impl DaemonIpc {
             zbus::fdo::Error::Failed(format!("Daemon action channel unavailable: {e}"))
         })?;
         Ok(())
+    }
+
+    /// Whether a recording session is running, in this process or in another
+    /// ApexShot process that reported itself to the daemon. The update window
+    /// asks before a native install, which restarts ApexShot.
+    fn is_recording(&self) -> bool {
+        crate::recording::has_active_recording_control()
+            || self
+                .state
+                .lock()
+                .map(|state| state.recording_active)
+                .unwrap_or(false)
     }
 
     /// Returns the current mic level as a normalized f64 (0.0 to 1.0).

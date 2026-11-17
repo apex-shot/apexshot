@@ -540,6 +540,33 @@ pub(super) fn show_settings_subprocess() {
     }
 }
 
+/// Open the standalone update window in its own process. The daemon only
+/// announces a release; the window resolves, downloads, and installs it.
+/// Returns whether the process started, so the caller can fall back to a
+/// notification when it did not.
+pub(super) fn spawn_update_window_subprocess(force: bool) -> bool {
+    let exe = crate::update_window::binary_path();
+    let mut command = std::process::Command::new(exe);
+    command.arg("update-window");
+    if force {
+        command.arg("--force");
+    }
+    match command.spawn() {
+        Ok(mut child) => {
+            // The daemon outlives the window; reap the child so it does not
+            // leave a zombie behind when the window closes.
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+            true
+        }
+        Err(error) => {
+            eprintln!("[daemon] Failed to spawn update window: {error}");
+            false
+        }
+    }
+}
+
 pub(super) fn spawn_history_subprocess() {
     let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
 

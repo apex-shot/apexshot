@@ -18,20 +18,22 @@ pub(super) fn dispatch_daemon_action(
             if let Some(handle) = tray_handle {
                 handle.update(|tray| tray.set_update_available(update.clone()));
             }
-            crate::utils::notify::desktop_notification(
-                &crate::i18n::t("ApexShot update available"),
-                &crate::i18n::tfmt(
-                    "Version {version} is ready. Open the ApexShot menu to view it.",
-                    &[("version", &update.version)],
-                ),
-            );
+            // The window owns the prompt and its snooze. When it cannot start
+            // at all, the desktop notification remains the quiet fallback.
+            if !capture_handlers::spawn_update_window_subprocess(false) {
+                crate::utils::notify::desktop_notification(
+                    &crate::i18n::t("ApexShot update available"),
+                    &crate::i18n::tfmt(
+                        "Version {version} is ready. Open the ApexShot menu to view it.",
+                        &[("version", &update.version)],
+                    ),
+                );
+            }
         }
-        DaemonAction::OpenUpdate(url) => {
-            tokio::task::spawn_blocking(move || {
-                if let Err(err) = crate::utils::open::open_url(&url) {
-                    eprintln!("[update] Could not open release page: {err}");
-                }
-            });
+        DaemonAction::OpenUpdate => {
+            if !capture_handlers::spawn_update_window_subprocess(true) {
+                eprintln!("[update] Could not open the update window");
+            }
         }
         DaemonAction::QuickCapture => {
             if let Some(session_guard) = capture_handlers::acquire_capture_session_guard() {
@@ -135,6 +137,9 @@ pub(super) fn dispatch_daemon_action(
             let stopped = crate::recording::send_active_recording_command(command)
                 || crate::recording::send_external_recording_command(command);
             if !stopped {
+                if let Ok(mut daemon_state) = state.lock() {
+                    daemon_state.recording_active = false;
+                }
                 eprintln!("[daemon] No active recording available for stop/save.");
                 idle_recording_tray(tray_handle, recording_tray_state);
             }
@@ -204,10 +209,16 @@ pub(super) fn dispatch_daemon_action(
             }
         }
         DaemonAction::RecordingSessionStarted => {
+            if let Ok(mut daemon_state) = state.lock() {
+                daemon_state.recording_active = true;
+            }
             *recording_tray_state = Some(recording_handlers::RecordingTrayState::started());
             recording_handlers::update_recording_tray(tray_handle, recording_tray_state.as_ref());
         }
         DaemonAction::RecordingSessionPaused => {
+            if let Ok(mut daemon_state) = state.lock() {
+                daemon_state.recording_active = true;
+            }
             if recording_tray_state.as_mut().map(|s| s.pause()).is_some() {
                 recording_handlers::update_recording_tray(
                     tray_handle,
@@ -216,6 +227,9 @@ pub(super) fn dispatch_daemon_action(
             }
         }
         DaemonAction::RecordingSessionResumed => {
+            if let Ok(mut daemon_state) = state.lock() {
+                daemon_state.recording_active = true;
+            }
             if recording_tray_state.as_mut().map(|s| s.resume()).is_some() {
                 recording_handlers::update_recording_tray(
                     tray_handle,
@@ -224,6 +238,9 @@ pub(super) fn dispatch_daemon_action(
             }
         }
         DaemonAction::RecordingSessionRestarted => {
+            if let Ok(mut daemon_state) = state.lock() {
+                daemon_state.recording_active = true;
+            }
             if recording_tray_state.as_mut().map(|s| s.restart()).is_some() {
                 recording_handlers::update_recording_tray(
                     tray_handle,
@@ -232,6 +249,9 @@ pub(super) fn dispatch_daemon_action(
             }
         }
         DaemonAction::RecordingSessionEnded => {
+            if let Ok(mut daemon_state) = state.lock() {
+                daemon_state.recording_active = false;
+            }
             idle_recording_tray(tray_handle, recording_tray_state);
         }
         DaemonAction::SetHotkeySuppressed(suppressed) => {

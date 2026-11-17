@@ -90,6 +90,7 @@ pub fn show_history_window() -> anyhow::Result<()> {
         window::build_history_window(application);
     });
 
+    crate::graceful_close::close_windows_on_sigterm(&app, || true);
     let _ = app.run_with_args::<String>(&[]);
     Ok(())
 }

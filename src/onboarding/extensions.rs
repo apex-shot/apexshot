@@ -1,19 +1,13 @@
 use gtk4::{prelude::*, Align, Button, Label};
-use std::process::Command;
 use std::time::Duration;
 
 use super::ui::{copy_with_feedback, feature_card_list, heading, open_link};
 use crate::capture::editor::window::icon_names::custom;
+use crate::gnome_extension::{self, RELEASES_URL as GNOME_EXTENSION_RELEASES_URL};
 use crate::i18n::{self, t};
 
-const GNOME_EXTENSION_RELEASES_URL: &str = "https://github.com/apex-shot/apexshot/releases";
-const GNOME_EXTENSION_RELEASES_API_URL: &str =
-    "https://api.github.com/repos/apex-shot/apexshot/releases";
-const GNOME_EXTENSION_ARCHIVE_NAME: &str = "apexshot-gnome-integration.zip";
 pub const CHROME_EXTENSION_URL: &str =
     "https://chromewebstore.google.com/detail/apexshot/kaejmfabajnakpodjffipckmcpfpdenj";
-const EXTENSION_UUID: &str = "apexshot-gnome-integration@apexshot.github.io";
-const OLD_EXTENSION_UUID: &str = "apexshot-preview-helper@apexshot.github.io";
 fn open_url(url: &str) {
     let url = url.to_string();
     std::thread::spawn(move || {
@@ -21,116 +15,23 @@ fn open_url(url: &str) {
     });
 }
 
-fn is_gnome() -> bool {
-    std::env::var("XDG_CURRENT_DESKTOP")
-        .unwrap_or_default()
-        .to_lowercase()
-        .contains("gnome")
-}
-
 fn is_extension_enabled() -> bool {
     crate::gnome_shell::is_shell_overlay_service_available()
 }
 
-fn is_extension_installed() -> bool {
-    if crate::app_identity::portal_only() {
-        return false;
-    }
-    Command::new("gnome-extensions")
-        .args(["list"])
-        .output()
-        .is_ok_and(|output| {
-            output.status.success()
-                && String::from_utf8_lossy(&output.stdout)
-                    .lines()
-                    .any(|line| line.trim() == EXTENSION_UUID)
-        })
-}
-
-fn latest_extension_download_url() -> Option<String> {
-    let response = ureq::get(GNOME_EXTENSION_RELEASES_API_URL)
-        .set("User-Agent", "ApexShot")
-        .call()
-        .ok()?
-        .into_string()
-        .ok()?;
-    let releases: serde_json::Value = serde_json::from_str(&response).ok()?;
-    extension_download_url_from_releases(&releases)
-}
-
-fn extension_download_url_from_releases(releases: &serde_json::Value) -> Option<String> {
-    for release in releases.as_array()? {
-        let Some(assets) = release.get("assets").and_then(serde_json::Value::as_array) else {
-            continue;
-        };
-        for asset in assets {
-            if asset.get("name").and_then(serde_json::Value::as_str)
-                == Some(GNOME_EXTENSION_ARCHIVE_NAME)
-            {
-                return asset
-                    .get("browser_download_url")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_owned);
-            }
-        }
-    }
-    None
-}
-
-fn is_old_extension_installed() -> bool {
-    if crate::app_identity::portal_only() {
-        return false;
-    }
-    Command::new("gnome-extensions")
-        .args(["list"])
-        .output()
-        .map(|output| String::from_utf8_lossy(&output.stdout).contains(OLD_EXTENSION_UUID))
-        .unwrap_or(false)
-}
-
-fn remove_old_extension() {
-    let _ = Command::new("gnome-extensions")
-        .args(["disable", OLD_EXTENSION_UUID])
-        .output();
-
-    let home = std::env::var("HOME").unwrap_or_default();
-    let old_ext_dir = format!(
-        "{}/.local/share/gnome-shell/extensions/{}",
-        home, OLD_EXTENSION_UUID
-    );
-    let _ = Command::new("rm").args(["-rf", &old_ext_dir]).output();
-}
-
 fn install_extension(button: gtk4::glib::SendWeakRef<Button>, already_installed: bool) {
     std::thread::spawn(move || {
-        let archive = std::env::temp_dir().join("apexshot-gnome-integration.zip");
+        let archive = std::env::temp_dir().join(gnome_extension::ARCHIVE_NAME);
         let mut installed = already_installed;
         if !installed {
-            let downloaded = latest_extension_download_url().is_some_and(|url| {
-                Command::new("wget")
-                    .args(["-q", "-O"])
-                    .arg(&archive)
-                    .arg(url)
-                    .status()
-                    .is_ok_and(|status| status.success())
-            });
-            installed = downloaded
-                && Command::new("gnome-extensions")
-                    .arg("install")
-                    .arg("--force")
-                    .arg(&archive)
-                    .status()
-                    .is_ok_and(|status| status.success());
+            let downloaded = gnome_extension::latest_download_url()
+                .is_some_and(|url| gnome_extension::download_archive(&url, &archive).is_ok());
+            installed = downloaded && gnome_extension::install_archive(&archive);
         }
         let _ = std::fs::remove_file(archive);
 
         let mut is_enabled = false;
-        if installed
-            && Command::new("gnome-extensions")
-                .args(["enable", EXTENSION_UUID])
-                .status()
-                .is_ok_and(|status| status.success())
-        {
+        if installed && gnome_extension::enable_extension() {
             for _ in 0..8 {
                 if is_extension_enabled() {
                     is_enabled = true;
@@ -158,7 +59,7 @@ fn install_extension(button: gtk4::glib::SendWeakRef<Button>, already_installed:
 
 pub fn build_gnome(content: &gtk4::Box) {
     // Check if running GNOME
-    if !is_gnome() {
+    if !gnome_extension::is_gnome_session() {
         let title = Label::new(None);
         title.set_markup(&i18n::markup_title("GNOME Shell Extension Required"));
         title.set_halign(Align::Center);
@@ -187,7 +88,7 @@ pub fn build_gnome(content: &gtk4::Box) {
     }
 
     // Check for old extension
-    let has_old_extension = is_old_extension_installed();
+    let has_old_extension = gnome_extension::is_old_installed();
     if has_old_extension {
         let title = Label::new(None);
         title.set_markup(&i18n::markup_title("Update GNOME Extension"));
@@ -209,7 +110,7 @@ pub fn build_gnome(content: &gtk4::Box) {
         remove_btn.set_halign(Align::Center);
         remove_btn.set_margin_top(32);
         remove_btn.connect_clicked(|_| {
-            remove_old_extension();
+            gnome_extension::remove_old_extension();
         });
         content.append(&remove_btn);
         return;
@@ -261,7 +162,7 @@ pub fn build_gnome(content: &gtk4::Box) {
 
     // Check if extension is already installed
     let is_enabled = is_extension_enabled();
-    let is_installed = is_extension_installed();
+    let is_installed = gnome_extension::is_installed();
 
     // Install button
     let installed_label = t("Extension Enabled ✓");
@@ -399,31 +300,4 @@ pub(super) fn build_chrome(body: &gtk4::Box, actions: &gtk4::Box, nav: &super::N
     let advance = nav.advance.clone();
     skip_btn.connect_clicked(move |_| advance());
     actions.append(&skip_btn);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn extension_download_finds_latest_release_with_the_archive() {
-        let releases = serde_json::json!([
-            {"assets": [{"name": "apexshot_0.2.36.deb", "browser_download_url": "https://example.invalid/app.deb"}]},
-            {"assets": [{"name": GNOME_EXTENSION_ARCHIVE_NAME, "browser_download_url": "https://example.invalid/v0.2.35/extension.zip"}]}
-        ]);
-
-        assert_eq!(
-            extension_download_url_from_releases(&releases).as_deref(),
-            Some("https://example.invalid/v0.2.35/extension.zip")
-        );
-    }
-
-    #[test]
-    fn extension_download_is_missing_when_no_release_has_the_archive() {
-        let releases = serde_json::json!([
-            {"assets": [{"name": "apexshot_0.2.36.deb", "browser_download_url": "https://example.invalid/app.deb"}]}
-        ]);
-
-        assert_eq!(extension_download_url_from_releases(&releases), None);
-    }
 }
