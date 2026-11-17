@@ -13,6 +13,10 @@ impl Default for ZoomCameraSettings {
             speed: 1.0,
             smoothness: 0.5,
             start_early: false,
+            // Opt-in on Linux. The reference we studied rests at 1.0, but a
+            // non-zero strength costs eight composited samples on every zoom,
+            // in preview and in export, so this build leaves blur off until
+            // the user asks for it.
             motion_blur: 0.0,
         }
     }

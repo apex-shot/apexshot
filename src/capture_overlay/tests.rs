@@ -672,10 +672,7 @@ mod tests {
 
     #[test]
     fn build_area_init_args_includes_runtime_overlay_defaults() {
-        let config = AppConfig {
-            rec_video_format: 1,
-            ..AppConfig::default()
-        };
+        let config = AppConfig::default();
 
         let args = build_area_init_args(&config);
 

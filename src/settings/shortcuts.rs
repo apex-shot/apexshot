@@ -590,7 +590,6 @@ pub fn install_shortcut_editors(widgets: &ShortcutSettingsWidgets, parent: &Appl
         &widgets.capture_crosshair_btn,
         &widgets.capture_prev_btn,
         &widgets.capture_fullscreen_btn,
-        &widgets.capture_window_btn,
         &widgets.show_last_preview_btn,
         &widgets.save_last_capture_btn,
         &widgets.record_screen_btn,
@@ -615,7 +614,6 @@ pub struct ShortcutSettingsWidgets {
     pub capture_crosshair_btn: Button,
     pub capture_prev_btn: Button,
     pub capture_fullscreen_btn: Button,
-    pub capture_window_btn: Button,
     pub show_last_preview_btn: Button,
     pub save_last_capture_btn: Button,
     pub record_screen_btn: Button,
@@ -824,10 +822,6 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         true,
         Some("capture_fullscreen"),
     );
-    // Hide the disabled legacy direct-window shortcut. Quick Capture still
-    // offers Window through its Shot menu.
-    let capture_window_btn = Button::new();
-    capture_window_btn.set_visible(false);
     let show_last_preview_btn = create_row(
         &screenshots_frame,
         "Show Last Preview:",
@@ -910,7 +904,6 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         capture_crosshair_btn,
         capture_prev_btn,
         capture_fullscreen_btn,
-        capture_window_btn,
         show_last_preview_btn,
         save_last_capture_btn,
         record_screen_btn,

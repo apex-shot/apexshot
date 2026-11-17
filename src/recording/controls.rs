@@ -1,3 +1,4 @@
+use super::recording_manifest::RecordingManifest;
 use super::*;
 #[cfg(test)]
 use crate::capture_overlay::RecordingType;
@@ -63,6 +64,82 @@ struct PointerTrackSession {
     started: bool,
     region: CaptureRegion,
     window_cursor_metadata: bool,
+    /// What the manifest records beside the sidecar this session writes.
+    manifest: RecordingManifest,
+}
+
+/// The recorded video's pixels per logical pointer unit, and the region's
+/// size in video pixels when it can be derived.
+///
+/// Pointer samples arrive in GNOME Shell's logical stage coordinates, while the
+/// encoder receives the monitor's physical frames. The two spaces differ by the
+/// monitor's scale factor, which GNOME reports through Mutter's DisplayConfig
+/// (including fractional scaling such as 1.25). The Settings resolution cap can
+/// scale the encoded frame down again, so that cap is folded in as well.
+///
+/// Returns 1.0 with no size when the ratio cannot be determined: a window
+/// capture (whose samples are already in window pixels), an unresolved
+/// monitor, or a session that cannot query Mutter.
+fn recording_pixel_geometry(
+    config: &super::RecordingConfig,
+    region: CaptureRegion,
+    window_cursor_metadata: bool,
+) -> (f64, Option<(u32, u32)>) {
+    if window_cursor_metadata || !region.is_area() {
+        return (1.0, None);
+    }
+    let monitors = match crate::gnome_shell::query_mutter_monitor_configs() {
+        Ok(monitors) => monitors,
+        Err(err) => {
+            eprintln!(
+                "[recording] monitor scale unavailable ({err}); recording manifest device pixel ratio will be 1.0"
+            );
+            return (1.0, None);
+        }
+    };
+    let center_x = i64::from(region.x) + i64::from(region.w) / 2;
+    let center_y = i64::from(region.y) + i64::from(region.h) / 2;
+    let Some(monitor) = monitors.iter().find(|monitor| {
+        center_x >= i64::from(monitor.logical_x)
+            && center_x < i64::from(monitor.logical_x) + i64::from(monitor.logical_width)
+            && center_y >= i64::from(monitor.logical_y)
+            && center_y < i64::from(monitor.logical_y) + i64::from(monitor.logical_height)
+    }) else {
+        return (1.0, None);
+    };
+    if !monitor.scale.is_finite() || monitor.scale <= 0.0 {
+        return (1.0, None);
+    }
+    let physical_w = (region.w as f64 * monitor.scale).round().max(1.0) as u32;
+    let physical_h = (region.h as f64 * monitor.scale).round().max(1.0) as u32;
+    let (video_w, video_h) =
+        super::backend::fit_within_max_resolution(physical_w, physical_h, config.max_resolution);
+    let ratio = video_w as f64 / region.w as f64;
+    if ratio.is_finite() && ratio > 0.0 {
+        (ratio, Some((video_w, video_h)))
+    } else {
+        (1.0, None)
+    }
+}
+
+fn recording_target_name(target: super::RecordingTarget) -> &'static str {
+    match target {
+        super::RecordingTarget::Screen => "screen",
+        super::RecordingTarget::Area => "area",
+        super::RecordingTarget::Window => "window",
+    }
+}
+
+/// Write the manifest the shared sidecar reader takes the device pixel ratio
+/// from. The sidecar is already written; a manifest failure must not discard it.
+fn write_recording_manifest(sidecar_path: &Path, manifest: &RecordingManifest) {
+    match manifest.write_beside(sidecar_path) {
+        Ok(path) => eprintln!("[recording] wrote recording manifest {}", path.display()),
+        Err(err) => eprintln!(
+            "[recording] failed to write recording manifest for {}: {err}",
+            sidecar_path.display()
+        ),
+    }
 }
 
 fn pointer_capture_region(
@@ -158,6 +235,7 @@ fn write_window_cursor_sidecar(
     origin_us: i64,
     clicks: Vec<ClickSample>,
     presses: Vec<PressSample>,
+    base_manifest: &RecordingManifest,
 ) -> bool {
     let mut sidecar = PointerSidecar::new(
         origin_us,
@@ -181,6 +259,15 @@ fn write_window_cursor_sidecar(
     match sidecar.write_next_to_video(output_path) {
         Ok(path) => {
             eprintln!("[recording] wrote window cursor sidecar {}", path.display());
+            // Window samples are already in the window's pixels, so the ratio
+            // is 1 and the sidecar's region is the encoded frame size.
+            let manifest = RecordingManifest {
+                target: Some(recording_target_name(super::RecordingTarget::Window).into()),
+                width: Some(sidecar.region.w),
+                height: Some(sidecar.region.h),
+                ..base_manifest.clone()
+            };
+            write_recording_manifest(&path, &manifest);
             true
         }
         Err(err) => {
@@ -253,8 +340,18 @@ impl PointerTrackSession {
                 started: false,
                 region,
                 window_cursor_metadata,
+                manifest: RecordingManifest::new(1.0),
             };
         }
+        let (device_pixel_ratio, recorded_size) =
+            recording_pixel_geometry(config, region, window_cursor_metadata);
+        let manifest = RecordingManifest {
+            frame_rate: Some(f64::from(config.fps)),
+            target: Some(recording_target_name(config.target).into()),
+            width: recorded_size.map(|size| size.0),
+            height: recorded_size.map(|size| size.1),
+            ..RecordingManifest::new(device_pixel_ratio)
+        };
         let _ = take_harvested_pointer_track();
         match crate::gnome_shell::start_pointer_track() {
             Ok(()) => {
@@ -267,6 +364,7 @@ impl PointerTrackSession {
                     started: true,
                     region,
                     window_cursor_metadata,
+                    manifest,
                 }
             }
             Err(err) => {
@@ -286,6 +384,7 @@ impl PointerTrackSession {
                     started: false,
                     region,
                     window_cursor_metadata,
+                    manifest,
                 }
             }
         }
@@ -319,6 +418,7 @@ impl PointerTrackSession {
                     origin_us,
                     Vec::new(),
                     Vec::new(),
+                    &self.manifest,
                 );
             }
             None => crate::gnome_shell::stop_pointer_track(),
@@ -350,6 +450,7 @@ impl PointerTrackSession {
                         origin_us,
                         clicks,
                         presses,
+                        &self.manifest,
                     );
                 }
                 if result.samples.is_empty() {
@@ -409,6 +510,7 @@ impl PointerTrackSession {
                 match sidecar.write_next_to_video(output_path) {
                     Ok(path) => {
                         eprintln!("[recording] wrote pointer sidecar {}", path.display());
+                        write_recording_manifest(&path, &self.manifest);
                         true
                     }
                     Err(err) => {
@@ -587,7 +689,6 @@ pub fn prepare_overlay_recording_request(
         crate::gnome_shell::current_session_supports_gnome_shell_overlay();
     let use_shell_mask = should_use_shell_mask_for_request(request, shell_overlay_available);
     app_config.rec_controls = request.controls;
-    app_config.rec_display_time = true; // always show recording time in top bar
     app_config.rec_hidpi = request.hidpi;
     app_config.rec_notifications = request.notifications;
     app_config.rec_cursor = true;
@@ -596,7 +697,6 @@ pub fn prepare_overlay_recording_request(
     app_config.rec_countdown = request.countdown;
     app_config.rec_mic = request.mic;
     app_config.rec_speaker = request.speaker;
-    app_config.rec_video_format = 0;
     // `rec_video_max_res` is deliberately not taken from the request: neither
     // quick access offers a resolution picker any more, so the request only
     // echoes the value the overlay was launched with. Writing that echo back
@@ -927,12 +1027,20 @@ pub async fn run_recording_with_native_controls(
             if config.target == super::RecordingTarget::Window {
                 if let Some(timeline) = timeline.as_ref() {
                     if let Some(origin_us) = timeline.origin_us() {
+                        let manifest = RecordingManifest {
+                            frame_rate: Some(f64::from(config.fps)),
+                            target: Some(
+                                recording_target_name(super::RecordingTarget::Window).into(),
+                            ),
+                            ..RecordingManifest::new(1.0)
+                        };
                         write_window_cursor_sidecar(
                             &path,
                             timeline,
                             origin_us,
                             Vec::new(),
                             Vec::new(),
+                            &manifest,
                         );
                     } else {
                         PointerSidecar::delete_next_to_video(&path);
@@ -1689,7 +1797,6 @@ mod tests {
             PathBuf::from("/tmp/apexshot-recordings/ApexShot Recording 2026-03-25 at 12-00-00.mp4")
         );
         assert_eq!(prepared.updated_app_config.rec_controls, true);
-        assert_eq!(prepared.updated_app_config.rec_display_time, true);
         assert_eq!(prepared.updated_app_config.rec_hidpi, true);
         assert_eq!(prepared.updated_app_config.rec_notifications, false);
         assert_eq!(prepared.updated_app_config.rec_cursor, true);
@@ -1698,7 +1805,6 @@ mod tests {
         assert_eq!(prepared.updated_app_config.last_selection_y, Some(20));
         assert_eq!(prepared.updated_app_config.last_selection_w, Some(640));
         assert_eq!(prepared.updated_app_config.last_selection_h, Some(480));
-        assert_eq!(prepared.updated_app_config.rec_video_format, 0);
         // The stale request value must not overwrite what Settings saved.
         assert_eq!(prepared.updated_app_config.rec_video_max_res, 5);
         assert_eq!(prepared.updated_app_config.rec_video_fps, 3);
@@ -1810,7 +1916,6 @@ mod tests {
                 "saved resolution index {video_max_res} must keep its cap"
             );
             assert_eq!(prepared.recording_config.fps, expected_fps);
-            assert_eq!(prepared.updated_app_config.rec_video_format, 0);
             assert_eq!(
                 prepared.updated_app_config.rec_video_max_res, video_max_res,
                 "the saved resolution must survive the request untouched"

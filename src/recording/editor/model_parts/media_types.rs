@@ -118,6 +118,10 @@ pub struct VideoEditState {
     /// persisted: a paste target is the live playhead, which has no meaning in
     /// a saved project.
     pub clipboard: Option<ClipClipboard>,
+    /// The Add zoom tool is armed: the next click on the preview places a
+    /// Manual zoom at the playhead, aimed at the point clicked. Session-only
+    /// like the clipboard — it is a gesture in progress, not an edit.
+    pub add_zoom_tool: bool,
     pub background: VideoBackground,
     pub background_padding: f64,
     /// The composition's sound: master volume, the microphone mode, the music

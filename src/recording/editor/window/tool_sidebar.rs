@@ -1,8 +1,8 @@
 use crate::recording::editor::cursor_sprite;
 use crate::recording::editor::model::{
-    nearest_zoom_preset, ClickEffect, CursorMotionStyle, CursorTheme, EditorTool, VideoBackground,
-    VideoEditState, ZoomMode, MAX_CLIP_SPEED, MAX_CURSOR_SIZE, MAX_CURSOR_SPEED, MIN_CLIP_SPEED,
-    MIN_CURSOR_SIZE, MIN_CURSOR_SPEED, ZOOM_SCALE_PRESETS,
+    nearest_zoom_preset, ClickEffect, CursorMotionStyle, CursorRotationMode, CursorTheme,
+    EditorTool, VideoBackground, VideoEditState, ZoomMode, MAX_CLIP_SPEED, MAX_CURSOR_SIZE,
+    MAX_CURSOR_SPEED, MIN_CLIP_SPEED, MIN_CURSOR_SIZE, MIN_CURSOR_SPEED, ZOOM_SCALE_PRESETS,
 };
 use crate::recording::editor::sound::MicPreset;
 use gtk4::{
@@ -77,7 +77,7 @@ pub(super) fn build_tool_sidebar(
     let cursor_panel = build_cursor_panel(state.clone(), on_change.clone(), pause_playback.clone());
     let background_panel = build_background_panel(state.clone(), on_change.clone());
     let zoom_panel = build_zoom_panel(state.clone(), on_change.clone(), pause_playback.clone());
-    let hide_panel = build_hide_panel();
+    let hide_panel = build_hide_panel(state.clone(), on_change.clone(), pause_playback.clone());
     let clip_panel = build_clip_panel(state.clone(), on_change, pause_playback);
     root.append(&cursor_panel.widget);
     root.append(&background_panel.widget);
@@ -541,11 +541,7 @@ fn build_zoom_panel(
                     ZoomMode::Manual => manual_btn.set_active(true),
                 }
             } else {
-                mode_hint.set_text(&if auto_available {
-                    t("Detect uses recorded clicks")
-                } else {
-                    t("Add a Manual zoom from the timeline")
-                });
+                mode_hint.set_text(&t("Select a zoom clip on the timeline"));
                 if !auto_available {
                     manual_btn.set_active(true);
                 }
@@ -776,6 +772,11 @@ fn build_clip_scope_page(
         }
     });
 
+    let speed_length = Label::new(None);
+    speed_length.add_css_class("recording-editor-zoom-hint");
+    speed_length.set_xalign(0.0);
+    speed_length.set_wrap(true);
+
     let sound_section = sidebar_section(&t("Sound"), true, false);
 
     let mute_row = GtkBox::new(Orientation::Horizontal, 8);
@@ -807,6 +808,7 @@ fn build_clip_scope_page(
 
     speed_section.body.append(&presets);
     speed_section.body.append(&speed_slider.widget());
+    speed_section.body.append(&speed_length);
     sound_section.body.append(&mute_row);
 
     body.append(&count);
@@ -819,6 +821,9 @@ fn build_clip_scope_page(
         let hint = hint.clone();
         let preset_buttons = preset_buttons.clone();
         let speed_slider = speed_slider.clone();
+        let speed_length = speed_length.clone();
+        let speed_root = speed_section.root.clone();
+        let sound_root = sound_section.root.clone();
         let mute = mute.clone();
         let syncing = syncing.clone();
         Rc::new(move || {
@@ -827,23 +832,57 @@ fn build_clip_scope_page(
             let muted = guard.selected_clip_muted().unwrap_or(false);
             let slots = guard.placed_segment_slots();
             let total = slots.len();
-            let selected = guard.selected_segment.and_then(|selected| {
+            let selected_slot = guard.selected_segment.and_then(|selected| {
                 slots
                     .iter()
                     .position(|slot| slot.0 == selected)
                     .map(|position| position + 1)
             });
-            let can_edit = selected.is_some() && !guard.video_locked;
+            let source_length = guard.selected_segment.and_then(|selected| {
+                slots
+                    .iter()
+                    .find(|slot| slot.0 == selected)
+                    .map(|&(_, _, source_start, source_end)| (source_end - source_start).max(0.0))
+            });
+            let source_speed = guard
+                .selected_segment
+                .map(|selected| guard.segment_speed(selected))
+                .unwrap_or(1.0);
+            let can_edit = selected_slot.is_some() && !guard.video_locked;
             let can_mute = can_edit && guard.has_audio_track() && !guard.audio_locked;
             drop(guard);
-            let current = selected.map_or_else(String::new, |current| current.to_string());
+            let current = selected_slot.map_or_else(String::new, |current| current.to_string());
             let total = total.to_string();
             count.set_text(&tfmt(
                 "Clip {current} of {total}",
                 &[("current", current.as_str()), ("total", total.as_str())],
             ));
-            count.set_visible(selected.is_some());
-            hint.set_visible(selected.is_none());
+            count.set_visible(selected_slot.is_some());
+            hint.set_visible(selected_slot.is_none());
+            // The Speed and Sound groups only apply to a selected piece, so
+            // they are hidden rather than left insensitive with no target.
+            speed_root.set_visible(selected_slot.is_some());
+            sound_root.set_visible(selected_slot.is_some());
+            if let Some(length) = source_length {
+                let original = format_clip_length(length);
+                let length_text = if (source_speed - 1.0).abs() < 1e-6 {
+                    tfmt("Length {original}", &[("original", original.as_str())])
+                } else {
+                    let now = format_clip_length(length / source_speed.max(1e-6));
+                    let speed = format_clip_speed(source_speed);
+                    tfmt(
+                        "{original} at 1× · {now} at {speed}",
+                        &[
+                            ("original", original.as_str()),
+                            ("now", now.as_str()),
+                            ("speed", speed.as_str()),
+                        ],
+                    )
+                };
+                speed_length.set_text(&length_text);
+            } else {
+                speed_length.set_text("");
+            }
             syncing.set(true);
             if let Some(speed) = speed {
                 speed_slider.set_value(speed);
@@ -852,8 +891,6 @@ fn build_clip_scope_page(
                 button.set_active(speed.is_some_and(|speed| (speed - preset).abs() < 1e-6));
             }
             sync_switch(&mute, muted);
-            // Speed stays editable with no clip selected, matching the panel
-            // we study: the model setter already ignores the press.
             mute.set_sensitive(can_mute);
             syncing.set(false);
         }) as Rc<dyn Fn()>
@@ -1165,12 +1202,28 @@ pub(crate) fn format_clip_speed(value: f64) -> String {
     }
 }
 
+/// Format a clip length for the read-out under the Speed slider: `m:ss`, or
+/// one decimal under ten seconds so a short piece does not read as a flat
+/// zero.
+pub(crate) fn format_clip_length(seconds: f64) -> String {
+    let seconds = seconds.max(0.0);
+    if seconds < 10.0 {
+        return format!("{seconds:.1}s");
+    }
+    let total = seconds.round() as u64;
+    format!("{}:{:02}", total / 60, total % 60)
+}
+
 struct HidePanel {
     widget: GtkBox,
     refresh: Rc<dyn Fn()>,
 }
 
-fn build_hide_panel() -> HidePanel {
+fn build_hide_panel(
+    state: Arc<Mutex<VideoEditState>>,
+    on_change: Rc<dyn Fn()>,
+    pause_playback: PausePlayback,
+) -> HidePanel {
     let panel = GtkBox::new(Orientation::Vertical, 0);
     panel.add_css_class("recording-editor-zoom-panel");
     panel.set_hexpand(true);
@@ -1197,6 +1250,34 @@ fn build_hide_panel() -> HidePanel {
     hint.set_max_width_chars(34);
     body.append(&hint);
 
+    // The context menu already offers these two actions on the hide clip; the
+    // panel repeats them so selecting the range is not a dead end.
+    let section = sidebar_section(&t("Visibility"), true, false);
+
+    let hidden_row = GtkBox::new(Orientation::Horizontal, 8);
+    hidden_row.add_css_class("recording-editor-zoom-classic");
+    hidden_row.set_hexpand(true);
+    let hidden_label = Label::new(Some(&t("Hide cursor")));
+    hidden_label.add_css_class("recording-editor-zoom-classic-label");
+    hidden_label.set_xalign(0.0);
+    hidden_label.set_hexpand(true);
+    hidden_label.set_valign(Align::Center);
+    let hidden_switch = Switch::new();
+    hidden_switch.add_css_class("recording-editor-zoom-switch");
+    hidden_switch.set_valign(Align::Center);
+    hidden_switch.set_halign(Align::End);
+    hidden_row.append(&hidden_label);
+    hidden_row.append(&hidden_switch);
+    section.body.append(&hidden_row);
+
+    let remove = Button::with_label(&t("Remove"));
+    remove.add_css_class("recording-editor-zoom-reset");
+    remove.set_has_frame(false);
+    remove.set_halign(Align::Start);
+    section.body.append(&remove);
+
+    body.append(&section.root);
+
     let scroll = ScrolledWindow::new();
     scroll.add_css_class("recording-editor-zoom-scroll");
     scroll.set_policy(PolicyType::Never, PolicyType::Automatic);
@@ -1207,10 +1288,55 @@ fn build_hide_panel() -> HidePanel {
     panel.append(&header);
     panel.append(&scroll);
 
+    let syncing = Rc::new(Cell::new(false));
+    bind_switch(
+        &hidden_switch,
+        syncing.clone(),
+        pause_playback.clone(),
+        on_change.clone(),
+        {
+            let state = state.clone();
+            move |active| {
+                let mut guard = state.lock().unwrap();
+                if let Some(index) = guard.selected_cursor_hide {
+                    // The switch reads as "the cursor is hidden here", while
+                    // the model's flag disables the range.
+                    guard.set_cursor_hide_hidden(index, !active);
+                }
+            }
+        },
+    );
+    remove.connect_clicked({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let pause_playback = pause_playback.clone();
+        move |_| {
+            let index = state.lock().unwrap().selected_cursor_hide;
+            let Some(index) = index else {
+                return;
+            };
+            pause_playback();
+            state.lock().unwrap().remove_cursor_hide_clip(index);
+            on_change();
+        }
+    });
+
     let refresh = {
         let panel = panel.clone();
+        let hidden_switch = hidden_switch.clone();
+        let remove = remove.clone();
+        let syncing = syncing.clone();
         Rc::new(move || {
             panel.set_visible(true);
+            let guard = state.lock().unwrap();
+            let selected = guard.selected_cursor_hide_clip();
+            let hiding = selected.is_some_and(|clip| !clip.hidden);
+            let can_remove = selected.is_some();
+            drop(guard);
+            syncing.set(true);
+            sync_switch(&hidden_switch, hiding);
+            remove.set_sensitive(can_remove);
+            syncing.set(false);
         }) as Rc<dyn Fn()>
     };
 
@@ -1891,6 +2017,149 @@ mod tests {
     }
 
     #[test]
+    fn the_cursor_follow_page_offers_rotation_the_shake_switch_and_the_tail() {
+        // The tilt/rotation engine, the shake filter and the tail behaviours
+        // are shared; the Follow page is what Linux was missing for them.
+        let panel = include_str!("tool_sidebar_cursor.rs");
+        for (needle, why) in [
+            (
+                "ToggleButton::with_label(&t(\"Tilt with motion\"))",
+                "the velocity rotation mode",
+            ),
+            (
+                "ToggleButton::with_label(&t(\"Point along movement\"))",
+                "the directional rotation mode",
+            ),
+            ("cursor_slider_row(&t(\"Tilt amount\"))", "the tilt ratio"),
+            (
+                "FillSlider::new_with_value_text(&t(\"Base angle\")",
+                "the base angle",
+            ),
+            ("t(\"Remove cursor shake\")", "the shake switch"),
+            ("t(\"Loop cursor position\")", "the loop switch"),
+            (
+                "FillSlider::new_with_value_text(&t(\"Loop before end\")",
+                "the loop distance",
+            ),
+            (
+                "FillSlider::new_with_value_text(&t(\"Stop at the end\")",
+                "the stop hold",
+            ),
+        ] {
+            assert!(panel.contains(needle), "the Follow page must offer {why}");
+        }
+        // The studied ranges, so the controls cannot drift from the engine's
+        // expectations.
+        for range in [
+            "tilt_row.scale.set_range(0.0, 1.0);",
+            "angle_slider.set_range(-180.0, 180.0);",
+            "idle_delay_row.scale.set_range(120.0, 5000.0);",
+            "loop_delay_row.set_range(1000.0, 4000.0);",
+            "stop_row.set_range(0.0, 5000.0);",
+        ] {
+            assert!(panel.contains(range), "the Follow page must set {range}");
+        }
+        // Every Follow control lives in the card Windows puts it in, and the
+        // loose group kickers are gone.
+        for section in [
+            "sidebar_section(&t(\"Movement\")",
+            "sidebar_section(&t(\"Rotation\")",
+            "sidebar_section(&t(\"Visibility\")",
+        ] {
+            assert!(
+                panel.contains(section),
+                "the Follow page must group its controls under {section}"
+            );
+        }
+        assert!(
+            panel.contains("movement_section.body.append(&shake_row);"),
+            "Remove cursor shake belongs to Movement"
+        );
+        assert!(
+            panel.contains("rotation_section.body.append(&rotation_modes);")
+                && panel.contains("rotation_section.body.append(&tilt_row.widget);")
+                && panel.contains("rotation_section.body.append(&angle_slider.widget());"),
+            "the rotation controls belong to Rotation"
+        );
+        assert!(
+            panel.contains("visibility_section.body.append(&idle_row);")
+                && panel.contains("visibility_section.body.append(&loop_row);")
+                && panel.contains("visibility_section.body.append(&stop_row.widget());"),
+            "the idle and tail controls belong to Visibility"
+        );
+        assert!(
+            !panel.contains("recording-editor-zoom-kicker")
+                && !panel.contains("t(\"Cursor at the end\")"),
+            "the loose Rotation and Cursor at the end kickers are replaced by cards"
+        );
+        // The switch turns the filter off at zero and back on at the studied
+        // default, and every write pushes the values into the sidecar.
+        assert!(
+            panel
+                .contains("crate::recording::editor::cursor_shake::DEFAULT_REMOVE_SHAKE_THRESHOLD"),
+            "the shake switch must restore the studied threshold"
+        );
+        assert!(
+            panel.contains("guard.sync_sidecar_cursor_filters();"),
+            "a cursor write must reach the pointer plan"
+        );
+    }
+
+    #[test]
+    fn the_cursor_style_page_offers_the_default_cursor_switch() {
+        // A recording can carry the pointer's real shape; the switch forces
+        // the arrow instead. Windows puts it in the Style card after Shadow,
+        // and it is refreshed with the rest of that page.
+        let panel = include_str!("tool_sidebar_cursor.rs");
+        let start = panel
+            .find("fn build_cursor_style_tab(")
+            .expect("the Style page has a builder");
+        let end = panel
+            .find("fn build_cursor_motion_tab(")
+            .expect("the Follow page follows the Style page");
+        let style = &panel[start..end];
+        assert!(
+            style.contains("t(\"Always use the default cursor\")"),
+            "the Style card must offer the default-cursor switch"
+        );
+        assert!(
+            style.contains("style_section.body.append(&default_row);")
+                && style.contains("cursor.always_use_default = active"),
+            "the switch must sit in the Style card and write the cursor setting"
+        );
+        assert!(
+            style.contains("sync_switch(&always_default, cursor.always_use_default)"),
+            "the Style refresh must show the stored value"
+        );
+    }
+
+    #[test]
+    fn the_hide_panel_offers_the_switch_and_the_remove_button() {
+        let source = include_str!("tool_sidebar.rs");
+        let start = source
+            .find("fn build_hide_panel(")
+            .expect("the Hide panel is built by build_hide_panel");
+        let end = source
+            .find("\n#[cfg(test)]")
+            .expect("the tests close the file");
+        let panel = &source[start..end];
+        assert!(
+            panel.contains("sidebar_section(&t(\"Visibility\")"),
+            "the hide actions live in a card, not loose on the page"
+        );
+        assert!(
+            panel.contains("set_cursor_hide_hidden(index, !active)")
+                && panel.contains("sync_switch(&hidden_switch, hiding)"),
+            "the switch must hide or show the selected range and read it back"
+        );
+        assert!(
+            panel.contains("remove_cursor_hide_clip(index)")
+                && panel.contains("selected_cursor_hide_clip()"),
+            "Remove must delete the selected hide range"
+        );
+    }
+
+    #[test]
     fn switching_popover_tabs_does_not_write_a_fill() {
         // Opening Gradient must not replace a color the swatch is showing, so
         // the tab switch is a pure view change: it only sets visibility and
@@ -2193,9 +2462,10 @@ mod tests {
         // parent does not live in is measured through the wrong surface. The seat
         // is now the popover body's box read in the panel's own space, with the
         // card top-aligned so the anchoring corner is the one being reasoned
-        // about. The geometry itself is asserted by measurement in
-        // `the_card_hangs_clear_of_the_popover_beside_it`; this test pins the
-        // wiring that measurement depends on. And because the popover behind the
+        // about. The geometry itself is asserted by
+        // `the_picker_card_seat_hangs_exactly_the_gap_left_of_the_body`, which
+        // checks the seat formula without a display; this test pins the wiring
+        // that measurement depends on. And because the popover behind the
         // card stays open, the card needs a close of its own rather than relying
         // on a second click on the tile.
         let source = include_str!("custom_wallpaper_popover.rs");
@@ -2227,7 +2497,7 @@ mod tests {
             "the seat must be the popover body's box read in the panel's space"
         );
         assert!(
-            opener.contains("body.height()"),
+            opener.contains("picker_card_pointing_rect(&body)"),
             "the seat must be taken from the popover's body, not from the page or a tile"
         );
         assert!(
@@ -2422,6 +2692,30 @@ mod tests {
     }
 
     #[test]
+    fn zoom_panel_asks_for_a_zoom_clip_when_none_is_selected() {
+        // The old hints described the toolbar's Detect button and a timeline
+        // placement the Add-zoom tool replaced. The Auto button already says
+        // whether recorded pointer data exists.
+        let source = include_str!("tool_sidebar.rs");
+        let start = source.find("fn build_zoom_panel(").unwrap();
+        let end = source.find("struct ClipPanel").unwrap();
+        let zoom = &source[start..end];
+        assert!(
+            zoom.contains("t(\"Select a zoom clip on the timeline\")"),
+            "the empty Zoom page must point at the timeline"
+        );
+        assert!(
+            !zoom.contains("t(\"Detect uses recorded clicks\")")
+                && !zoom.contains("t(\"Add a Manual zoom from the timeline\")"),
+            "the pre-port empty-selection hints are gone"
+        );
+        assert!(
+            zoom.contains("auto_btn.set_sensitive(auto_available && can_edit)"),
+            "auto_available still gates the Auto button"
+        );
+    }
+
+    #[test]
     fn clip_speed_is_a_filled_slider_not_a_preset_picker() {
         // The Clip panel offered a 4x4 grid of speed chips. It is one filled
         // slider now — the control every editor uses — so the chip grid and
@@ -2447,6 +2741,46 @@ mod tests {
             !clip.contains("recording-editor-zoom-chip") && !clip.contains("CLIP_SPEED_PRESETS"),
             "the speed preset picker must be gone from the Clip panel"
         );
+    }
+
+    #[test]
+    fn the_clip_scope_reads_the_clip_length_under_the_speed_slider() {
+        let source = include_str!("tool_sidebar.rs");
+        let start = source
+            .find("fn build_clip_scope_page(")
+            .expect("the Clip scope is built by build_clip_scope_page");
+        let end = source
+            .find("fn build_sound_scope_page(")
+            .expect("the Sound scope follows the Clip scope");
+        let clip = &source[start..end];
+        assert!(
+            clip.contains("speed_section.body.append(&speed_length);"),
+            "the length read-out sits under the Speed slider"
+        );
+        assert!(
+            clip.contains("tfmt(\"Length {original}\"")
+                && clip.contains("\"{original} at 1× · {now} at {speed}\""),
+            "the read-out must use the shared length templates"
+        );
+        assert!(
+            clip.contains("speed_root.set_visible(selected_slot.is_some());")
+                && clip.contains("sound_root.set_visible(selected_slot.is_some());"),
+            "the Speed and Sound cards are hidden with nothing selected"
+        );
+        for (seconds, expected) in [
+            (3.4, "3.4s"),
+            (9.9, "9.9s"),
+            (12.0, "0:12"),
+            (90.4, "1:30"),
+            (125.6, "2:06"),
+            (600.0, "10:00"),
+        ] {
+            assert_eq!(
+                super::format_clip_length(seconds),
+                expected,
+                "{seconds}s must read as {expected}"
+            );
+        }
     }
 
     #[test]

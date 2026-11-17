@@ -787,6 +787,9 @@ msgstr "Открыть разметку"
 msgid "Open Video Editor"
 msgstr "Открыть видеоредактор"
 
+msgid "Automatic zoom on import"
+msgstr "Автоматическое масштабирование при импорте"
+
 msgid "Open File:"
 msgstr "Открыть файл:"
 

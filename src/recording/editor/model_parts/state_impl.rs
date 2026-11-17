@@ -29,6 +29,7 @@ impl VideoEditState {
             selected_cursor_hide: None,
             selected_segment: None,
             clipboard: None,
+            add_zoom_tool: false,
             background: VideoBackground::None,
             background_padding: 24.0,
             sound: Default::default(),
@@ -90,6 +91,30 @@ impl VideoEditState {
                 })
             })
             .fold(0.0_f64, f64::max)
+    }
+
+    /// Push the cursor's shake filter and its tail behaviours into the pointer
+    /// sidecar, so the sprite path the preview draws and the export renders
+    /// follows the panel. The camera reads `cursor.remove_shake_threshold`
+    /// itself; this is the other half of the same setting.
+    ///
+    /// The tail measures back from the last source instant the edit plays, so
+    /// trimming, cutting and reordering move it — and a held freeze tail, which
+    /// lengthens the composition without adding footage, does not.
+    pub(crate) fn sync_sidecar_cursor_filters(&mut self) {
+        let settings = self.cursor.clamped();
+        let end = self
+            .ordered_placed_segments()
+            .last()
+            .map(|(_, _, source_end)| *source_end);
+        if let Some(sidecar) = self.sidecar.as_mut() {
+            sidecar.set_shake_threshold(settings.remove_shake_threshold);
+            sidecar.set_cursor_tail(
+                settings.stop_movement_in_last_part_ms,
+                settings.loop_position_before_end_ms,
+                end,
+            );
+        }
     }
 
     pub fn playback_position(&self, timeline_t: f64) -> Option<(f64, f64)> {

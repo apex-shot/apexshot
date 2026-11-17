@@ -36,7 +36,7 @@ fn build_cursor_panel(
     tabs.append(&motion_tab);
     tabs.append(&effects_tab);
 
-    let style = build_cursor_style_tab(state.clone(), on_change.clone());
+    let style = build_cursor_style_tab(state.clone(), on_change.clone(), pause_playback.clone());
     let motion = build_cursor_motion_tab(state.clone(), on_change.clone(), pause_playback.clone());
     let effects = build_cursor_effects_tab(state.clone(), on_change.clone());
     style.widget.set_visible(true);
@@ -203,14 +203,34 @@ fn bind_cursor_f64(
         if syncing.get() {
             return;
         }
-        write(&mut state.lock().unwrap().cursor, scale.value());
+        {
+            let mut guard = state.lock().unwrap();
+            write(&mut guard.cursor, scale.value());
+            guard.sync_sidecar_cursor_filters();
+        }
         on_change();
     });
+}
+
+/// Write the cursor settings once and push the shake filter and tail values
+/// into the pointer sidecar before the editor refreshes.
+fn write_cursor(
+    state: &Arc<Mutex<VideoEditState>>,
+    on_change: &Rc<dyn Fn()>,
+    write: impl FnOnce(&mut crate::recording::editor::model::CursorSettings),
+) {
+    {
+        let mut guard = state.lock().unwrap();
+        write(&mut guard.cursor);
+        guard.sync_sidecar_cursor_filters();
+    }
+    on_change();
 }
 
 fn build_cursor_style_tab(
     state: Arc<Mutex<VideoEditState>>,
     on_change: Rc<dyn Fn()>,
+    pause_playback: PausePlayback,
 ) -> CursorPanel {
     let body = GtkBox::new(Orientation::Vertical, 8);
     body.add_css_class("recording-editor-zoom-body");
@@ -287,9 +307,26 @@ fn build_cursor_style_tab(
     size_row.scale.set_increments(0.05, 0.25);
     shadow_row.scale.set_range(0.0, 1.0);
     shadow_row.scale.set_increments(0.05, 0.1);
+
+    let default_row = GtkBox::new(Orientation::Horizontal, 8);
+    default_row.add_css_class("recording-editor-zoom-classic");
+    default_row.set_hexpand(true);
+    let default_label = Label::new(Some(&t("Always use the default cursor")));
+    default_label.add_css_class("recording-editor-zoom-classic-label");
+    default_label.set_xalign(0.0);
+    default_label.set_hexpand(true);
+    default_label.set_valign(Align::Center);
+    let always_default = Switch::new();
+    always_default.add_css_class("recording-editor-zoom-switch");
+    always_default.set_valign(Align::Center);
+    always_default.set_halign(Align::End);
+    default_row.append(&default_label);
+    default_row.append(&always_default);
+
     style_section.body.append(&grid);
     style_section.body.append(&size_row.widget);
     style_section.body.append(&shadow_row.widget);
+    style_section.body.append(&default_row);
     body.append(&style_section.root);
 
     let syncing = Rc::new(Cell::new(false));
@@ -304,14 +341,25 @@ fn build_cursor_style_tab(
         &shadow_row.scale,
         syncing.clone(),
         state.clone(),
-        on_change,
+        on_change.clone(),
         |cursor, value| cursor.shadow = value,
+    );
+    bind_switch(
+        &always_default,
+        syncing.clone(),
+        pause_playback,
+        on_change,
+        {
+            let state = state.clone();
+            move |active| state.lock().unwrap().cursor.always_use_default = active
+        },
     );
 
     let refresh = {
         let cards = cards;
         let size_scale = size_row.scale.clone();
         let shadow_scale = shadow_row.scale.clone();
+        let always_default = always_default.clone();
         let syncing = syncing.clone();
         Rc::new(move || {
             let cursor = state.lock().unwrap().cursor;
@@ -322,6 +370,7 @@ fn build_cursor_style_tab(
             syncing.set(true);
             size_scale.set_value(cursor.size);
             shadow_scale.set_value(cursor.shadow);
+            sync_switch(&always_default, cursor.always_use_default);
             syncing.set(false);
         }) as Rc<dyn Fn()>
     };
@@ -365,6 +414,51 @@ fn build_cursor_motion_tab(
     movement_section.body.append(&smooth_row.widget);
     movement_section.body.append(&speed_row.widget);
 
+    let shake_row = GtkBox::new(Orientation::Horizontal, 8);
+    shake_row.add_css_class("recording-editor-zoom-classic");
+    shake_row.set_hexpand(true);
+    let shake_label = Label::new(Some(&t("Remove cursor shake")));
+    shake_label.add_css_class("recording-editor-zoom-classic-label");
+    shake_label.set_xalign(0.0);
+    shake_label.set_hexpand(true);
+    let shake_switch = Switch::new();
+    shake_switch.add_css_class("recording-editor-zoom-switch");
+    shake_switch.set_valign(Align::Center);
+    shake_switch.set_halign(Align::End);
+    shake_row.append(&shake_label);
+    shake_row.append(&shake_switch);
+    movement_section.body.append(&shake_row);
+
+    let rotation_section = sidebar_section(&t("Rotation"), true, false);
+
+    let rotation_modes = GtkBox::new(Orientation::Horizontal, 0);
+    rotation_modes.add_css_class("recording-editor-cursor-segments");
+    rotation_modes.set_hexpand(true);
+    rotation_modes.set_homogeneous(true);
+    let velocity_btn = ToggleButton::with_label(&t("Tilt with motion"));
+    velocity_btn.add_css_class("recording-editor-cursor-segment");
+    velocity_btn.set_has_frame(false);
+    velocity_btn.set_hexpand(true);
+    let directional_btn = ToggleButton::with_label(&t("Point along movement"));
+    directional_btn.add_css_class("recording-editor-cursor-segment");
+    directional_btn.set_has_frame(false);
+    directional_btn.set_hexpand(true);
+    directional_btn.set_group(Some(&velocity_btn));
+    rotation_modes.append(&velocity_btn);
+    rotation_modes.append(&directional_btn);
+    rotation_section.body.append(&rotation_modes);
+
+    let tilt_row = cursor_slider_row(&t("Tilt amount"));
+    tilt_row.scale.set_range(0.0, 1.0);
+    tilt_row.scale.set_increments(0.05, 0.1);
+    rotation_section.body.append(&tilt_row.widget);
+
+    let angle_slider =
+        FillSlider::new_with_value_text(&t("Base angle"), |value, _, _| format!("{value:.0}°"));
+    angle_slider.set_range(-180.0, 180.0);
+    angle_slider.set_increments(5.0, 45.0);
+    rotation_section.body.append(&angle_slider.widget());
+
     let visibility_section = sidebar_section(&t("Visibility"), true, false);
 
     let idle_row = GtkBox::new(Orientation::Horizontal, 8);
@@ -382,12 +476,42 @@ fn build_cursor_motion_tab(
     idle_row.append(&idle_switch);
 
     let idle_delay_row = cursor_slider_row(&t("Idle delay"));
-    idle_delay_row.scale.set_range(120.0, 4000.0);
+    idle_delay_row.scale.set_range(120.0, 5000.0);
     idle_delay_row.scale.set_increments(40.0, 200.0);
     visibility_section.body.append(&idle_row);
     visibility_section.body.append(&idle_delay_row.widget);
 
+    let loop_row = GtkBox::new(Orientation::Horizontal, 8);
+    loop_row.add_css_class("recording-editor-zoom-classic");
+    loop_row.set_hexpand(true);
+    let loop_label = Label::new(Some(&t("Loop cursor position")));
+    loop_label.add_css_class("recording-editor-zoom-classic-label");
+    loop_label.set_xalign(0.0);
+    loop_label.set_hexpand(true);
+    let loop_switch = Switch::new();
+    loop_switch.add_css_class("recording-editor-zoom-switch");
+    loop_switch.set_valign(Align::Center);
+    loop_switch.set_halign(Align::End);
+    loop_row.append(&loop_label);
+    loop_row.append(&loop_switch);
+    visibility_section.body.append(&loop_row);
+
+    let loop_delay_row = FillSlider::new_with_value_text(&t("Loop before end"), |value, _, _| {
+        format!("{:.1}s", value / 1000.0)
+    });
+    loop_delay_row.set_range(1000.0, 4000.0);
+    loop_delay_row.set_increments(50.0, 250.0);
+    visibility_section.body.append(&loop_delay_row.widget());
+
+    let stop_row = FillSlider::new_with_value_text(&t("Stop at the end"), |value, _, _| {
+        format!("{:.1}s", value / 1000.0)
+    });
+    stop_row.set_range(0.0, 5000.0);
+    stop_row.set_increments(50.0, 250.0);
+    visibility_section.body.append(&stop_row.widget());
+
     body.append(&movement_section.root);
+    body.append(&rotation_section.root);
     body.append(&visibility_section.root);
 
     let syncing = Rc::new(Cell::new(false));
@@ -454,6 +578,99 @@ fn build_cursor_motion_tab(
             move |active| state.lock().unwrap().cursor.hide_idle = active
         },
     );
+    velocity_btn.connect_toggled({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        move |button| {
+            if syncing.get() || !button.is_active() {
+                return;
+            }
+            write_cursor(&state, &on_change, |cursor| {
+                cursor.rotation_mode = CursorRotationMode::Velocity
+            });
+        }
+    });
+    directional_btn.connect_toggled({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        move |button| {
+            if syncing.get() || !button.is_active() {
+                return;
+            }
+            write_cursor(&state, &on_change, |cursor| {
+                cursor.rotation_mode = CursorRotationMode::Directional
+            });
+        }
+    });
+    bind_cursor_f64(
+        &tilt_row.scale,
+        syncing.clone(),
+        state.clone(),
+        on_change.clone(),
+        |cursor, value| cursor.rotate_on_x_movement_ratio = value,
+    );
+    bind_cursor_f64(
+        &angle_slider,
+        syncing.clone(),
+        state.clone(),
+        on_change.clone(),
+        |cursor, value| cursor.base_rotation_deg = value,
+    );
+    bind_switch(
+        &shake_switch,
+        syncing.clone(),
+        pause_playback.clone(),
+        on_change.clone(),
+        {
+            let state = state.clone();
+            // The studied panel turns the filter off by writing zero and back
+            // on at its default threshold.
+            move |active| {
+                let mut guard = state.lock().unwrap();
+                guard.cursor.remove_shake_threshold = if active {
+                    crate::recording::editor::cursor_shake::DEFAULT_REMOVE_SHAKE_THRESHOLD
+                } else {
+                    0.0
+                };
+                guard.sync_sidecar_cursor_filters();
+            }
+        },
+    );
+    bind_switch(
+        &loop_switch,
+        syncing.clone(),
+        pause_playback.clone(),
+        on_change.clone(),
+        {
+            let state = state.clone();
+            // The studied panel turns the loop on one second before the end.
+            move |active| {
+                let mut guard = state.lock().unwrap();
+                guard.cursor.loop_position_before_end_ms = if active { Some(1000.0) } else { None };
+                guard.sync_sidecar_cursor_filters();
+            }
+        },
+    );
+    bind_cursor_f64(
+        &loop_delay_row,
+        syncing.clone(),
+        state.clone(),
+        on_change.clone(),
+        |cursor, value| {
+            if cursor.loop_position_before_end_ms.is_some() {
+                cursor.loop_position_before_end_ms = Some(value);
+            }
+        },
+    );
+    bind_cursor_f64(
+        &stop_row,
+        syncing.clone(),
+        state.clone(),
+        on_change.clone(),
+        |cursor, value| cursor.stop_movement_in_last_part_ms = value,
+    );
 
     let refresh = {
         let focused_btn = focused_btn.clone();
@@ -462,6 +679,14 @@ fn build_cursor_motion_tab(
         let speed_scale = speed_row.scale.clone();
         let idle_switch = idle_switch.clone();
         let idle_delay_scale = idle_delay_row.scale.clone();
+        let velocity_btn = velocity_btn.clone();
+        let directional_btn = directional_btn.clone();
+        let tilt_scale = tilt_row.scale.clone();
+        let angle_slider = angle_slider.clone();
+        let shake_switch = shake_switch.clone();
+        let loop_switch = loop_switch.clone();
+        let loop_delay_scale = loop_delay_row.clone();
+        let stop_scale = stop_row.clone();
         let syncing = syncing.clone();
         Rc::new(move || {
             let cursor = state.lock().unwrap().cursor;
@@ -485,6 +710,18 @@ fn build_cursor_motion_tab(
             sync_switch(&idle_switch, cursor.hide_idle);
             idle_delay_scale.set_value(cursor.idle_ms);
             idle_delay_scale.set_sensitive(cursor.hide_idle);
+            velocity_btn.set_active(cursor.rotation_mode == CursorRotationMode::Velocity);
+            directional_btn.set_active(cursor.rotation_mode == CursorRotationMode::Directional);
+            tilt_scale.set_value(cursor.rotate_on_x_movement_ratio);
+            // Tilt is the velocity mode's setting; pointing along the movement
+            // derives its angle from the heading instead.
+            tilt_scale.set_sensitive(cursor.rotation_mode == CursorRotationMode::Velocity);
+            angle_slider.set_value(cursor.base_rotation_deg);
+            sync_switch(&shake_switch, cursor.remove_shake_threshold > 0.0);
+            sync_switch(&loop_switch, cursor.loop_position_before_end_ms.is_some());
+            loop_delay_scale.set_value(cursor.loop_position_before_end_ms.unwrap_or(1000.0));
+            loop_delay_scale.set_sensitive(cursor.loop_position_before_end_ms.is_some());
+            stop_scale.set_value(cursor.stop_movement_in_last_part_ms);
             syncing.set(false);
         }) as Rc<dyn Fn()>
     };

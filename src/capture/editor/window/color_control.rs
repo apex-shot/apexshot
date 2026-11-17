@@ -52,24 +52,31 @@ fn active_color(st: &EditorState) -> DrawColor {
         .unwrap_or(st.selected_color)
 }
 
+/// Which palette entry a colour is, exactly: the index it matches, or `None`
+/// for a colour the palette does not carry.
+///
+/// Exact rather than nearest: a near miss is a custom colour, and the picker has
+/// to light the rainbow tile rather than a swatch that merely looks close.
+fn preset_index(color: DrawColor, mut palette: impl Iterator<Item = DrawColor>) -> Option<usize> {
+    let rgba = draw_color_to_rgba_u8(color);
+    palette.position(|value| draw_color_to_rgba_u8(value) == rgba)
+}
+
 fn sync_selection(
     color: DrawColor,
     custom_open: bool,
     swatches: &[(DrawColor, Button)],
     custom: &Button,
 ) {
-    let rgba = draw_color_to_rgba_u8(color);
-    let preset_match = swatches
-        .iter()
-        .any(|(value, _)| draw_color_to_rgba_u8(*value) == rgba);
-    for (value, button) in swatches {
-        if !custom_open && draw_color_to_rgba_u8(*value) == rgba {
+    let preset = preset_index(color, swatches.iter().map(|(value, _)| *value));
+    for (index, (_, button)) in swatches.iter().enumerate() {
+        if !custom_open && preset == Some(index) {
             button.add_css_class("selected");
         } else {
             button.remove_css_class("selected");
         }
     }
-    if custom_open || !preset_match {
+    if custom_open || preset.is_none() {
         custom.add_css_class("selected");
     } else {
         custom.remove_css_class("selected");
@@ -411,6 +418,29 @@ mod tests {
         }) else {
             return;
         };
+    }
+
+    /// The palette decision, without a toolkit.
+    ///
+    /// `sync_marks_the_preset_ring_and_rainbow_for_off_palette_colours` covers
+    /// the wiring from that decision to the `selected` class; what the decision
+    /// itself has to get right is the exact match, including the last palette
+    /// entry and the case where a colour is only *near* one.
+    #[test]
+    fn preset_index_matches_exact_palette_colours_and_rejects_near_misses() {
+        let palette = || PALETTE.iter().map(|&(_, rgb)| palette_color(rgb));
+        for (index, &(name, rgb)) in PALETTE.iter().enumerate() {
+            assert_eq!(
+                preset_index(palette_color(rgb), palette()),
+                Some(index),
+                "{name} must resolve to its own swatch"
+            );
+        }
+        // A colour a few points off Blue is not Blue: it opens as custom.
+        assert_eq!(
+            preset_index(DrawColor::new(0.13, 0.52, 0.77, 1.0), palette()),
+            None
+        );
     }
 
     #[test]

@@ -5,6 +5,12 @@ pub(super) const MIN_DIMENSION: u32 = 64;
 pub const DEFAULT_ZOOM_DURATION_SECONDS: f64 = 1.8;
 pub const DEFAULT_CURSOR_HIDE_DURATION_SECONDS: f64 = 1.8;
 pub const DEFAULT_ZOOM_SCALE: f64 = 1.8;
+/// Length and scale of a zoom the user adds to the timeline. They are longer
+/// and tighter than the clip defaults above because a zoom the user placed by
+/// hand is meant to hold on its subject, not to sit on one click the way the
+/// generated ones do.
+pub const ADD_ZOOM_DURATION_SECONDS: f64 = 3.0;
+pub const ADD_ZOOM_SCALE: f64 = 2.0;
 pub const DEFAULT_ZOOM_EASE_MS: u32 = 600;
 pub const MIN_ZOOM_SCALE: f64 = 1.2;
 pub const MAX_ZOOM_SCALE: f64 = 5.0;

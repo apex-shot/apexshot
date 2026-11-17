@@ -81,14 +81,11 @@ pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
         ("Save", config.after_capture_save),
         ("Open Annotate tool", config.after_capture_open_annotate),
         ("Open Video Editor", config.rec_video_open_editor),
+        (
+            "Automatic zoom on import",
+            config.rec_video_auto_zoom_on_import,
+        ),
     ];
-    #[cfg(target_os = "windows")]
-    let windows_after_capture_rows = [(
-        "Automatic zoom on import",
-        config.rec_video_auto_zoom_on_import,
-    )];
-    #[cfg(not(target_os = "windows"))]
-    let windows_after_capture_rows: [(&str, bool); 0] = [];
     let mut screenshot_after_capture_checks = Vec::new();
     let mut rec_copy_to_clipboard = CheckButton::new();
     let mut rec_save = CheckButton::new();
@@ -97,11 +94,7 @@ pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
     let mut rec_auto_zoom_on_import = CheckButton::new();
     rec_auto_zoom_on_import.set_active(config.rec_video_auto_zoom_on_import);
 
-    for (index, (action, active)) in after_capture_rows
-        .into_iter()
-        .chain(windows_after_capture_rows)
-        .enumerate()
-    {
+    for (index, (action, active)) in after_capture_rows.into_iter().enumerate() {
         let row = Grid::new();
         row.add_css_class("settings-table-row");
         if index % 2 == 1 {

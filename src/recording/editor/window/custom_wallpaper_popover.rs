@@ -90,6 +90,38 @@ const POPOVER_SIDEBAR_GAP: i32 = 8;
 /// this constant states.
 const PICKER_CARD_GAP: i32 = 6;
 
+/// The rect GTK seats the stop picker's card against, in the popover host's
+/// coordinate space.
+///
+/// A left-positioned popover with `valign` START reads the rect as a corner, so
+/// the seat is "the card's top-right corner `PICKER_CARD_GAP` left of the
+/// body's top-left corner": a 1px-wide probe at the body's left edge, moved the
+/// gap to its left, with the body's height. The probe is only a caret for GTK
+/// to hang the card on; the painted gap is the whole of `PICKER_CARD_GAP`.
+///
+/// Pure, so the seat can be checked without a display — a compositor seats the
+/// popup itself, which is not the part this formula decides.
+fn picker_card_seat(body: (f64, f64, f64, f64)) -> (i32, i32, i32, i32) {
+    let (x, y, _width, height) = body;
+    (
+        x as i32 - PICKER_CARD_GAP,
+        y as i32,
+        1,
+        height.max(1.0) as i32,
+    )
+}
+
+/// [`picker_card_seat`] in the form `Popover::set_pointing_to` takes.
+fn picker_card_pointing_rect(body: &gtk4::graphene::Rect) -> gtk4::gdk::Rectangle {
+    let (x, y, width, height) = picker_card_seat((
+        body.x() as f64,
+        body.y() as f64,
+        body.width() as f64,
+        body.height() as f64,
+    ));
+    gtk4::gdk::Rectangle::new(x, y, width, height)
+}
+
 /// The editable state behind the Custom fill popover, as four closures. Keeping
 /// it state-free is what lets the video editor (its `VideoBackground`) and the
 /// image editor's Motion Appearance (its own fields) share one popover.
@@ -1683,18 +1715,15 @@ fn build_gradient_page(
         move |_| card_up.set(false)
     });
 
-    // Show the card. The rect is in the host's coordinate space — the space
-    // GTK measures a popover's rect in, and the space this card's parent lives
-    // in — and with `valign` START it is read as a corner, so the seat is
-    // simply "the card's top-right corner PICKER_CARD_GAP left of the body's
-    // top-left corner". PICKER_CARD_GAP is the whole visible gap: the card fills
-    // its own surface, so the painted corner is the corner GTK seats. The body's
-    // top-left is read back in the host's space on every open, because the
-    // popover's own seat moves when the panel scrolls. Measured rather than
-    // derived: see `the_card_hangs_clear_of_the_popover_beside_it`. A seat built
-    // from the page or a tile is what tucked the card under the popover.
-    // `was_selected` lets a second click on the same tile close the card
-    // instead of leaving it up.
+    // Show the card. The body's box is read back in the host's space on every
+    // open, because the popover's own seat moves when the panel scrolls, and
+    // `picker_card_seat` turns it into the rect GTK hangs the card on. That
+    // formula is the whole spacing (the card fills its own surface, so the
+    // painted corner is the corner GTK seats) and it is checked without a
+    // display: see `the_picker_card_seat_hangs_exactly_the_gap_left_of_the_body`.
+    // A seat built from the page or a tile is what tucked the card under the
+    // popover. `was_selected` lets a second click on the same tile close the
+    // card instead of leaving it up.
     let open_picker: Rc<dyn Fn(bool)> = {
         let picker_popover = picker_popover.clone();
         let card_body = card_body.clone();
@@ -1707,12 +1736,7 @@ fn build_gradient_page(
                 return;
             }
             if let Some(body) = card_body.compute_bounds(&popover_host) {
-                picker_popover.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(
-                    body.x() as i32 - PICKER_CARD_GAP,
-                    body.y() as i32,
-                    1,
-                    body.height().max(1.0) as i32,
-                )));
+                picker_popover.set_pointing_to(Some(&picker_card_pointing_rect(&body)));
             }
             card_up.set(true);
             picker_popover.popup();
@@ -2958,50 +2982,57 @@ mod tests {
         }
     }
 
-    /// The seat, measured rather than derived.
+    /// The seat is a formula, so it is checked without a display.
     ///
-    /// This is the test that would have caught every wrong seat: the card is
-    /// built exactly as the real one is — hung off the panel as the popover's
-    /// sibling, pointing at the popover body's box read in that panel's space —
-    /// and both boxes are measured back from the same space. Getting the space
-    /// wrong moved the card by ~150px — up over the video — so the band checked
-    /// below is wide enough for the harness's own placement offset and nowhere
-    /// near wide enough to pass a wrong seat.
+    /// The failure the old measurement existed for was a seat stated in the
+    /// wrong space: the card hung off the page or a tile instead of the popover
+    /// body, which put it ~150px up, over the video. That is a property of
+    /// `picker_card_seat`'s inputs, not of any compositor's placement, and the
+    /// measured version could not state the gap anyway — a bare window seats a
+    /// left-positioned popup a few pixels off, so it could only check a wide
+    /// band. Here the number is exact.
     #[test]
-    fn the_card_hangs_clear_of_the_popover_beside_it() {
+    fn the_picker_card_seat_hangs_exactly_the_gap_left_of_the_body() {
+        // A body at the panel's left edge, 236x300 as the real one requests.
+        let body = (300.0, 100.0, 236.0, 300.0);
+        let seat = super::picker_card_seat(body);
+        assert_eq!(seat, (300 - PICKER_CARD_GAP, 100, 1, 300));
+        // A left-positioned, top-aligned popover puts the card's top-right
+        // corner on the probe's left edge, so the painted gap is the whole of
+        // PICKER_CARD_GAP and the card is level with the body's top.
+        assert_eq!(body.0 as i32 - seat.0, PICKER_CARD_GAP);
+        assert_eq!(seat.1, body.1 as i32);
+        // The probe is a caret, not the gap: a wider one would move the card.
+        assert_eq!(seat.2, 1);
+        assert_eq!(seat.3, body.3 as i32);
+
+        // The panel scrolls, so the body's box can sit left of its parent's
+        // origin; the gap still measures from the body's own edge.
+        assert_eq!(
+            super::picker_card_seat((-40.0, 12.0, 236.0, 80.0)),
+            (-40 - PICKER_CARD_GAP, 12, 1, 80)
+        );
+        // A collapsed body still gets a probe GTK can hang the card on.
+        assert_eq!(super::picker_card_seat((10.0, 20.0, 236.0, 0.0)).3, 1);
+    }
+
+    /// The arrangement itself, on a live toolkit: production parents the card
+    /// to the panel as the host popover's sibling and gives it its own popup.
+    /// Where a compositor then puts it is that compositor's business, so this
+    /// only checks that both popups map and the card lays out.
+    #[test]
+    fn the_picker_card_popover_maps_beside_the_popover_body() {
         let Some(()) = crate::test_support::with_gtk(|| {
             let window = gtk4::Window::new();
             window.set_default_size(1200, 800);
             let panel = GtkBox::new(Orientation::Vertical, 0);
             window.set_child(Some(&panel));
 
-            // The app's own rules for these two popovers, sliced out of the real
-            // stylesheet the editor ships, so what is measured below is what
-            // production paints. They matter to the measurement: the strip that
-            // paints away the host theme's popover surface is what makes the
-            // body's box the popover's own edge and the card's box the card's own
-            // surface. Read from the file rather than restated so the two cannot
-            // drift.
-            let css = include_str!("../ui_support_css/09.css");
-            let popover_css = &css[css
-                .find("/* ── Custom Wallpaper popover ──")
-                .expect("09.css must have a Custom Wallpaper popover section")..];
-            let provider = gtk4::CssProvider::new();
-            provider.load_from_data(popover_css);
-            if let Some(display) = gtk4::gdk::Display::default() {
-                gtk4::style_context_add_provider_for_display(
-                    &display,
-                    &provider,
-                    gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
-                );
-            }
-
             let host = Popover::new();
             host.set_has_arrow(false);
-            // As production builds it. An autohiding host takes the modal grab,
-            // and the card is a *sibling* popup outside that grab's surface tree,
-            // so the compositor dismissed the host the moment the card opened —
-            // the test then measured a dismissed popover's box.
+            // As production builds it: an autohiding host takes the modal grab,
+            // and the card is a *sibling* popup outside that grab's surface
+            // tree, so the host would be dismissed the moment the card opened.
             host.set_autohide(false);
             host.add_css_class("recording-editor-custom-popover");
             host.set_position(gtk4::PositionType::Left);
@@ -3016,11 +3047,7 @@ mod tests {
             card_popover.set_position(gtk4::PositionType::Left);
             card_popover.set_autohide(false);
             card_popover.set_valign(Align::Start);
-            // Production's layout: the card is the popover's sibling, parented
-            // to the panel, so neither popup can outlive the other's surface.
             card_popover.set_parent(&panel);
-            // Built as production builds it: the card box *is* the card's
-            // painted box, with nothing held back inside the surface around it.
             let card_box = GtkBox::new(Orientation::Vertical, 0);
             card_box.add_css_class("recording-editor-gradient-picker-card");
             let card_body = GtkBox::new(Orientation::Vertical, 0);
@@ -3031,7 +3058,7 @@ mod tests {
             window.present();
             // Surfaces are positioned by the compositor, so the loop has to run
             // in real time: spinning the context without waiting reads the
-            // popup's position before Wayland has answered.
+            // popup before it has mapped.
             let pump = || {
                 let ctx = gtk4::glib::MainContext::default();
                 let deadline = std::time::Instant::now() + std::time::Duration::from_millis(250);
@@ -3046,24 +3073,16 @@ mod tests {
             pump();
 
             if let Some(body_box) = body.compute_bounds(&panel) {
-                card_popover.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(
-                    body_box.x() as i32 - PICKER_CARD_GAP,
-                    body_box.y() as i32,
-                    1,
-                    body_box.height().max(1.0) as i32,
-                )));
+                card_popover.set_pointing_to(Some(&super::picker_card_pointing_rect(&body_box)));
             }
             card_popover.popup();
             pump();
 
-            // Both boxes in the panel's own space. A popover's layout transform
-            // is what GTK uses to place it, and the panel is the space both
-            // popovers are parented in.
-            let body_rect = body.compute_bounds(&panel);
-            let painted = card_box.compute_bounds(&panel);
+            let host_mapped = host.surface().is_some_and(|surface| surface.is_mapped());
             let card_mapped = card_popover
                 .surface()
                 .is_some_and(|surface| surface.is_mapped());
+            let painted = card_box.compute_bounds(&panel);
             card_popover.popdown();
             pump();
             card_popover.unparent();
@@ -3072,44 +3091,17 @@ mod tests {
             window.destroy();
 
             if !card_mapped {
-                eprintln!("skipping: the compositor did not position the surfaces");
+                eprintln!("skipping: the compositor did not map the card's surface");
                 return;
             }
-            let (Some(body_rect), Some(painted)) = (body_rect, painted) else {
-                eprintln!("skipping: the widgets have no bounds");
-                return;
-            };
-
-            // The seat is "the card's top-right corner PICKER_CARD_GAP left of
-            // the body's top-left corner", and in the editor that number is the
-            // whole visible gap: both cards carry the app's own surface, so the
-            // card's painted box is the box GTK seats, and the popover body's
-            // left edge is the edge it hangs off.
-            //
-            // What this test cannot do is assert the number itself. It stands up
-            // a bare `gtk4::Window` instead of the editor shell, and GTK seats a
-            // left-positioned popover ~14px right of the rect it is given in
-            // there; in the editor it does not, which is what the two cards
-            // sitting level to the pixel in the reference measurement shows. So
-            // the painted gap reads single digits in here instead of 6. The six
-            // pixels are pinned where they can be read exactly — on the constant,
-            // by `the_picker_card_keeps_exactly_the_references_six_pixels_clear`
-            // — and this test's job is the failure the measurement exists for: a
-            // seat stated in the wrong space, which lands the card ~150px away,
-            // or a card that never opens at all. Hence the wide band.
-            let gap = body_rect.x() as i32 - (painted.x() + painted.width()) as i32;
             assert!(
-                (-24..=32).contains(&gap),
-                "the card must hang beside the popover's edge, not {gap}px away"
+                host_mapped,
+                "the card must not dismiss the popover it hangs off"
             );
-            // The failure this guards is vertical: a centred rect put the
-            // card's corner where its centre belonged, ~150px up, which is the
-            // "card over the video" the seat kept producing.
-            let painted_top = painted.y() as i32;
-            let body_top = body_rect.y() as i32;
+            let painted = painted.expect("the card box lays out inside its popup");
             assert!(
-                (painted_top - body_top).abs() <= 24,
-                "the card must be level with the popover: card top {painted_top} vs body top {body_top}"
+                painted.width() > 0.0 && painted.height() > 0.0,
+                "the card box must fill the card's surface: {painted:?}"
             );
         }) else {
             eprintln!("skipping: no display available");

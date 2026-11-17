@@ -33,6 +33,18 @@ pub(super) fn relative_camera_transform(
     (sample.0 - current.0 * sx, sample.1 - current.1 * sy, sx, sy)
 }
 
+/// Progress at which the `extra`-th motion-blur sample joins the running
+/// average: sample 1 of N at 1/2, sample 2 at 1/3, and so on.
+///
+/// `CrossFadeNode` returns `a * (1 - p) + b * p`, so blending extra sample
+/// `extra` at `1 / (extra + 2)` leaves each of the `extra + 2` samples blended
+/// so far weighted exactly `1 / (extra + 2)`. After the last sample every one
+/// weighs `1 / N`, the same arithmetic the exporter's `mix` performs with unit
+/// weights and a `1 / N` scale.
+pub(super) fn running_average_progress(extra: usize) -> f32 {
+    1.0 / (extra + 2) as f32
+}
+
 mod imp {
     use super::*;
 
@@ -107,15 +119,22 @@ mod imp {
             let Some(node) = content.to_node() else {
                 return;
             };
+            // A running average, not a stack of ghosts: the current frame is
+            // the base and each extra sample is cross-faded in at 1/(k+1), so
+            // the finished node weighs every sample exactly 1/N. That matches
+            // the exporter's equal-weight average of the same N camera samples.
             let mut average = node.clone();
-            for (index, &(tx, ty, sx, sy)) in samples.iter().enumerate() {
+            for (extra, &(tx, ty, sx, sy)) in samples.iter().enumerate() {
                 let transform = gtk4::gsk::Transform::new()
                     .translate(&gtk4::graphene::Point::new(tx as f32, ty as f32))
                     .scale(sx as f32, sy as f32);
                 let sample = gtk4::gsk::TransformNode::new(&node, &transform);
-                average =
-                    gtk4::gsk::CrossFadeNode::new(&average, &sample, 1.0 / (index + 2) as f32)
-                        .upcast();
+                average = gtk4::gsk::CrossFadeNode::new(
+                    &average,
+                    &sample,
+                    running_average_progress(extra),
+                )
+                .upcast();
             }
             snapshot.append_node(&average);
         }
@@ -411,10 +430,51 @@ mod tests {
                 }],
             }));
             let (warped, warped_pixels) = render();
-            assert_ne!(sharp_pixels, warped_pixels);
             assert_eq!(warped_pixels[3], 0);
+            // Far from the click the warp must leave the footage where it was.
+            //
+            // Not byte for byte: the warped frame is read back from the
+            // window's own renderer, while this reference is a fresh Cairo
+            // renderer, and a GL-backed session applies its colour transform to
+            // that read-back (measured: a uniform 5% darkening, 11 of 255 on the
+            // brightest grid channel). What the contract has to say is that the
+            // footage keeps its colour and its place out there.
+            //
+            // The grid is what makes the tolerance safe: the sampled pixel sits
+            // on a line 20px from the background on either side, and the warp
+            // moves nothing at this distance, so a warp that reached it would
+            // turn the line into background (a difference near 170, not 11).
             let far = (40 * width + 40) * 4;
-            assert_eq!(&sharp_pixels[far..far + 4], &warped_pixels[far..far + 4]);
+            let sharp_far = &sharp_pixels[far..far + 3];
+            assert!(
+                sharp_far
+                    .iter()
+                    .map(|&channel| u32::from(channel))
+                    .sum::<u32>()
+                    > 300,
+                "the sampled far pixel must sit on a grid line, not background: {sharp_far:?}"
+            );
+            for (sharp, warped) in sharp_far.iter().zip(&warped_pixels[far..far + 3]) {
+                assert!(
+                    sharp.abs_diff(*warped) <= 16,
+                    "far footage keeps its colour outside the ripple: {sharp} became {warped}"
+                );
+            }
+            assert_eq!(warped_pixels[far + 3], 255, "the card mask is fixed");
+            // ...and the ripple is real where it acts, by far more than the
+            // tolerance above, so the tolerance cannot hide a missing warp.
+            let displaced = (0..height).any(|y| {
+                (0..width).any(|x| {
+                    let at = (y * width + x) * 4;
+                    (0..3).any(|channel| {
+                        sharp_pixels[at + channel].abs_diff(warped_pixels[at + channel]) > 60
+                    })
+                })
+            });
+            assert!(
+                displaced,
+                "the ripple must displace footage near the click, not just recolour it"
+            );
             clip.set_camera_samples((1..8).map(|index| (index as f64, 0.0, 1.0, 1.0)).collect());
             let (blurred, blurred_pixels) = render();
             assert_eq!(blurred_pixels[3], 0);
@@ -627,6 +687,30 @@ mod tests {
         }) else {
             return;
         };
+    }
+
+    #[test]
+    fn running_average_weights_every_sample_equally() {
+        // Simulate the nested cross-fades: the base is sample 0, and extra
+        // sample `extra` joins the running average at `running_average_progress`.
+        for total in 1..=8usize {
+            let mut weights = vec![1.0_f64];
+            for extra in 0..total.saturating_sub(1) {
+                let progress = f64::from(super::running_average_progress(extra));
+                for weight in &mut weights {
+                    *weight *= 1.0 - progress;
+                }
+                weights.push(progress);
+            }
+            assert_eq!(weights.len(), total);
+            for (index, weight) in weights.iter().enumerate() {
+                assert!(
+                    (weight - 1.0 / total as f64).abs() < 1e-6,
+                    "sample {index} of {total} weighs {weight}, not {}",
+                    1.0 / total as f64
+                );
+            }
+        }
     }
 
     #[test]

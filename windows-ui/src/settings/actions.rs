@@ -72,7 +72,6 @@ pub struct SaveInputs {
     pub shortcut_capture_crosshair: Button,
     pub shortcut_capture_previous_area: Button,
     pub shortcut_capture_fullscreen: Button,
-    pub shortcut_capture_window: Button,
     pub shortcut_show_last_preview: Button,
     pub shortcut_save_last_capture: Button,
     pub shortcut_record_screen: Button,
@@ -328,7 +327,6 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<SaveOutcome> {
     config.shortcut_capture_previous_area =
         button_label_value(&inputs.shortcut_capture_previous_area);
     config.shortcut_capture_fullscreen = button_label_value(&inputs.shortcut_capture_fullscreen);
-    config.shortcut_capture_window.clear();
     config.shortcut_show_last_preview = button_label_value(&inputs.shortcut_show_last_preview);
     config.shortcut_save_last_capture = button_label_value(&inputs.shortcut_save_last_capture);
     config.shortcut_open_recording_ui.clear();

@@ -5,9 +5,6 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-pub const DEFAULT_PREVIEW_AUTO_CLOSE_SECONDS: u32 = 12;
-pub const MIN_PREVIEW_AUTO_CLOSE_SECONDS: u32 = 3;
-pub const MAX_PREVIEW_AUTO_CLOSE_SECONDS: u32 = 120;
 pub const DEFAULT_SHUTTER_SOUND: &str = "Camera";
 /// UI color theme. `system` follows the desktop; `light` and `dark` force it.
 pub const DEFAULT_UI_THEME: &str = "system";
@@ -34,7 +31,6 @@ static CONFIG_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
-    pub preview_auto_close_seconds: u32,
     pub start_at_login: bool,
     pub play_sounds: bool,
     pub shutter_sound: String,
@@ -46,7 +42,6 @@ pub struct AppConfig {
     /// When true, the video editor Save dialog reopens in the last export folder.
     pub rec_remember_export_folder: bool,
     pub last_video_export_dir: String,
-    pub hide_desktop_icons_while_capturing: bool,
     pub after_capture_show_quick_access: bool,
     pub after_capture_copy_file_to_clipboard: bool,
     pub after_capture_save: bool,
@@ -57,7 +52,6 @@ pub struct AppConfig {
     pub rec_after_capture_show_quick_access: bool,
     // Recording General tab settings
     pub rec_controls: bool,
-    pub rec_display_time: bool,
     pub rec_hidpi: bool,
     pub rec_notifications: bool,
     pub rec_cursor: bool,
@@ -70,7 +64,6 @@ pub struct AppConfig {
     pub last_selection_w: Option<i32>,
     pub last_selection_h: Option<i32>,
     // Recording Video tab settings
-    pub rec_video_format: u8,
     pub rec_video_max_res: u8,
     pub rec_video_fps: u8,
     /// 0 = Balanced (CRF 23), 1 = High (CRF 20), 2 = Ultra (CRF 16).
@@ -108,7 +101,6 @@ pub struct AppConfig {
     pub rec_webcam_rel_y: f64,
     // Quick Access settings
     pub quick_access_position: String,
-    pub quick_access_multi_display: bool,
     pub quick_access_overlay_size: f64,
     pub quick_access_auto_close_enabled: bool,
     pub quick_access_auto_close_action: String,
@@ -117,8 +109,6 @@ pub struct AppConfig {
     pub quick_access_close_after_uploading: bool,
     // Screenshots tab settings
     pub screenshot_format: String,
-    pub screenshot_retina_scale: bool,
-    pub screenshot_frame_border: bool,
     pub screenshot_freeze_screen: bool,
     pub screenshot_crosshair_mode: String,
     pub screenshot_show_magnifier: bool,
@@ -143,26 +133,15 @@ pub struct AppConfig {
     pub skip_static_to_motion_confirm: bool,
     /// Skip the Motion → Static confirm that motion segments will be cleared.
     pub skip_motion_to_static_confirm: bool,
-    // Wallpaper settings
-    pub wallpaper_mode: String,
-    pub wallpaper_dont_change_on_space: bool,
-    pub wallpaper_custom_path: String,
-    pub wallpaper_plain_color: String,
-    pub window_screenshot_mode: String,
-    pub window_screenshot_padding: f64,
-    pub window_screenshot_shadow: bool,
     // Shortcut settings
-    pub shortcut_toggle_desktop_icons: String,
     pub shortcut_open_file: String,
     pub shortcut_open_from_clipboard: String,
-    pub shortcut_pin_to_screen: String,
     pub shortcut_restore_recently_closed: String,
     pub shortcut_toggle_overlays: String,
     pub shortcut_capture_area: String,
     pub shortcut_capture_crosshair: String,
     pub shortcut_capture_previous_area: String,
     pub shortcut_capture_fullscreen: String,
-    pub shortcut_capture_window: String,
     pub shortcut_capture_menu: String,
     pub shortcut_show_last_preview: String,
     pub shortcut_save_last_capture: String,
@@ -176,10 +155,6 @@ pub struct AppConfig {
     /// Windows only: mark the current moment of the running recording.
     pub shortcut_recording_marker: String,
     // Cloud settings
-    pub cloud_screenshot_quality: String,
-    pub cloud_copy_to_clipboard: String,
-    pub cloud_show_recently_uploaded: bool,
-    pub cloud_ask_name_tags: bool,
     pub cloud_user_name: String,
     pub cloud_user_email: String,
     pub cloud_pro_plan: bool,
@@ -200,16 +175,10 @@ pub struct AppConfig {
     /// Upload button on Quick Access / the editor).
     pub cloud_auto_upload_after_capture: bool,
     // Advanced settings
-    pub adv_filename_pattern: String,
-    pub adv_ask_name_after_capture: bool,
     pub adv_retina_suffix: bool,
     pub adv_clipboard_mode: String,
-    pub adv_pinned_rounded_corners: bool,
-    pub adv_pinned_shadow: bool,
-    pub adv_pinned_border: bool,
     pub adv_ocr_language: String,
     pub adv_ocr_keep_line_breaks: bool,
-    pub adv_filename_use_utc: bool,
     /// Anonymous usage heartbeat (daemon). Opt out in Settings or via
     /// `APEXSHOT_TELEMETRY=0`. Default on to match install-script telemetry.
     pub telemetry_enabled: bool,
@@ -226,7 +195,6 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            preview_auto_close_seconds: DEFAULT_PREVIEW_AUTO_CLOSE_SECONDS,
             start_at_login: false,
             play_sounds: true,
             shutter_sound: DEFAULT_SHUTTER_SOUND.to_string(),
@@ -237,7 +205,6 @@ impl Default for AppConfig {
             rec_filename_pattern: "ApexShot Recording {Date} at {Time}".to_string(),
             rec_remember_export_folder: true,
             last_video_export_dir: String::new(),
-            hide_desktop_icons_while_capturing: false,
             after_capture_show_quick_access: DEFAULT_AFTER_CAPTURE_SHOW_QUICK_ACCESS,
             after_capture_copy_file_to_clipboard: DEFAULT_AFTER_CAPTURE_COPY_FILE_TO_CLIPBOARD,
             after_capture_save: DEFAULT_AFTER_CAPTURE_SAVE,
@@ -246,7 +213,6 @@ impl Default for AppConfig {
             rec_after_capture_save: DEFAULT_REC_AFTER_CAPTURE_SAVE,
             rec_after_capture_show_quick_access: DEFAULT_REC_AFTER_CAPTURE_SHOW_QUICK_ACCESS,
             rec_controls: true,
-            rec_display_time: false,
             rec_hidpi: true,
             rec_notifications: true,
             rec_cursor: true,
@@ -258,7 +224,6 @@ impl Default for AppConfig {
             last_selection_w: None,
             last_selection_h: None,
             // Video tab defaults
-            rec_video_format: 0,  // 0 = MP4
             rec_video_max_res: 0, // 0 = Original
             rec_video_fps: 1,     // 1 = 30fps
             rec_video_quality: 1, // 1 = High
@@ -279,7 +244,6 @@ impl Default for AppConfig {
             rec_webcam_rel_x: 1.0,
             rec_webcam_rel_y: 0.0,
             quick_access_position: "Left".to_string(),
-            quick_access_multi_display: true,
             quick_access_overlay_size: QUICK_ACCESS_OVERLAY_SCALE_BASELINE,
             quick_access_auto_close_enabled: false,
             quick_access_auto_close_action: "Close".to_string(),
@@ -287,8 +251,6 @@ impl Default for AppConfig {
             quick_access_close_after_dragging: true,
             quick_access_close_after_uploading: true,
             screenshot_format: "PNG".to_string(),
-            screenshot_retina_scale: false,
-            screenshot_frame_border: false,
             screenshot_freeze_screen: true,
             screenshot_crosshair_mode: "Disabled".to_string(),
             screenshot_show_magnifier: false,
@@ -305,17 +267,8 @@ impl Default for AppConfig {
             annotate_tool_colors: std::collections::BTreeMap::new(),
             skip_static_to_motion_confirm: false,
             skip_motion_to_static_confirm: false,
-            wallpaper_mode: "Desktop".to_string(),
-            wallpaper_dont_change_on_space: false,
-            wallpaper_custom_path: String::new(),
-            wallpaper_plain_color: "#b0c4de".to_string(), // LightSteelBlue from image
-            window_screenshot_mode: "Wallpaper".to_string(),
-            window_screenshot_padding: 0.5,
-            window_screenshot_shadow: true,
-            shortcut_toggle_desktop_icons: "Ctrl+Super+H".to_string(),
             shortcut_open_file: String::new(),
             shortcut_open_from_clipboard: String::new(),
-            shortcut_pin_to_screen: String::new(),
             shortcut_restore_recently_closed: String::new(),
             shortcut_toggle_overlays: String::new(),
             shortcut_capture_area: if cfg!(target_os = "windows") {
@@ -332,8 +285,6 @@ impl Default for AppConfig {
                 "Shift+Super+3"
             }
             .to_string(),
-            // Empty because legacy direct window capture is disabled; Quick Capture still offers Window.
-            shortcut_capture_window: String::new(),
             shortcut_capture_menu: if cfg!(target_os = "windows") {
                 "Ctrl+Alt+Shift+M"
             } else {
@@ -348,10 +299,6 @@ impl Default for AppConfig {
             shortcut_recording_pause: "Ctrl+Alt+Shift+P".to_string(),
             shortcut_recording_restart: "Ctrl+Alt+Shift+R".to_string(),
             shortcut_recording_marker: "Ctrl+Alt+Shift+K".to_string(),
-            cloud_screenshot_quality: "Optimized for sharing".to_string(),
-            cloud_copy_to_clipboard: "ApexShot Cloud link".to_string(),
-            cloud_show_recently_uploaded: true,
-            cloud_ask_name_tags: false,
             cloud_user_name: String::new(),
             cloud_user_email: String::new(),
             cloud_pro_plan: false,
@@ -364,16 +311,10 @@ impl Default for AppConfig {
             xbackbone_url: String::new(),
             xbackbone_api_token: String::new(),
             cloud_auto_upload_after_capture: true,
-            adv_filename_pattern: "ApexShot {Date} at {Time}".to_string(),
-            adv_ask_name_after_capture: false,
             adv_retina_suffix: true,
             adv_clipboard_mode: "File & Image (default)".to_string(),
-            adv_pinned_rounded_corners: true,
-            adv_pinned_shadow: true,
-            adv_pinned_border: true,
             adv_ocr_language: "eng".to_string(),
             adv_ocr_keep_line_breaks: true,
-            adv_filename_use_utc: false,
             // Flatpak: off until the user explicitly opts in (plan §10.3 / §9.4).
             telemetry_enabled: !cfg!(feature = "flatpak"),
             windows_telemetry_enabled: false,
@@ -385,10 +326,6 @@ impl Default for AppConfig {
 
 impl AppConfig {
     pub fn sanitized(mut self) -> Self {
-        self.preview_auto_close_seconds = self.preview_auto_close_seconds.clamp(
-            MIN_PREVIEW_AUTO_CLOSE_SECONDS,
-            MAX_PREVIEW_AUTO_CLOSE_SECONDS,
-        );
         self.shutter_sound = sanitize_shutter_sound(self.shutter_sound);
         self.export_location = self.export_location.trim().to_string();
         self.screenshot_export_location = self.screenshot_export_location.trim().to_string();
@@ -413,7 +350,6 @@ impl AppConfig {
         {
             self.after_capture_show_quick_access = DEFAULT_AFTER_CAPTURE_SHOW_QUICK_ACCESS;
         }
-        self.rec_video_format = self.rec_video_format.min(1);
         self.rec_video_codec = self.rec_video_codec.min(1);
         self.rec_video_default_preset = self
             .rec_video_default_preset
@@ -463,17 +399,6 @@ impl AppConfig {
             "Disabled" | "Crosshair" | "Magnifier" => self.screenshot_crosshair_mode,
             _ => "Disabled".to_string(),
         };
-        self.wallpaper_mode = match self.wallpaper_mode.as_str() {
-            "Desktop" | "Custom" | "Color" => self.wallpaper_mode,
-            _ => "Desktop".to_string(),
-        };
-        self.window_screenshot_mode = match self.window_screenshot_mode.as_str() {
-            "Wallpaper" | "Transparent" => self.window_screenshot_mode,
-            _ => "Wallpaper".to_string(),
-        };
-        self.window_screenshot_padding = self.window_screenshot_padding.clamp(0.0, 1.0);
-        // Drop legacy direct-window hotkeys; Quick Capture still offers Window.
-        self.shortcut_capture_window.clear();
         self.cloud_destination = match self.cloud_destination.as_str() {
             "apexshot" | "xbackbone" => self.cloud_destination,
             _ => "apexshot".to_string(),
@@ -963,12 +888,9 @@ mod tests {
     }
 
     #[test]
-    fn default_config_has_expected_auto_close_seconds() {
+    fn default_config_has_expected_video_fps() {
         let cfg = AppConfig::default();
-        assert_eq!(
-            cfg.preview_auto_close_seconds,
-            DEFAULT_PREVIEW_AUTO_CLOSE_SECONDS
-        );
+        assert_eq!(cfg.rec_video_fps, 1);
     }
 
     #[test]
@@ -977,7 +899,7 @@ mod tests {
         let config = AppConfig {
             cloud_api_token: "test-access-token".into(),
             cloud_refresh_token: "test-refresh-token".into(),
-            preview_auto_close_seconds: 42,
+            rec_video_fps: 2,
             ..AppConfig::default()
         };
         let serialized = serde_yml::to_string(&config).unwrap();
@@ -987,7 +909,7 @@ mod tests {
         let saved: AppConfig = serde_yml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert!(saved.cloud_api_token == config.cloud_api_token);
         assert!(saved.cloud_refresh_token == config.cloud_refresh_token);
-        assert_eq!(saved.preview_auto_close_seconds, 42);
+        assert_eq!(saved.rec_video_fps, 2);
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -1012,7 +934,7 @@ mod tests {
     fn invalid_config_write_preserves_the_previous_file() {
         let path = temporary_config_path();
         fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let previous = "preview_auto_close_seconds: 42\n";
+        let previous = "rec_video_fps: 2\n";
         fs::write(&path, previous).unwrap();
 
         assert!(write_config_atomically(&path, "[invalid yaml").is_err());
@@ -1066,10 +988,37 @@ mod tests {
 
     #[test]
     fn legacy_config_defaults_new_image_export_preferences_safely() {
-        let loaded: AppConfig = serde_yml::from_str("preview_auto_close_seconds: 12\n").unwrap();
+        let loaded: AppConfig = serde_yml::from_str("rec_video_fps: 1\n").unwrap();
 
         assert!(!loaded.annotate_close_after_export);
         assert!(!loaded.annotate_overwrite_original_image);
+    }
+
+    #[test]
+    fn configs_containing_removed_keys_still_load() {
+        // `AppConfig` has no `deny_unknown_fields`, so a config written by an
+        // older build must still load after a field is removed.
+        let raw = r#"{
+            "preview_auto_close_seconds": 42,
+            "hide_desktop_icons_while_capturing": true,
+            "rec_video_format": 1,
+            "wallpaper_mode": "Custom",
+            "shortcut_capture_window": "Shift+Super+5",
+            "cloud_screenshot_quality": "Lossless",
+            "adv_filename_pattern": "Old",
+            "rec_video_fps": 3,
+            "start_at_login": true
+        }"#;
+
+        let config: AppConfig = serde_yml::from_str(raw).unwrap();
+
+        assert_eq!(config.rec_video_fps, 3);
+        assert!(config.start_at_login);
+        assert_eq!(
+            config.rec_filename_pattern,
+            "ApexShot Recording {Date} at {Time}"
+        );
+        assert_eq!(config.cloud_destination, "apexshot");
     }
 
     #[test]
@@ -1188,29 +1137,6 @@ mod tests {
         }
         .sanitized();
         assert_eq!(unknown.ui_theme, DEFAULT_UI_THEME);
-    }
-
-    #[test]
-    fn sanitize_clamps_auto_close_seconds() {
-        let low = AppConfig {
-            preview_auto_close_seconds: 0,
-            ..AppConfig::default()
-        }
-        .sanitized();
-        assert_eq!(
-            low.preview_auto_close_seconds,
-            MIN_PREVIEW_AUTO_CLOSE_SECONDS
-        );
-
-        let high = AppConfig {
-            preview_auto_close_seconds: 999,
-            ..AppConfig::default()
-        }
-        .sanitized();
-        assert_eq!(
-            high.preview_auto_close_seconds,
-            MAX_PREVIEW_AUTO_CLOSE_SECONDS
-        );
     }
 
     #[test]
@@ -1462,7 +1388,6 @@ mod tests {
     fn recording_settings_have_correct_defaults() {
         let cfg = AppConfig::default();
         assert!(cfg.rec_controls);
-        assert!(!cfg.rec_display_time);
         assert!(cfg.rec_hidpi);
         assert!(cfg.rec_notifications);
         assert!(cfg.rec_cursor);
@@ -1472,7 +1397,6 @@ mod tests {
         assert!(cfg.rec_dim_screen);
         assert!(cfg.rec_countdown);
         assert!(cfg.last_selection_x.is_none());
-        assert_eq!(cfg.rec_video_format, 0);
     }
 
     #[test]
@@ -1591,19 +1515,18 @@ mod tests {
 
     #[test]
     fn config_without_recording_settings_uses_defaults() {
-        let yaml = "preview_auto_close_seconds: 12\nstart_at_login: false\n";
+        let yaml = "rec_video_fps: 1\nstart_at_login: false\n";
         let cfg: AppConfig = serde_yml::from_str(yaml).unwrap();
         assert!(!cfg.rec_mic);
         assert!(!cfg.rec_speaker);
         assert!(cfg.rec_controls);
         assert!(cfg.rec_cursor);
         assert!(cfg.rec_hidpi);
-        assert_eq!(cfg.rec_video_format, 0);
     }
 
     #[test]
     fn automatic_zoom_on_import_defaults_on_when_the_key_is_missing() {
-        let yaml = "preview_auto_close_seconds: 12\n";
+        let yaml = "rec_video_fps: 1\n";
         let cfg: AppConfig = serde_yml::from_str(yaml).unwrap();
         assert!(cfg.rec_video_auto_zoom_on_import);
     }
@@ -1623,7 +1546,7 @@ mod tests {
 
     #[test]
     fn capture_keystrokes_defaults_off_when_the_key_is_missing() {
-        let yaml = "preview_auto_close_seconds: 12\n";
+        let yaml = "rec_video_fps: 1\n";
         let cfg: AppConfig = serde_yml::from_str(yaml).unwrap();
         assert!(!cfg.rec_capture_keystrokes);
     }
@@ -1643,7 +1566,7 @@ mod tests {
 
     #[test]
     fn default_video_preset_is_unset_when_the_key_is_missing() {
-        let yaml = "preview_auto_close_seconds: 12\nrec_video_open_editor: true\n";
+        let yaml = "rec_video_fps: 1\nrec_video_open_editor: true\n";
         let cfg: AppConfig = serde_yml::from_str(yaml).unwrap();
 
         assert!(cfg.rec_video_default_preset.is_none());
@@ -1743,7 +1666,7 @@ mod tests {
     #[test]
     fn legacy_quick_access_overlay_size_migrates_only_for_old_schema() {
         let legacy_raw = r#"
-preview_auto_close_seconds: 12
+rec_video_fps: 1
 quick_access_overlay_size: 0.5
 "#;
         let legacy_cfg = serde_yml::from_str::<AppConfig>(legacy_raw)
@@ -1755,7 +1678,7 @@ quick_access_overlay_size: 0.5
         ));
 
         let current_raw = r#"
-preview_auto_close_seconds: 12
+rec_video_fps: 1
 quick_access_position: Right
 quick_access_overlay_size: 0.5
 "#;

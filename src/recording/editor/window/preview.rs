@@ -4,15 +4,15 @@ use crate::recording::editor::model::background_render::render_gradient;
 use crate::recording::editor::model::{
     float_crop_rect, format_timecode, source_to_zoomed_point, view_to_source,
     zoom_camera_transform, ClickEffect, CursorSettings, ExportQuality, VideoBackground,
-    VideoEditState, VideoGradient, ZoomClip, ZoomMode, FRAME_ASPECT_RATIOS,
+    VideoEditState, VideoGradient, ZoomMode, FRAME_ASPECT_RATIOS,
 };
 use crate::recording::editor::ripple_preview::{PreviewRipple, PreviewRippleClick};
 use crate::recording::editor::sidecar::CursorMotion;
 use crate::settings::ui_support::align_popover_to_trigger;
 use gtk4::{
     gdk, glib, prelude::*, Align, ApplicationWindow, AspectFrame, Box as GtkBox, Button,
-    CssProvider, DrawingArea, GestureDrag, Image, Label, MediaFile, Orientation, Overlay, Picture,
-    Popover, Separator,
+    CssProvider, DrawingArea, EventControllerMotion, GestureClick, GestureDrag, Image, Label,
+    MediaFile, Orientation, Overlay, Picture, Popover, Separator,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -24,15 +24,16 @@ pub(super) fn build_preview(
     state: Arc<Mutex<VideoEditState>>,
     estimate_label: Label,
 ) -> (GtkBox, MediaFile, Button) {
-    build_preview_inner(state, estimate_label, None, true)
+    build_preview_inner(state, estimate_label, None, true, Rc::new(|| {}))
 }
 
 pub(super) fn build_preview_with_media(
     state: Arc<Mutex<VideoEditState>>,
     estimate_label: Label,
     media: Option<MediaFile>,
+    on_change: Rc<dyn Fn()>,
 ) -> (GtkBox, MediaFile, Button) {
-    build_preview_inner(state, estimate_label, media, false)
+    build_preview_inner(state, estimate_label, media, false, on_change)
 }
 
 fn build_preview_inner(
@@ -40,6 +41,7 @@ fn build_preview_inner(
     estimate_label: Label,
     media: Option<MediaFile>,
     show_player_bar: bool,
+    on_change: Rc<dyn Fn()>,
 ) -> (GtkBox, MediaFile, Button) {
     let (path, has_video) = {
         let state = state.lock().unwrap();
@@ -170,6 +172,9 @@ fn build_preview_inner(
     cursor_layer.set_vexpand(true);
     cursor_layer.set_can_target(true);
     let placing_focus = Rc::new(Cell::new(false));
+    // Source pixel under the pointer while the Add zoom tool is armed; the
+    // outline of the zoom it would place is drawn there.
+    let add_zoom_hover: Rc<Cell<Option<(f64, f64)>>> = Rc::new(Cell::new(None));
     let camera_cursor = DrawingArea::new();
     camera_cursor.set_hexpand(true);
     camera_cursor.set_vexpand(true);
@@ -178,15 +183,24 @@ fn build_preview_inner(
         let state = state.clone();
         let placing_focus = placing_focus.clone();
         move |_, cr, width, height| {
-            draw_preview_overlays(&state, cr, width, height, placing_focus.get(), true);
+            draw_preview_overlays(&state, cr, width, height, placing_focus.get(), None, true);
         }
     });
     squircle.add_camera_overlay(&camera_cursor);
     cursor_layer.set_draw_func({
         let state = state.clone();
         let placing_focus = placing_focus.clone();
+        let add_zoom_hover = add_zoom_hover.clone();
         move |_, cr, width, height| {
-            draw_preview_overlays(&state, cr, width, height, placing_focus.get(), false);
+            draw_preview_overlays(
+                &state,
+                cr,
+                width,
+                height,
+                placing_focus.get(),
+                add_zoom_hover.get(),
+                false,
+            );
         }
     });
     overlay.add_overlay(&cursor_layer);
@@ -208,6 +222,30 @@ fn build_preview_inner(
     zoom_badge.set_margin_bottom(12);
     zoom_badge.set_can_target(false);
     overlay.add_overlay(&zoom_badge);
+
+    // The armed Add zoom tool's prompt, along the bottom of the preview. The
+    // Automatic button only appears when the recording carries pointer data,
+    // because that is the only case where a generated zoom can follow it.
+    let add_zoom_bar = GtkBox::new(Orientation::Horizontal, 8);
+    add_zoom_bar.add_css_class("recording-editor-add-zoom-bar");
+    add_zoom_bar.set_halign(Align::Center);
+    add_zoom_bar.set_valign(Align::End);
+    add_zoom_bar.set_margin_bottom(16);
+    add_zoom_bar.set_visible(false);
+    let add_zoom_hint_plain = t("Click where to zoom in");
+    let add_zoom_hint_automatic = t("Click where to zoom in, or use Automatic zoom");
+    let add_zoom_hint = Label::new(Some(&add_zoom_hint_plain));
+    add_zoom_hint.add_css_class("recording-editor-add-zoom-hint");
+    add_zoom_hint.set_can_target(false);
+    let add_zoom_auto = Button::with_label(&t("Automatic zoom"));
+    add_zoom_auto.add_css_class("recording-editor-add-zoom-auto");
+    add_zoom_auto.set_tooltip_text(Some(&t(
+        "Adds a zoom that automatically follows the mouse activity",
+    )));
+    add_zoom_auto.set_visible(false);
+    add_zoom_bar.append(&add_zoom_hint);
+    add_zoom_bar.append(&add_zoom_auto);
+    overlay.add_overlay(&add_zoom_bar);
 
     let player = build_player_bar(true);
     wire_aspect_menu(
@@ -244,6 +282,12 @@ fn build_preview_inner(
         let cursor_layer_tick = cursor_layer.clone();
         let camera_cursor = camera_cursor.clone();
         let empty_hint = empty_hint.clone();
+        let add_zoom_bar_tick = add_zoom_bar.clone();
+        let add_zoom_hint_tick = add_zoom_hint.clone();
+        let add_zoom_auto_tick = add_zoom_auto.clone();
+        let add_zoom_hover_tick = add_zoom_hover.clone();
+        let add_zoom_hint_plain = add_zoom_hint_plain.clone();
+        let add_zoom_hint_automatic = add_zoom_hint_automatic.clone();
         let last_zoom_css = Rc::new(RefCell::new(String::new()));
         let last_bg_css = Rc::new(RefCell::new(String::new()));
         let last_wallpaper = Rc::new(RefCell::new(String::new()));
@@ -262,6 +306,8 @@ fn build_preview_inner(
                 hidden,
                 label,
                 placing,
+                armed,
+                automatic,
                 radius,
                 background,
                 retained,
@@ -284,16 +330,33 @@ fn build_preview_inner(
                     s.video_hidden,
                     s.canvas_label(),
                     placing_manual(&s, playing),
+                    // Playing puts the tool away without putting it out: the
+                    // picture is moving, so there is nothing to aim at.
+                    s.add_zoom_tool && !playing && s.has_source_video(),
+                    s.supports_auto_zoom(),
                     s.background_corner_radius_px(),
                     s.background.clone(),
                     s.last_segment_end() > f64::EPSILON,
                 )
             };
             placing_focus.set(placing);
-            let crosshair = placing
+            let crosshair = (placing || armed)
                 .then(|| gtk4::gdk::Cursor::from_name("crosshair", None))
                 .flatten();
             cursor_layer_tick.set_cursor(crosshair.as_ref());
+            if !armed && add_zoom_hover_tick.take().is_some() {
+                cursor_layer_tick.queue_draw();
+            }
+            let hint = if automatic {
+                &add_zoom_hint_automatic
+            } else {
+                &add_zoom_hint_plain
+            };
+            if add_zoom_hint_tick.text() != hint.as_str() {
+                add_zoom_hint_tick.set_text(hint);
+            }
+            add_zoom_auto_tick.set_visible(armed && automatic);
+            add_zoom_bar_tick.set_visible(armed);
             picture.set_visible(duration > 0.0 && retained);
             cursor_layer_tick.set_visible(retained);
             empty_hint.set_visible(duration <= 0.0);
@@ -426,6 +489,142 @@ fn build_preview_inner(
         }
     });
     cursor_layer.add_controller(drag);
+
+    // While the Add zoom tool is armed the outline follows the pointer, so a
+    // click already shows the framing it will place. The controllers sit on
+    // the stage rather than the cursor layer so a click that lands on the
+    // prompt still places, exactly as it does on the video.
+    let motion = EventControllerMotion::new();
+    motion.connect_motion({
+        let state = state.clone();
+        let media = media.clone();
+        let cursor_layer = cursor_layer.clone();
+        let add_zoom_hover = add_zoom_hover.clone();
+        move |_, x, y| {
+            if media.is_playing() {
+                return;
+            }
+            let Some((px, py)) = video_layer_point(&cursor_layer, x, y) else {
+                if add_zoom_hover.take().is_some() {
+                    cursor_layer.queue_draw();
+                }
+                return;
+            };
+            let point = {
+                let state = state.lock().unwrap();
+                if !state.add_zoom_tool || !state.has_source_video() {
+                    return;
+                }
+                let view = visible_source_view(
+                    &state,
+                    state.playhead_seconds,
+                    state.source_playhead(),
+                    false,
+                );
+                view_to_source(
+                    view,
+                    px,
+                    py,
+                    cursor_layer.allocated_width().max(1) as f64,
+                    cursor_layer.allocated_height().max(1) as f64,
+                )
+            };
+            if add_zoom_hover.replace(Some(point)) != Some(point) {
+                cursor_layer.queue_draw();
+            }
+        }
+    });
+    motion.connect_leave({
+        let cursor_layer = cursor_layer.clone();
+        let add_zoom_hover = add_zoom_hover.clone();
+        move |_| {
+            if add_zoom_hover.take().is_some() {
+                cursor_layer.queue_draw();
+            }
+        }
+    });
+    overlay.add_controller(motion);
+
+    // A click on the video places the zoom at the playhead, aimed at the point
+    // clicked, and puts the tool away so the sidebar can show the new clip.
+    let place = GestureClick::new();
+    place.set_button(1);
+    place.connect_released({
+        let state = state.clone();
+        let media = media.clone();
+        let cursor_layer = cursor_layer.clone();
+        let overlay = overlay.clone();
+        let add_zoom_auto = add_zoom_auto.clone();
+        let add_zoom_hover = add_zoom_hover.clone();
+        let on_change = on_change.clone();
+        move |_, _, x, y| {
+            if media.is_playing() {
+                return;
+            }
+            // A press on the prompt's button is that button's, not a
+            // placement.
+            if let Some(picked) = overlay.pick(x, y, gtk4::PickFlags::DEFAULT) {
+                let button = add_zoom_auto.upcast_ref::<gtk4::Widget>();
+                if &picked == button || picked.is_ancestor(button) {
+                    return;
+                }
+            }
+            let Some((px, py)) = video_layer_point(&cursor_layer, x, y) else {
+                return;
+            };
+            let placed = {
+                let mut state = state.lock().unwrap();
+                if !state.add_zoom_tool {
+                    return;
+                }
+                let view = visible_source_view(
+                    &state,
+                    state.playhead_seconds,
+                    state.source_playhead(),
+                    false,
+                );
+                let point = view_to_source(
+                    view,
+                    px,
+                    py,
+                    cursor_layer.allocated_width().max(1) as f64,
+                    cursor_layer.allocated_height().max(1) as f64,
+                );
+                let placed = state.place_manual_zoom_at_playhead(point);
+                if placed.is_some() {
+                    state.set_add_zoom_tool(false);
+                }
+                placed
+            };
+            if placed.is_none() {
+                return;
+            }
+            add_zoom_hover.set(None);
+            cursor_layer.queue_draw();
+            on_change();
+        }
+    });
+    overlay.add_controller(place);
+
+    // The prompt's Automatic button runs the same pass as Detect, which is
+    // what the recording's pointer data is for.
+    add_zoom_auto.connect_clicked({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        move |_| {
+            {
+                let mut state = state.lock().unwrap();
+                if !state.add_zoom_tool {
+                    return;
+                }
+                if state.supports_auto_zoom() {
+                    state.redetect_zoom_clips();
+                }
+                state.set_add_zoom_tool(false);
+            }
+            on_change();
+        }
+    });
 
     workspace.append(&stage);
     root.append(&workspace);
@@ -922,8 +1121,18 @@ fn preview_zoom_blur_view(
     source_t: f64,
     sample_index: usize,
 ) -> (f64, f64, f64, f64) {
+    preview_view_at(
+        state,
+        state.eval_zoom_blur_sample_at(timeline_t, source_t, sample_index),
+    )
+}
+
+/// The preview's frame for one camera sample. It keeps the camera's fractional
+/// source coordinates, unlike the exporter's even-pixel crop, but it reads the
+/// same sample from the model.
+fn preview_view_at(state: &VideoEditState, camera: (f64, (f64, f64))) -> (f64, f64, f64, f64) {
     let (cx, cy, cw, ch) = state.crop_or_full();
-    let (scale, center) = state.eval_zoom_blur_sample_at(timeline_t, source_t, sample_index);
+    let (scale, center) = camera;
     let (x, y, w, h) = float_crop_rect(
         scale,
         (center.0 - cx, center.1 - cy),
@@ -931,6 +1140,26 @@ fn preview_zoom_blur_view(
         ch.max(2.0) as u32,
     );
     (cx + x, cy + y, w, h)
+}
+
+/// The current view followed by the extra motion-blur samples, newest first.
+/// Both come from the model's one composited sample list, which already
+/// collapses a still camera to a single view. Placing a manual zoom shows the
+/// unzoomed source with no blur.
+fn preview_blur_views(
+    state: &VideoEditState,
+    timeline_t: f64,
+    source_t: f64,
+    placing: bool,
+) -> Vec<(f64, f64, f64, f64)> {
+    if placing {
+        return vec![state.crop_or_full()];
+    }
+    state
+        .zoom_blur_composited_samples_at(timeline_t, source_t)
+        .into_iter()
+        .map(|camera| preview_view_at(state, camera))
+        .collect()
 }
 
 fn placing_manual(state: &VideoEditState, playing: bool) -> bool {
@@ -967,19 +1196,13 @@ fn apply_preview_view(
     }
     let (view, src_w, src_h, samples, ripple) = {
         let state = state.lock().unwrap();
-        let view = visible_source_view(&state, timeline_t, source_t, placing);
-        let samples = if placing {
-            Vec::new()
-        } else {
-            (1..state.zoom_blur_sample_count().min(8))
-                .map(|index| preview_zoom_blur_view(&state, timeline_t, source_t, index))
-                .collect()
-        };
+        let views = preview_blur_views(&state, timeline_t, source_t, placing);
+        let view = views[0];
         (
             view,
             state.metadata.width.max(1) as f64,
             state.metadata.height.max(1) as f64,
-            samples,
+            views.into_iter().skip(1).collect::<Vec<_>>(),
             preview_ripple_frame(&state, view, source_t),
         )
     };
@@ -994,9 +1217,9 @@ fn apply_preview_view(
             )
         })
         .collect();
-    let moving = relative_samples.iter().any(|&(x, y, sx, sy)| {
-        x.abs() > 1e-6 || y.abs() > 1e-6 || (sx - 1.0).abs() > 1e-9 || (sy - 1.0).abs() > 1e-9
-    });
+    // The model already decided whether the camera moved across the shutter, so
+    // an empty tail means a still frame and the picture is drawn once.
+    let moving = !relative_samples.is_empty();
     squircle.set_camera_samples(if moving { relative_samples } else { Vec::new() });
     let video_css = if (sx - 1.0).abs() < 0.002
         && (sy - 1.0).abs() < 0.002
@@ -1175,6 +1398,7 @@ fn draw_preview_overlays(
     width: i32,
     height: i32,
     placing: bool,
+    add_zoom_hover: Option<(f64, f64)>,
     draw_cursor: bool,
 ) {
     let state = state.lock().unwrap();
@@ -1242,9 +1466,18 @@ fn draw_preview_overlays(
         }
     }
 
-    if placing && !draw_cursor {
-        if let Some(clip) = state.selected_zoom_clip() {
-            let (x, y, rect_w, rect_h) = manual_focus_rect(clip, view, w, h);
+    if !draw_cursor {
+        // The selected Manual zoom while its focus is being dragged, else the
+        // zoom the armed Add zoom tool would place under the pointer.
+        let outline = if placing {
+            state
+                .selected_zoom_clip()
+                .map(|clip| (clip.scale, clip.center))
+        } else {
+            add_zoom_hover.map(|point| (state.add_zoom_tool_scale(), point))
+        };
+        if let Some((scale, center)) = outline {
+            let (x, y, rect_w, rect_h) = manual_focus_rect(scale, center, view, w, h);
             cr.set_source_rgba(1.0, 0.48, 0.12, 0.22);
             cr.rectangle(x, y, rect_w, rect_h);
             let _ = cr.fill_preserve();
@@ -1274,17 +1507,35 @@ fn cursor_motion(cursor: CursorSettings) -> CursorMotion {
     }
 }
 
+/// A point on the preview stage as a point inside the video rect, or `None`
+/// when it falls in the letterbox around the footage.
+///
+/// The cursor layer carries the video rect as its margins, so its allocation
+/// is the footage and the stage's coordinates reach it by subtracting them.
+fn video_layer_point(layer: &DrawingArea, x: f64, y: f64) -> Option<(f64, f64)> {
+    let left = layer.margin_start() as f64;
+    let top = layer.margin_top() as f64;
+    let width = layer.allocated_width().max(0) as f64;
+    let height = layer.allocated_height().max(0) as f64;
+    if width < 1.0 || height < 1.0 {
+        return None;
+    }
+    let inside = x >= left && y >= top && x <= left + width && y <= top + height;
+    inside.then_some((x - left, y - top))
+}
+
 fn manual_focus_rect(
-    clip: &ZoomClip,
+    scale: f64,
+    center: (f64, f64),
     view: (f64, f64, f64, f64),
     widget_w: f64,
     widget_h: f64,
 ) -> (f64, f64, f64, f64) {
     let (view_x, view_y, view_w, view_h) = view;
-    let rect_w = widget_w / clip.scale.max(1.0);
-    let rect_h = widget_h / clip.scale.max(1.0);
-    let raw_x = ((clip.center.0 - view_x) / view_w.max(1.0)) * widget_w - rect_w / 2.0;
-    let raw_y = ((clip.center.1 - view_y) / view_h.max(1.0)) * widget_h - rect_h / 2.0;
+    let rect_w = widget_w / scale.max(1.0);
+    let rect_h = widget_h / scale.max(1.0);
+    let raw_x = ((center.0 - view_x) / view_w.max(1.0)) * widget_w - rect_w / 2.0;
+    let raw_y = ((center.1 - view_y) / view_h.max(1.0)) * widget_h - rect_h / 2.0;
     let x = if rect_w >= widget_w {
         (widget_w - rect_w) / 2.0
     } else {
@@ -1458,6 +1709,70 @@ mod tests {
             (first_center / 2.0 - (first_center / 2.0).round()).abs() > 1e-3,
             "preview centre should retain fractional source coordinates, got {first_center}"
         );
+    }
+
+    #[test]
+    fn preview_and_export_blur_samples_share_the_model_list() {
+        use crate::recording::editor::model::{VideoEditState, VideoMetadata, ZoomClip, ZoomMode};
+        use crate::recording::editor::sidecar::{
+            CaptureRegion, CursorKind, PointerSample, PointerSidecar,
+        };
+        let mut state = VideoEditState::new(VideoMetadata {
+            path: std::path::PathBuf::from("/tmp/preview-blur-samples.mp4"),
+            duration_seconds: 2.0,
+            width: 1920,
+            height: 1080,
+            file_size_bytes: 100,
+            has_audio: false,
+            frame_rate: 30.0,
+        });
+        let mut sidecar = PointerSidecar::new(
+            0,
+            CaptureRegion {
+                x: 0,
+                y: 0,
+                w: 1920,
+                h: 1080,
+            },
+        );
+        for (t, x) in [(0.0, 960.0), (0.4, 1460.0), (0.8, 960.0), (1.2, 460.0)] {
+            sidecar.pointer.push(PointerSample {
+                t,
+                x,
+                y: 540.0,
+                kind: CursorKind::Default,
+                cursor_id: None,
+            });
+        }
+        state.sidecar = Some(sidecar);
+        state.zoom_clips.push(ZoomClip {
+            start: 0.0,
+            end: 2.0,
+            scale: 2.0,
+            center: (960.0, 540.0),
+            ease_ms: 0,
+            mode: ZoomMode::Auto,
+            ..Default::default()
+        });
+        state.zoom_camera.motion_blur = 1.0;
+
+        let t = 0.8;
+        let views = super::preview_blur_views(&state, t, t, false);
+        let cameras = state.zoom_blur_composited_samples_at(t, t);
+        assert_eq!(views.len(), state.zoom_blur_sample_count());
+        assert_eq!(views.len(), cameras.len());
+        for (index, (view, camera)) in views.iter().zip(cameras.iter()).enumerate() {
+            assert_eq!(*view, super::preview_view_at(&state, *camera));
+            // The exporter reads the same sample and only snaps it to its even
+            // pixel grid, so the two can differ by at most that grid's step.
+            let exported = crate::recording::editor::ffmpeg::zoom_blur_view(&state, t, t, index);
+            assert!((view.0 - exported.0).abs() <= 2.0, "sample {index} x");
+            assert!((view.1 - exported.1).abs() <= 2.0, "sample {index} y");
+            assert!((view.2 - exported.2).abs() <= 2.0, "sample {index} w");
+            assert!((view.3 - exported.3).abs() <= 2.0, "sample {index} h");
+        }
+        // Placing shows the unzoomed source and composites no extra samples.
+        assert_eq!(super::preview_blur_views(&state, t, t, true).len(), 1);
     }
 
     #[test]

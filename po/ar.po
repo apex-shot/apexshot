@@ -779,6 +779,9 @@ msgstr "فتح أداة التعليق"
 msgid "Open Video Editor"
 msgstr "فتح محرر الفيديو"
 
+msgid "Automatic zoom on import"
+msgstr "تكبير تلقائي عند الاستيراد"
+
 msgid "Open File:"
 msgstr "فتح ملف:"
 

@@ -829,7 +829,6 @@ mod tests {
             shortcut_capture_menu: "Shift+Super+5".into(),
             shortcut_capture_crosshair: "Ctrl+Alt+X".into(),
             shortcut_capture_fullscreen: "Shift+Super+3".into(),
-            shortcut_capture_window: "Shift+Super+5".into(),
             shortcut_recording_stop_save: "Ctrl+Alt+Shift+S".into(),
             ..crate::config::AppConfig::default()
         };

@@ -775,6 +775,9 @@ msgstr "注釈ツールを開く"
 msgid "Open Video Editor"
 msgstr "動画エディターを開く"
 
+msgid "Automatic zoom on import"
+msgstr "インポート時に自動ズーム"
+
 msgid "Open File:"
 msgstr "ファイルを開く:"
 

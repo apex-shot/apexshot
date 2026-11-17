@@ -30,6 +30,7 @@ mod audio;
 mod backend;
 mod controls;
 mod gst_audio;
+mod recording_manifest;
 mod timeline;
 mod wf_recorder;
 

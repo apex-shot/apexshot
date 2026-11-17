@@ -296,9 +296,8 @@ pub fn hotkey_config_from_app_config(app_config: &crate::config::AppConfig) -> H
         &app_config.shortcut_capture_fullscreen,
         &["capture", "screen"],
     );
-    // Do not register legacy direct-window actions, even if a leftover config
-    // shortcut remains; Quick Capture still offers Window.
-    let _ = &app_config.shortcut_capture_window;
+    // Legacy direct-window capture is disabled; Quick Capture still offers
+    // Window through its Shot menu.
     push_binding(
         &mut bindings,
         "show_last_preview",

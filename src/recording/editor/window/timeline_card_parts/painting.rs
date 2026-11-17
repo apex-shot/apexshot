@@ -621,9 +621,11 @@ pub fn draw_one_zoom(
     }
 }
 
+/// The span a click on the empty zoom lane would place, so the lane can draw
+/// its ghost at the length the click really produces.
 pub fn suggested_zoom_range(state: &VideoEditState, start: f64) -> Option<(f64, f64)> {
     let start = start.max(0.0);
-    let end = start + DEFAULT_ZOOM_DURATION_SECONDS;
+    let end = start + ADD_ZOOM_DURATION_SECONDS;
     let overlaps = state
         .zoom_clips
         .iter()

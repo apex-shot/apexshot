@@ -792,6 +792,9 @@ msgstr "Abrir herramienta de anotación"
 msgid "Open Video Editor"
 msgstr "Abrir editor de vídeo"
 
+msgid "Automatic zoom on import"
+msgstr "Zoom automático al importar"
+
 msgid "Open File:"
 msgstr "Abrir archivo:"
 

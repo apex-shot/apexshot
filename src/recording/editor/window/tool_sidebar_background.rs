@@ -253,7 +253,7 @@ fn build_background_panel(
     image_thumb.set_content_height(28);
     image_thumb.set_valign(Align::Center);
     image_thumb.set_can_target(false);
-    let image_label = Label::new(Some(&t("Select image...")));
+    let image_label = Label::new(Some(&t("Select image…")));
     image_label.set_hexpand(true);
     image_label.set_xalign(0.0);
     image_label.set_valign(Align::Center);

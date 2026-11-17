@@ -107,10 +107,10 @@ pub(super) fn build_number_bar(
             if syncing.get() {
                 return;
             }
-            if let Ok(value) = entry.text().parse::<u32>() {
+            if let Some(value) = parse_number_start(&entry.text()) {
                 let changed = {
                     let mut st = state.lock().unwrap();
-                    st.set_active_number_start(value.clamp(1, MAX_NUMBER as u32))
+                    st.set_active_number_start(value)
                 };
                 if changed {
                     queue_draw(&area);
@@ -233,6 +233,18 @@ pub(super) fn install_number_bar_tick(
     });
 }
 
+/// The start number an edited field asks for, or `None` when the text is not a
+/// number.
+///
+/// Clamped to the marker range, so a paste of a long string cannot arm a number
+/// no marker can carry, and unparseable text leaves the armed number alone
+/// instead of resetting it while the user is mid-edit.
+fn parse_number_start(text: &str) -> Option<u32> {
+    text.parse::<u32>()
+        .ok()
+        .map(|value| value.clamp(1, MAX_NUMBER as u32))
+}
+
 /// Stepper tooltip: what the number in the field refers to in each mode.
 fn number_start_tooltip(has_marker: bool) -> String {
     if has_marker {
@@ -269,24 +281,24 @@ mod tests {
         st.selected_action_index = Some(0);
     }
 
+    /// The field's edit contract, without a toolkit: what an entry's text arms
+    /// as the start number.
+    ///
+    /// The widget's part — forwarding `changed` into the state — is covered by
+    /// `entry_renumbers_a_selected_marker_with_undo`, which types into the real
+    /// entry and reads the state back.
     #[test]
-    fn entry_typing_updates_the_start_and_clamps_at_the_top() {
-        let Some(()) = crate::test_support::with_gtk(|| {
-            let state = test_state();
-            state.lock().unwrap().selected_tool = Tool::Number;
-            let area = DrawingArea::new();
-            let menus = MenuTracker::default();
-            let bar = build_number_bar(&state, &area, noop_colour(), None, &menus);
-            bar.start_entry.set_text("7");
-            assert_eq!(state.lock().unwrap().active_number_start(), 7);
-            bar.start_entry.set_text("123456");
-            assert_eq!(state.lock().unwrap().active_number_start(), 9999);
-            // A non-numeric entry leaves the start alone.
-            bar.start_entry.set_text("abc");
-            assert_eq!(state.lock().unwrap().active_number_start(), 9999);
-        }) else {
-            return;
-        };
+    fn number_start_parsing_clamps_and_ignores_non_numbers() {
+        assert_eq!(parse_number_start("7"), Some(7));
+        assert_eq!(parse_number_start("123456"), Some(MAX_NUMBER as u32));
+        // Mid-edit text that is not a number must leave the armed start alone,
+        // not reset it to 1.
+        assert_eq!(parse_number_start("abc"), None);
+        assert_eq!(parse_number_start(""), None);
+        // A zero would be a marker with no number.
+        assert_eq!(parse_number_start("0"), Some(1));
+        assert_eq!(parse_number_start("9999"), Some(9999));
+        assert_eq!(parse_number_start("10000"), Some(9999));
     }
 
     #[test]
