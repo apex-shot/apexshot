@@ -4908,3 +4908,54 @@ msgstr "已使用"
 
 msgid "{used} of {limit}"
 msgstr "{used} / {limit}"
+
+msgid "Activate a license"
+msgstr "激活许可证"
+
+msgid "ApexShot Studio"
+msgstr "ApexShot Studio"
+
+msgid "Included updates ended {date}."
+msgstr "包含的更新已于 {date} 结束。"
+
+msgid "License"
+msgstr "许可证"
+
+msgid "License key"
+msgstr "许可证密钥"
+
+msgid "Needs attention"
+msgstr "需要处理"
+
+msgid "Not activated on this device."
+msgstr "此设备上未激活。"
+
+msgid "Open ApexShot anytime for Settings, shortcuts, and preferences"
+msgstr "随时打开 ApexShot 进行设置、快捷键和偏好调整"
+
+msgid "Other device"
+msgstr "其他设备"
+
+msgid "Paste your license key"
+msgstr "粘贴许可证密钥"
+
+msgid "Replace…"
+msgstr "替换…"
+
+msgid "The saved license couldn't be verified."
+msgstr "无法验证已保存的许可证。"
+
+msgid "This build can't verify Studio licenses."
+msgstr "此版本无法验证 Studio 许可证。"
+
+msgid "This license belongs to another device."
+msgstr "此许可证属于另一台设备。"
+
+msgid "Unavailable"
+msgstr "不可用"
+
+msgid "Updates ended"
+msgstr "更新已结束"
+
+msgid "Updates included through {date}."
+msgstr "包含截至 {date} 的更新。"

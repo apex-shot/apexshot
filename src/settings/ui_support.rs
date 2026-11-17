@@ -15,6 +15,7 @@ const SETTINGS_CSS: &str = concat!(
     include_str!("css/11-theme-picker.css"),
     include_str!("css/12-select-menu.css"),
     include_str!("css/13-usage-account.css"),
+    include_str!("css/14-studio.css"),
 );
 
 pub fn install_settings_css() {

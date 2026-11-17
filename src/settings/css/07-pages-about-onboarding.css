@@ -89,80 +89,275 @@
                 opacity: 1;
             }
 
-            /* Onboarding */
-            .editor-root .onboarding-toolbar.settings-window-controls {
+            /* Onboarding: a narrow centred form with rounded corners and no outline. */
+            .editor-root.onboarding-root {
+                background: #191919;
+                background-color: #191919;
+                color: #f3f0ec;
+                border: none;
+                border-radius: 12px;
+                box-shadow: none;
+                font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
+                font-size: 14px;
+            }
+
+            window.editor-window.onboarding-window {
+                border: none;
+                border-radius: 12px;
+            }
+
+            .onboarding-pane {
+                background: transparent;
+            }
+
+            .editor-root.onboarding-root scrolledwindow,
+            .editor-root.onboarding-root scrolledwindow > viewport {
+                background: transparent;
+            }
+
+            .editor-root.onboarding-root scrolledwindow undershoot.top,
+            .editor-root.onboarding-root scrolledwindow undershoot.bottom {
+                background: transparent;
+                box-shadow: none;
+            }
+
+            .editor-root.onboarding-root .onboarding-toolbar.settings-window-controls {
+                background: transparent;
                 border-bottom: none;
             }
 
-            .onboarding-progress-dot {
-                border-radius: 999px;
-                background-color: rgba(255, 255, 255, 0.22);
+            .editor-root.onboarding-root .onboarding-headline {
+                font-size: 28px;
+                font-weight: 600;
+                letter-spacing: -0.6px;
+                line-height: 1.15;
             }
 
-            .editor-root.editor-theme-light .onboarding-progress-dot {
-                background-color: rgba(29, 33, 41, 0.18);
+            .editor-root.onboarding-root .onboarding-copy {
+                font-size: 15px;
+                font-weight: 400;
+                line-height: 1.35;
+                color: #a3a09c;
+                opacity: 1;
             }
 
-            .onboarding-progress-dot-done {
-                background-color: alpha(#ff7c2f, 0.6);
-            }
-
-            .onboarding-progress-dot-active {
+            .editor-root.onboarding-root .onboarding-actions button.settings-primary-btn {
+                min-width: 0;
+                min-height: 42px;
+                padding: 0 18px;
+                border: none;
+                border-radius: 7px;
+                background-image: none;
                 background-color: #ff670d;
-            }
-
-            .onboarding-hotkey-table .shortcut-capture-keycap {
-                padding: 4px 10px;
-                font-size: 12px;
-            }
-
-            .editor-root.editor-theme-light .onboarding-hotkey-table .shortcut-capture-keycap {
-                background: alpha(#111827, 0.06);
-                color: #17202a;
-            }
-
-            .editor-root.editor-theme-light .onboarding-hotkey-table .shortcut-capture-plus {
-                color: rgba(29, 33, 41, 0.35);
-            }
-
-            .onboarding-progress-caption {
-                font-size: 12px;
-                opacity: 0.6;
-            }
-
-            .onboarding-headline {
-                font-size: 26px;
-                font-weight: 700;
-                letter-spacing: -0.01em;
-            }
-
-            .onboarding-copy {
+                color: #ffffff;
                 font-size: 14px;
-                opacity: 0.72;
+                font-weight: 600;
+                box-shadow: none;
             }
 
-            .onboarding-footer button.settings-primary-btn {
-                padding: 7px 20px;
-                min-height: 30px;
-                font-size: 13px;
+            .editor-root.onboarding-root .onboarding-actions button.settings-primary-btn:hover {
+                background-image: none;
+                background-color: #ff792b;
             }
 
-            .onboarding-text-button {
+            .editor-root.onboarding-root .onboarding-actions button.settings-primary-btn:active {
+                background-color: #e65c0a;
+            }
+
+            .editor-root.onboarding-root .onboarding-actions button.settings-primary-btn:disabled {
+                background-color: #67391f;
+                color: #b9a493;
+            }
+
+            /* The ring itself is drawn in code; these rules only colour the
+               number and the ring (.onboarding-progress-ring's color). */
+            .editor-root.onboarding-root .onboarding-progress-node {
+                border: none;
+                border-radius: 999px;
+                color: rgba(243, 240, 236, 0.30);
+                font-size: 11px;
+                font-weight: 500;
+            }
+
+            .editor-root.onboarding-root .onboarding-progress-node-done {
+                color: rgba(243, 240, 236, 0.65);
+            }
+
+            .editor-root.onboarding-root .onboarding-progress-node-active {
+                color: #f3f0ec;
+                font-weight: 600;
+            }
+
+            .editor-root.onboarding-root .onboarding-progress-ring {
+                color: rgba(243, 240, 236, 0.14);
+            }
+
+            .editor-root.onboarding-root .onboarding-progress-node-done .onboarding-progress-ring {
+                color: rgba(243, 240, 236, 0.24);
+            }
+
+            .editor-root.onboarding-root .onboarding-progress-node-active .onboarding-progress-ring {
+                color: rgba(243, 240, 236, 0.65);
+            }
+
+            .editor-root.editor-theme-light.onboarding-root .onboarding-progress-ring {
+                color: rgba(37, 35, 31, 0.15);
+            }
+
+            .editor-root.editor-theme-light.onboarding-root .onboarding-progress-node-done .onboarding-progress-ring {
+                color: rgba(37, 35, 31, 0.28);
+            }
+
+            .editor-root.editor-theme-light.onboarding-root .onboarding-progress-node-active .onboarding-progress-ring {
+                color: rgba(37, 35, 31, 0.65);
+            }
+
+            .editor-root.onboarding-root .onboarding-progress-connector {
+                background-color: rgba(243, 240, 236, 0.12);
+            }
+
+            .editor-root.onboarding-root .onboarding-progress-connector-done {
+                background-color: rgba(243, 240, 236, 0.24);
+            }
+
+            .editor-root.onboarding-root .onboarding-text-button {
                 background: transparent;
+                background-image: none;
                 border: none;
                 box-shadow: none;
-                padding: 6px 12px;
+                color: #b9b4ad;
                 font-size: 13px;
-                opacity: 0.8;
+                font-weight: 500;
+                padding: 5px 10px;
             }
 
-            .onboarding-text-button:hover {
+            .editor-root.onboarding-root .onboarding-text-button:hover {
+                background: rgba(243, 240, 236, 0.06);
+                color: #f3f0ec;
+            }
+
+            .editor-root.onboarding-root .onboarding-text-button:active {
+                background: rgba(243, 240, 236, 0.10);
+                color: #f3f0ec;
+            }
+
+            .editor-root.onboarding-root .onboarding-action-note {
+                color: #83807b;
+                font-size: 12px;
+            }
+
+            /* Setup is a form, not another Settings page: no nested tables or cards. */
+            .editor-root.onboarding-root .onboarding-card-list,
+            .editor-root.onboarding-root .onboarding-hotkey-table {
+                background: transparent;
+                background-image: none;
+                border: none;
+                border-radius: 0;
+                box-shadow: none;
+            }
+
+            .editor-root.onboarding-root .onboarding-feature-row,
+            .editor-root.onboarding-root .onboarding-hotkey-table .settings-table-row {
+                background: transparent;
+                border: none;
+                padding: 9px 0;
+            }
+
+            .editor-root.onboarding-root .onboarding-icon-badge {
+                color: #b9b4ad;
+                background: transparent;
+                border-radius: 0;
+                min-width: 28px;
+                min-height: 28px;
+            }
+
+            .editor-root.onboarding-root .onboarding-hotkey-table label {
+                font-size: 14px;
+                font-weight: 500;
+            }
+
+            .editor-root.onboarding-root .onboarding-feature-title {
+                font-size: 15px;
+                font-weight: 500;
+            }
+
+            .editor-root.onboarding-root .settings-sub-option {
+                font-size: 13px;
+                font-weight: 400;
+                line-height: 1.3;
+                color: #a3a09c;
                 opacity: 1;
-                background: alpha(@window_fg_color, 0.06);
             }
 
-            .onboarding-danger-button {
-                background: alpha(#e34a4a, 0.18);
+            .editor-root.onboarding-root .cloud-user-name {
+                font-size: 15px;
+                font-weight: 500;
+            }
+
+            .editor-root.onboarding-root .onboarding-status-pill {
+                background-color: rgba(255, 124, 47, 0.14);
+                color: #ff8a4c;
+                border-radius: 999px;
+                padding: 3px 12px;
+                font-size: 12px;
+                font-weight: 600;
+            }
+
+            .editor-root.onboarding-root .onboarding-hotkey-table .shortcut-capture-plus {
+                color: rgba(243, 240, 236, 0.42);
+                font-size: 12px;
+                font-weight: 500;
+                margin-top: 0;
+            }
+
+            .editor-root.onboarding-root .onboarding-hotkey-table .shortcut-capture-keycap {
+                background: #2b2b2b;
+                background-image: none;
+                color: #f3f0ec;
+                border: none;
+                border-radius: 5px;
+                box-shadow: none;
+                padding: 4px 7px;
+                font-size: 12px;
+                font-weight: 500;
+            }
+
+            .editor-root.onboarding-root .onboarding-connect-code-frame {
+                background-color: #222222;
+                border: none;
+                border-radius: 8px;
+                box-shadow: none;
+                padding: 8px 8px 8px 16px;
+            }
+
+            .editor-root.onboarding-root .onboarding-connect-code {
+                font-family: monospace;
+                font-size: 24px;
+                font-weight: 600;
+                letter-spacing: 2px;
+                color: #f3f0ec;
+            }
+
+            .editor-root.onboarding-root .onboarding-connect-link-frame {
+                background-color: #222222;
+                border: none;
+                border-radius: 8px;
+                box-shadow: none;
+                padding: 8px 12px;
+            }
+
+            .editor-root.onboarding-root .onboarding-connect-link {
+                font-size: 13px;
+                color: #b9b4ad;
+            }
+
+            .editor-root.onboarding-root .onboarding-status-error {
+                font-size: 13px;
+                color: #e8786d;
+            }
+
+            .editor-root.onboarding-root .onboarding-danger-button {
+                background: rgba(227, 74, 74, 0.18);
                 border: none;
                 border-radius: 6px;
                 box-shadow: none;
@@ -171,114 +366,104 @@
                 color: #ffb3ad;
             }
 
-            .onboarding-danger-button:hover {
-                background: alpha(#e34a4a, 0.28);
+            .editor-root.onboarding-root .onboarding-danger-button:hover {
+                background: rgba(227, 74, 74, 0.28);
                 color: #ffc9c4;
             }
 
-            .editor-root.editor-theme-light .onboarding-danger-button {
-                background: alpha(#e34a4a, 0.12);
-                color: #8a2822;
+            /* Light: warm paper instead of the settings window's blue-grey. */
+            .editor-root.editor-theme-light.onboarding-root {
+                background: #f4f2ee;
+                background-color: #f4f2ee;
+                color: #25231f;
             }
 
-            .editor-root.editor-theme-light .onboarding-danger-button:hover {
-                background: alpha(#e34a4a, 0.20);
-                color: #8a2822;
+            .editor-root.editor-theme-light.onboarding-root .onboarding-copy,
+            .editor-root.editor-theme-light.onboarding-root .settings-sub-option {
+                color: #6c6861;
             }
 
-            .onboarding-status-error {
-                color: #e8786d;
-                font-size: 12px;
+            .editor-root.editor-theme-light.onboarding-root .onboarding-action-note {
+                color: #83807b;
             }
 
-            .editor-root.editor-theme-light .onboarding-status-error {
+            .editor-root.editor-theme-light.onboarding-root .onboarding-actions button.settings-primary-btn:disabled {
+                background-color: rgba(255, 103, 13, 0.32);
+                color: #8a4a1f;
+            }
+
+            .editor-root.editor-theme-light.onboarding-root .onboarding-text-button {
+                color: #45413b;
+            }
+
+            .editor-root.editor-theme-light.onboarding-root .onboarding-text-button:hover {
+                background: rgba(37, 35, 31, 0.06);
+                color: #25231f;
+            }
+
+            .editor-root.editor-theme-light.onboarding-root .onboarding-text-button:active {
+                background: rgba(37, 35, 31, 0.10);
+                color: #25231f;
+            }
+
+            .editor-root.editor-theme-light.onboarding-root .onboarding-progress-node {
+                color: rgba(37, 35, 31, 0.35);
+            }
+
+            .editor-root.editor-theme-light.onboarding-root .onboarding-progress-node-done {
+                color: rgba(37, 35, 31, 0.65);
+            }
+
+            .editor-root.editor-theme-light.onboarding-root .onboarding-progress-node-active {
+                color: #25231f;
+            }
+
+            .editor-root.editor-theme-light.onboarding-root .onboarding-progress-connector {
+                background-color: rgba(37, 35, 31, 0.15);
+            }
+
+            .editor-root.editor-theme-light.onboarding-root .onboarding-progress-connector-done {
+                background-color: rgba(37, 35, 31, 0.28);
+            }
+
+            .editor-root.editor-theme-light.onboarding-root .onboarding-icon-badge {
+                color: #6c6861;
+            }
+
+            .editor-root.editor-theme-light.onboarding-root .onboarding-status-pill {
+                background-color: rgba(255, 103, 13, 0.12);
+                color: #cf530b;
+            }
+
+            .editor-root.editor-theme-light.onboarding-root .onboarding-hotkey-table .shortcut-capture-plus {
+                color: rgba(37, 35, 31, 0.40);
+            }
+
+            .editor-root.editor-theme-light.onboarding-root .onboarding-hotkey-table .shortcut-capture-keycap,
+            .editor-root.editor-theme-light.onboarding-root .onboarding-connect-code-frame,
+            .editor-root.editor-theme-light.onboarding-root .onboarding-connect-link-frame {
+                background: #e8e5df;
+                background-color: #e8e5df;
+                color: #25231f;
+            }
+
+            .editor-root.editor-theme-light.onboarding-root .onboarding-connect-code,
+            .editor-root.editor-theme-light.onboarding-root .onboarding-connect-link {
+                color: #25231f;
+            }
+
+            .editor-root.editor-theme-light.onboarding-root .onboarding-status-error {
                 color: #b3261e;
             }
 
-            .onboarding-card-list {
-                margin-top: 4px;
+            .editor-root.editor-theme-light.onboarding-root .onboarding-danger-button {
+                background: rgba(227, 74, 74, 0.12);
+                color: #8a2822;
             }
 
-            .onboarding-feature-row {
-                padding: 12px 16px;
-            }
-
-            .onboarding-icon-badge {
-                background-color: alpha(#ff7c2f, 0.16);
-                color: #ff7c2f;
-                border-radius: 10px;
-                min-width: 34px;
-                min-height: 34px;
-            }
-
-            .onboarding-option-icon {
-                min-width: 32px;
-                min-height: 32px;
-            }
-
-            .editor-root.editor-theme-light .onboarding-icon-badge {
-                background-color: alpha(#ff670d, 0.12);
-                color: #cf530b;
-            }
-
-            .onboarding-option-card {
-                padding: 16px 18px;
-                margin: 0;
-            }
-
-            .onboarding-status-pill {
-                background-color: alpha(#ff7c2f, 0.14);
-                color: #ff7c2f;
-                border-radius: 999px;
-                padding: 3px 12px;
-                font-size: 11px;
-                font-weight: 600;
-                letter-spacing: 0.02em;
-            }
-
-            .editor-root.editor-theme-light .onboarding-status-pill {
-                background-color: alpha(#ff670d, 0.12);
-                color: #cf530b;
-            }
-
-            .onboarding-connect-code-frame {
-                background-color: alpha(white, 0.06);
-                border: 1px solid alpha(white, 0.12);
-                border-radius: 12px;
-                padding: 14px 18px;
-            }
-
-            .onboarding-connect-code {
-                font-family: monospace;
-                font-size: 26px;
-                font-weight: 700;
-                letter-spacing: 0.22em;
-            }
-
-            .editor-root.editor-theme-light .onboarding-connect-code-frame {
-                background-color: alpha(#111827, 0.05);
-                border-color: alpha(#111827, 0.12);
-            }
-
-            .onboarding-connect-link-frame {
-                background-color: alpha(white, 0.06);
-                border: 1px solid alpha(white, 0.12);
-                border-radius: 12px;
-                padding: 10px 14px;
-            }
-
-            .editor-root.editor-theme-light .onboarding-connect-link-frame {
-                background-color: alpha(#111827, 0.05);
-                border-color: alpha(#111827, 0.12);
-            }
-
-            .onboarding-connect-link {
-                font-size: 14px;
-                color: alpha(white, 0.92);
-            }
-
-            .editor-root.editor-theme-light .onboarding-connect-link {
-                color: #17202a;
+            .editor-root.editor-theme-light.onboarding-root .onboarding-danger-button:hover {
+                background: rgba(227, 74, 74, 0.20);
+                color: #8a2822;
             }
 
             /* ── Inline cloud connect view ── */

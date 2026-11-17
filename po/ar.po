@@ -4944,3 +4944,54 @@ msgstr "المُستخدَم"
 
 msgid "{used} of {limit}"
 msgstr "{used} من {limit}"
+
+msgid "Activate a license"
+msgstr "تفعيل ترخيص"
+
+msgid "ApexShot Studio"
+msgstr "ApexShot Studio"
+
+msgid "Included updates ended {date}."
+msgstr "انتهت التحديثات المضمّنة في {date}."
+
+msgid "License"
+msgstr "الترخيص"
+
+msgid "License key"
+msgstr "مفتاح الترخيص"
+
+msgid "Needs attention"
+msgstr "يحتاج إلى انتباه"
+
+msgid "Not activated on this device."
+msgstr "غير مفعّل على هذا الجهاز."
+
+msgid "Open ApexShot anytime for Settings, shortcuts, and preferences"
+msgstr "افتح ApexShot في أي وقت للوصول إلى الإعدادات والاختصارات والتفضيلات"
+
+msgid "Other device"
+msgstr "جهاز آخر"
+
+msgid "Paste your license key"
+msgstr "الصق مفتاح الترخيص"
+
+msgid "Replace…"
+msgstr "استبدال…"
+
+msgid "The saved license couldn't be verified."
+msgstr "تعذّر التحقق من الترخيص المحفوظ."
+
+msgid "This build can't verify Studio licenses."
+msgstr "لا يمكن لهذا الإصدار التحقق من تراخيص Studio."
+
+msgid "This license belongs to another device."
+msgstr "هذا الترخيص مرتبط بجهاز آخر."
+
+msgid "Unavailable"
+msgstr "غير متاح"
+
+msgid "Updates ended"
+msgstr "انتهت التحديثات"
+
+msgid "Updates included through {date}."
+msgstr "التحديثات مضمّنة حتى {date}."

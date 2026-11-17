@@ -362,70 +362,43 @@ pub(super) fn build_chrome(body: &gtk4::Box, actions: &gtk4::Box, nav: &super::N
             desktop_body.as_str(),
         ),
     ]);
-    features.set_margin_top(28);
+    features.set_margin_top(super::SECTION_GAP);
     body.append(&features);
+
+    // Shown only when the browser could not be opened.
+    let browser_status = Label::new(None);
+    browser_status.add_css_class("settings-sub-option");
+    browser_status.set_halign(Align::Center);
+    browser_status.set_xalign(0.5);
+    browser_status.set_justify(gtk4::Justification::Center);
+    browser_status.set_wrap(true);
+    browser_status.set_max_width_chars(38);
+    browser_status.set_margin_top(10);
+    browser_status.set_visible(false);
+    body.append(&browser_status);
 
     let install_btn = Button::with_label(&t("Get Chrome Extension"));
     install_btn.add_css_class("settings-primary-btn");
-    install_btn.set_valign(Align::Center);
-    let link_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 10);
-    link_row.set_halign(Align::Center);
-    link_row.set_margin_top(20);
-    let copy_link_btn = Button::with_label(&t("Copy link"));
-    copy_link_btn.add_css_class("secondary-settings-button");
-    copy_link_btn.set_valign(Align::Center);
-    let link_label = Label::new(Some(CHROME_EXTENSION_URL));
-    link_label.add_css_class("settings-sub-option");
-    link_label.set_selectable(true);
-    link_label.set_wrap(true);
-    link_label.set_xalign(0.0);
-    link_label.set_halign(Align::Start);
-    link_label.set_visible(false);
-    let browser_status = Label::new(None);
-    browser_status.add_css_class("settings-sub-option");
-    browser_status.set_halign(Align::Start);
-    browser_status.set_wrap(true);
-    browser_status.set_margin_top(10);
-    browser_status.set_visible(false);
     install_btn.connect_clicked({
         let browser_status = browser_status.clone();
-        let link_label = link_label.clone();
         move |_| {
-            browser_status.set_visible(true);
-            link_label.set_visible(true);
             open_link(CHROME_EXTENSION_URL, &browser_status);
         }
     });
+    actions.append(&install_btn);
+
+    let copy_link_btn = Button::with_label(&t("Copy link"));
+    copy_link_btn.add_css_class("secondary-settings-button");
     copy_link_btn.connect_clicked(|button| {
         copy_with_feedback(button, CHROME_EXTENSION_URL, &t("Copy link"));
     });
-    link_row.append(&install_btn);
-    link_row.append(&copy_link_btn);
-    body.append(&link_row);
-    body.append(&link_label);
-    body.append(&browser_status);
-
-    let skip_hint = Label::new(Some(&t(
-        "Optional. You can install this later from Settings or the Chrome Web Store.",
-    )));
-    skip_hint.set_halign(Align::Start);
-    skip_hint.set_xalign(0.0);
-    skip_hint.set_wrap(true);
-    skip_hint.add_css_class("settings-sub-option");
-    skip_hint.set_margin_top(14);
-    body.append(&skip_hint);
+    actions.append(&copy_link_btn);
 
     let skip_btn = Button::with_label(&t("Skip for now"));
     skip_btn.add_css_class("onboarding-text-button");
     let advance = nav.advance.clone();
     skip_btn.connect_clicked(move |_| advance());
     actions.append(&skip_btn);
-
-    let continue_btn = Button::with_label(&t("Continue"));
-    continue_btn.add_css_class("settings-primary-btn");
-    let advance = nav.advance.clone();
-    continue_btn.connect_clicked(move |_| advance());
-    actions.append(&continue_btn);
 }
 
 #[cfg(test)]

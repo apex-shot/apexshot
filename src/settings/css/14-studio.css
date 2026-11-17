@@ -1,0 +1,135 @@
+            /* Studio page: summary card and licence rows. */
+
+            /* The summary card is a plain Settings surface, like every other group. */
+            .studio-hero {
+                padding: 14px;
+                border-radius: 10px;
+                border: none;
+                background-image: none;
+                background-color: alpha(white, 0.04);
+            }
+
+            .editor-root.editor-theme-light .studio-hero {
+                background-color: alpha(#111827, 0.04);
+            }
+
+            .studio-hero-title {
+                font-size: 15px;
+                font-weight: 600;
+                letter-spacing: -0.1px;
+            }
+
+            /* One pill shape, one tint per licence state. */
+            .studio-status-pill {
+                border-radius: 999px;
+                padding: 2px 10px;
+                font-size: 11px;
+                font-weight: 600;
+                letter-spacing: 0.02em;
+            }
+
+            .studio-status-pill-active {
+                background-color: rgba(62, 207, 142, 0.14);
+                color: #3ecf8e;
+            }
+
+            .editor-root.editor-theme-light .studio-status-pill-active {
+                background-color: rgba(31, 157, 99, 0.12);
+                color: #1f9d63;
+            }
+
+            .studio-status-pill-neutral {
+                background-color: alpha(white, 0.08);
+                color: alpha(white, 0.62);
+            }
+
+            .editor-root.editor-theme-light .studio-status-pill-neutral {
+                background-color: alpha(#111827, 0.07);
+                color: alpha(#1d2129, 0.60);
+            }
+
+            .studio-status-pill-warning {
+                background-color: rgba(240, 180, 41, 0.14);
+                color: #f0b429;
+            }
+
+            .editor-root.editor-theme-light .studio-status-pill-warning {
+                background-color: rgba(180, 83, 9, 0.12);
+                color: #a55a05;
+            }
+
+            .studio-status-pill-attention {
+                background-color: rgba(255, 103, 13, 0.14);
+                color: #ff8a4a;
+            }
+
+            .editor-root.editor-theme-light .studio-status-pill-attention {
+                background-color: rgba(255, 103, 13, 0.12);
+                color: #cf530b;
+            }
+
+            .studio-status-pill-muted {
+                background-color: alpha(white, 0.06);
+                color: alpha(white, 0.45);
+            }
+
+            .editor-root.editor-theme-light .studio-status-pill-muted {
+                background-color: alpha(#111827, 0.06);
+                color: alpha(#1d2129, 0.45);
+            }
+
+            .studio-hero-meta {
+                font-size: 12px;
+                color: alpha(white, 0.60);
+            }
+
+            .studio-hero-meta image {
+                color: alpha(white, 0.45);
+            }
+
+            .editor-root.editor-theme-light .studio-hero-meta {
+                color: alpha(#1d2129, 0.58);
+            }
+
+            .editor-root.editor-theme-light .studio-hero-meta image {
+                color: alpha(#1d2129, 0.45);
+            }
+
+            .studio-hero-meta-dot {
+                min-width: 3px;
+                min-height: 3px;
+                border-radius: 999px;
+                background-color: rgba(255, 255, 255, 0.22);
+            }
+
+            .editor-root.editor-theme-light .studio-hero-meta-dot {
+                background-color: alpha(#111827, 0.20);
+            }
+
+            .studio-row-title {
+                font-size: 13px;
+                font-weight: 500;
+            }
+
+            .studio-activate-row {
+                padding: 12px 14px 14px 14px;
+            }
+
+            .studio-reveal-body {
+                padding: 4px 14px 14px 14px;
+            }
+
+            .editor-root .studio-token-entry {
+                min-height: 36px;
+                border-radius: 8px;
+            }
+
+            .studio-feedback {
+                font-size: 12px;
+                color: alpha(white, 0.62);
+            }
+
+            .editor-root.editor-theme-light .studio-feedback {
+                color: alpha(#1d2129, 0.62);
+            }
+

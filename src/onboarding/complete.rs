@@ -1,7 +1,9 @@
+//! Finish: what the install now has, and the action that closes setup.
+
 use gtk4::{prelude::*, Box as GtkBox, Button};
 
-use super::ui::{feature_card_list, heading, tip_block};
-use super::Nav;
+use super::ui::{feature_card_list, heading};
+use super::{Nav, SECTION_GAP};
 use crate::capture::editor::window::icon_names::custom;
 use crate::i18n::t;
 
@@ -22,7 +24,7 @@ pub fn build(body: &GtkBox, actions: &GtkBox, nav: &Nav) {
         t("Capture without opening Settings every time")
     };
     let menu_title = t("App menu");
-    let menu_body = t("Open ApexShot anytime for Settings and preferences");
+    let menu_body = t("Open ApexShot anytime for Settings, shortcuts, and preferences");
     let checklist = feature_card_list(&[
         (
             custom::OVERLAPPING_WINDOWS_SYMBOLIC,
@@ -40,15 +42,8 @@ pub fn build(body: &GtkBox, actions: &GtkBox, nav: &Nav) {
             menu_body.as_str(),
         ),
     ]);
-    checklist.set_margin_top(28);
+    checklist.set_margin_top(SECTION_GAP);
     body.append(&checklist);
-
-    let tip_title = t("Pro tip");
-    let tip_body =
-        t("If a hotkey conflicts with your desktop, change it under Settings → Shortcuts.");
-    let tip = tip_block(&tip_title, &tip_body);
-    tip.set_margin_top(24);
-    body.append(&tip);
 
     let finish_btn = Button::with_label(&t("Start Using ApexShot"));
     finish_btn.add_css_class("settings-primary-btn");
