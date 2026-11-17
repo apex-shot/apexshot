@@ -457,13 +457,14 @@
                 border-radius: 6px;
                 background: transparent;
                 color: alpha(white, 0.52);
-                font-size: 12px;
+                font-size: 13px;
                 font-weight: 500;
+                box-shadow: none;
             }
 
             button.recording-editor-cursor-tab label {
                 color: inherit;
-                font-size: 12px;
+                font-size: 13px;
                 font-weight: 500;
             }
 
@@ -483,6 +484,10 @@
                 color: inherit;
             }
 
+            button.recording-editor-cursor-tab:disabled {
+                opacity: 0.35;
+            }
+
             /* The Clips panel's speed presets, on the same segmented track as
              * the scopes above them. */
             .recording-editor-clip-presets {
@@ -494,18 +499,19 @@
 
             button.recording-editor-clip-preset {
                 min-height: 26px;
-                padding: 0 4px;
+                padding: 0 6px;
                 border: none;
                 border-radius: 6px;
                 background: transparent;
                 color: alpha(white, 0.52);
-                font-size: 12px;
+                font-size: 13px;
                 font-weight: 500;
+                box-shadow: none;
             }
 
             button.recording-editor-clip-preset label {
                 color: inherit;
-                font-size: 12px;
+                font-size: 13px;
                 font-weight: 500;
             }
 
@@ -523,6 +529,10 @@
             button.recording-editor-clip-preset:checked label,
             button.recording-editor-clip-preset:checked:hover label {
                 color: inherit;
+            }
+
+            button.recording-editor-clip-preset:disabled {
+                opacity: 0.35;
             }
 
             /* Microphone modes: a two-column grid of tiles, each a name over
@@ -724,13 +734,14 @@
                 border-radius: 6px;
                 background: transparent;
                 color: alpha(white, 0.52);
-                font-size: 12px;
+                font-size: 13px;
                 font-weight: 500;
+                box-shadow: none;
             }
 
             button.recording-editor-zoom-mode-btn label {
                 color: inherit;
-                font-size: 12px;
+                font-size: 13px;
                 font-weight: 500;
             }
 

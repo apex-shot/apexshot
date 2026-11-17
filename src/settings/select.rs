@@ -17,11 +17,6 @@ const OPTION_HEIGHT: i32 = 32;
 /// Space between a trigger and the menu it drops.
 const MENU_GAP: i32 = 6;
 
-/// Room a popover surface reserves on each side of its contents for the
-/// shadow. Sizing the surface to the trigger's width alone leaves the visible
-/// panel this much narrower on both sides, so the request adds it back.
-const POPOVER_SHADOW_INSET: i32 = 0;
-
 type ChangeListeners = Rc<RefCell<Vec<Rc<dyn Fn()>>>>;
 
 #[derive(Clone)]
@@ -82,6 +77,8 @@ impl SettingsSelect {
         popover.set_has_arrow(false);
         popover.set_autohide(true);
         popover.set_position(gtk4::PositionType::Bottom);
+        // The menu hangs off its trigger's left edge rather than centring on it.
+        popover.set_halign(Align::Start);
         // A small gap under the trigger keeps the menu reading as a separate
         // surface instead of a continuation of the field.
         popover.set_offset(0, MENU_GAP);
@@ -102,9 +99,15 @@ impl SettingsSelect {
             option.set_size_request(-1, OPTION_HEIGHT);
             let row = GtkBox::new(Orientation::Horizontal, 8);
             let option_text = Label::new(Some(option_label));
-            option_text.set_halign(Align::Start);
+            // The row's text fills whatever the row is given and keeps its
+            // left edge; a start-aligned label would render at its capped
+            // natural width as a bare ellipsis.
+            option_text.set_halign(Align::Fill);
             option_text.set_xalign(0.0);
             option_text.set_hexpand(true);
+            // The menu is never wider than its trigger, so an option longer
+            // than the field ends in an ellipsis instead of widening the panel.
+            option_text.set_ellipsize(gtk4::pango::EllipsizeMode::End);
             // The chosen option is marked, not filled: the row keeps the same
             // surface as its neighbours and only the tick sets it apart.
             let check = Image::from_icon_name(icon_names::custom::CHECK_SYMBOLIC);
@@ -166,11 +169,13 @@ impl SettingsSelect {
             let popover = popover.clone();
             let button_for_width = button.clone();
             button.connect_clicked(move |_| {
-                // The menu is an extension of its trigger: the visible panel
-                // takes the trigger's outer width, so the request carries the
-                // popover surface's own shadow reserve on top of it.
-                let width = button_for_width.width();
-                popover.set_size_request(width + POPOVER_SHADOW_INSET * 2, -1);
+                // The menu is an extension of its trigger: the same width, on
+                // the same left edge.
+                crate::settings::ui_support::align_popover_to_trigger(
+                    &popover,
+                    &button_for_width,
+                    false,
+                );
                 popover.popup();
             });
         }
@@ -242,9 +247,84 @@ mod tests {
             "settings dropdown still stretches with the row"
         );
         assert!(
-            production_source.contains("button_for_width.width()"),
+            production_source.contains("align_popover_to_trigger(")
+                && production_source.contains("&button_for_width"),
             "settings dropdown menu should match its trigger width"
         );
+    }
+
+    fn select_popover(select: &SettingsSelect) -> Popover {
+        let mut child = select.widget().first_child();
+        while let Some(widget) = child {
+            if let Ok(popover) = widget.clone().downcast::<Popover>() {
+                return popover;
+            }
+            child = widget.next_sibling();
+        }
+        panic!("settings select popover");
+    }
+
+    #[test]
+    fn settings_select_menu_lines_up_with_its_trigger() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let select = SettingsSelect::new(
+                [
+                    ("first", "A first option far longer than this field"),
+                    ("second", "Second option"),
+                ],
+                "first",
+            );
+            let popover = select_popover(&select);
+            assert_eq!(
+                popover.halign(),
+                Align::Start,
+                "the menu must open on the trigger's left edge, not centred on it"
+            );
+
+            let menu = popover
+                .child()
+                .expect("popover child")
+                .downcast::<GtkBox>()
+                .expect("menu box");
+            let mut labels = 0;
+            let mut row = menu.first_child();
+            while let Some(widget) = row {
+                let next = widget.next_sibling();
+                let row_box = widget
+                    .downcast::<Button>()
+                    .expect("option row")
+                    .child()
+                    .expect("row content")
+                    .downcast::<GtkBox>()
+                    .expect("row box");
+                let text = row_box
+                    .first_child()
+                    .expect("option label")
+                    .downcast::<Label>()
+                    .expect("label widget");
+                assert_eq!(
+                    text.ellipsize(),
+                    gtk4::pango::EllipsizeMode::End,
+                    "an option longer than the field has to end in an ellipsis"
+                );
+                assert_eq!(
+                    text.halign(),
+                    Align::Fill,
+                    "a capped option label has to fill its row, or it renders as a bare ellipsis"
+                );
+                assert_eq!(
+                    text.xalign(),
+                    0.0,
+                    "filling the row must not move the option text off its left edge"
+                );
+                labels += 1;
+                row = next;
+            }
+            assert_eq!(labels, 2);
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
     }
 
     #[test]
@@ -256,18 +336,7 @@ mod tests {
             );
             assert_eq!(select.active_id().as_deref(), Some("first"));
 
-            let popover = {
-                let mut found = None;
-                let mut child = select.widget().first_child();
-                while let Some(widget) = child {
-                    if let Ok(popover) = widget.clone().downcast::<Popover>() {
-                        found = Some(popover);
-                        break;
-                    }
-                    child = widget.next_sibling();
-                }
-                found.expect("settings select popover")
-            };
+            let popover = select_popover(&select);
             let menu = popover
                 .child()
                 .expect("popover child")

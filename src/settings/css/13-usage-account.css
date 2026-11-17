@@ -145,14 +145,3 @@
                 background-color: #ffffff;
                 border: 1px solid alpha(#111827, 0.16);
             }
-
-            .linux-settings button.settings-select {
-                min-height: 28px;
-                padding: 0 10px;
-                border: none;
-                border-radius: 8px;
-            }
-
-            .linux-settings button.settings-select label {
-                padding: 0;
-            }

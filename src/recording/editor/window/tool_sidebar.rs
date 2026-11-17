@@ -8,8 +8,8 @@ use crate::recording::editor::sound::MicPreset;
 use gtk4::{
     gdk, glib, prelude::*, Align, Box as GtkBox, Button, DrawingArea, EventControllerMotion,
     FileChooserAction, FileChooserNative, FileFilter, GestureClick, GestureDrag, Grid, Image,
-    Justification, Label, Orientation, Overlay, PolicyType, ResponseType, ScrolledWindow, Switch,
-    ToggleButton, Widget, Window,
+    Justification, Label, Orientation, Overlay, PolicyType, ResponseType, Revealer,
+    RevealerTransitionType, ScrolledWindow, Switch, ToggleButton, Widget, Window,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -144,6 +144,85 @@ pub(super) fn build_tool_sidebar(
 include!("tool_sidebar_cursor.rs");
 include!("tool_sidebar_background.rs");
 
+/// A titled group of controls whose body folds under its header: the raised
+/// card, uppercase title and chevron the image editor's inspector uses, so
+/// both editors' side panels read as the same stack of cards.
+pub(super) struct SidebarSection {
+    root: GtkBox,
+    body: GtkBox,
+}
+
+fn sidebar_section(title: &str, open: bool, studio: bool) -> SidebarSection {
+    let root = GtkBox::new(Orientation::Vertical, 8);
+    root.add_css_class("video-editor-section");
+    root.set_hexpand(true);
+
+    let header = GtkBox::new(Orientation::Horizontal, 8);
+    header.add_css_class("video-editor-disclosure-header");
+    let heading = Label::new(Some(&title.to_uppercase()));
+    heading.add_css_class("video-editor-section-title");
+    heading.set_xalign(0.0);
+    heading.set_hexpand(true);
+    let chevron_name = |open: bool| {
+        if open {
+            icon_names::CHEVRON_DOWN_REGULAR
+        } else {
+            icon_names::CHEVRON_RIGHT_REGULAR
+        }
+    };
+    let chevron = Image::from_icon_name(chevron_name(open));
+    chevron.set_pixel_size(12);
+    chevron.set_valign(Align::Center);
+    chevron.add_css_class("video-editor-disclosure-chevron");
+    header.append(&heading);
+    if studio {
+        append_studio_badge(&header);
+    }
+    header.append(&chevron);
+    root.append(&header);
+
+    let body = GtkBox::new(Orientation::Vertical, 8);
+    body.set_hexpand(true);
+    let revealer = Revealer::builder()
+        .transition_type(RevealerTransitionType::SlideDown)
+        .transition_duration(120)
+        .child(&body)
+        .build();
+    revealer.set_halign(Align::Fill);
+    revealer.set_reveal_child(open);
+    root.append(&revealer);
+
+    let click = GestureClick::new();
+    click.connect_pressed(move |_, _, _, _| {
+        let open = !revealer.reveals_child();
+        revealer.set_reveal_child(open);
+        chevron.set_icon_name(Some(chevron_name(open)));
+    });
+    header.add_controller(click);
+    SidebarSection { root, body }
+}
+
+/// Append the quiet tier marker to a Studio group's header. The controls stay
+/// usable; the badge only says which tier owns them, so it is hidden once
+/// Studio is unlocked. Activation can happen while the editor is open, so the
+/// check runs again whenever the header is shown.
+fn append_studio_badge(header: &GtkBox) {
+    let badge = Label::new(Some(&t("Studio")));
+    badge.add_css_class("editor-studio-badge");
+    badge.set_valign(Align::Center);
+    badge.set_tooltip_text(Some(&t("Included with Studio")));
+    badge.set_visible(!crate::studio_entitlement::studio_unlocked());
+    header.connect_map({
+        let badge = badge.downgrade();
+        move |_| {
+            if let Some(badge) = badge.upgrade() {
+                badge.set_visible(!crate::studio_entitlement::studio_unlocked());
+            }
+        }
+    });
+    header.append(&badge);
+}
+
 struct ZoomPanel {
     widget: GtkBox,
     refresh: Rc<dyn Fn()>,
@@ -167,8 +246,17 @@ fn build_zoom_panel(
     title.set_xalign(0.0);
     title.set_hexpand(true);
     header.append(&title);
+    let reset = Button::with_label(&t("Reset"));
+    reset.add_css_class("recording-editor-zoom-reset");
+    reset.set_has_frame(false);
+    reset.set_halign(Align::End);
+    reset.set_valign(Align::Center);
+    reset.set_tooltip_text(Some(&t(
+        "Put every zoom animation setting back to its default.",
+    )));
+    header.append(&reset);
 
-    let body = GtkBox::new(Orientation::Vertical, 0);
+    let body = GtkBox::new(Orientation::Vertical, 8);
     body.add_css_class("recording-editor-zoom-body");
     body.add_css_class("recording-editor-zoom-slider-spacing");
     body.set_hexpand(true);
@@ -239,20 +327,6 @@ fn build_zoom_panel(
         })
         .collect();
 
-    let animation_header = GtkBox::new(Orientation::Horizontal, 8);
-    animation_header.add_css_class("recording-editor-zoom-section-row");
-    animation_header.set_hexpand(true);
-    let animation_label = Label::new(Some(&t("Animation")));
-    animation_label.add_css_class("recording-editor-zoom-kicker");
-    animation_label.set_xalign(0.0);
-    animation_label.set_hexpand(true);
-    let reset = Button::with_label(&t("Reset"));
-    reset.add_css_class("recording-editor-zoom-reset");
-    reset.set_has_frame(false);
-    reset.set_halign(Align::End);
-    animation_header.append(&animation_label);
-    animation_header.append(&reset);
-
     let instant_row = GtkBox::new(Orientation::Horizontal, 8);
     instant_row.add_css_class("recording-editor-zoom-classic");
     instant_row.set_hexpand(true);
@@ -269,21 +343,6 @@ fn build_zoom_panel(
     )));
     instant_row.append(&instant_label);
     instant_row.append(&instant);
-
-    let studio_hint = Label::new(Some(&t(
-        "Studio controls. Default zoom and legacy easing stay free; active exports using non-default camera settings or instant animation need activation.",
-    )));
-    studio_hint.set_visible(!crate::studio_entitlement::studio_unlocked());
-    studio_hint.add_css_class("recording-editor-zoom-hint");
-    studio_hint.set_wrap(true);
-    studio_hint.set_xalign(0.0);
-    studio_hint.set_max_width_chars(34);
-
-    let camera_hint = Label::new(Some(&t("These settings apply to every zoom.")));
-    camera_hint.add_css_class("recording-editor-zoom-hint");
-    camera_hint.set_wrap(true);
-    camera_hint.set_xalign(0.0);
-    camera_hint.set_max_width_chars(34);
 
     let speed_slider =
         FillSlider::new_with_value_text(&t("Camera speed"), |value, _, _| format_clip_speed(value));
@@ -344,17 +403,23 @@ fn build_zoom_panel(
     early_row.append(&early_label);
     early_row.append(&start_early);
 
-    body.append(&mode_row);
-    body.append(&mode_hint);
-    body.append(&chips);
-    body.append(&animation_header);
-    body.append(&studio_hint);
-    body.append(&instant_row);
-    body.append(&camera_hint);
-    body.append(&speed_slider.widget());
-    body.append(&smoothness_slider.widget());
-    body.append(&early_row);
-    body.append(&motion_blur_slider.widget());
+    let selected = sidebar_section(&t("This zoom"), true, false);
+    selected.body.append(&mode_row);
+    selected.body.append(&mode_hint);
+    selected.body.append(&chips);
+
+    let animation = sidebar_section(&t("Animation"), true, true);
+    animation
+        .root
+        .set_tooltip_text(Some(&t("These settings apply to every zoom.")));
+    animation.body.append(&instant_row);
+    animation.body.append(&speed_slider.widget());
+    animation.body.append(&smoothness_slider.widget());
+    animation.body.append(&motion_blur_slider.widget());
+    animation.body.append(&early_row);
+
+    body.append(&selected.root);
+    body.append(&animation.root);
 
     let scroll = ScrolledWindow::new();
     scroll.add_css_class("recording-editor-zoom-scroll");
@@ -650,9 +715,7 @@ fn build_clip_scope_page(
     hint.set_xalign(0.0);
     hint.set_max_width_chars(34);
 
-    let speed_label = Label::new(Some(&t("Speed")));
-    speed_label.add_css_class("recording-editor-zoom-kicker");
-    speed_label.set_xalign(0.0);
+    let speed_section = sidebar_section(&t("Speed"), true, false);
 
     let presets = GtkBox::new(Orientation::Horizontal, 0);
     presets.add_css_class("recording-editor-clip-presets");
@@ -713,9 +776,7 @@ fn build_clip_scope_page(
         }
     });
 
-    let sound_label = Label::new(Some(&t("Sound")));
-    sound_label.add_css_class("recording-editor-zoom-kicker");
-    sound_label.set_xalign(0.0);
+    let sound_section = sidebar_section(&t("Sound"), true, false);
 
     let mute_row = GtkBox::new(Orientation::Horizontal, 8);
     mute_row.add_css_class("recording-editor-zoom-classic");
@@ -744,18 +805,18 @@ fn build_clip_scope_page(
         },
     );
 
+    speed_section.body.append(&presets);
+    speed_section.body.append(&speed_slider.widget());
+    sound_section.body.append(&mute_row);
+
     body.append(&count);
     body.append(&hint);
-    body.append(&speed_label);
-    body.append(&presets);
-    body.append(&speed_slider.widget());
-    body.append(&sound_label);
-    body.append(&mute_row);
+    body.append(&speed_section.root);
+    body.append(&sound_section.root);
 
     let refresh = {
         let count = count.clone();
         let hint = hint.clone();
-        let presets = presets.clone();
         let preset_buttons = preset_buttons.clone();
         let speed_slider = speed_slider.clone();
         let mute = mute.clone();
@@ -791,8 +852,8 @@ fn build_clip_scope_page(
                 button.set_active(speed.is_some_and(|speed| (speed - preset).abs() < 1e-6));
             }
             sync_switch(&mute, muted);
-            presets.set_sensitive(can_edit);
-            speed_slider.set_sensitive(can_edit);
+            // Speed stays editable with no clip selected, matching the panel
+            // we study: the model setter already ignores the press.
             mute.set_sensitive(can_mute);
             syncing.set(false);
         }) as Rc<dyn Fn()>
@@ -815,9 +876,7 @@ fn build_sound_scope_page(
 
     let syncing = Rc::new(Cell::new(false));
 
-    let volume_label = Label::new(Some(&t("Volume")));
-    volume_label.add_css_class("recording-editor-zoom-kicker");
-    volume_label.set_xalign(0.0);
+    let volume_section = sidebar_section(&t("Volume"), true, false);
     let volume_slider =
         FillSlider::new_with_value_text(&t("Volume"), |value, _, _| format!("{value:.0}%"));
     volume_slider.set_range(0.0, 100.0);
@@ -843,9 +902,7 @@ fn build_sound_scope_page(
     no_sound.set_xalign(0.0);
     no_sound.set_max_width_chars(34);
 
-    let mic_label = Label::new(Some(&t("Microphone")));
-    mic_label.add_css_class("recording-editor-zoom-kicker");
-    mic_label.set_xalign(0.0);
+    let mic_section = sidebar_section(&t("Microphone"), true, false);
 
     let mic_grid = Grid::new();
     mic_grid.add_css_class("recording-editor-mic-grid");
@@ -896,9 +953,7 @@ fn build_sound_scope_page(
         }
     }
 
-    let music_label = Label::new(Some(&t("Background music")));
-    music_label.add_css_class("recording-editor-zoom-kicker");
-    music_label.set_xalign(0.0);
+    let music_section = sidebar_section(&t("Background music"), true, false);
 
     let music_row = GtkBox::new(Orientation::Horizontal, 6);
     music_row.add_css_class("recording-editor-clip-music-row");
@@ -1036,14 +1091,15 @@ fn build_sound_scope_page(
         },
     );
 
-    body.append(&volume_label);
-    body.append(&volume_slider.widget());
-    body.append(&no_sound);
-    body.append(&mic_label);
-    body.append(&mic_grid);
-    body.append(&music_label);
-    body.append(&music_row);
-    body.append(&music_controls);
+    volume_section.body.append(&volume_slider.widget());
+    volume_section.body.append(&no_sound);
+    mic_section.body.append(&mic_grid);
+    music_section.body.append(&music_row);
+    music_section.body.append(&music_controls);
+
+    body.append(&volume_section.root);
+    body.append(&mic_section.root);
+    body.append(&music_section.root);
 
     let refresh = {
         let volume_slider = volume_slider.clone();

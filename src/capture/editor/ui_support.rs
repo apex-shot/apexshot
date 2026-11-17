@@ -470,6 +470,37 @@ pub fn traffic_light_button(color_class: &str, tooltip: &str) -> Button {
     button
 }
 
+/// The primary monitor's logical geometry, or a generous fallback when there
+/// is no display to ask.
+fn primary_monitor_size() -> (i32, i32) {
+    if let Some(display) = gdk::Display::default() {
+        let monitors = display.monitors();
+        if monitors.n_items() > 0 {
+            if let Some(obj) = monitors.item(0) {
+                if let Ok(monitor) = obj.downcast::<gdk::Monitor>() {
+                    let geometry = monitor.geometry();
+                    return (geometry.width(), geometry.height());
+                }
+            }
+        }
+    }
+    (1920, 1080)
+}
+
+/// Clamp a preferred editor window size to the space the primary monitor
+/// leaves — at most 90% of its logical width and 85% of its height — so a
+/// small or scaled display never opens a window the compositor has to stretch
+/// to the screen.
+pub fn clamp_editor_window_size(preferred_width: i32, preferred_height: i32) -> (i32, i32) {
+    let (screen_width, screen_height) = primary_monitor_size();
+    let max_width = ((screen_width as f64) * 0.90).round() as i32;
+    let max_height = ((screen_height as f64) * 0.85).round() as i32;
+    (
+        preferred_width.min(max_width.max(1)),
+        preferred_height.min(max_height.max(1)),
+    )
+}
+
 pub fn recommended_window_size_with_extra_width(
     _image_width: i32,
     _image_height: i32,
@@ -478,37 +509,12 @@ pub fn recommended_window_size_with_extra_width(
     // Keep the editor window size stable. Do not auto-resize the window based on
     // the opened screenshot dimensions; users can manually resize the editor if
     // they want a larger or smaller workspace.
-    let (screen_width, screen_height) = if let Some(display) = gdk::Display::default() {
-        let monitors = display.monitors();
-        if monitors.n_items() > 0 {
-            if let Some(obj) = monitors.item(0) {
-                if let Ok(monitor) = obj.downcast::<gdk::Monitor>() {
-                    let geometry = monitor.geometry();
-                    (geometry.width(), geometry.height())
-                } else {
-                    (1920, 1080)
-                }
-            } else {
-                (1920, 1080)
-            }
-        } else {
-            (1920, 1080)
-        }
-    } else {
-        (1920, 1080)
-    };
-
-    let max_width = ((screen_width as f64) * 0.90).round() as i32;
-    let max_height = ((screen_height as f64) * 0.85).round() as i32;
     let default_width = 1280 + extra_width.max(0);
     // Kept identical to the recording editor's default height so switching
     // between the image and video editors doesn't resize the window.
     let default_height = 900;
 
-    (
-        default_width.clamp(EDITOR_MIN_WINDOW_WIDTH.min(max_width), max_width.max(1)),
-        default_height.clamp(560.min(max_height), max_height.max(1)),
-    )
+    clamp_editor_window_size(default_width, default_height)
 }
 
 pub fn set_active_tool_button(buttons: &[Button], active_index: usize) {
