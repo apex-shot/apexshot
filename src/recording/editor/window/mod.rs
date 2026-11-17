@@ -146,11 +146,14 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
         InitialVideo::AsyncLoad(path) => match ffmpeg::probe_metadata(path) {
             Ok(metadata) => {
                 let mut state = VideoEditState::new(metadata);
-                project::restore_into(&mut state);
+                let has_saved_project = project::restore_into(&mut state);
                 // Runs at most once per recording, and never again after the
                 // user has reviewed the result — including after deleting
-                // every suggestion.
-                if state.suggest_zooms_on_open() {
+                // every suggestion. A saved project keeps whatever it holds.
+                if state.suggest_zooms_on_open(
+                    crate::config::load_config().rec_video_auto_zoom_on_import,
+                    has_saved_project,
+                ) {
                     state.selected_tool = EditorTool::Timeline;
                 }
                 Some(Arc::new(Mutex::new(state)))
@@ -230,8 +233,12 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
     stage.set_hexpand(true);
     stage.set_vexpand(true);
     let preview_media = media.borrow().clone();
-    let (preview_widget, _, _) =
-        preview::build_preview_with_media(state.clone(), estimate_label.clone(), preview_media);
+    let (preview_widget, _, _) = preview::build_preview_with_media(
+        state.clone(),
+        estimate_label.clone(),
+        preview_media,
+        ping.clone(),
+    );
     stage.append(&preview_widget);
     stage.append(&preview::build_stage_tools(
         &window,
@@ -428,6 +435,17 @@ fn build_zoom_history_keys(
         if export_flow_active.get() {
             return glib::Propagation::Stop;
         }
+        // Escape puts the Add zoom tool away from anywhere in the editor; the
+        // armed tool is a gesture waiting for a click, and the key is its
+        // usual way out.
+        if key == gdk::Key::Escape {
+            let changed = state.lock().unwrap().set_add_zoom_tool(false);
+            if changed {
+                ping();
+                return glib::Propagation::Stop;
+            }
+            return glib::Propagation::Proceed;
+        }
         let Some(action) = zoom_history_key(key, modifiers) else {
             return glib::Propagation::Proceed;
         };
@@ -565,7 +583,14 @@ fn load_preview_video(
         return false;
     };
     let mut next = VideoEditState::new(metadata.clone());
-    project::restore_into(&mut next);
+    let has_saved_project = project::restore_into(&mut next);
+    // Opening another video is the same first open a launch performs, so the
+    // automatic pass runs under the same setting and the same "no saved
+    // project" rule.
+    next.suggest_zooms_on_open(
+        crate::config::load_config().rec_video_auto_zoom_on_import,
+        has_saved_project,
+    );
     *state.lock().unwrap() = next;
     filmstrip.borrow_mut().clear();
     spawn_filmstrip_job(metadata, filmstrip.clone(), state.clone(), ping.clone());

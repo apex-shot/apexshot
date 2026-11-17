@@ -21,6 +21,7 @@ pub mod sound;
 pub mod sound_peaks;
 pub mod ui_support;
 pub(crate) mod window;
+pub mod zoom_path;
 
 use std::path::PathBuf;
 

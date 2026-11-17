@@ -429,3 +429,101 @@
             .editor-reduced-transparency .editor-theme-light .recording-editor-export-options-card button.recording-editor-export-action:not(.recording-editor-export-primary) {
                 background: #f4f2ee;
             }
+            /* ── Add zoom tool ── */
+
+            /* The armed tool's prompt, along the bottom of the preview. The
+               pill is drawn over the footage, so it stays dark in both
+               themes rather than following the chrome. */
+            .recording-editor-add-zoom-bar {
+                padding: 6px 8px;
+                border-radius: 999px;
+                background: alpha(black, 0.62);
+            }
+
+            .recording-editor-add-zoom-hint {
+                color: alpha(white, 0.92);
+                font-size: 13px;
+            }
+
+            button.recording-editor-add-zoom-auto {
+                min-height: 0;
+                padding: 3px 10px;
+                border-radius: 999px;
+                color: white;
+                background: alpha(white, 0.16);
+                font-size: 13px;
+            }
+
+            button.recording-editor-add-zoom-auto:hover {
+                background: alpha(white, 0.24);
+            }
+
+            /* The tool row shows the tool waiting for its click. */
+            .recording-editor-root button.recording-editor-timeline-tool-active {
+                background: alpha(white, 0.12);
+            }
+
+            .recording-editor-root.editor-theme-light button.recording-editor-timeline-tool-active {
+                background: alpha(#111827, 0.09);
+            }
+            /* ── Cursor rotation modes ── */
+
+            /* The cursor's Follow page picks a rotation mode on the same
+               segmented track as the Clip scope's speed presets. */
+            .recording-editor-cursor-segments {
+                margin: 0 0 4px 0;
+                padding: 3px;
+                border-radius: 8px;
+                background: alpha(white, 0.06);
+            }
+
+            button.recording-editor-cursor-segment {
+                min-height: 26px;
+                padding: 0 4px;
+                border: none;
+                border-radius: 6px;
+                background: transparent;
+                color: alpha(white, 0.52);
+                font-size: 12px;
+                font-weight: 500;
+            }
+
+            button.recording-editor-cursor-segment label {
+                color: inherit;
+                font-size: 12px;
+                font-weight: 500;
+            }
+
+            button.recording-editor-cursor-segment:hover {
+                color: alpha(white, 0.92);
+                background: transparent;
+            }
+
+            button.recording-editor-cursor-segment:checked,
+            button.recording-editor-cursor-segment:checked:hover {
+                background: alpha(white, 0.10);
+                color: alpha(white, 0.96);
+            }
+
+            button.recording-editor-cursor-segment:checked label,
+            button.recording-editor-cursor-segment:checked:hover label {
+                color: inherit;
+            }
+
+            .editor-theme-light .recording-editor-cursor-segments {
+                background: alpha(#111827, 0.06);
+            }
+
+            .editor-theme-light button.recording-editor-cursor-segment {
+                color: alpha(#1d2129, 0.55);
+            }
+
+            .editor-theme-light button.recording-editor-cursor-segment:hover {
+                color: alpha(#1d2129, 0.92);
+            }
+
+            .editor-theme-light button.recording-editor-cursor-segment:checked,
+            .editor-theme-light button.recording-editor-cursor-segment:checked:hover {
+                background: alpha(#111827, 0.10);
+                color: alpha(#1d2129, 0.96);
+            }

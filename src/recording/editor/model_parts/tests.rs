@@ -883,7 +883,12 @@ fn follow_camera_keeps_its_viewport_inside_the_crop() {
     // export would show pixels the crop dropped.
     let crop = (100.0, 50.0, 800.0, 600.0);
     let points = vec![(0.0, 900.0, 650.0), (1.0, 900.0, 650.0)];
-    let budget = movement_group_budget(crop, 2.0);
+    let budget = movement_group_budget(
+        (crop.2, crop.3),
+        2.0,
+        crop.2 / crop.3,
+        (crop.2, crop.3),
+    );
     let followed = evaluate_spring_camera((500.0, 350.0), &points, 0.0, 1.0, budget, CAMERA_FOLLOW_SPRING);
     let clamped = clamp_zoom_center(crop, 2.0, followed);
     let half_w = crop.2 / 2.0 / 2.0;
@@ -928,30 +933,479 @@ fn movement_groups_split_when_the_pointer_roams_far() {
 }
 
 #[test]
-fn zoom_follow_samples_drop_jitter_and_stay_inside_the_zoom() {
-    let points = vec![
-        (0.0, 100.0, 100.0),
-        (0.5, 400.0, 400.0),
-        (1.0, 403.0, 402.0),
-        (1.5, 900.0, 500.0),
-        (2.0, 1500.0, 800.0),
-        (3.0, 1800.0, 900.0),
-    ];
-    let window = zoom_follow_samples(&points, 1.2, 2.5);
-    let times: Vec<f64> = window.iter().map(|sample| sample.0).collect();
-    assert_eq!(times.len(), 3, "carry-in plus two inside samples: {window:?}");
-    assert!((times[0] - 1.199).abs() < 1e-9, "carry-in starts the zoom, got {times:?}");
-    assert_eq!((window[0].1, window[0].2), (400.0, 400.0), "the 3 px wobble is jitter");
-    assert_eq!(times[1], 1.5);
-    assert_eq!(times[2], 2.0);
+fn the_budget_matches_the_old_crop_rule_at_a_1080_tall_logical_source() {
+    // The old budget was `crop / scale * 0.5`. The stage-aware one has to
+    // reduce to exactly that when the logical source is 1080 tall at the
+    // stage's aspect, or every existing recording would regroup.
+    for (frame, scale) in [
+        ((1920.0, 1080.0), 2.0),
+        ((1440.0, 1080.0), 1.8),
+        ((1080.0, 1080.0), 3.0),
+    ] {
+        let stage_aspect = frame.0 / frame.1;
+        let budget = movement_group_budget(frame, scale, stage_aspect, frame);
+        assert!(
+            (budget.0 - frame.0 / scale * 0.5).abs() < 1e-9
+                && (budget.1 - frame.1 / scale * 0.5).abs() < 1e-9,
+            "budget {budget:?} should match the old rule for {frame:?} at {scale}x"
+        );
+    }
 }
 
 #[test]
-fn zoom_follow_samples_without_history_start_at_the_first_inside_sample() {
-    let points = vec![(1.0, 100.0, 100.0), (2.0, 600.0, 100.0)];
-    let window = zoom_follow_samples(&points, 0.5, 3.0);
-    assert_eq!(window.len(), 2);
-    assert_eq!(window[0].0, 1.0);
+fn the_budget_grows_with_the_device_pixel_ratio() {
+    // A HiDPI capture records more pixels for the same logical stage, so the
+    // grouping must be coarser to cover the same stretch of interface.
+    let frame = (3840.0, 2160.0);
+    let logical = (1920.0, 1080.0);
+    let plain = movement_group_budget(frame, 2.0, 16.0 / 9.0, logical);
+    let hidpi = movement_group_budget(frame, 2.0, 16.0 / 9.0, (1920.0 / 2.0, 1080.0 / 2.0));
+    assert!(
+        hidpi.0 > plain.0 && hidpi.1 > plain.1,
+        "{plain:?} then {hidpi:?}"
+    );
+    assert!((plain.0 - 960.0).abs() < 1e-9 && (plain.1 - 540.0).abs() < 1e-9);
+}
+
+#[test]
+fn follow_points_carry_the_last_sample_before_each_footage_window() {
+    // Two footage windows (a cut). Each starts where the pointer already was,
+    // and the inside samples map onto composition time at the window's rate.
+    use crate::recording::editor::zoom_path::{ZoomPathEvent, ZoomPathKind};
+    let path = vec![
+        ZoomPathEvent {
+            t: 0.0,
+            x: 100.0,
+            y: 100.0,
+            kind: ZoomPathKind::Move,
+        },
+        ZoomPathEvent {
+            t: 5.0,
+            x: 400.0,
+            y: 400.0,
+            kind: ZoomPathKind::Move,
+        },
+        ZoomPathEvent {
+            t: 8.0,
+            x: 900.0,
+            y: 500.0,
+            kind: ZoomPathKind::Move,
+        },
+    ];
+    let windows = vec![
+        CameraWindow {
+            start: 0.5,
+            source_start: 1.0,
+            source_end: 3.0,
+            speed: 1.0,
+        },
+        CameraWindow {
+            start: 3.0,
+            source_start: 6.0,
+            source_end: 9.0,
+            speed: 2.0,
+        },
+    ];
+
+    let points = follow_points(&path, &windows);
+
+    assert_eq!(
+        points,
+        vec![
+            (0.5 - 0.001, 100.0, 100.0),
+            (3.0 - 0.001, 400.0, 400.0),
+            (4.0, 900.0, 500.0),
+        ]
+    );
+}
+
+#[test]
+fn a_zoom_without_its_own_samples_aims_at_the_nearest_one() {
+    use crate::recording::editor::zoom_path::{ZoomPathEvent, ZoomPathKind};
+    let path = vec![ZoomPathEvent {
+        t: 2.3,
+        x: 700.0,
+        y: 500.0,
+        kind: ZoomPathKind::Move,
+    }];
+    let windows = vec![CameraWindow {
+        start: 1.0,
+        source_start: 1.0,
+        source_end: 2.0,
+        speed: 1.0,
+    }];
+
+    let points = follow_points(&path, &windows);
+
+    assert_eq!(points, vec![(2.3, 700.0, 500.0)]);
+}
+
+#[test]
+fn the_nearest_sample_fallback_prefers_the_first_one_within_500_ms() {
+    use crate::recording::editor::zoom_path::{ZoomPathEvent, ZoomPathKind};
+    let event = |t: f64, x: f64| ZoomPathEvent {
+        t,
+        x,
+        y: 0.0,
+        kind: ZoomPathKind::Move,
+    };
+    let path = vec![event(1.4, 400.0), event(1.45, 100.0)];
+
+    assert_eq!(
+        nearest_follow_sample(&path, 1.0),
+        Some((1.4, 400.0, 0.0)),
+        "the first sample inside the look-ahead wins over a nearer one"
+    );
+    assert_eq!(nearest_follow_sample(&path, 1.9), Some((1.45, 100.0, 0.0)));
+    assert_eq!(nearest_follow_sample(&[], 1.0), None);
+}
+
+#[test]
+fn the_camera_ignores_a_pointer_teleport_the_shake_filter_dropped() {
+    use crate::recording::editor::sidecar::{
+        CaptureRegion, CursorKind, PointerSample, PointerSidecar,
+    };
+    let mut state = VideoEditState::new(metadata());
+    let mut sidecar = PointerSidecar::new(
+        0,
+        CaptureRegion {
+            x: 0,
+            y: 0,
+            w: 1920,
+            h: 1080,
+        },
+    );
+    for index in 0..=150 {
+        let x = if index == 63 { 1800.0 } else { 300.0 };
+        let y = if index == 63 { 900.0 } else { 300.0 };
+        sidecar.pointer.push(PointerSample {
+            t: index as f64 * 0.016,
+            x,
+            y,
+            kind: CursorKind::Default,
+            cursor_id: None,
+        });
+    }
+    state.sidecar = Some(sidecar);
+    let index = state.add_zoom_at(0.5).expect("zoom fits");
+    state.zoom_clips[index].end = 2.0;
+    state.zoom_clips[index].scale = 2.0;
+    state.set_selected_zoom_instant(true);
+
+    let (_, center) = state.eval_zoom_at(1.008, 1.008);
+
+    assert!(
+        center.0 < 700.0,
+        "the camera should stay on the parked pointer, got {center:?}"
+    );
+
+    // Turning the filter off refilters the path and the camera follows the
+    // teleport again, so the threshold is part of what the plan caches.
+    state.cursor.remove_shake_threshold = 0.0;
+    let (_, unfiltered) = state.eval_zoom_at(1.008, 1.008);
+    assert!(
+        unfiltered.0 > 1200.0,
+        "without the filter the teleport is followed, got {unfiltered:?}"
+    );
+}
+
+#[test]
+fn the_camera_frames_a_click_with_no_nearby_pointer_sample() {
+    use crate::recording::editor::sidecar::{
+        CaptureRegion, ClickSample, CursorKind, PointerSample, PointerSidecar,
+    };
+    let mut state = VideoEditState::new(metadata());
+    // Clicks far from the pointer are shakes at the default threshold; the
+    // point of this test is that the click is in the path at all.
+    state.cursor.remove_shake_threshold = 0.0;
+    let mut sidecar = PointerSidecar::new(
+        0,
+        CaptureRegion {
+            x: 0,
+            y: 0,
+            w: 1920,
+            h: 1080,
+        },
+    );
+    for index in 0..=150 {
+        sidecar.pointer.push(PointerSample {
+            t: index as f64 * 0.016,
+            x: 300.0,
+            y: 300.0,
+            kind: CursorKind::Default,
+            cursor_id: None,
+        });
+    }
+    sidecar.clicks.push(ClickSample {
+        t: 1.0,
+        x: 1700.0,
+        y: 900.0,
+        button: 1,
+        cursor_id: None,
+    });
+    state.sidecar = Some(sidecar);
+    let index = state.add_zoom_at(0.5).expect("zoom fits");
+    state.zoom_clips[index].end = 2.0;
+    state.zoom_clips[index].scale = 2.0;
+    state.set_selected_zoom_instant(true);
+
+    let (_, center) = state.eval_zoom_at(1.0, 1.0);
+
+    assert!(
+        center.0 > 1200.0 && center.1 > 600.0,
+        "the click should pull the camera off the parked pointer, got {center:?}"
+    );
+}
+
+#[test]
+fn the_editor_pushes_its_cuts_into_the_cursor_plan() {
+    use crate::recording::editor::sidecar::{
+        CaptureRegion, ClickSample, CursorKind, PointerSample, PointerSidecar,
+    };
+    let mut state = VideoEditState::new(metadata());
+    state.cursor.smooth = 0.5;
+    let mut sidecar = PointerSidecar::new(
+        0,
+        CaptureRegion {
+            x: 0,
+            y: 0,
+            w: 1920,
+            h: 1080,
+        },
+    );
+    for index in 0..=60 {
+        sidecar.pointer.push(PointerSample {
+            t: index as f64 * 0.008,
+            x: 100.0 + index as f64 * 8.0,
+            y: 540.0,
+            kind: CursorKind::Default,
+            cursor_id: None,
+        });
+    }
+    sidecar.clicks.push(ClickSample {
+        t: 0.4,
+        x: 500.0,
+        y: 540.0,
+        button: 1,
+        cursor_id: None,
+    });
+    state.sidecar = Some(sidecar);
+
+    let led = state
+        .sidecar
+        .as_ref()
+        .unwrap()
+        .motion_position_at(0.429, 0.5, 1.0)
+        .unwrap();
+    state.add_cut(0.43);
+    let cut = state
+        .sidecar
+        .as_ref()
+        .unwrap()
+        .motion_position_at(0.429, 0.5, 1.0)
+        .unwrap();
+
+    assert!(
+        led.0 - cut.0 > 10.0,
+        "a cut should hold the cursor back: {cut:?} vs {led:?}"
+    );
+}
+
+#[test]
+fn the_editor_pushes_the_shake_threshold_into_the_cursor_plan() {
+    use crate::recording::editor::sidecar::{
+        CaptureRegion, CursorKind, PointerSample, PointerSidecar,
+    };
+    let mut state = VideoEditState::new(metadata());
+    let mut sidecar = PointerSidecar::new(
+        0,
+        CaptureRegion {
+            x: 0,
+            y: 0,
+            w: 1920,
+            h: 1080,
+        },
+    );
+    for index in 0..=150 {
+        let (x, y) = if index == 63 {
+            (1800.0, 900.0)
+        } else {
+            (300.0, 300.0)
+        };
+        sidecar.pointer.push(PointerSample {
+            t: index as f64 * 0.016,
+            x,
+            y,
+            kind: CursorKind::Default,
+            cursor_id: None,
+        });
+    }
+    state.sidecar = Some(sidecar);
+
+    // The switch off is a zero threshold, and it has to reach the sprite path
+    // as well as the camera: the lone spike is drawn again.
+    state.cursor.remove_shake_threshold = 0.0;
+    state.sync_sidecar_cursor_filters();
+    let (x, _) = state
+        .sidecar
+        .as_ref()
+        .unwrap()
+        .motion_position_at(1.008, 0.0, 1.0)
+        .unwrap();
+    assert!(
+        (x - 1800.0).abs() < 1.0,
+        "with the filter off the teleport is drawn, got {x}"
+    );
+
+    // Back on at the studied default, the spike is dropped from the plan.
+    state.cursor.remove_shake_threshold =
+        crate::recording::editor::cursor_shake::DEFAULT_REMOVE_SHAKE_THRESHOLD;
+    state.sync_sidecar_cursor_filters();
+    let (x, _) = state
+        .sidecar
+        .as_ref()
+        .unwrap()
+        .motion_position_at(1.008, 0.0, 1.0)
+        .unwrap();
+    assert!(
+        (x - 300.0).abs() < 1.0,
+        "the default threshold drops the spike, got {x}"
+    );
+}
+
+#[test]
+fn the_editor_pushes_the_cursor_tail_into_the_cursor_plan() {
+    use crate::recording::editor::sidecar::{
+        CaptureRegion, CursorKind, PointerSample, PointerSidecar,
+    };
+    let mut short = metadata();
+    short.duration_seconds = 1.0;
+    let mut state = VideoEditState::new(short);
+    state.cursor.remove_shake_threshold = 0.0;
+    let mut sidecar = PointerSidecar::new(
+        0,
+        CaptureRegion {
+            x: 0,
+            y: 0,
+            w: 1920,
+            h: 1080,
+        },
+    );
+    for index in 0..=60 {
+        sidecar.pointer.push(PointerSample {
+            t: index as f64 * 0.016,
+            x: 100.0 + index as f64 * 8.0,
+            y: 540.0,
+            kind: CursorKind::Default,
+            cursor_id: None,
+        });
+    }
+    state.sidecar = Some(sidecar);
+
+    let moving = state
+        .sidecar
+        .as_ref()
+        .unwrap()
+        .motion_position_at(0.9, 0.0, 1.0)
+        .unwrap();
+    state.cursor.stop_movement_in_last_part_ms = 300.0;
+    state.sync_sidecar_cursor_filters();
+    let held = state
+        .sidecar
+        .as_ref()
+        .unwrap()
+        .motion_position_at(0.9, 0.0, 1.0)
+        .unwrap();
+    assert!(
+        (held.0 - moving.0).abs() > 50.0,
+        "the stop holds the cursor where it was 0.3 s before the end: {held:?} vs {moving:?}"
+    );
+
+    // The loop replaces the hold and sends the cursor back to where it
+    // started 0.4 s before the end.
+    state.cursor.stop_movement_in_last_part_ms = 0.0;
+    state.cursor.loop_position_before_end_ms = Some(400.0);
+    state.sync_sidecar_cursor_filters();
+    let (x, y) = state
+        .sidecar
+        .as_ref()
+        .unwrap()
+        .motion_position_at(0.9, 0.0, 1.0)
+        .unwrap();
+    assert!(
+        (x - 100.0).abs() < 1.0 && (y - 540.0).abs() < 1.0,
+        "the loop sends the cursor home, got {x}, {y}"
+    );
+}
+
+#[test]
+fn the_cursor_filters_default_to_what_the_editor_already_renders() {
+    use crate::recording::editor::sidecar::{
+        CaptureRegion, CursorKind, PointerSample, PointerSidecar,
+    };
+    // A project written before the controls existed opens unchanged: the
+    // studied defaults are the sidecar's own, and syncing them is a no-op.
+    let mut state = VideoEditState::new(metadata());
+    assert_eq!(state.cursor.rotation_mode, CursorRotationMode::Velocity);
+    assert!(
+        (state.cursor.rotate_on_x_movement_ratio - DEFAULT_ROTATE_ON_X_MOVEMENT_RATIO).abs()
+            < 1e-12
+    );
+    assert_eq!(state.cursor.base_rotation_deg, 0.0);
+    assert_eq!(
+        state.cursor.remove_shake_threshold,
+        crate::recording::editor::cursor_shake::DEFAULT_REMOVE_SHAKE_THRESHOLD
+    );
+    assert_eq!(state.cursor.stop_movement_in_last_part_ms, 0.0);
+    assert_eq!(state.cursor.loop_position_before_end_ms, None);
+
+    let mut sidecar = PointerSidecar::new(
+        0,
+        CaptureRegion {
+            x: 0,
+            y: 0,
+            w: 1920,
+            h: 1080,
+        },
+    );
+    for index in 0..=150 {
+        let (x, y) = if index == 63 {
+            (1800.0, 900.0)
+        } else {
+            (300.0, 300.0)
+        };
+        sidecar.pointer.push(PointerSample {
+            t: index as f64 * 0.016,
+            x,
+            y,
+            kind: CursorKind::Default,
+            cursor_id: None,
+        });
+    }
+    state.sidecar = Some(sidecar);
+    let times = [0.0, 0.4, 1.008, 1.6, 2.3];
+    let before: Vec<_> = times
+        .iter()
+        .map(|&t| {
+            let sidecar = state.sidecar.as_ref().unwrap();
+            (
+                sidecar.motion_position_at(t, 0.0, 1.0).unwrap(),
+                sidecar.motion_position_at(t, 0.4, 1.0).unwrap(),
+            )
+        })
+        .collect();
+    state.sync_sidecar_cursor_filters();
+    let after: Vec<_> = times
+        .iter()
+        .map(|&t| {
+            let sidecar = state.sidecar.as_ref().unwrap();
+            (
+                sidecar.motion_position_at(t, 0.0, 1.0).unwrap(),
+                sidecar.motion_position_at(t, 0.4, 1.0).unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(before, after, "the defaults must not move the cursor");
 }
 
 #[test]
@@ -1302,7 +1756,7 @@ fn selected_zoom_mode_and_scale_update_clip() {
     attach_pointer(&mut state, 960.0, 540.0);
     assert!(state.add_zoom_at_playhead().is_some());
     assert_eq!(state.selected_zoom_clip().unwrap().mode, ZoomMode::Auto);
-    assert!((state.selected_zoom_clip().unwrap().scale - DEFAULT_ZOOM_SCALE).abs() < 1e-9);
+    assert!((state.selected_zoom_clip().unwrap().scale - ADD_ZOOM_SCALE).abs() < 1e-9);
 
     state.set_selected_zoom_mode(ZoomMode::Manual);
     state.set_selected_zoom_scale(1.5);
@@ -1992,7 +2446,7 @@ fn undo_takes_back_the_pass_that_ran_on_open() {
     // — and the pass must not return.
     let mut state = VideoEditState::new(metadata());
     attach_sidecar_with_clicks(&mut state, &[(4.0, 500.0, 400.0)]);
-    assert!(state.suggest_zooms_on_open());
+    assert!(state.suggest_zooms_on_open(true, false));
     assert_eq!(state.zoom_clips.len(), 1);
 
     assert!(state.undo_zoom_edit());
@@ -2002,7 +2456,7 @@ fn undo_takes_back_the_pass_that_ran_on_open() {
     let mut reloaded = VideoEditState::new(metadata());
     reloaded.apply_project(saved);
     assert!(reloaded.zoom_clips.is_empty());
-    assert!(!reloaded.suggest_zooms_on_open());
+    assert!(!reloaded.suggest_zooms_on_open(true, false));
 }
 
 #[test]
@@ -2032,12 +2486,12 @@ fn opening_a_fresh_recording_suggests_once() {
     let mut state = VideoEditState::new(metadata());
     attach_sidecar_with_clicks(&mut state, &[(3.0, 960.0, 540.0)]);
     assert!(!state.zoom_suggestions_reviewed());
-    assert!(state.suggest_zooms_on_open());
+    assert!(state.suggest_zooms_on_open(true, false));
     assert_eq!(state.zoom_clips.len(), 1);
     assert!(state.zoom_suggestions_reviewed());
     // A second open must not stack another suggestion on top.
     state.zoom_clips.clear();
-    assert!(!state.suggest_zooms_on_open());
+    assert!(!state.suggest_zooms_on_open(true, false));
     assert!(state.zoom_clips.is_empty());
 }
 
@@ -2046,22 +2500,73 @@ fn the_review_pass_runs_quietly_when_it_finds_nothing() {
     // No sidecar means no suggestions, but the pass still counts as reviewed:
     // the recording has been looked at.
     let mut state = VideoEditState::new(metadata());
-    assert!(!state.suggest_zooms_on_open());
+    assert!(!state.suggest_zooms_on_open(true, false));
     assert!(state.zoom_suggestions_reviewed());
     assert!(state.zoom_clips.is_empty());
+}
+
+#[test]
+fn the_import_setting_gates_the_pass_on_open() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_clicks(&mut state, &[(3.0, 960.0, 540.0)]);
+    assert!(!state.suggest_zooms_on_open(false, false));
+    assert!(state.zoom_clips.is_empty());
+    // A disabled setting is not a review: turning it on still seeds once.
+    assert!(!state.zoom_suggestions_reviewed());
+    assert!(state.suggest_zooms_on_open(true, false));
+    assert_eq!(state.zoom_clips.len(), 1);
+}
+
+#[test]
+fn a_saved_project_is_never_seeded_again() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_clicks(&mut state, &[(3.0, 960.0, 540.0)]);
+    assert!(!state.suggest_zooms_on_open(true, true));
+    assert!(state.zoom_clips.is_empty());
+}
+
+#[test]
+fn reopening_a_project_keeps_the_zooms_it_has() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_clicks(&mut state, &[(3.0, 960.0, 540.0)]);
+    assert_eq!(state.suggest_zoom_clips(), 1);
+    let saved = state.to_project();
+
+    let mut reloaded = VideoEditState::new(metadata());
+    reloaded.apply_project(saved);
+    let before = reloaded.zoom_clips.clone();
+    assert!(!reloaded.suggest_zooms_on_open(true, true));
+    assert_eq!(reloaded.zoom_clips, before);
+}
+
+#[test]
+fn a_project_without_the_reviewed_flag_is_left_alone() {
+    // Projects written before the reviewed flag existed have no clips and
+    // `zoom_suggestions_reviewed: false`. The saved project, not the flag,
+    // decides that the pass already happened.
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_clicks(&mut state, &[(3.0, 960.0, 540.0)]);
+    let mut saved = state.to_project();
+    saved.zoom_suggestions_reviewed = false;
+
+    let mut reloaded = VideoEditState::new(metadata());
+    reloaded.apply_project(saved);
+    assert!(!reloaded.zoom_suggestions_reviewed());
+    assert!(!reloaded.suggest_zooms_on_open(true, true));
+    assert!(reloaded.zoom_clips.is_empty());
 }
 
 #[test]
 fn rejecting_every_suggestion_survives_reopening() {
     let mut state = VideoEditState::new(metadata());
     attach_sidecar_with_clicks(&mut state, &[(3.0, 960.0, 540.0)]);
-    assert!(state.suggest_zooms_on_open());
+    assert!(state.suggest_zooms_on_open(true, false));
     assert_eq!(state.zoom_clips.len(), 1);
 
     // The user deletes the suggestion to reject it. The zoom list is now
     // empty, but the review state is separate, so opening again stays quiet.
     state.zoom_clips.clear();
-    assert!(!state.suggest_zooms_on_open());
+    assert!(!state.suggest_zooms_on_open(true, false));
     assert!(state.zoom_clips.is_empty());
 }
 
@@ -2077,11 +2582,11 @@ fn explicit_redetect_marks_the_recording_reviewed() {
 fn resetting_the_review_state_allows_the_pass_again() {
     let mut state = VideoEditState::new(metadata());
     attach_sidecar_with_clicks(&mut state, &[(3.0, 960.0, 540.0)]);
-    assert!(state.suggest_zooms_on_open());
+    assert!(state.suggest_zooms_on_open(true, false));
     state.zoom_clips.clear();
     state.reset_zoom_suggestions_reviewed();
     assert!(!state.zoom_suggestions_reviewed());
-    assert!(state.suggest_zooms_on_open());
+    assert!(state.suggest_zooms_on_open(true, false));
     assert_eq!(state.zoom_clips.len(), 1);
 }
 
@@ -4099,7 +4604,9 @@ fn a_new_zoom_keeps_the_factory_style_until_a_zoom_is_edited() {
     attach_pointer(&mut state, 960.0, 540.0);
     let index = state.add_zoom_at(0.5).expect("zoom fits");
     let clip = &state.zoom_clips[index];
-    assert!((clip.scale - DEFAULT_ZOOM_SCALE).abs() < 1e-9);
+    // A zoom added from the timeline opens at the add-zoom scale, not the
+    // bare clip default, until the user edits one and sets a style.
+    assert!((clip.scale - ADD_ZOOM_SCALE).abs() < 1e-9);
     assert_eq!(clip.easing, ZoomEasing::Glide);
     assert!(!clip.instant);
 }
@@ -4648,4 +5155,223 @@ fn motion_duplication_skips_short_gaps_and_reconciles_the_new_camera_chain() {
         .segments
         .windows(2)
         .all(|clips| clips[0].end <= clips[1].start));
+}
+
+#[test]
+fn a_zoom_added_from_the_timeline_opens_at_the_add_zoom_length_and_scale() {
+    let mut state = VideoEditState::new(metadata());
+    attach_pointer(&mut state, 960.0, 540.0);
+    let index = state.add_zoom_at(0.5).expect("zoom fits");
+    let clip = &state.zoom_clips[index];
+    assert!((clip.duration() - ADD_ZOOM_DURATION_SECONDS).abs() < 1e-9);
+    assert!((clip.scale - ADD_ZOOM_SCALE).abs() < 1e-9);
+    assert!((ADD_ZOOM_DURATION_SECONDS - 3.0).abs() < 1e-9);
+    assert!((ADD_ZOOM_SCALE - 2.0).abs() < 1e-9);
+}
+
+#[test]
+fn the_add_zoom_tool_clears_the_selection_and_refuses_a_recording_without_video() {
+    let mut state = VideoEditState::new(metadata());
+    state.zoom_clips.push(ZoomClip {
+        start: 0.0,
+        end: 3.0,
+        ..Default::default()
+    });
+    state.selected_zoom = Some(0);
+    state.selected_segment = Some(0);
+    state.selected_cursor_hide = Some(0);
+
+    assert!(state.set_add_zoom_tool(true));
+    assert!(state.add_zoom_tool);
+    assert_eq!(state.selected_zoom, None);
+    assert_eq!(state.selected_segment, None);
+    assert_eq!(state.selected_cursor_hide, None);
+    // Arming twice changes nothing, so the caller does not pause again.
+    assert!(!state.set_add_zoom_tool(true));
+    assert!(state.set_add_zoom_tool(false));
+    assert!(!state.add_zoom_tool);
+
+    let mut empty = VideoEditState::new(VideoMetadata {
+        duration_seconds: 0.0,
+        ..metadata()
+    });
+    assert!(!empty.set_add_zoom_tool(true));
+    assert!(!empty.add_zoom_tool);
+}
+
+#[test]
+fn the_add_zoom_tool_outline_uses_the_last_edited_scale() {
+    let mut state = VideoEditState::new(metadata());
+    assert!((state.add_zoom_tool_scale() - ADD_ZOOM_SCALE).abs() < 1e-9);
+    state.last_edited_zoom_style = Some(ZoomStyle {
+        scale: 3.5,
+        easing: ZoomEasing::Glide,
+        ease_ms: DEFAULT_ZOOM_EASE_MS,
+        instant: false,
+    });
+    assert!((state.add_zoom_tool_scale() - 3.5).abs() < 1e-9);
+}
+
+#[test]
+fn a_placed_zoom_starts_at_the_playhead_aimed_at_the_click() {
+    let mut state = VideoEditState::new(metadata());
+    state.playhead_seconds = 2.0;
+    state.set_add_zoom_tool(true);
+    let index = state
+        .place_manual_zoom_at_playhead((700.0, 450.0))
+        .expect("zoom fits");
+    let clip = &state.zoom_clips[index];
+    assert!((clip.start - 2.0).abs() < 1e-9);
+    assert!((clip.end - (2.0 + ADD_ZOOM_DURATION_SECONDS)).abs() < 1e-9);
+    assert_eq!(clip.mode, ZoomMode::Manual);
+    assert_eq!(clip.center, (700.0, 450.0));
+    assert!((clip.scale - ADD_ZOOM_SCALE).abs() < 1e-9);
+    assert_eq!(state.selected_zoom, Some(index));
+    assert_eq!(state.selected_tool, EditorTool::Timeline);
+}
+
+#[test]
+fn a_placed_zoom_keeps_its_framing_inside_the_crop() {
+    let mut state = VideoEditState::new(metadata());
+    state.crop = Some(CropSelection {
+        x: 200,
+        y: 100,
+        width: 1000,
+        height: 600,
+    });
+    state.playhead_seconds = 1.0;
+    let index = state
+        .place_manual_zoom_at_playhead((5000.0, -20.0))
+        .expect("zoom fits");
+    let clip = &state.zoom_clips[index];
+    // A 2× viewport is half the crop, so its centre may not come closer than
+    // half a viewport to the crop's edges.
+    let (crop_x, crop_y, crop_w, crop_h) = state.crop_or_full();
+    assert!(clip.center.0 >= crop_x + crop_w / 4.0);
+    assert!(clip.center.0 <= crop_x + crop_w * 3.0 / 4.0);
+    assert!(clip.center.1 >= crop_y + crop_h / 4.0);
+    assert!(clip.center.1 <= crop_y + crop_h * 3.0 / 4.0);
+}
+
+#[test]
+fn a_zoom_placed_inside_another_splits_it_at_the_playhead() {
+    let mut state = VideoEditState::new(metadata());
+    attach_pointer(&mut state, 960.0, 540.0);
+    let index = state.add_zoom_at(0.5).expect("zoom fits");
+    state.zoom_clips[index].end = 4.0;
+    let before = state.zoom_clips.clone();
+
+    state.playhead_seconds = 2.0;
+    let placed = state
+        .place_manual_zoom_at_playhead((700.0, 450.0))
+        .expect("split fits");
+
+    assert_eq!(state.zoom_clips.len(), 2);
+    assert_eq!(state.zoom_clips[0].start, 0.5);
+    assert!((state.zoom_clips[0].end - 2.0).abs() < 1e-9);
+    assert!((state.zoom_clips[1].start - 2.0).abs() < 1e-9);
+    assert!((state.zoom_clips[1].end - 4.0).abs() < 1e-9);
+    assert_eq!(state.zoom_clips[1].mode, ZoomMode::Manual);
+    assert_eq!(state.zoom_clips[1].center, (700.0, 450.0));
+    // The split keeps the clip's own scale: the click aims the framing, it
+    // does not restyle the zoom.
+    assert!((state.zoom_clips[1].scale - ADD_ZOOM_SCALE).abs() < 1e-9);
+    assert_eq!(state.selected_zoom, Some(placed));
+
+    // The whole split is one step: a single undo puts the clip back in one
+    // piece, and the one after it takes back the zoom that was added before.
+    assert!(state.undo_zoom_edit());
+    assert_eq!(state.zoom_clips, before);
+    assert!(state.undo_zoom_edit());
+    assert!(state.zoom_clips.is_empty());
+}
+
+#[test]
+fn a_placed_zoom_is_one_undo_step() {
+    let mut state = VideoEditState::new(metadata());
+    state.playhead_seconds = 1.0;
+    state
+        .place_manual_zoom_at_playhead((600.0, 400.0))
+        .expect("zoom fits");
+    assert_eq!(state.zoom_clips.len(), 1);
+    assert!(state.undo_zoom_edit());
+    assert!(state.zoom_clips.is_empty());
+    assert_eq!(state.selected_zoom, None);
+    assert!(state.redo_zoom_edit());
+    assert_eq!(state.zoom_clips.len(), 1);
+}
+
+#[test]
+fn a_placed_zoom_stops_at_the_next_clip_and_the_end_of_the_video() {
+    let mut state = VideoEditState::new(metadata());
+    state.zoom_clips.push(ZoomClip {
+        start: 3.5,
+        end: 5.0,
+        ..Default::default()
+    });
+    state.playhead_seconds = 1.0;
+    let index = state
+        .place_manual_zoom_at_playhead((960.0, 540.0))
+        .expect("zoom fits");
+    assert!((state.zoom_clips[index].end - 3.5).abs() < 1e-9);
+
+    // Nothing fits when the next clip starts right at the playhead, and a
+    // split is refused when either half would be too short to hold.
+    let mut packed = VideoEditState::new(metadata());
+    packed.zoom_clips.push(ZoomClip {
+        start: 1.0,
+        end: 4.0,
+        ..Default::default()
+    });
+    packed.playhead_seconds = 1.0;
+    assert!(packed
+        .place_manual_zoom_at_playhead((960.0, 540.0))
+        .is_none());
+    packed.playhead_seconds = 1.05;
+    assert!(packed
+        .place_manual_zoom_at_playhead((960.0, 540.0))
+        .is_none());
+    packed.playhead_seconds = 2.0;
+    assert!(packed
+        .place_manual_zoom_at_playhead((960.0, 540.0))
+        .is_some());
+}
+
+#[test]
+fn a_placed_zoom_leaves_a_generated_split_unanchored_and_the_users_work() {
+    let mut state = VideoEditState::new(metadata());
+    attach_pointer(&mut state, 960.0, 540.0);
+    state.zoom_clips.push(ZoomClip {
+        start: 1.0,
+        end: 4.0,
+        scale: 2.0,
+        center: (960.0, 540.0),
+        origin: ZoomOrigin::Generated,
+        anchor: Some(ZoomAnchor {
+            source_start: 1.0,
+            source_end: 4.0,
+        }),
+        ..Default::default()
+    });
+    state.playhead_seconds = 2.0;
+    state
+        .place_manual_zoom_at_playhead((400.0, 300.0))
+        .expect("split fits");
+    assert!(state.zoom_clips.iter().all(|clip| clip.anchor.is_none()));
+    assert!(state
+        .zoom_clips
+        .iter()
+        .all(|clip| clip.origin == ZoomOrigin::User));
+}
+
+#[test]
+fn a_zoom_placement_is_refused_while_the_zoom_track_is_locked() {
+    let mut state = VideoEditState::new(metadata());
+    state.zoom_locked = true;
+    state.playhead_seconds = 1.0;
+    assert!(state
+        .place_manual_zoom_at_playhead((400.0, 300.0))
+        .is_none());
+    assert!(state.zoom_clips.is_empty());
+    assert!(!state.undo_zoom_edit());
 }

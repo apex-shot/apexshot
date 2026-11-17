@@ -1110,6 +1110,12 @@ impl VideoEditState {
         for item in file.extra_media {
             self.add_project_media(media_from_file(&item));
         }
+        // The restored cuts must reach the cursor plan, which stops a lead at
+        // a cut, before the preview or an export reads it.
+        self.sync_sidecar_cuts();
+        // The same goes for the cursor's shake filter and tail behaviours: the
+        // project is the only place they are stored.
+        self.sync_sidecar_cursor_filters();
     }
 
     pub fn session_is_default(&self) -> bool {
@@ -1129,10 +1135,15 @@ impl VideoEditState {
     }
 }
 
-pub fn restore_into(state: &mut VideoEditState) {
-    if let Some(project) = load_project(&state.metadata.path) {
-        state.apply_project(project);
-    }
+/// Apply this video's saved project, when there is one. Returns whether a
+/// saved project was applied, so a caller can tell a first open from a
+/// reopened edit.
+pub fn restore_into(state: &mut VideoEditState) -> bool {
+    let Some(project) = load_project(&state.metadata.path) else {
+        return false;
+    };
+    state.apply_project(project);
+    true
 }
 
 pub fn persist_video_session(state: &VideoEditState) {
@@ -1674,6 +1685,61 @@ mod tests {
         assert_eq!(restored.cursor.loop_position_before_end_ms, Some(2000.0));
         assert_eq!(restored.zoom_clips[0].easing, ZoomEasing::Snappy);
         assert_eq!(restored.zoom_clips[0].ease_ms, 480);
+        cleanup_project(&video);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_restored_project_pushes_its_cursor_filters_into_the_plan() {
+        use crate::recording::editor::sidecar::{
+            CaptureRegion, CursorKind, PointerSample, PointerSidecar,
+        };
+        let dir = scratch("cursor-filters");
+        let video = write_video(&dir, "clip.mp4", 24);
+        let mut state = VideoEditState::new(metadata_for(&video, 24));
+        state.cursor.remove_shake_threshold = 0.0;
+        save_project(&video, &state.to_project()).unwrap();
+
+        let loaded = load_project(&video).expect("project should load");
+        let mut restored = VideoEditState::new(metadata_for(&video, 24));
+        let mut sidecar = PointerSidecar::new(
+            0,
+            CaptureRegion {
+                x: 0,
+                y: 0,
+                w: 1920,
+                h: 1080,
+            },
+        );
+        for index in 0..=150 {
+            let (x, y) = if index == 63 {
+                (1800.0, 900.0)
+            } else {
+                (300.0, 300.0)
+            };
+            sidecar.pointer.push(PointerSample {
+                t: index as f64 * 0.016,
+                x,
+                y,
+                kind: CursorKind::Default,
+                cursor_id: None,
+            });
+        }
+        restored.sidecar = Some(sidecar);
+        restored.apply_project(loaded);
+
+        // The project's threshold reached the pointer plan the preview and
+        // the export draw from, so the spike is drawn again.
+        let (x, _) = restored
+            .sidecar
+            .as_ref()
+            .unwrap()
+            .motion_position_at(1.008, 0.0, 1.0)
+            .unwrap();
+        assert!(
+            (x - 1800.0).abs() < 1.0,
+            "the restored filter must reach the plan, got {x}"
+        );
         cleanup_project(&video);
         let _ = fs::remove_dir_all(&dir);
     }

@@ -1581,14 +1581,27 @@ fn build_sendcmd(state: &VideoEditState, start: f64, end: f64) -> String {
     build_camera_commands(state, start, end, 1).0
 }
 
+/// The exporter's quantized frame for one camera sample, for tests that compare
+/// it with the preview's float view.
+#[cfg(test)]
 pub(super) fn zoom_blur_view(
     state: &VideoEditState,
     timeline_t: f64,
     source_t: f64,
     sample_index: usize,
 ) -> (f64, f64, f64, f64) {
+    zoom_blur_view_at(
+        state,
+        state.eval_zoom_blur_sample_at(timeline_t, source_t, sample_index),
+    )
+}
+
+/// The exporter's quantized frame for one camera sample. It takes the sample
+/// itself rather than a time so a frame can reuse the model's sample list
+/// instead of re-evaluating the camera.
+fn zoom_blur_view_at(state: &VideoEditState, camera: (f64, (f64, f64))) -> (f64, f64, f64, f64) {
     let (cx, cy, cw, ch) = state.crop_or_full();
-    let (scale, center) = state.eval_zoom_blur_sample_at(timeline_t, source_t, sample_index);
+    let (scale, center) = camera;
     let (x, y, w, h) = even_crop_rect(
         scale,
         (center.0 - cx, center.1 - cy),
@@ -1606,8 +1619,8 @@ pub(super) fn zoom_export_times(state: &VideoEditState, start: f64, local_t: f64
 }
 
 fn build_zoom_commands(state: &VideoEditState, start: f64, end: f64) -> (String, usize) {
-    let samples = state.zoom_blur_sample_count().clamp(1, 8);
-    if samples == 1 {
+    let samples = state.zoom_blur_sample_count();
+    if samples <= 1 {
         return (build_sendcmd(state, start, end), 1);
     }
     let (commands, moving) = build_camera_commands(state, start, end, samples);
@@ -1640,14 +1653,20 @@ fn build_camera_commands(
     for index in 0..frames {
         let local_t = index as f64 / fps;
         let (timeline_t, source_t) = zoom_export_times(state, start, local_t);
-        let current = zoom_blur_view(state, timeline_t, source_t, 0);
+        // One list from the model, the same one the preview composites, so the
+        // export cannot sample different sub-frame times or a different count.
+        let cameras = if samples > 1 {
+            state.zoom_blur_composited_samples_at(timeline_t, source_t)
+        } else {
+            vec![state.eval_zoom_blur_sample_at(timeline_t, source_t, 0)]
+        };
+        let current = cameras[0];
+        moving |= cameras.len() > 1;
         for sample in 0..samples {
-            let view = if sample == 0 {
-                current
-            } else {
-                zoom_blur_view(state, timeline_t, source_t, sample)
-            };
-            moving |= view != current;
+            // A still camera (or a still frame of a moving export) has one
+            // sample: every branch reads the current view, so the average is
+            // exactly that view and the frame stays sharp.
+            let view = zoom_blur_view_at(state, cameras.get(sample).copied().unwrap_or(current));
             let target = if sample == 0 {
                 "z".into()
             } else {
@@ -2629,6 +2648,117 @@ mod tests {
         assert_eq!(commands.lines().count(), 30 * 8 * 4);
         assert!(commands.contains("crop@zb7"));
         assert!(!commands.contains("crop@zb8"));
+    }
+
+    fn command_number(line: &str, needle: &str) -> u32 {
+        line.split_once(needle)
+            .unwrap_or_else(|| panic!("{needle:?} missing from {line:?}"))
+            .1
+            .trim_end_matches(';')
+            .trim()
+            .parse()
+            .unwrap()
+    }
+
+    #[test]
+    fn camera_blur_commands_take_the_model_sample_list() {
+        // A full-size source keeps the even-pixel quantization fine enough that
+        // neighbouring samples cannot collapse into one command.
+        let mut state = VideoEditState::new(VideoMetadata {
+            path: PathBuf::from("/tmp/camera-blur-fast.mp4"),
+            duration_seconds: 2.0,
+            width: 1920,
+            height: 1080,
+            file_size_bytes: 100,
+            has_audio: false,
+            frame_rate: 30.0,
+        });
+        state
+            .zoom_clips
+            .push(crate::recording::editor::model::ZoomClip {
+                start: 0.0,
+                end: 2.0,
+                scale: 3.0,
+                center: (1400.0, 800.0),
+                ease_ms: 600,
+                mode: crate::recording::editor::model::ZoomMode::Manual,
+                ..Default::default()
+            });
+        state.zoom_camera.speed = 2.0;
+        state.zoom_camera.motion_blur = 1.0;
+        let (commands, samples) = build_zoom_commands(&state, 0.0, 1.0);
+        assert_eq!(samples, state.zoom_blur_sample_count());
+        let (_, _, source_w, source_h) = state.crop_or_full();
+        let (video_w, video_h) = state.video_rect_dimensions();
+        let fps = state.metadata.export_frame_rate();
+        for frame in [3usize, 6, 9] {
+            let local_t = frame as f64 / fps;
+            let (timeline_t, source_t) = zoom_export_times(&state, 0.0, local_t);
+            let cameras = state.zoom_blur_composited_samples_at(timeline_t, source_t);
+            assert!(cameras.len() > 1, "frame {frame} should be moving");
+            let lines: Vec<&str> = commands
+                .lines()
+                .skip(frame * samples * 4)
+                .take(samples * 4)
+                .collect();
+            let mut widths = Vec::new();
+            for sample in 0..samples {
+                let target = if sample == 0 {
+                    "z".to_string()
+                } else {
+                    format!("zb{sample}")
+                };
+                let view = zoom_blur_view_at(&state, cameras[sample]);
+                let scaled_w = command_number(lines[sample * 4], &format!("scale@{target}s w"));
+                let scaled_h = command_number(lines[sample * 4 + 1], &format!("scale@{target}s h"));
+                // Inverting the exporter's scale must land on this sample's
+                // view, which is the same camera sample the preview draws.
+                assert!(
+                    (scaled_w as f64 - source_w * video_w as f64 / view.2).abs() <= 2.0,
+                    "frame {frame} sample {sample} width came from another sample"
+                );
+                assert!(
+                    (scaled_h as f64 - source_h * video_h as f64 / view.3).abs() <= 2.0,
+                    "frame {frame} sample {sample} height came from another sample"
+                );
+                widths.push(scaled_w);
+            }
+            // Each sample is a distinct sub-frame time, so the branch widths
+            // move monotonically across the list and cannot all tie. (A zoom-in
+            // orders them one way, an exit the other.)
+            let monotone = widths.windows(2).all(|pair| pair[0] >= pair[1])
+                || widths.windows(2).all(|pair| pair[0] <= pair[1]);
+            assert!(
+                monotone && widths.first() != widths.last(),
+                "frame {frame} repeated a sample: {widths:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn camera_blur_repeats_the_current_view_on_a_still_frame() {
+        let mut state = moving_camera_state();
+        state.zoom_camera.motion_blur = 1.0;
+        let (commands, samples) = build_zoom_commands(&state, 0.0, 1.0);
+        assert_eq!(samples, 8);
+        // Frame 0 sits before the zoom starts, so the whole shutter is static:
+        // every branch reads the current view and the average stays sharp.
+        let first: Vec<&str> = commands.lines().take(samples * 4).collect();
+        let current_x = command_number(first[2], "crop@z x");
+        let current_y = command_number(first[3], "crop@z y");
+        for sample in 1..samples {
+            let target = format!("zb{sample}");
+            assert_eq!(
+                command_number(first[sample * 4 + 2], &format!("crop@{target} x")),
+                current_x,
+                "sample {sample} x"
+            );
+            assert_eq!(
+                command_number(first[sample * 4 + 3], &format!("crop@{target} y")),
+                current_y,
+                "sample {sample} y"
+            );
+        }
     }
 
     #[test]

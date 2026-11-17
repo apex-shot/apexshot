@@ -23,6 +23,18 @@ use super::floating_bar::{dock_position, dock_reserve, set_bar_shown, set_dock_r
 use super::picker_placement::PickerPlacementContext;
 use super::toolbar_controls::{sub_bar, ArrowControl, MenuTracker, StrokeControl};
 
+/// The Reverse button's whole effect.
+///
+/// A selected arrow is reversed in place (and that edit is undoable); with
+/// nothing selected the flip applies to the next arrow drawn, so the tool's
+/// default direction toggles. Pure, so both behaviours can be checked without a
+/// toolkit; the button's wiring to it is checked separately.
+fn reverse_arrow(state: &mut EditorState) {
+    if !state.reverse_selected_arrow_action() {
+        state.inverse_arrow_direction = !state.inverse_arrow_direction;
+    }
+}
+
 pub(super) struct ArrowBar {
     pub(super) root: GtkBox,
     bar: GtkBox,
@@ -58,9 +70,7 @@ pub(super) fn build_arrow_bar(
         move |_| {
             {
                 let mut st = state.lock().unwrap();
-                if !st.reverse_selected_arrow_action() {
-                    st.inverse_arrow_direction = !st.inverse_arrow_direction;
-                }
+                reverse_arrow(&mut st);
             }
             super::floating_bar::queue_draw(&area);
         }
@@ -191,8 +201,68 @@ mod tests {
         Rc::new(|_| {})
     }
 
+    fn push_arrow(st: &mut EditorState) {
+        st.actions.push(AnnotationAction::Arrow {
+            start: Point { x: 1.0, y: 2.0 },
+            end: Point { x: 20.0, y: 22.0 },
+            color: DrawColor::new(1.0, 1.0, 1.0, 1.0),
+            stroke_size: 4.0,
+            style: ArrowStyle::Standard,
+            control_points: None,
+            shadow: false,
+            reversed: false,
+        });
+        st.selected_action_index = Some(0);
+    }
+
     #[test]
     fn reverse_toggles_the_default_direction_without_a_selection() {
+        let mut st = EditorState::new(RgbaImage::new(32, 32));
+        st.selected_tool = Tool::Arrow;
+        reverse_arrow(&mut st);
+        assert!(st.inverse_arrow_direction);
+        reverse_arrow(&mut st);
+        assert!(!st.inverse_arrow_direction);
+    }
+
+    #[test]
+    fn reverse_swaps_a_selected_arrow_and_undo_restores_it() {
+        let mut st = EditorState::new(RgbaImage::new(32, 32));
+        st.selected_tool = Tool::Select;
+        push_arrow(&mut st);
+        reverse_arrow(&mut st);
+        {
+            let Some(AnnotationAction::Arrow {
+                start,
+                end,
+                reversed,
+                ..
+            }) = st.selected_action()
+            else {
+                panic!("arrow selection should survive reversing");
+            };
+            assert!(*reversed);
+            assert_eq!(*start, Point { x: 20.0, y: 22.0 });
+            assert_eq!(*end, Point { x: 1.0, y: 2.0 });
+        }
+        // Reversing a selected arrow is an edit, so it is undoable and the
+        // tool's own default direction is left alone.
+        assert!(!st.inverse_arrow_direction);
+        assert!(st.undo());
+        let Some(AnnotationAction::Arrow {
+            start, reversed, ..
+        }) = st.actions.first()
+        else {
+            panic!("undo should restore the original arrow");
+        };
+        assert!(!*reversed);
+        assert_eq!(*start, Point { x: 1.0, y: 2.0 });
+    }
+
+    /// The button's wiring to [`reverse_arrow`], which is the only part a live
+    /// toolkit adds.
+    #[test]
+    fn the_reverse_button_flips_the_arrow_direction() {
         let Some(()) = crate::test_support::with_gtk(|| {
             let state = test_state();
             state.lock().unwrap().selected_tool = Tool::Arrow;
@@ -201,61 +271,6 @@ mod tests {
             let bar = build_arrow_bar(&state, &area, noop_colour(), None, &menus);
             bar.reverse.emit_clicked();
             assert!(state.lock().unwrap().inverse_arrow_direction);
-            bar.reverse.emit_clicked();
-            assert!(!state.lock().unwrap().inverse_arrow_direction);
-        }) else {
-            return;
-        };
-    }
-
-    #[test]
-    fn reverse_swaps_a_selected_arrow_and_undo_restores_it() {
-        let Some(()) = crate::test_support::with_gtk(|| {
-            let state = test_state();
-            {
-                let mut st = state.lock().unwrap();
-                st.selected_tool = Tool::Select;
-                st.actions.push(AnnotationAction::Arrow {
-                    start: Point { x: 1.0, y: 2.0 },
-                    end: Point { x: 20.0, y: 22.0 },
-                    color: DrawColor::new(1.0, 1.0, 1.0, 1.0),
-                    stroke_size: 4.0,
-                    style: ArrowStyle::Standard,
-                    control_points: None,
-                    shadow: false,
-                    reversed: false,
-                });
-                st.selected_action_index = Some(0);
-            }
-            let area = DrawingArea::new();
-            let menus = MenuTracker::default();
-            let bar = build_arrow_bar(&state, &area, noop_colour(), None, &menus);
-            bar.reverse.emit_clicked();
-            {
-                let st = state.lock().unwrap();
-                let Some(AnnotationAction::Arrow {
-                    start,
-                    end,
-                    reversed,
-                    ..
-                }) = st.selected_action()
-                else {
-                    panic!("arrow selection should survive reversing");
-                };
-                assert!(*reversed);
-                assert_eq!(*start, Point { x: 20.0, y: 22.0 });
-                assert_eq!(*end, Point { x: 1.0, y: 2.0 });
-            }
-            assert!(state.lock().unwrap().undo());
-            let st = state.lock().unwrap();
-            let Some(AnnotationAction::Arrow {
-                start, reversed, ..
-            }) = st.actions.first()
-            else {
-                panic!("undo should restore the original arrow");
-            };
-            assert!(!*reversed);
-            assert_eq!(*start, Point { x: 1.0, y: 2.0 });
         }) else {
             return;
         };

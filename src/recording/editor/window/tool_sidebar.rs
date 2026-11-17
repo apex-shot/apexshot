@@ -1,8 +1,8 @@
 use crate::recording::editor::cursor_sprite;
 use crate::recording::editor::model::{
-    nearest_zoom_preset, ClickEffect, CursorMotionStyle, CursorTheme, EditorTool, VideoBackground,
-    VideoEditState, ZoomMode, MAX_CLIP_SPEED, MAX_CURSOR_SIZE, MAX_CURSOR_SPEED, MIN_CLIP_SPEED,
-    MIN_CURSOR_SIZE, MIN_CURSOR_SPEED, ZOOM_SCALE_PRESETS,
+    nearest_zoom_preset, ClickEffect, CursorMotionStyle, CursorRotationMode, CursorTheme,
+    EditorTool, VideoBackground, VideoEditState, ZoomMode, MAX_CLIP_SPEED, MAX_CURSOR_SIZE,
+    MAX_CURSOR_SPEED, MIN_CLIP_SPEED, MIN_CURSOR_SIZE, MIN_CURSOR_SPEED, ZOOM_SCALE_PRESETS,
 };
 use crate::recording::editor::sound::MicPreset;
 use gtk4::{
@@ -1835,6 +1835,61 @@ mod tests {
     }
 
     #[test]
+    fn the_cursor_follow_page_offers_rotation_the_shake_switch_and_the_tail() {
+        // The tilt/rotation engine, the shake filter and the tail behaviours
+        // are shared; the Follow page is what Linux was missing for them.
+        let panel = include_str!("tool_sidebar_cursor.rs");
+        for (needle, why) in [
+            (
+                "ToggleButton::with_label(&t(\"Tilt with motion\"))",
+                "the velocity rotation mode",
+            ),
+            (
+                "ToggleButton::with_label(&t(\"Point along movement\"))",
+                "the directional rotation mode",
+            ),
+            ("cursor_slider_row(&t(\"Tilt amount\"))", "the tilt ratio"),
+            (
+                "FillSlider::new_with_value_text(&t(\"Base angle\")",
+                "the base angle",
+            ),
+            ("t(\"Remove cursor shake\")", "the shake switch"),
+            ("t(\"Loop cursor position\")", "the loop switch"),
+            (
+                "FillSlider::new_with_value_text(&t(\"Loop before end\")",
+                "the loop distance",
+            ),
+            (
+                "FillSlider::new_with_value_text(&t(\"Stop at the end\")",
+                "the stop hold",
+            ),
+        ] {
+            assert!(panel.contains(needle), "the Follow page must offer {why}");
+        }
+        // The studied ranges, so the controls cannot drift from the engine's
+        // expectations.
+        for range in [
+            "tilt_row.scale.set_range(0.0, 1.0);",
+            "angle_slider.set_range(-180.0, 180.0);",
+            "loop_delay_row.set_range(1000.0, 4000.0);",
+            "stop_row.set_range(0.0, 5000.0);",
+        ] {
+            assert!(panel.contains(range), "the Follow page must set {range}");
+        }
+        // The switch turns the filter off at zero and back on at the studied
+        // default, and every write pushes the values into the sidecar.
+        assert!(
+            panel
+                .contains("crate::recording::editor::cursor_shake::DEFAULT_REMOVE_SHAKE_THRESHOLD"),
+            "the shake switch must restore the studied threshold"
+        );
+        assert!(
+            panel.contains("guard.sync_sidecar_cursor_filters();"),
+            "a cursor write must reach the pointer plan"
+        );
+    }
+
+    #[test]
     fn switching_popover_tabs_does_not_write_a_fill() {
         // Opening Gradient must not replace a color the swatch is showing, so
         // the tab switch is a pure view change: it only sets visibility and
@@ -2137,9 +2192,10 @@ mod tests {
         // parent does not live in is measured through the wrong surface. The seat
         // is now the popover body's box read in the panel's own space, with the
         // card top-aligned so the anchoring corner is the one being reasoned
-        // about. The geometry itself is asserted by measurement in
-        // `the_card_hangs_clear_of_the_popover_beside_it`; this test pins the
-        // wiring that measurement depends on. And because the popover behind the
+        // about. The geometry itself is asserted by
+        // `the_picker_card_seat_hangs_exactly_the_gap_left_of_the_body`, which
+        // checks the seat formula without a display; this test pins the wiring
+        // that measurement depends on. And because the popover behind the
         // card stays open, the card needs a close of its own rather than relying
         // on a second click on the tile.
         let source = include_str!("custom_wallpaper_popover.rs");
@@ -2171,7 +2227,7 @@ mod tests {
             "the seat must be the popover body's box read in the panel's space"
         );
         assert!(
-            opener.contains("body.height()"),
+            opener.contains("picker_card_pointing_rect(&body)"),
             "the seat must be taken from the popover's body, not from the page or a tile"
         );
         assert!(

@@ -515,18 +515,46 @@ pub fn time_weighted_center(
     }
 }
 
-/// Half the zoomed view: the movement-group budget at this scale.
+/// The stage is this many units tall at the output's aspect.
+const STUDIED_STAGE_HEIGHT: f64 = 1080.0;
+
+/// Half the stage the zoom shows: the movement-group budget at this scale.
 ///
-/// The studied grouping breaks a run when its bounding box exceeds half the
-/// visible source; at our fixed per-clip scale the visible source is
-/// `crop / scale`, so the budget is half of that. A tighter zoom groups more
-/// finely, a wider one lets the pointer roam further before splitting.
-pub fn movement_group_budget(crop: (f64, f64, f64, f64), scale: f64) -> (f64, f64) {
-    let (_, _, crop_w, crop_h) = crop;
+/// The studied grouping breaks a run when its bounding box exceeds half of what
+/// the zoom's viewport shows of the stage. That part is the stage over the
+/// source's *logical* size times the zoom, capped at the whole source, so a
+/// group covers the same stretch of interface on any display: a HiDPI capture
+/// groups more coarsely, and the grouping is resolution independent. A tighter
+/// zoom groups more finely.
+///
+/// `frame` is the source size the budget is measured in, `stage_aspect` the
+/// output's width over height (zero uses the frame's own shape), and
+/// `logical_source` the recorded region over the display's device pixel ratio.
+/// With a 1080-tall logical source at the stage aspect this is exactly
+/// `frame / scale * 0.5`.
+pub fn movement_group_budget(
+    frame: (f64, f64),
+    scale: f64,
+    stage_aspect: f64,
+    logical_source: (f64, f64),
+) -> (f64, f64) {
     let scale = scale.max(1.0);
+    let frame = (frame.0.max(1.0), frame.1.max(1.0));
+    let stage_aspect = if stage_aspect.is_finite() && stage_aspect > 0.0 {
+        stage_aspect
+    } else {
+        frame.0 / frame.1
+    };
+    let shown = |stage: f64, source: f64| {
+        if source.is_finite() && source > 0.0 {
+            (stage / (source * scale)).min(1.0)
+        } else {
+            1.0 / scale
+        }
+    };
     (
-        (crop_w.max(1.0) / scale * 0.5).max(1.0),
-        (crop_h.max(1.0) / scale * 0.5).max(1.0),
+        (frame.0 * shown(STUDIED_STAGE_HEIGHT * stage_aspect, logical_source.0) * 0.5).max(1.0),
+        (frame.1 * shown(STUDIED_STAGE_HEIGHT, logical_source.1) * 0.5).max(1.0),
     )
 }
 
@@ -571,46 +599,6 @@ pub fn movement_groups(
         }
     }
     groups
-}
-
-/// Pointer samples closer than this to the last kept one are jitter.
-const FOLLOW_JITTER_PIXELS: f64 = 10.0;
-
-/// The pointer samples one zoom's follow camera reads, in `(time, x, y)`.
-///
-/// Ports the studied per-zoom event list: samples within 10 px of the last kept
-/// one are dropped as jitter, only samples inside `[start, end]` are kept, and
-/// the last sample before `start` is carried in at the zoom's first instant so
-/// the first group begins where the pointer already was. Grouping each zoom
-/// from its own window keeps pointer history from before the zoom — and a
-/// group left half-filled by it — out of the camera's targets.
-pub fn zoom_follow_samples(
-    points: &[(f64, f64, f64)],
-    start: f64,
-    end: f64,
-) -> Vec<(f64, f64, f64)> {
-    let mut kept: Vec<(f64, f64, f64)> = Vec::new();
-    for &(t, x, y) in points {
-        if !t.is_finite() || !x.is_finite() || !y.is_finite() {
-            continue;
-        }
-        let far_enough = kept
-            .last()
-            .is_none_or(|&(_, kx, ky)| (x - kx).hypot(y - ky) >= FOLLOW_JITTER_PIXELS);
-        if far_enough {
-            kept.push((t, x, y));
-        }
-    }
-    let first_inside = kept.partition_point(|&(t, _, _)| t < start);
-    let mut window: Vec<(f64, f64, f64)> = kept[first_inside..]
-        .iter()
-        .take_while(|&&(t, _, _)| t <= end)
-        .copied()
-        .collect();
-    if let Some(&(_, x, y)) = first_inside.checked_sub(1).and_then(|i| kept.get(i)) {
-        window.insert(0, (start - 0.001, x, y));
-    }
-    window
 }
 
 /// Precompute each movement group's first sample time and dwell-weighted

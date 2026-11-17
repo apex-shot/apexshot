@@ -42,7 +42,7 @@ pub fn build_timeline_card(
     let skip_back = icon_button("media-skip-backward-symbolic", &t("Skip back 1s"));
     let skip_forward = icon_button("media-skip-forward-symbolic", &t("Skip forward 1s"));
 
-    let zoom = labeled_tool_button("zoom-fit-best-symbolic", &t("Zoom"), &t("Add zoom at playhead"));
+    let zoom = labeled_tool_button("zoom-fit-best-symbolic", &t("Zoom"), &t("Click where to zoom in"));
     let split = labeled_tool_button(
         icon_names::custom::SQUARE_SPLIT_HORIZONTAL_SYMBOLIC,
         &t("Split"),
@@ -598,7 +598,7 @@ pub fn build_timeline_card(
                 playhead_clock.set_text(&format_clock(guard.playhead_seconds));
                 duration_clock.set_text(&format_clock(guard.content_end_seconds()));
                 sync_scroll_adj(&scroll_adj, &guard, &scroll_syncing);
-                if guard.selected_zoom.is_some() {
+                if guard.add_zoom_tool {
                     zoom.add_css_class("recording-editor-timeline-tool-active");
                 } else {
                     zoom.remove_css_class("recording-editor-timeline-tool-active");
@@ -671,22 +671,26 @@ pub fn build_timeline_card(
     });
     board.add_controller(wheel);
 
+    // The Zoom button arms the Add zoom tool rather than adding at once: the
+    // next click on the preview says where the zoom should look. Clicking it
+    // again, or Escape, puts the tool away.
     zoom.connect_clicked({
         let state = state.clone();
         let redraw = redraw.clone();
+        let pause = pause.clone();
         move |_| {
-            let mut guard = state.lock().unwrap();
-            if guard.add_zoom_at_playhead().is_none() {
-                let playhead = guard.playhead_seconds;
-                if let Some(index) = guard
-                    .zoom_clips
-                    .iter()
-                    .position(|clip| playhead >= clip.start && playhead <= clip.end)
-                {
-                    select_zoom(&mut guard, Some(index));
-                }
+            let (changed, armed) = {
+                let mut guard = state.lock().unwrap();
+                let armed = !guard.add_zoom_tool;
+                let changed = guard.set_add_zoom_tool(armed);
+                (changed, guard.add_zoom_tool)
+            };
+            if !changed {
+                return;
             }
-            drop(guard);
+            if armed {
+                pause();
+            }
             redraw();
         }
     });
@@ -778,6 +782,8 @@ pub fn build_timeline_card(
                             return glib::ControlFlow::Break;
                         }
                         guard.sidecar = Some(sidecar);
+                        guard.sync_sidecar_cuts();
+                        guard.sync_sidecar_cursor_filters();
                         guard.redetect_zoom_clips();
                         let auto_zooms = guard
                             .zoom_clips

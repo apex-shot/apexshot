@@ -5,6 +5,136 @@ impl VideoEditState {
         self.add_zoom_at(self.playhead_seconds)
     }
 
+    /// The style a zoom the user adds opens with: the one their last zoom edit
+    /// settled on, else the add-zoom defaults.
+    fn add_zoom_style(&self) -> ZoomStyle {
+        self.last_edited_zoom_style.unwrap_or(ZoomStyle {
+            scale: ADD_ZOOM_SCALE,
+            easing: ZoomEasing::Glide,
+            ease_ms: DEFAULT_ZOOM_EASE_MS,
+            instant: false,
+        })
+    }
+
+    /// Arm or put away the Add zoom tool.
+    ///
+    /// Arming clears the selection so the preview shows the whole frame to aim
+    /// at; the caller owns the transport, because playback lives in the window
+    /// rather than the model. Returns whether anything changed — a recording
+    /// with no video has nothing to aim at, so it refuses to arm.
+    pub fn set_add_zoom_tool(&mut self, armed: bool) -> bool {
+        if armed && !self.has_source_video() {
+            return false;
+        }
+        if self.add_zoom_tool == armed {
+            return false;
+        }
+        self.add_zoom_tool = armed;
+        if armed {
+            self.selected_zoom = None;
+            self.selected_cursor_hide = None;
+            self.selected_segment = None;
+        }
+        true
+    }
+
+    /// The scale the armed Add zoom tool draws its outline at and opens the
+    /// clip it places with.
+    pub fn add_zoom_tool_scale(&self) -> f64 {
+        self.add_zoom_style()
+            .scale
+            .clamp(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE)
+    }
+
+    /// Place the zoom the Add zoom tool aimed at `target`, in source pixels,
+    /// starting at the playhead.
+    ///
+    /// A zoom the playhead already runs through is split there and its
+    /// right-hand half becomes the new Manual clip, aimed at the click: two
+    /// zooms cannot overlap, so the studied editor splits rather than stacks
+    /// them. Both halves leave the generator's anchor behind — the user has
+    /// said where the break belongs, so no later composition edit may pull
+    /// them back together. Otherwise a Manual clip of the add-zoom length is
+    /// placed, trimmed to the next clip and the composition end.
+    ///
+    /// The whole placement is one undo step, split included.
+    pub fn place_manual_zoom_at_playhead(&mut self, target: (f64, f64)) -> Option<usize> {
+        if self.zoom_locked || !target.0.is_finite() || !target.1.is_finite() {
+            return None;
+        }
+        let crop = self.crop_or_full();
+        let start = self.playhead_seconds.max(0.0);
+        if let Some(index) = self
+            .zoom_clips
+            .iter()
+            .position(|clip| clip.start < start && start < clip.end)
+        {
+            let clip = self.zoom_clips[index].clone();
+            if start - clip.start < MIN_EFFECT_CLIP_SECONDS
+                || clip.end - start < MIN_EFFECT_CLIP_SECONDS
+            {
+                return None;
+            }
+            self.record_zoom_command();
+            let mut left = clip.clone();
+            left.end = start;
+            left.anchor = None;
+            left.origin = ZoomOrigin::User;
+            let mut right = ZoomClip { start, ..clip };
+            right.mode = ZoomMode::Manual;
+            right.center = clamp_zoom_center(crop, right.scale, target);
+            right.anchor = None;
+            right.origin = ZoomOrigin::User;
+            self.zoom_clips[index] = left;
+            self.zoom_clips.insert(index + 1, right);
+            self.selected_zoom = Some(index + 1);
+            self.selected_cursor_hide = None;
+            self.selected_segment = None;
+            self.selected_tool = EditorTool::Timeline;
+            return Some(index + 1);
+        }
+        let limit = effect_clip_limit(self);
+        let start = start.clamp(0.0, (limit - MIN_EFFECT_CLIP_SECONDS).max(0.0));
+        let next_start = self
+            .zoom_clips
+            .iter()
+            .filter(|clip| clip.start >= start)
+            .map(|clip| clip.start)
+            .fold(f64::INFINITY, f64::min);
+        let end = (start + ADD_ZOOM_DURATION_SECONDS)
+            .min(next_start)
+            .min(limit);
+        if end - start < MIN_EFFECT_CLIP_SECONDS {
+            return None;
+        }
+        let style = self.add_zoom_style();
+        let scale = style.scale.clamp(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE);
+        self.record_zoom_command();
+        self.zoom_clips.push(ZoomClip {
+            start,
+            end,
+            scale,
+            center: clamp_zoom_center(crop, scale, target),
+            ease_ms: style.ease_ms,
+            easing: style.easing,
+            instant: style.instant,
+            mode: ZoomMode::Manual,
+            // Placed by the user, so automatic generation must not replace it.
+            origin: ZoomOrigin::User,
+            ..Default::default()
+        });
+        self.zoom_clips.sort_by(|a, b| a.start.total_cmp(&b.start));
+        let index = self
+            .zoom_clips
+            .iter()
+            .position(|clip| (clip.start - start).abs() < 1e-6)?;
+        self.selected_zoom = Some(index);
+        self.selected_cursor_hide = None;
+        self.selected_segment = None;
+        self.selected_tool = EditorTool::Timeline;
+        Some(index)
+    }
+
     pub fn add_zoom_at(&mut self, start: f64) -> Option<usize> {
         if self.zoom_locked {
             return None;
@@ -12,7 +142,7 @@ impl VideoEditState {
         let start = start.max(0.0);
         // A zoom may not run past the last frame of the video, so the default
         // span is trimmed to the boundary and refused when too little is left.
-        let (start, end) = fit_effect_span(self, start, start + DEFAULT_ZOOM_DURATION_SECONDS)?;
+        let (start, end) = fit_effect_span(self, start, start + ADD_ZOOM_DURATION_SECONDS)?;
         if self
             .zoom_clips
             .iter()
@@ -22,12 +152,7 @@ impl VideoEditState {
         }
         let center = self.default_zoom_center(start);
         self.record_zoom_command();
-        let style = self.last_edited_zoom_style.unwrap_or(ZoomStyle {
-            scale: DEFAULT_ZOOM_SCALE,
-            easing: ZoomEasing::Glide,
-            ease_ms: DEFAULT_ZOOM_EASE_MS,
-            instant: false,
-        });
+        let style = self.add_zoom_style();
         self.zoom_clips.push(ZoomClip {
             start,
             end,
@@ -707,6 +832,8 @@ impl VideoEditState {
     ///
     /// Clips the user placed or dragged carry no anchor and never move.
     pub(crate) fn composition_changed(&mut self) {
+        self.sync_sidecar_cuts();
+        self.sync_sidecar_cursor_filters();
         self.reproject_anchored_zooms();
     }
 
@@ -823,12 +950,21 @@ impl VideoEditState {
     /// Run the automatic zoom pass the first time the editor opens a
     /// recording. Returns true when suggestions were added.
     ///
+    /// The pass is a creation default, not an edit, so it only runs when
+    /// `auto_zoom_on_import` is enabled and the video has no saved project
+    /// yet. Reopening a project therefore never re-adds zooms the user
+    /// deleted, even when that project predates the reviewed flag.
+    ///
     /// The pass runs once and is recorded even when it finds nothing: an empty
     /// clip list is a legitimate result, not proof that the user has not been
     /// asked. Recording it separately from `zoom_clips` is what makes rejecting
     /// every suggestion — or deleting all of them — stick across reopen.
-    pub fn suggest_zooms_on_open(&mut self) -> bool {
-        if self.zoom_suggestions_reviewed {
+    pub fn suggest_zooms_on_open(
+        &mut self,
+        auto_zoom_on_import: bool,
+        has_saved_project: bool,
+    ) -> bool {
+        if !auto_zoom_on_import || has_saved_project || self.zoom_suggestions_reviewed {
             return false;
         }
         self.zoom_suggestions_reviewed = true;

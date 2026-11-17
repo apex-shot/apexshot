@@ -205,6 +205,7 @@ jobs:
           for i in 1 2 3; do
             sudo apt-get install -y --fix-missing \
               libgtk-4-dev \
+              libgtk-4-bin \
               libgstreamer1.0-dev \
               libgstreamer-plugins-base1.0-dev \
               libgstreamer-plugins-bad1.0-dev \
@@ -258,6 +259,9 @@ jobs:
         run: cargo test --no-run
 
       - name: Run tests
+        # GTK tests start their own private broadway display (see
+        # src/test_support.rs), so `libgtk-4-bin` above is what keeps them from
+        # skipping here; no X server or session bus is needed.
         run: cargo test --jobs 2 -- --test-threads=1
 
       - name: Run preview lifecycle regressions with a display
