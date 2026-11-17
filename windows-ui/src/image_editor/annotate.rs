@@ -549,6 +549,18 @@ impl EditorHost {
         borrow.as_ref().map(f)
     }
 
+    /// Write the current annotations beside `path`, so reopening the same file
+    /// restores them even when nothing was exported. This is the close path the
+    /// update's graceful close relies on.
+    pub(crate) fn persist_session(&self, path: &std::path::Path) {
+        let Some(session) = self.read(EditableSession::capture) else {
+            return;
+        };
+        if let Err(error) = session.persist(path) {
+            eprintln!("[image-editor] Could not save the editable annotations: {error}");
+        }
+    }
+
     /// The licence state, re-read at most once a second so painting never
     /// touches the entitlement file per frame.
     fn studio_unlocked_cached(&self) -> bool {

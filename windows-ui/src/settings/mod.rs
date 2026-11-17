@@ -726,6 +726,7 @@ fn build_settings_window(app: &Application) {
 
     let saver_for_close = Rc::clone(&saver);
     window.connect_close_request(move |_| {
+        crate::update::open_windows::unregister();
         saver_for_close.flush();
         gtk4::glib::Propagation::Proceed
     });
@@ -744,7 +745,9 @@ fn build_settings_window(app: &Application) {
         &quick_access.auto_close_interval_input,
     );
 
+    crate::update::open_windows::register_settings();
     window.present();
+    crate::update_ui::present_if_needed(&window_overlay);
 }
 
 /// Rebuild the window in place after a change the widget tree cannot re-apply:

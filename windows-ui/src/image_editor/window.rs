@@ -445,7 +445,20 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
         &exporting,
     );
 
+    // Keep the updater aware of this window and its document, so an update can
+    // close it through this close handler and reopen the same file.
+    crate::update::open_windows::register_image_editor(initial);
+    window.connect_close_request({
+        let canvas = canvas.clone();
+        move |_| {
+            canvas.persist_session_on_close();
+            crate::update::open_windows::unregister();
+            gtk4::glib::Propagation::Proceed
+        }
+    });
+
     window.present();
+    crate::update_ui::present_if_needed(&overlay);
 
     if crate::config::load_config().annotate_always_on_top {
         keep_above(&window);

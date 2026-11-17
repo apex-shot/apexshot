@@ -267,6 +267,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
         let sound_sources = sound_sources.clone();
         let probe_generation = probe_generation.clone();
         Rc::new(move |path| {
+            crate::update::open_windows::register_video_editor(path);
             let title = document_title_for_path(path);
             *document_title.borrow_mut() = title.clone();
             set_title_bar_text(&title_bar, &title);
@@ -349,12 +350,15 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
         let sound = sound.clone();
         move |_| {
             timeline.flush_project();
+            crate::update::open_windows::set_busy(false);
+            crate::update::open_windows::unregister();
             sound.stop();
             gtk4::glib::Propagation::Proceed
         }
     });
 
     window.present();
+    crate::update_ui::present_if_needed(&shell);
 }
 
 fn build_editor_shell(root: &GtkBox, title_bar: &GtkBox, editor_body: &GtkBox) -> Overlay {

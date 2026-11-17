@@ -388,6 +388,7 @@ impl Canvas {
             match receiver.try_recv() {
                 Ok(Ok(decoded)) => {
                     *canvas.source_path.borrow_mut() = Some(loaded_path.clone());
+                    crate::update::open_windows::register_image_editor(Some(loaded_path.as_path()));
                     canvas.finish_load(decoded);
                     glib::ControlFlow::Break
                 }
@@ -407,6 +408,15 @@ impl Canvas {
     /// The file the current document came from, for Export's suggestions.
     pub(super) fn source_path(&self) -> Option<std::path::PathBuf> {
         self.source_path.borrow().clone()
+    }
+
+    /// Keep the annotations for this window's file, so closing the editor (or
+    /// an update's graceful close) does not lose them.
+    pub(super) fn persist_session_on_close(&self) {
+        let Some(path) = self.source_path() else {
+            return;
+        };
+        self.host.persist_session(&path);
     }
 
     /// Step the zoom in, as the pill's plus and Ctrl+plus do.

@@ -448,8 +448,18 @@ pub fn build_history_window(app: &Application) {
     root_box.append(&content_split);
     window.set_child(Some(&window_overlay));
 
+    #[cfg(target_os = "windows")]
+    {
+        // The updater closes this window through its own close handler and
+        // reopens it after the install.
+        crate::update::open_windows::register_history();
+        window.connect_close_request(|_| {
+            crate::update::open_windows::unregister();
+            gtk4::glib::Propagation::Proceed
+        });
+    }
+
     window.present();
-    #[cfg(not(target_os = "windows"))]
     crate::update_ui::present_if_needed(&window_overlay);
 }
 

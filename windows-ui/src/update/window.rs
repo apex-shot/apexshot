@@ -1,11 +1,12 @@
-//! The update window and its four states: available, downloading, ready, and
-//! failed. Pages swap without a transition.
+//! The update window and its states: available, downloading, ready, open
+//! windows, preparing, and failed. Pages swap without a transition.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use gtk4::prelude::*;
 use gtk4::{
@@ -29,6 +30,10 @@ const PANE_WIDTH: f64 = 480.0;
 
 /// Inset of a page from the pane's edges.
 const PAGE_INSET: f64 = 36.0;
+
+/// How long the closed windows get to save and exit before the install is
+/// called off.
+const CLOSE_WAIT_TIMEOUT: Duration = Duration::from_secs(8);
 
 fn px(scale: f64, value: f64) -> i32 {
     (value * scale).round() as i32
@@ -238,6 +243,68 @@ pub(super) fn build_window(app: &Application, release: Release) {
     page_body(&ready, &ready_body, &ready_actions);
     stack.add_named(&ready, Some("ready"));
 
+    // ── Open windows ─────────────────────────────────────────────────────
+    // The installer replaces the app's files, so every open window closes
+    // through its own close handler first: the editors persist there. The
+    // window then reopens the same documents once the installer finishes.
+    let work = page(scale);
+    let work_body = body();
+    work_body.append(&header(
+        scale,
+        dark,
+        &t("Your work will reopen"),
+        &t("These windows close while ApexShot updates and reopen with your edits afterwards:"),
+    ));
+    let work_card = card(scale);
+    let work_list = GtkBox::new(Orientation::Vertical, 0);
+    work_card.append(&work_list);
+    work_body.append(&work_card);
+    let work_install = primary_button(&t("Install now"));
+    let work_back = quiet_button(&t("Back"));
+    let work_actions = action_row(scale, Some(&work_back), &work_install);
+    page_body(&work, &work_body, &work_actions);
+    stack.add_named(&work, Some("work"));
+
+    // ── Preparing ────────────────────────────────────────────────────────
+    // Shown only while those windows save and exit; the installer takes over
+    // as soon as they have.
+    let installing = page(scale);
+    let installing_body = body();
+    installing_body.append(&header(
+        scale,
+        dark,
+        &t("Preparing to install"),
+        &t("The installer starts as soon as these windows have saved and closed."),
+    ));
+    let installing_card = card(scale);
+    let (install_status_row, install_status) = row(scale, &t("Status"), &t("Saving your work…"));
+    installing_card.append(&install_status_row);
+    let install_progress = ProgressBar::new();
+    install_progress.add_css_class("update-progress");
+    install_progress.set_show_text(false);
+    install_progress.set_pulse_step(0.08);
+    install_progress.set_margin_top(px(scale, 10.0));
+    installing_card.append(&install_progress);
+    installing_body.append(&installing_card);
+    page_body(
+        &installing,
+        &installing_body,
+        &GtkBox::new(Orientation::Vertical, 0),
+    );
+    stack.add_named(&installing, Some("installing"));
+
+    let pulse = Rc::new(Cell::new(false));
+    {
+        let install_progress = install_progress.clone();
+        let pulse = pulse.clone();
+        glib::timeout_add_local(Duration::from_millis(120), move || {
+            if pulse.get() {
+                install_progress.pulse();
+            }
+            glib::ControlFlow::Continue
+        });
+    }
+
     // ── Failed ───────────────────────────────────────────────────────────
     let failed = page(scale);
     let failed_body = body();
@@ -376,27 +443,104 @@ pub(super) fn build_window(app: &Application, release: Release) {
         })
     };
 
+    // Set when the failed page is only there because a window would not close:
+    // Try again returns to the ready page instead of restarting the download.
+    let retry_to_ready = Rc::new(Cell::new(false));
+
     update_now.connect_clicked({
         let begin_download = begin_download.clone();
         move |_| begin_download()
     });
     retry.connect_clicked({
         let begin_download = begin_download.clone();
-        move |_| begin_download()
+        let stack = stack.clone();
+        let retry_to_ready = retry_to_ready.clone();
+        move |_| {
+            if retry_to_ready.replace(false) {
+                stack.set_visible_child_name("ready");
+                return;
+            }
+            begin_download()
+        }
     });
 
-    install_now.connect_clicked({
+    // ── Install gate ─────────────────────────────────────────────────────
+    // The work list comes from each window's own record. While it is on
+    // screen it refreshes once a second, so a window opened or closed
+    // meanwhile is reflected without another click.
+    let reopen_commands: Rc<RefCell<Vec<Vec<String>>>> = Rc::new(RefCell::new(Vec::new()));
+    let poll_source: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
+
+    let refresh_work_list: Rc<dyn Fn(&[super::open_windows::OpenWindow])> = {
+        let work_list = work_list.clone();
+        Rc::new(move |open| {
+            while let Some(child) = work_list.first_child() {
+                work_list.remove(&child);
+            }
+            for line in super::open_windows::summary(open) {
+                work_list.append(&fact_line(&line));
+            }
+        })
+    };
+
+    let stop_work_poll: Rc<dyn Fn()> = {
+        let poll_source = poll_source.clone();
+        Rc::new(move || {
+            if let Some(source) = poll_source.borrow_mut().take() {
+                source.remove();
+            }
+        })
+    };
+
+    let start_work_poll: Rc<dyn Fn()> = {
+        let poll_source = poll_source.clone();
+        let stack = stack.clone();
+        let refresh_work_list = refresh_work_list.clone();
+        Rc::new(move || {
+            if let Some(source) = poll_source.borrow_mut().take() {
+                source.remove();
+            }
+            let poll_slot = poll_source.clone();
+            let stack = stack.clone();
+            let refresh_work_list = refresh_work_list.clone();
+            let source = glib::timeout_add_local(Duration::from_secs(1), move || {
+                if stack.visible_child_name().as_deref() == Some("work") {
+                    refresh_work_list(&super::open_windows::list());
+                    glib::ControlFlow::Continue
+                } else {
+                    *poll_slot.borrow_mut() = None;
+                    glib::ControlFlow::Break
+                }
+            });
+            *poll_source.borrow_mut() = Some(source);
+        })
+    };
+
+    // Start the downloaded installer. The update window closes right after,
+    // so a detached watcher waits for the installer and reopens the windows
+    // it closed with the new binaries.
+    let start_installer: Rc<dyn Fn()> = {
         let state = state.clone();
         let window = window.clone();
         let stack = stack.clone();
         let failure_status = failure_status.clone();
-        move |_| {
+        let reopen_commands = reopen_commands.clone();
+        Rc::new(move || {
             let Some(path) = state.borrow().downloaded.clone() else {
                 return;
             };
             match launch_installer(&path) {
-                Ok(()) => window.close(),
+                Ok(installer_pid) => {
+                    let commands = std::mem::take(&mut *reopen_commands.borrow_mut());
+                    super::open_windows::reopen_after_installer(installer_pid, commands);
+                    window.close();
+                }
                 Err(error) => {
+                    // The old binaries are still the running ones, so the
+                    // windows that were closed can come straight back.
+                    super::open_windows::reopen(&std::mem::take(
+                        &mut *reopen_commands.borrow_mut(),
+                    ));
                     failure_status.set_text(&tfmt(
                         "Could not start the installer: {error}",
                         &[("error", &error.to_string())],
@@ -405,14 +549,152 @@ pub(super) fn build_window(app: &Application, release: Release) {
                     stack.set_visible_child_name("failed");
                 }
             }
+        })
+    };
+
+    // An export that is still running blocks the install: the video editor
+    // marks its record busy for the whole encode, and closing the window would
+    // lose it. Try again returns to the ready page.
+    let show_export_blocked: Rc<dyn Fn()> = {
+        let stack = stack.clone();
+        let failure_status = failure_status.clone();
+        let retry_to_ready = retry_to_ready.clone();
+        Rc::new(move || {
+            failure_status.set_text(&t(
+                "An export is still running. Let it finish, then try again.",
+            ));
+            failure_status.set_visible(true);
+            retry_to_ready.set(true);
+            stack.set_visible_child_name("failed");
+        })
+    };
+
+    // Install now: ask the open windows to close first, when there are any.
+    let begin_install: Rc<dyn Fn()> = {
+        let stack = stack.clone();
+        let refresh_work_list = refresh_work_list.clone();
+        let start_work_poll = start_work_poll.clone();
+        let start_installer = start_installer.clone();
+        let show_export_blocked = show_export_blocked.clone();
+        Rc::new(move || {
+            let open = super::open_windows::list();
+            if super::open_windows::any_busy(&open) {
+                show_export_blocked();
+                return;
+            }
+            if open.is_empty() {
+                start_installer();
+                return;
+            }
+            refresh_work_list(&open);
+            stack.set_visible_child_name("work");
+            start_work_poll();
+        })
+    };
+
+    // Install now on the open-window page: close each window through its own
+    // close handler, wait for the processes to exit, then hand over to the
+    // installer. A window that will not close calls the install off instead
+    // of letting the installer end it without saving.
+    let save_and_install: Rc<dyn Fn()> = {
+        let stack = stack.clone();
+        let install_status = install_status.clone();
+        let pulse = pulse.clone();
+        let failure_status = failure_status.clone();
+        let retry_to_ready = retry_to_ready.clone();
+        let reopen_commands = reopen_commands.clone();
+        let start_installer = start_installer.clone();
+        let stop_work_poll = stop_work_poll.clone();
+        let show_export_blocked = show_export_blocked.clone();
+        Rc::new(move || {
+            let open = super::open_windows::list();
+            if super::open_windows::any_busy(&open) {
+                stop_work_poll();
+                pulse.set(false);
+                show_export_blocked();
+                return;
+            }
+            if open.is_empty() {
+                start_installer();
+                return;
+            }
+            stop_work_poll();
+            super::open_windows::request_close(&open);
+            install_status.set_text(&t("Saving your work…"));
+            pulse.set(true);
+            stack.set_visible_child_name("installing");
+
+            let (sender, receiver) = async_channel::bounded(1);
+            let pids: Vec<u32> = open.iter().map(|window| window.pid).collect();
+            std::thread::spawn(move || {
+                let survivors = super::open_windows::wait_for_close(&pids, CLOSE_WAIT_TIMEOUT);
+                let _ = sender.send_blocking(survivors);
+            });
+
+            let stack = stack.clone();
+            let pulse = pulse.clone();
+            let failure_status = failure_status.clone();
+            let retry_to_ready = retry_to_ready.clone();
+            let reopen_commands = reopen_commands.clone();
+            let start_installer = start_installer.clone();
+            glib::spawn_future_local(async move {
+                let Ok(survivors) = receiver.recv().await else {
+                    return;
+                };
+                if survivors.is_empty() {
+                    reopen_commands.replace(
+                        open.into_iter()
+                            .map(|window| window.reopen)
+                            .filter(|reopen| !reopen.is_empty())
+                            .collect(),
+                    );
+                    start_installer();
+                    return;
+                }
+                // A window did not close in time. Put back the ones that did
+                // and leave the install for later.
+                let closed: Vec<Vec<String>> = open
+                    .iter()
+                    .filter(|window| !survivors.contains(&window.pid))
+                    .map(|window| window.reopen.clone())
+                    .filter(|reopen| !reopen.is_empty())
+                    .collect();
+                super::open_windows::reopen(&closed);
+                pulse.set(false);
+                failure_status.set_text(&t(
+                    "ApexShot could not close every window. Close them, then try again.",
+                ));
+                failure_status.set_visible(true);
+                retry_to_ready.set(true);
+                stack.set_visible_child_name("failed");
+            });
+        })
+    };
+
+    install_now.connect_clicked({
+        let begin_install = begin_install.clone();
+        move |_| begin_install()
+    });
+    work_install.connect_clicked({
+        let save_and_install = save_and_install.clone();
+        move |_| save_and_install()
+    });
+    work_back.connect_clicked({
+        let stack = stack.clone();
+        let stop_work_poll = stop_work_poll.clone();
+        move |_| {
+            stop_work_poll();
+            stack.set_visible_child_name("ready");
         }
     });
 
     window.connect_close_request({
         let state = state.clone();
         let release = release.clone();
+        let stop_work_poll = stop_work_poll.clone();
         move |_| {
             state.borrow().cancel.store(true, Ordering::Relaxed);
+            stop_work_poll();
             // Dismissing the prompt rests this version for a day; the next
             // check after that offers it again if it is still installed.
             super::check::snooze(&release.version);
@@ -589,8 +871,26 @@ fn file_size(path: &Path) -> u64 {
     std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0)
 }
 
-fn launch_installer(path: &Path) -> std::io::Result<()> {
-    std::process::Command::new(path).spawn().map(|_| ())
+/// One line of a fact card that has no value column, for the open-window list.
+fn fact_line(text: &str) -> GtkBox {
+    let line = GtkBox::new(Orientation::Horizontal, 0);
+    line.add_css_class("update-row");
+    line.set_hexpand(true);
+
+    let label = Label::new(Some(text));
+    label.add_css_class("update-row-value");
+    label.set_halign(Align::Start);
+    label.set_xalign(0.0);
+    label.set_valign(Align::Center);
+    line.append(&label);
+
+    line
+}
+
+fn launch_installer(path: &Path) -> std::io::Result<u32> {
+    std::process::Command::new(path)
+        .spawn()
+        .map(|child| child.id())
 }
 
 /// Load the update-specific surfaces after the onboarding sheet, at the same
