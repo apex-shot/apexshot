@@ -3,8 +3,8 @@ use std::rc::Rc;
 
 use gtk4::{glib, prelude::*, Align, Box as GtkBox, Button, Label, Orientation, Spinner};
 
-use super::ui::{copy_with_feedback, heading_centered, open_link, option_card, status_pill};
-use super::{Nav, OnboardingStep};
+use super::ui::{copy_with_feedback, feature_card_list, heading, open_link, status_pill};
+use super::{Nav, OnboardingStep, SECTION_GAP};
 use crate::capture::editor::window::icon_names::custom;
 use crate::cloud::auth::{begin_device_login, poll_device_login, DeviceLogin, LoginError};
 use crate::cloud::destination::Destination;
@@ -30,13 +30,7 @@ struct View {
 
 impl View {
     fn begin(&self) -> u64 {
-        let mut child = self.body.first_child();
-        while let Some(widget) = child {
-            child = widget.next_sibling();
-            if !widget.has_css_class("onboarding-mascot") {
-                self.body.remove(&widget);
-            }
-        }
+        super::clear(&self.body);
         super::clear(&self.actions);
         let session = self.session.get() + 1;
         self.session.set(session);
@@ -65,23 +59,29 @@ pub fn build(body: &GtkBox, actions: &GtkBox, nav: &Nav) {
 
 fn intro(view: &View) {
     view.begin();
-    view.body.append(&heading_centered(
+    view.body.append(&heading(
         &t("Share captures as links"),
         &t("Optional. Connect ApexShot Cloud to turn a capture into a link you can paste anywhere. ApexShot works offline without an account, so you can skip this."),
     ));
 
-    let options = GtkBox::new(Orientation::Vertical, 12);
-    options.set_margin_top(26);
-    options.append(&option_card(
-        custom::APEXSHOT_CLOUD,
-        &t("ApexShot Cloud"),
-        &t("Hosted by us. Connect with a one-time code from your browser."),
-    ));
-    options.append(&option_card(
-        custom::XBACKBONE,
-        &t("XBackBone"),
-        &t("Self-host for full control of storage. Set it up later in Settings → Cloud."),
-    ));
+    let hosted_title = t("ApexShot Cloud");
+    let hosted_body = t("Hosted by us. Connect with a one-time code from your browser.");
+    let self_hosted_title = t("XBackBone");
+    let self_hosted_body =
+        t("Self-host for full control of storage. Set it up later in Settings → Cloud.");
+    let options = feature_card_list(&[
+        (
+            custom::APEXSHOT_CLOUD,
+            hosted_title.as_str(),
+            hosted_body.as_str(),
+        ),
+        (
+            custom::XBACKBONE,
+            self_hosted_title.as_str(),
+            self_hosted_body.as_str(),
+        ),
+    ]);
+    options.set_margin_top(SECTION_GAP);
     view.body.append(&options);
 
     let skip_btn = Button::with_label(&t("Skip for now"));
@@ -95,14 +95,13 @@ fn intro(view: &View) {
     let view_c = view.clone();
     connect_btn.connect_clicked(move |_| connect(&view_c));
     view.actions.append(&connect_btn);
+    view.nav.layout_footer();
 }
 
 fn connected(view: &View, config: &AppConfig) {
     view.begin();
-    view.body.append(&heading_centered(
-        &t("You're connected"),
-        &connected_note(config),
-    ));
+    view.body
+        .append(&heading(&t("You're connected"), &connected_note(config)));
 
     let tier = config.cloud_plan_tier.trim();
     let plan = if tier.is_empty() {
@@ -112,7 +111,7 @@ fn connected(view: &View, config: &AppConfig) {
     };
     let pill = status_pill(&tfmt("{plan} plan", &[("plan", &plan)]));
     pill.set_halign(Align::Center);
-    pill.set_margin_top(26);
+    pill.set_margin_top(SECTION_GAP);
     view.body.append(&pill);
 
     let email = if config.cloud_user_email.trim().is_empty() {
@@ -153,7 +152,7 @@ fn connected_note(config: &AppConfig) -> String {
 /// until the account lands. Expiry and failures end the session and offer a retry.
 fn connect(view: &View) {
     let session = view.begin();
-    view.body.append(&heading_centered(
+    view.body.append(&heading(
         &t("Connect your account"),
         &t("Enter this code in your browser to link this device."),
     ));
@@ -161,7 +160,7 @@ fn connect(view: &View) {
     let code_frame = GtkBox::new(Orientation::Horizontal, 12);
     code_frame.add_css_class("onboarding-connect-code-frame");
     code_frame.set_halign(Align::Center);
-    code_frame.set_margin_top(26);
+    code_frame.set_margin_top(SECTION_GAP);
 
     let code_label = Label::new(Some("— — — —"));
     code_label.add_css_class("onboarding-connect-code");
