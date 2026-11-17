@@ -290,9 +290,57 @@
             }
 
             /* Fill-source tabs reuse the video editor's Background tab tray
-             * classes; only the label sizing needs the Motion heading look. */
+             * classes. This inspector is narrower than that sidebar, so the
+             * tray keeps its own compact sizing here: a 26px pill in an 8px
+             * tray, with the lighter 11px label. */
+            .editor-motion-inspector .recording-editor-bg-tabs {
+                margin: 0 0 12px 0;
+                padding: 3px;
+                border-radius: 8px;
+                background: rgba(255, 255, 255, 0.06);
+            }
+
+            .editor-motion-inspector .recording-editor-bg-tab {
+                min-height: 26px;
+                padding: 0 6px;
+                border-radius: 6px;
+                color: rgba(255, 255, 255, 0.52);
+                font-size: 11px;
+                font-weight: 500;
+            }
+
+            .editor-motion-inspector .recording-editor-bg-tab:hover {
+                background: transparent;
+                color: rgba(255, 255, 255, 0.92);
+            }
+
+            .editor-motion-inspector .recording-editor-bg-tab:checked,
+            .editor-motion-inspector .recording-editor-bg-tab:checked:hover {
+                background: rgba(255, 255, 255, 0.10);
+                color: rgba(255, 255, 255, 0.96);
+            }
+
             .editor-motion-inspector .recording-editor-bg-tab label {
                 font-size: 11px;
+            }
+
+            .editor-root.editor-theme-light .editor-motion-inspector .recording-editor-bg-tabs {
+                background: rgba(17, 24, 39, 0.06);
+            }
+
+            .editor-root.editor-theme-light .editor-motion-inspector .recording-editor-bg-tab {
+                color: rgba(29, 33, 41, 0.52);
+            }
+
+            .editor-root.editor-theme-light .editor-motion-inspector .recording-editor-bg-tab:hover {
+                background: transparent;
+                color: rgba(29, 33, 41, 0.88);
+            }
+
+            .editor-root.editor-theme-light .editor-motion-inspector .recording-editor-bg-tab:checked,
+            .editor-root.editor-theme-light .editor-motion-inspector .recording-editor-bg-tab:checked:hover {
+                background: rgba(17, 24, 39, 0.08);
+                color: rgba(29, 33, 41, 0.92);
             }
 
             /* Tool groups below the fill tabs: a clickable header row over a

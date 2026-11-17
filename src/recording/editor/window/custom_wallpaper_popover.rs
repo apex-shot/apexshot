@@ -27,6 +27,7 @@ use crate::recording::editor::model::background_render::{render_gradient, sample
 use crate::recording::editor::model::{
     GradientKind, GradientStop, VideoBackground, VideoEditState, VideoGradient, MAX_GRADIENT_STOPS,
 };
+use crate::settings::ui_support::align_popover_to_trigger;
 
 /// Corner radius shared by the color field, the hue bar, and the hex row, so
 /// the popover reads as one set of stacked surfaces.
@@ -1454,10 +1455,12 @@ fn build_gradient_page(
         // only be pressed while its ancestors are mapped, so `is_visible()`
         // reports the dropdown's own state and nothing else.
         let popover = type_popover.clone();
+        let trigger = type_button.clone();
         type_button.connect_clicked(move |_| {
             if popover.is_visible() {
                 popover.popdown();
             } else {
+                align_popover_to_trigger(&popover, &trigger, true);
                 popover.popup();
             }
         });

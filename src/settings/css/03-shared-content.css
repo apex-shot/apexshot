@@ -133,19 +133,3 @@
                 background-color: #f6f7fb;
                 border-top-color: alpha(#111827, 0.08);
             }
-
-            button.settings-select {
-                min-width: 180px;
-                min-height: 32px;
-                padding: 6px 10px;
-                border-radius: 8px;
-            }
-
-            button.settings-select label {
-                font-size: 13px;
-                font-weight: 500;
-            }
-
-            button.settings-select .settings-select-arrow {
-                opacity: 0.55;
-            }

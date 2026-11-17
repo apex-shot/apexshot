@@ -1,5 +1,5 @@
 use gtk4::gdk;
-use gtk4::{prelude::*, Button, CssProvider};
+use gtk4::{prelude::*, Align, Button, CssProvider, Label, Orientation, Popover};
 
 const SETTINGS_CSS: &str = concat!(
     include_str!("css/01-shell-controls.css"),
@@ -26,6 +26,92 @@ pub fn install_settings_css() {
             &provider,
             gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
+    }
+}
+
+/// Size a popover to the control it drops from and line its left edge up with
+/// that control, so the menu reads as that field's own list instead of a panel
+/// centred on it.
+///
+/// A popover is as wide as its contents, and a width request on the popover is
+/// only a floor, so a long option would widen it past its trigger. The request
+/// goes on the popover's child instead — that is the box the visible panel is
+/// drawn around — and every label inside it is capped to a one-character size
+/// request, so the longest option can never push the panel past the trigger.
+/// A capped label fills its row and is only ellipsized when the row is too
+/// narrow for the whole text.
+///
+/// `keep_natural` is for a compact trigger that is narrower than its widest row
+/// (a chip in the editor chrome): that menu keeps the wider of the two widths so
+/// its options are never truncated.
+pub fn align_popover_to_trigger<W: IsA<gtk4::Widget>>(
+    popover: &Popover,
+    trigger: &W,
+    keep_natural: bool,
+) -> i32 {
+    if !keep_natural {
+        cap_label_widths(popover);
+    }
+    let Some(child) = popover.child() else {
+        return 0;
+    };
+    // `width()` is the content box; the field the user sees is the border box,
+    // which also carries the trigger's CSS padding and border.
+    let trigger_width = trigger
+        .compute_bounds(trigger)
+        .map(|bounds| bounds.width().round() as i32)
+        .unwrap_or_else(|| trigger.width());
+    // Measure from scratch: a request left by an earlier open would show up as
+    // a minimum instead of the panel's own natural width.
+    popover.set_size_request(-1, -1);
+    child.set_size_request(-1, -1);
+    let (_, natural, _, _) = popover.measure(Orientation::Horizontal, -1);
+    let target = if keep_natural {
+        trigger_width.max(natural)
+    } else {
+        trigger_width
+    }
+    .max(1);
+    // What the surface adds around the child (the panel's own border and
+    // padding, plus any min-width the theme sets on the popover), which the
+    // child's request cannot reach. Measure it with the child pinned to the
+    // target: at its own tiny natural width the child would let a popover
+    // min-width dominate the difference and be mistaken for chrome.
+    child.set_size_request(target, -1);
+    let (_, pinned, _, _) = popover.measure(Orientation::Horizontal, -1);
+    let chrome = (pinned - target).max(0);
+    child.set_size_request((target - chrome).max(1), -1);
+    // GTK places a popover against its anchor by this alignment, and `Start` is
+    // what puts the menu's left edge on the trigger's.
+    popover.set_halign(Align::Start);
+    eprintln!(
+        "[popover-align] content={} border_box={} target={} chrome={} child_req={}",
+        trigger.width(),
+        trigger_width,
+        target,
+        chrome,
+        target - chrome
+    );
+    target
+}
+
+/// Cap every label under `widget` so a long one ellipsizes rather than
+/// widening the row it sits in.
+///
+/// The label is switched to fill its row: with a capped size request and a
+/// start alignment it would be allocated its one-character natural width and
+/// render as a bare ellipsis. `xalign` stays where the caller put it, so the
+/// text itself still sits at the row's left edge.
+fn cap_label_widths(widget: &impl IsA<gtk4::Widget>) {
+    let mut child = widget.first_child();
+    while let Some(current) = child {
+        if let Ok(label) = current.clone().downcast::<Label>() {
+            label.set_max_width_chars(1);
+            label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+            label.set_halign(Align::Fill);
+        }
+        cap_label_widths(&current);
+        child = current.next_sibling();
     }
 }
 

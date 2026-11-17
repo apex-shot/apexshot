@@ -52,7 +52,7 @@ popover.settings-select-popover button.history-action-btn {
     background-image: none;
     box-shadow: none;
     font-size: 14px;
-    font-weight: 400;
+    font-weight: 500;
     color: rgba(255, 255, 255, 0.90);
 }
 
@@ -72,10 +72,17 @@ popover.settings-select-popover button.history-action-btn:active {
     color: #ffffff;
 }
 
+popover.settings-select-popover button.history-action-btn:focus,
+popover.settings-select-popover button.history-action-btn:focus-within {
+    outline: none;
+    box-shadow: none;
+}
+
+/* Keyboard focus is the hover fill, not a second ring around the row. */
 popover.settings-select-popover button.history-action-btn:focus-visible {
     background-color: rgba(255, 255, 255, 0.07);
-    outline: 1px solid rgba(255, 255, 255, 0.35);
-    outline-offset: -1px;
+    outline: none;
+    box-shadow: none;
 }
 
 popover.settings-select-popover button.history-action-btn:disabled {
@@ -124,9 +131,16 @@ popover.settings-select-popover button.history-action-btn:disabled image {
     color: #111827;
 }
 
+.editor-root.editor-theme-light popover.settings-select-popover button.history-action-btn:focus,
+.editor-root.editor-theme-light popover.settings-select-popover button.history-action-btn:focus-within {
+    outline: none;
+    box-shadow: none;
+}
+
 .editor-root.editor-theme-light popover.settings-select-popover button.history-action-btn:focus-visible {
     background-color: rgba(17, 24, 39, 0.05);
-    outline-color: rgba(17, 24, 39, 0.35);
+    outline: none;
+    box-shadow: none;
 }
 
 .editor-root.editor-theme-light popover.settings-select-popover button.history-action-btn:disabled {

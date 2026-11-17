@@ -8,6 +8,7 @@ use crate::recording::editor::model::{
 };
 use crate::recording::editor::ripple_preview::{PreviewRipple, PreviewRippleClick};
 use crate::recording::editor::sidecar::CursorMotion;
+use crate::settings::ui_support::align_popover_to_trigger;
 use gtk4::{
     gdk, glib, prelude::*, Align, ApplicationWindow, AspectFrame, Box as GtkBox, Button,
     CssProvider, DrawingArea, GestureDrag, Image, Label, MediaFile, Orientation, Overlay, Picture,
@@ -468,7 +469,11 @@ pub(super) fn build_stage_tools(
     popover.set_parent(&aspect);
     aspect.connect_clicked({
         let popover = popover.clone();
-        move |_| popover.popup()
+        let trigger = aspect.clone();
+        move |_| {
+            align_popover_to_trigger(&popover, &trigger, true);
+            popover.popup()
+        }
     });
 
     append_stage_aspect_item(
@@ -534,7 +539,11 @@ pub(super) fn build_stage_tools(
     quality_popover.set_parent(&quality);
     quality.connect_clicked({
         let quality_popover = quality_popover.clone();
-        move |_| quality_popover.popup()
+        let trigger = quality.clone();
+        move |_| {
+            align_popover_to_trigger(&quality_popover, &trigger, true);
+            quality_popover.popup()
+        }
     });
 
     for tier in [
@@ -716,7 +725,9 @@ fn build_player_bar(enabled: bool) -> PlayerBar {
     popover.set_parent(&aspect_button);
     aspect_button.connect_clicked({
         let popover = popover.clone();
+        let trigger = aspect_button.clone();
         move |_| {
+            align_popover_to_trigger(&popover, &trigger, true);
             popover.popup();
         }
     });

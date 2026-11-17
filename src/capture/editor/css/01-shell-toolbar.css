@@ -16,6 +16,24 @@
                 font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
             }
 
+            /* The video editor's root also carries `.editor-root`, and its own
+               sheet is installed below this one's provider priority, so its
+               surface has to be restated here for the title bar to match. The
+               dark/light theme selectors are needed to outrank
+               `.editor-root.editor-theme-dark` / `-light` in
+               09-theme-overrides.css. */
+            .editor-root.recording-editor-root,
+            .editor-root.recording-editor-root.editor-theme-dark,
+            .editor-root.recording-editor-root.editor-reduced-transparency,
+            .editor-root.recording-editor-root.editor-reduced-transparency.editor-theme-dark {
+                background-color: #0f0f0f;
+            }
+
+            .editor-root.recording-editor-root.editor-theme-light,
+            .editor-root.recording-editor-root.editor-reduced-transparency.editor-theme-light {
+                background-color: #ffffff;
+            }
+
             window.fullscreen .editor-root,
             window.fullscreen .editor-footer,
             window.fullscreen .recording-editor-window-controls {

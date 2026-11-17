@@ -16,13 +16,14 @@
                 border-radius: 6px;
                 background: transparent;
                 color: alpha(white, 0.52);
-                font-size: 12px;
+                font-size: 13px;
                 font-weight: 500;
+                box-shadow: none;
             }
 
             button.recording-editor-bg-tab label {
                 color: inherit;
-                font-size: 12px;
+                font-size: 13px;
                 font-weight: 500;
             }
 
@@ -35,6 +36,10 @@
             button.recording-editor-bg-tab:checked:hover {
                 background: alpha(white, 0.10);
                 color: alpha(white, 0.96);
+            }
+
+            button.recording-editor-bg-tab:disabled {
+                opacity: 0.35;
             }
 
             /* "None" clears the fill outright. It is not a fourth source tab,
@@ -186,6 +191,7 @@
             }
 
             .editor-theme-light button.recording-editor-bg-tab:hover {
+                background: transparent;
                 color: alpha(#1d2129, 0.88);
             }
 
@@ -245,14 +251,12 @@
 
             .recording-editor-tools-column {
                 min-width: 288px;
-                max-width: 288px;
             }
 
             /* The bar is a rounded container the selected tool sits inside —
              * a pill on a tray, rather than a pill floating on the page. */
             .recording-editor-tool-section {
                 min-width: 0;
-                max-width: none;
                 margin: 10px 10px 2px 10px;
                 padding: 3px;
                 border-radius: 12px;
@@ -290,7 +294,6 @@
              * with the timeline. */
             .recording-editor-tool-sidebar {
                 min-width: 0;
-                max-width: none;
                 background: @recording-editor-surface;
                 border-left: none;
             }

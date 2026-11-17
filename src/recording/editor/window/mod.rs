@@ -114,19 +114,25 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
     // before its cleanup ran. Opening the editor is the earliest point a user
     // would notice, and the sweep skips any live process's tree.
     ffmpeg::sweep_stale_scratch_dirs();
+    // The editor is laid out for 1400x900, but it has to stay inside the
+    // monitor: the default is clamped to 90% of its logical width and 85% of
+    // its height, the same limits the image editor uses, so a small or scaled
+    // display never gets a window the compositor stretches to the screen.
+    let (default_width, default_height) =
+        crate::capture::editor::ui_support::clamp_editor_window_size(1400, 900);
     let window = ApplicationWindow::builder()
         .application(application)
         .title(t("ApexShot Recording Editor"))
         .icon_name(crate::app_identity::icon_name())
-        .default_width(1400)
-        .default_height(900)
+        .default_width(default_width)
+        .default_height(default_height)
         .decorated(false)
         .build();
-    // The editor is laid out for 1400x900, but the window also has to be
-    // usable on a 1366x768 display, so the floor sits well below the default.
-    // The transport bar holds the real minimum a little above it, near
-    // 1055x700.
-    window.set_size_request(1000, 700);
+    // The transport bar holds the real minimum, near 1055x700, but the floor
+    // may never exceed the default above: on a scaled monitor that ceiling is
+    // lower than 1000x700, and a larger floor would force the window off the
+    // screen.
+    window.set_size_request(1000.min(default_width), 700.min(default_height));
     window.add_css_class("editor-window");
 
     let root = GtkBox::new(Orientation::Vertical, 0);
