@@ -244,6 +244,35 @@ so "Later" (or closing the window) means the next offer comes at the first
 check after a day, while a newer version clears the snooze immediately. The
 tray's desktop notification is unchanged.
 
+The in-window card (`windows-ui/src/update_ui.rs`) mirrors the Linux prompt: a
+compact bottom-right card appears in the Settings, History, image-editor and
+video-editor windows once the cached check finds a release, with Release notes
+and Update ApexShot. It passes the release it already resolved on the command
+line, so the window never repeats the network lookup, and opening the window
+does not interrupt the work under the card.
+
+Before the installer starts, the update window closes every open window through
+that window's own close handler. Each window process keeps one record under
+`%LOCALAPPDATA%\apexshot\open-windows`, naming the sibling executable and file
+that reopen it. The update window posts `WM_CLOSE` to those processes, waits up
+to eight seconds for them to exit, and only then starts the installer; a window
+that will not close calls the install off and the closed ones reopen at once.
+After the installer exits, a detached PowerShell watcher reopens the remembered
+documents with the new binaries. The image editor writes its annotation sidecar
+and the video editor flushes its project on close, so the edits come back.
+
+Not yet verified on Windows: the close/reopen handshake, the watcher, and the
+card's placement in each window.
+
+A video export is no longer lost to an update. The video editor marks its
+open-window record busy when an export starts and clears the flag on every end
+path — success, cancellation, failure, or window close — and the update window
+checks the live records before it posts any close: while one is busy it closes
+nothing, starts no installer, and reports "An export is still running. Let it
+finish, then try again." with Try again returning to the ready page. The
+ordinary close button is unaffected, so the guard never holds a user's own
+close back.
+
 ## Deliberately out of scope
 
 - The preview overlay and onboarding. Settings and History are implemented,

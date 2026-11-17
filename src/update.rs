@@ -293,7 +293,9 @@ pub fn check_for_update() -> Option<UpdateInfo> {
     let path = state_path();
     let mut state = path.as_deref().map(load_state).unwrap_or_default();
     if checked_recently(&state) {
-        return state.available_update;
+        // The cache outlives an upgrade: right after installing the release
+        // it names, that release is no longer newer than this build.
+        return state.available_update.filter(is_newer_than_installed);
     }
 
     let release = match fetch_latest_release() {
@@ -356,6 +358,12 @@ pub fn cached_update() -> Option<UpdateInfo> {
     state_path()
         .as_deref()
         .and_then(|path| load_state(path).available_update)
+        .filter(is_newer_than_installed)
+}
+
+/// Whether a cached release is still an update for the running build.
+fn is_newer_than_installed(update: &UpdateInfo) -> bool {
+    is_newer_version(&update.version, env!("CARGO_PKG_VERSION"))
 }
 
 /// Whether the launch card should remain hidden for this particular release.
@@ -613,6 +621,19 @@ mod tests {
     #[test]
     fn prerelease_suffix_does_not_break_version_parsing() {
         assert_eq!(parse_version("v1.2.3-beta.1"), Some(vec![1, 2, 3]));
+    }
+
+    #[test]
+    fn a_cached_release_that_is_now_installed_is_not_offered_again() {
+        let cached = |version: &str| UpdateInfo {
+            version: version.to_string(),
+            release_url: RELEASES_URL.to_string(),
+            studio_release_timestamp: None,
+            studio_key_fingerprint: None,
+        };
+        assert!(!is_newer_than_installed(&cached(env!("CARGO_PKG_VERSION"))));
+        assert!(!is_newer_than_installed(&cached("0.0.1")));
+        assert!(is_newer_than_installed(&cached("999.0.0")));
     }
 
     #[test]

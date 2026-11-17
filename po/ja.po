@@ -4969,3 +4969,180 @@ msgstr "アップデート終了"
 
 msgid "Updates included through {date}."
 msgstr "{date} までのアップデートが含まれます。"
+
+msgid "0 B/s"
+msgstr "0 B/s"
+
+msgid "An export is still running. Let it finish, then try again."
+msgstr "書き出しがまだ実行中です。完了してからもう一度お試しください。"
+
+msgid "ApexShot could not close every window. Close them, then try again."
+msgstr "ApexShot がすべてのウィンドウを閉じられませんでした。ウィンドウを閉じてから、もう一度お試しください。"
+
+msgid "ApexShot is up to date"
+msgstr "ApexShot は最新です"
+
+msgid "ApexShot v{version} is being installed. Keep this window open."
+msgstr "ApexShot v{version} をインストールしています。このウィンドウは開いたままにしてください。"
+
+msgid "ApexShot v{version} is installed."
+msgstr "ApexShot v{version} をインストールしました。"
+
+msgid "ApexShot v{version} is ready. Your current work will not be interrupted."
+msgstr "ApexShot v{version} の準備ができました。現在の作業は中断されません。"
+
+msgid "ApexShot window"
+msgstr "ApexShot ウィンドウ"
+
+msgid "Could not check the release: {error}"
+msgstr "リリースを確認できませんでした: {error}"
+
+msgid "Could not create the update folder: {error}"
+msgstr "アップデート用フォルダーを作成できませんでした: {error}"
+
+msgid "Could not find a local cache folder for the update."
+msgstr "アップデート用のローカルキャッシュフォルダーが見つかりませんでした。"
+
+msgid "Could not finish the update: {error}"
+msgstr "アップデートを完了できませんでした: {error}"
+
+msgid "Could not install the GNOME extension update."
+msgstr "GNOME 拡張機能のアップデートをインストールできませんでした。"
+
+msgid "Could not reach the Flatpak service: {error}"
+msgstr "Flatpak サービスに接続できませんでした: {error}"
+
+msgid "Could not reach the package service: {error}"
+msgstr "パッケージサービスに接続できませんでした: {error}"
+
+msgid "Could not read the checksums: {error}"
+msgstr "チェックサムを読み取れませんでした: {error}"
+
+msgid "Could not save the update: {error}"
+msgstr "アップデートを保存できませんでした: {error}"
+
+msgid "Could not start the package manager: {error}"
+msgstr "パッケージマネージャーを起動できませんでした: {error}"
+
+msgid "Enhancement works up to 1 MP and 4096 px per edge. Crop this {width} × {height} image to use it."
+msgstr "高画質化は 1 MP、1 辺 4096 px までの画像に対応します。この {width} × {height} の画像を切り抜くと使用できます。"
+
+msgid "Finish your recording first"
+msgstr "先に録画を終了してください"
+
+msgid "Image editor"
+msgstr "画像エディター"
+
+msgid "Installation was cancelled."
+msgstr "インストールはキャンセルされました。"
+
+msgid "Installing restarts ApexShot, which would stop the recording in progress."
+msgstr "インストールすると ApexShot が再起動し、進行中の録画が停止します。"
+
+msgid "Installing update"
+msgstr "アップデートをインストール中"
+
+msgid "Log out and back in to finish updating the GNOME extension."
+msgstr "GNOME 拡張機能のアップデートを完了するには、ログアウトしてから再度ログインしてください。"
+
+msgid "Preparing to install"
+msgstr "インストールの準備中"
+
+msgid "Refreshing the GNOME extension..."
+msgstr "GNOME 拡張機能を更新中..."
+
+msgid "Restart ApexShot"
+msgstr "ApexShot を再起動"
+
+msgid "Restart ApexShot to use the new version."
+msgstr "新しいバージョンを使うには ApexShot を再起動してください。"
+
+msgid "Saving your work…"
+msgstr "作業内容を保存しています…"
+
+msgid "Setup"
+msgstr "セットアップ"
+
+msgid "The Flatpak update could not start: {error}"
+msgstr "Flatpak のアップデートを開始できませんでした: {error}"
+
+msgid "The Flatpak update failed."
+msgstr "Flatpak のアップデートに失敗しました。"
+
+msgid "The Flatpak update stopped without finishing."
+msgstr "Flatpak のアップデートが完了前に停止しました。"
+
+msgid "The download did not match the published checksum."
+msgstr "ダウンロードしたファイルが公開されているチェックサムと一致しません。"
+
+msgid "The download stopped: {error}"
+msgstr "ダウンロードが停止しました: {error}"
+
+msgid "The installer starts as soon as these windows have saved and closed."
+msgstr "これらのウィンドウが保存されて閉じると、すぐにインストーラーが起動します。"
+
+msgid "The package manager could not install the update."
+msgstr "パッケージマネージャーでアップデートをインストールできませんでした。"
+
+msgid "The package service could not install the update."
+msgstr "パッケージサービスでアップデートをインストールできませんでした。"
+
+msgid "The package service refused the update: {error}"
+msgstr "パッケージサービスがアップデートを拒否しました: {error}"
+
+msgid "The package service stopped without finishing."
+msgstr "パッケージサービスが完了前に停止しました。"
+
+msgid "The release did not publish a checksum for {name}."
+msgstr "このリリースには {name} のチェックサムが公開されていません。"
+
+msgid "The release did not publish checksums."
+msgstr "このリリースにはチェックサムが公開されていません。"
+
+msgid "The server sent an empty download."
+msgstr "サーバーから空のファイルが送られてきました。"
+
+msgid "The update package is missing."
+msgstr "アップデートパッケージが見つかりません。"
+
+msgid "These windows close while ApexShot updates and reopen with your edits afterwards:"
+msgstr "以下のウィンドウは ApexShot の更新中に閉じ、更新後に編集内容を保ったまま再び開きます:"
+
+msgid "This installation is managed by Nix. Update the ApexShot flake input and rebuild your configuration, or upgrade its Nix profile entry."
+msgstr "このインストールは Nix で管理されています。ApexShot の flake 入力を更新して構成を再ビルドするか、Nix プロファイルのエントリをアップグレードしてください。"
+
+msgid "This release does not include a package for this system."
+msgstr "このリリースにはこのシステム用のパッケージが含まれていません。"
+
+msgid "This system needs the terminal updater."
+msgstr "このシステムではターミナルのアップデーターが必要です。"
+
+msgid "This version is not in your Flatpak repository yet. Try again later."
+msgstr "このバージョンはまだ Flatpak リポジトリにありません。後でもう一度お試しください。"
+
+msgid "Tidying the startup entries..."
+msgstr "スタートアップ項目を整理中..."
+
+msgid "Update ApexShot"
+msgstr "ApexShot をアップデート"
+
+msgid "Updating..."
+msgstr "アップデート中..."
+
+msgid "Verifying download..."
+msgstr "ダウンロードを検証中..."
+
+msgid "Video editor"
+msgstr "動画エディター"
+
+msgid "Waiting for permission..."
+msgstr "許可を待っています..."
+
+msgid "Your windows will reopen with your edits."
+msgstr "ウィンドウは編集内容を保ったまま再び開きます。"
+
+msgid "Your work will reopen"
+msgstr "作業内容は再び開きます"
+
+msgid "{label} ({count})"
+msgstr "{label}（{count}）"

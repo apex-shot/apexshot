@@ -129,6 +129,25 @@ fn main() {
             }
             return;
         }
+        "update-window" => {
+            apexshot::update_window::rename_process();
+            let flags = match apexshot::update_window::parse_flags(&args[2..]) {
+                Ok(flags) => flags,
+                Err(error) => {
+                    eprintln!("{error}");
+                    std::process::exit(1);
+                }
+            };
+            if flags.help {
+                println!("{}", apexshot::update_window::USAGE);
+                return;
+            }
+            if let Err(error) = apexshot::update_window::check_and_show(flags.force) {
+                eprintln!("Failed to open the update window: {error}");
+                std::process::exit(1);
+            }
+            return;
+        }
         "history-internal" => {
             if let Err(e) = apexshot::history::show_history_window() {
                 eprintln!("Failed to open history window: {e}");
@@ -674,6 +693,7 @@ pub(crate) fn print_usage() {
     println!("  video-editor [mp4] Open the recording editor");
     println!("  install           Install local binary and set up autostart");
     println!("  update            Update ApexShot to the latest published release");
+    println!("  update-window     Open the standalone update window (--force ignores snooze)");
     println!("  --version / -V    Print version");
     println!("  uninstall         Remove local install, autostart, and native host manifests");
     println!();

@@ -14,9 +14,10 @@
 
 mod check;
 mod download;
+pub mod open_windows;
 mod window;
 
-pub use check::check_and_show;
+pub use check::{cached_release, check, check_and_show, prompt_is_snoozed, snooze};
 
 use std::ffi::OsString;
 
@@ -70,6 +71,45 @@ impl Release {
             release_url: None,
         })
     }
+
+    /// The arguments that make `apexshot-update` present this release again.
+    ///
+    /// The card passes the release it already resolved so the update window
+    /// never repeats the network lookup, and so a snooze it just recorded
+    /// cannot hide the window it is opening.
+    pub fn command_line(&self) -> Vec<String> {
+        let mut args = vec![
+            "--version".to_string(),
+            self.version.clone(),
+            "--asset-url".to_string(),
+            self.asset_url.clone(),
+            "--asset-name".to_string(),
+            self.asset_name.clone(),
+        ];
+        if let Some(size) = self.asset_size {
+            args.push("--asset-size".to_string());
+            args.push(size.to_string());
+        }
+        if let Some(url) = self.release_url.as_ref() {
+            args.push("--release-url".to_string());
+            args.push(url.clone());
+        }
+        args
+    }
+}
+
+/// The update window binary beside this one, or the shell's override.
+pub fn executable_path() -> Option<std::path::PathBuf> {
+    if let Some(path) = std::env::var_os("APEXSHOT_UPDATE") {
+        let path = std::path::PathBuf::from(path);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    let sibling = std::env::current_exe()
+        .ok()?
+        .with_file_name("apexshot-update.exe");
+    sibling.is_file().then_some(sibling)
 }
 
 /// The command line help text.
@@ -266,6 +306,19 @@ mod tests {
             .map(|command| matches!(command, Command::Show(_))),
             Ok(true)
         );
+    }
+
+    #[test]
+    fn a_release_round_trips_through_its_command_line() {
+        let mut release = Release::new("v0.2.37", "https://example.test/ApexShot-0.2.37-setup.exe")
+            .expect("valid release");
+        release.asset_size = Some(191_754_859);
+        release.release_url = Some("https://example.test/releases/v0.2.37".to_string());
+        let command = release.command_line();
+        let parsed = release_from_args(command.into_iter().map(OsString::from))
+            .expect("valid arguments")
+            .expect("a release");
+        assert_eq!(parsed, release);
     }
 
     #[test]

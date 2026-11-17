@@ -32,9 +32,9 @@ const UPDATE_CSS: &str = r#"
     button.apexshot-update-primary:hover { background: #ff7c2f; }
     button.apexshot-update-link {
         padding: 0; min-height: 0; border: none; background: transparent;
-        color: #d9815e; font-size: 12px;
+        color: #ff670d; font-size: 12px;
     }
-    button.apexshot-update-link:hover { color: #efa17e; text-decoration: underline; }
+    button.apexshot-update-link:hover { color: #ff7c2f; text-decoration: underline; }
 
     /* Light surfaces. The card is an overlay child of a themed window root,
        so these are ancestor-qualified the way the settings CSS is. */
@@ -176,8 +176,25 @@ fn present_card(overlay: &Overlay, update: crate::update::UpdateInfo) {
     let update_overlay = overlay.clone();
     update_btn.connect_clicked(move |_| {
         crate::update::snooze_prompt(&update_for_action);
-        if let Err(err) = crate::update::launch_update() {
-            eprintln!("[update] {err}");
+        // The card hands off to the standalone window, which downloads and
+        // installs with the desktop's own authentication dialog. A host that
+        // cannot start it still gets the terminal updater.
+        let mut command = std::process::Command::new(crate::update_window::binary_path());
+        command.arg("update-window").arg("--force");
+        match command.spawn() {
+            Ok(mut child) => {
+                // The card lives in long-lived windows; reap the child so no
+                // zombie is left behind when the update window closes.
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                });
+            }
+            Err(err) => {
+                eprintln!("[update] Could not open the update window: {err}");
+                if let Err(err) = crate::update::launch_update() {
+                    eprintln!("[update] {err}");
+                }
+            }
         }
         update_overlay.remove_overlay(&update_surface);
     });

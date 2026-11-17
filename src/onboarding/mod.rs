@@ -21,8 +21,8 @@ mod complete;
 pub mod extensions;
 mod howto;
 mod motion;
-mod showcase;
-mod ui;
+pub(crate) mod showcase;
+pub(crate) mod ui;
 mod welcome;
 
 use crate::capture::editor::window::icon_names::custom;
@@ -193,6 +193,7 @@ pub fn show_onboarding_window() -> anyhow::Result<()> {
         build_onboarding_window(application);
     });
 
+    crate::graceful_close::close_windows_on_sigterm(&app, || true);
     let _ = app.run_with_args::<String>(&[]);
     Ok(())
 }
@@ -331,7 +332,7 @@ fn install(
 
 /// Minimize and Close in the window's top-right corner, floating over the
 /// pane so the form itself stays free of chrome.
-fn window_controls(window: &ApplicationWindow) -> GtkBox {
+pub(crate) fn window_controls(window: &ApplicationWindow) -> GtkBox {
     let min_btn = traffic_light_button("traffic-light-yellow", &t("Minimize"));
     min_btn.remove_css_class("recent-captures-wm-btn");
     min_btn.add_css_class("recording-editor-traffic-btn");
@@ -362,7 +363,7 @@ fn window_controls(window: &ApplicationWindow) -> GtkBox {
 /// Move the window from a press on the pane's empty space. A press that lands
 /// on a control (or anything inside one) is left alone: starting a move on
 /// press takes the pointer grab, so the control would never see its release.
-fn install_pane_drag(pane: &GtkBox, window: &ApplicationWindow) {
+pub(crate) fn install_pane_drag(pane: &GtkBox, window: &ApplicationWindow) {
     let gesture = gtk4::GestureClick::new();
     gesture.set_button(1);
     let window = window.downgrade();

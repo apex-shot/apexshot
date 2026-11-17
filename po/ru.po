@@ -5052,3 +5052,180 @@ msgstr "Обновления завершены"
 
 msgid "Updates included through {date}."
 msgstr "Обновления включены до {date}."
+
+msgid "0 B/s"
+msgstr "0 Б/с"
+
+msgid "An export is still running. Let it finish, then try again."
+msgstr "Экспорт ещё выполняется. Дождитесь его завершения и повторите попытку."
+
+msgid "ApexShot could not close every window. Close them, then try again."
+msgstr "ApexShot не удалось закрыть все окна. Закройте их и повторите попытку."
+
+msgid "ApexShot is up to date"
+msgstr "ApexShot обновлён"
+
+msgid "ApexShot v{version} is being installed. Keep this window open."
+msgstr "Устанавливается ApexShot v{version}. Не закрывайте это окно."
+
+msgid "ApexShot v{version} is installed."
+msgstr "ApexShot v{version} установлен."
+
+msgid "ApexShot v{version} is ready. Your current work will not be interrupted."
+msgstr "ApexShot v{version} готов. Ваша текущая работа не будет прервана."
+
+msgid "ApexShot window"
+msgstr "Окно ApexShot"
+
+msgid "Could not check the release: {error}"
+msgstr "Не удалось проверить выпуск: {error}"
+
+msgid "Could not create the update folder: {error}"
+msgstr "Не удалось создать папку обновления: {error}"
+
+msgid "Could not find a local cache folder for the update."
+msgstr "Не удалось найти локальную папку кэша для обновления."
+
+msgid "Could not finish the update: {error}"
+msgstr "Не удалось завершить обновление: {error}"
+
+msgid "Could not install the GNOME extension update."
+msgstr "Не удалось установить обновление расширения GNOME."
+
+msgid "Could not reach the Flatpak service: {error}"
+msgstr "Не удалось связаться со службой Flatpak: {error}"
+
+msgid "Could not reach the package service: {error}"
+msgstr "Не удалось связаться со службой пакетов: {error}"
+
+msgid "Could not read the checksums: {error}"
+msgstr "Не удалось прочитать контрольные суммы: {error}"
+
+msgid "Could not save the update: {error}"
+msgstr "Не удалось сохранить обновление: {error}"
+
+msgid "Could not start the package manager: {error}"
+msgstr "Не удалось запустить менеджер пакетов: {error}"
+
+msgid "Enhancement works up to 1 MP and 4096 px per edge. Crop this {width} × {height} image to use it."
+msgstr "Улучшение работает для изображений до 1 Мп и 4096 пикс. по стороне. Обрежьте это изображение {width} × {height}, чтобы использовать его."
+
+msgid "Finish your recording first"
+msgstr "Сначала завершите запись"
+
+msgid "Image editor"
+msgstr "Редактор изображений"
+
+msgid "Installation was cancelled."
+msgstr "Установка отменена."
+
+msgid "Installing restarts ApexShot, which would stop the recording in progress."
+msgstr "Установка перезапускает ApexShot, и текущая запись остановится."
+
+msgid "Installing update"
+msgstr "Установка обновления"
+
+msgid "Log out and back in to finish updating the GNOME extension."
+msgstr "Выйдите из системы и войдите снова, чтобы завершить обновление расширения GNOME."
+
+msgid "Preparing to install"
+msgstr "Подготовка к установке"
+
+msgid "Refreshing the GNOME extension..."
+msgstr "Обновление расширения GNOME..."
+
+msgid "Restart ApexShot"
+msgstr "Перезапустить ApexShot"
+
+msgid "Restart ApexShot to use the new version."
+msgstr "Перезапустите ApexShot, чтобы использовать новую версию."
+
+msgid "Saving your work…"
+msgstr "Сохранение вашей работы…"
+
+msgid "Setup"
+msgstr "Настройка"
+
+msgid "The Flatpak update could not start: {error}"
+msgstr "Не удалось запустить обновление Flatpak: {error}"
+
+msgid "The Flatpak update failed."
+msgstr "Обновление Flatpak не удалось."
+
+msgid "The Flatpak update stopped without finishing."
+msgstr "Обновление Flatpak остановилось, не завершившись."
+
+msgid "The download did not match the published checksum."
+msgstr "Загруженный файл не совпадает с опубликованной контрольной суммой."
+
+msgid "The download stopped: {error}"
+msgstr "Загрузка прервана: {error}"
+
+msgid "The installer starts as soon as these windows have saved and closed."
+msgstr "Установщик запустится, как только эти окна сохранятся и закроются."
+
+msgid "The package manager could not install the update."
+msgstr "Менеджеру пакетов не удалось установить обновление."
+
+msgid "The package service could not install the update."
+msgstr "Службе пакетов не удалось установить обновление."
+
+msgid "The package service refused the update: {error}"
+msgstr "Служба пакетов отклонила обновление: {error}"
+
+msgid "The package service stopped without finishing."
+msgstr "Служба пакетов остановилась, не завершив работу."
+
+msgid "The release did not publish a checksum for {name}."
+msgstr "В выпуске нет контрольной суммы для {name}."
+
+msgid "The release did not publish checksums."
+msgstr "В выпуске нет контрольных сумм."
+
+msgid "The server sent an empty download."
+msgstr "Сервер отправил пустой файл."
+
+msgid "The update package is missing."
+msgstr "Пакет обновления отсутствует."
+
+msgid "These windows close while ApexShot updates and reopen with your edits afterwards:"
+msgstr "Эти окна закроются на время обновления ApexShot и затем откроются снова с вашими правками:"
+
+msgid "This installation is managed by Nix. Update the ApexShot flake input and rebuild your configuration, or upgrade its Nix profile entry."
+msgstr "Эта установка управляется Nix. Обновите вход flake ApexShot и пересоберите конфигурацию или обновите его запись в профиле Nix."
+
+msgid "This release does not include a package for this system."
+msgstr "В этом выпуске нет пакета для этой системы."
+
+msgid "This system needs the terminal updater."
+msgstr "Для этой системы нужен установщик обновлений в терминале."
+
+msgid "This version is not in your Flatpak repository yet. Try again later."
+msgstr "Этой версии ещё нет в вашем репозитории Flatpak. Повторите попытку позже."
+
+msgid "Tidying the startup entries..."
+msgstr "Наведение порядка в записях автозапуска..."
+
+msgid "Update ApexShot"
+msgstr "Обновить ApexShot"
+
+msgid "Updating..."
+msgstr "Обновление..."
+
+msgid "Verifying download..."
+msgstr "Проверка загрузки..."
+
+msgid "Video editor"
+msgstr "Видеоредактор"
+
+msgid "Waiting for permission..."
+msgstr "Ожидание разрешения..."
+
+msgid "Your windows will reopen with your edits."
+msgstr "Ваши окна откроются снова с вашими правками."
+
+msgid "Your work will reopen"
+msgstr "Ваша работа откроется снова"
+
+msgid "{label} ({count})"
+msgstr "{label} ({count})"

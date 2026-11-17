@@ -52,6 +52,7 @@ pub mod test_support;
 #[rustfmt::skip]
 pub mod typography;
 pub mod update;
+pub mod update_ui;
 mod usage_telemetry;
 pub mod utils;
 pub mod video_editor;

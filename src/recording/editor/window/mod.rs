@@ -45,6 +45,30 @@ use std::time::Duration;
 
 use crate::i18n::t;
 
+thread_local! {
+    /// The export flags of the windows this process built. The SIGTERM handler
+    /// lives outside any window, so it asks these whether an encode may still
+    /// be interrupted.
+    static EXPORTING_FLAGS: RefCell<Vec<std::rc::Weak<Cell<bool>>>> =
+        const { RefCell::new(Vec::new()) };
+}
+
+/// Whether any window in this process is encoding an export.
+fn any_export_running() -> bool {
+    EXPORTING_FLAGS.with(|flags| {
+        flags
+            .borrow()
+            .iter()
+            .filter_map(|exporting| exporting.upgrade())
+            .any(|exporting| exporting.get())
+    })
+}
+
+/// Let the SIGTERM handler see a window's export flag.
+fn register_exporting_flag(exporting: &Rc<Cell<bool>>) {
+    EXPORTING_FLAGS.with(|flags| flags.borrow_mut().push(Rc::downgrade(exporting)));
+}
+
 pub fn open_empty() -> anyhow::Result<()> {
     let app = Application::builder()
         .application_id(crate::app_identity::app_id())
@@ -60,6 +84,7 @@ pub fn open_empty() -> anyhow::Result<()> {
         build_window(application, initial.clone());
     });
 
+    crate::graceful_close::close_windows_on_sigterm(&app, || !any_export_running());
     let _ = app.run_with_args::<String>(&[]);
     Ok(())
 }
@@ -99,6 +124,7 @@ pub fn open_with_path(path: PathBuf) -> anyhow::Result<()> {
         build_window(application, initial.clone());
     });
 
+    crate::graceful_close::close_windows_on_sigterm(&app, || !any_export_running());
     let _ = app.run_with_args::<String>(&[]);
     Ok(())
 }
@@ -183,6 +209,7 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
     // The composition's own sound, played beside the muted video stream.
     let sound = Rc::new(sound_player::SoundSync::new());
     let exporting = Rc::new(Cell::new(false));
+    register_exporting_flag(&exporting);
     let export_flow_active: export_flow::FlowActive = Rc::new(Cell::new(false));
     let export_cancellation = Arc::new(AtomicBool::new(false));
     let close_after_export = Rc::new(Cell::new(false));

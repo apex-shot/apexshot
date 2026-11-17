@@ -74,7 +74,7 @@ right starting point for a change.
 | Recording pipeline                    | `src/recording/`                                    | Native PipeWire (`pipewire_engine.rs`) + ffmpeg on Wayland; GStreamer ximagesrc on X11. Video encoding, audio source discovery (`pactl`). |
 | OCR + QR                              | `src/ocr/`, `src/qr/`                               | Tesseract LSTM with multi-PSM voting, deskew, QR-first detection. |
 | Settings UI                           | `src/settings/`                                     | GTK4 preferences window, shortcut editor, recording options. |
-| Onboarding wizard                     | `src/onboarding/`                                   | First-run setup, GNOME extension installer (`wget` + `curl`). |
+| Onboarding wizard                     | `src/onboarding/`                                   | First-run setup, GNOME extension installer (`ureq` download + `gnome-extensions`). |
 | Cross-cutting utilities               | `src/utils/`                                        | Clipboard, desktop env detection, scoped portal identity. |
 | Native interactive overlay (Qt5)      | `capture-overlay/src/`                              | Selection, recording controls; built automatically by `build.rs` (manual CMake still OK for debugging). |
 | Cloud upload destinations             | `src/cloud/`                                        | ApexShot Cloud + XBackBone; Settings → Cloud + `apexshot login`. |

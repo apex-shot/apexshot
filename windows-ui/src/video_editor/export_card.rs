@@ -80,6 +80,9 @@ pub(super) fn show(
     present_screen(shell, &screen);
     stop.grab_focus();
 
+    // The update window reads this flag before it closes any window, so an
+    // install waits for the export instead of ending it.
+    crate::update::open_windows::set_busy(true);
     let handle = Rc::new(start_export_with_settings(model, output, settings));
     let cancelling = Rc::new(Cell::new(false));
     stop.connect_clicked({
@@ -112,10 +115,12 @@ pub(super) fn show(
         let screen = screen.downgrade();
         move || {
             let (Some(shell), Some(screen)) = (shell.upgrade(), screen.upgrade()) else {
+                crate::update::open_windows::set_busy(false);
                 handle.cancel();
                 return glib::ControlFlow::Break;
             };
             if shell.root().is_none() {
+                crate::update::open_windows::set_busy(false);
                 handle.cancel();
                 return glib::ControlFlow::Break;
             }
@@ -157,11 +162,13 @@ pub(super) fn show(
                     return glib::ControlFlow::Continue
                 }
                 Ok(ExportUpdate::Cancelled) => {
+                    crate::update::open_windows::set_busy(false);
                     shell.remove_overlay(&screen);
                     restore_editor(&shell);
                     return glib::ControlFlow::Break;
                 }
                 Ok(ExportUpdate::Finished(path, sound)) => {
+                    crate::update::open_windows::set_busy(false);
                     title.set_text(&t("Exported successfully"));
                     crate::utils::notify::desktop_notification(
                         &t("Export complete"),
@@ -285,8 +292,14 @@ pub(super) fn show(
                     });
                     None
                 }
-                Ok(ExportUpdate::Failed(message)) => Some(message),
-                Err(TryRecvError::Disconnected) => Some(t("The export stopped unexpectedly.")),
+                Ok(ExportUpdate::Failed(message)) => {
+                    crate::update::open_windows::set_busy(false);
+                    Some(message)
+                }
+                Err(TryRecvError::Disconnected) => {
+                    crate::update::open_windows::set_busy(false);
+                    Some(t("The export stopped unexpectedly."))
+                }
             };
             if let Some(message) = failure {
                 title.set_text(&t("Export failed"));

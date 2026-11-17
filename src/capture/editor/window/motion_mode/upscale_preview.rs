@@ -1035,7 +1035,12 @@ pub(super) fn input_unavailable_reason((width, height): (u32, u32)) -> Option<St
     }
     crate::capture::editor::upscale::validate_input_dimensions(width, height, SourceUpscale::Neural2x)
         .err()
-        .map(|reason| tfmt("{reason} This image is {width} × {height} pixels. Crop it or choose a smaller image to enable enhancement.", &[("reason", &t(&reason)), ("width", &width.to_string()), ("height", &height.to_string())]))
+        .map(|_| {
+            tfmt(
+                "Enhancement works up to 1 MP and 4096 px per edge. Crop this {width} × {height} image to use it.",
+                &[("width", &width.to_string()), ("height", &height.to_string())],
+            )
+        })
 }
 
 pub(super) fn output_dimensions(session: &MotionSession, mode: SourceUpscale) -> (u32, u32) {

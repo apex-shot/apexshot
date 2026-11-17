@@ -21,8 +21,10 @@ pub mod compositor;
 pub mod config;
 pub mod daemon;
 pub mod distro;
+pub mod gnome_extension;
 pub mod gnome_integration;
 pub mod gnome_shell;
+pub(crate) mod graceful_close;
 pub mod history;
 pub mod hotkeys;
 pub mod i18n;
@@ -45,6 +47,7 @@ mod test_support;
 mod typography;
 pub mod update;
 pub mod update_ui;
+pub mod update_window;
 pub mod usage_telemetry;
 pub mod utils;
 

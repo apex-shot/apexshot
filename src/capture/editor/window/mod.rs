@@ -361,6 +361,7 @@ pub fn open_image_editor(path: PathBuf) -> Result<(), EditorError> {
         setup_image_loading_shell(application, Some(path.clone()));
     });
 
+    crate::graceful_close::close_windows_on_sigterm(&app, || true);
     let _ = app.run_with_args::<String>(&[]);
     Ok(())
 }
@@ -377,6 +378,7 @@ pub fn open_image_editor_empty() -> Result<(), EditorError> {
         setup_image_loading_shell(application, None);
     });
 
+    crate::graceful_close::close_windows_on_sigterm(&app, || true);
     let _ = app.run_with_args::<String>(&[]);
     Ok(())
 }

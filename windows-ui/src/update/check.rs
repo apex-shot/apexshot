@@ -110,6 +110,28 @@ pub fn check_and_show() -> anyhow::Result<()> {
     }
 }
 
+/// The release the last check found, without touching the network.
+///
+/// The in-window card appears immediately from this, the way the Linux card
+/// uses the daemon's cached check, and only falls back to a background lookup.
+pub fn cached_release() -> Option<Release> {
+    let path = state_path()?;
+    let state = load_state(&path);
+    state
+        .available_update
+        .as_ref()
+        .filter(|available| is_newer_version(&available.version, env!("CARGO_PKG_VERSION")))
+        .cloned()
+        .map(Into::into)
+}
+
+/// Whether this version's prompt is resting after a dismissal.
+pub fn prompt_is_snoozed(version: &str) -> bool {
+    state_path()
+        .map(|path| prompt_snoozed(&load_state(&path), version, now_unix()))
+        .unwrap_or(false)
+}
+
 /// Hide this version's prompt for a day. A newer release names a different
 /// version, so it clears the snooze.
 pub fn snooze(version: &str) {
