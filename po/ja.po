@@ -5146,3 +5146,21 @@ msgstr "作業内容は再び開きます"
 
 msgid "{label} ({count})"
 msgstr "{label}（{count}）"
+
+msgid "Uploading video"
+msgstr "動画をアップロード中"
+
+msgid "{sent} of {total}"
+msgstr "{sent} / {total}"
+
+msgid "Link copied to clipboard"
+msgstr "リンクをクリップボードにコピーしました"
+
+msgid "The link will be copied when you return to this window"
+msgstr "このウィンドウに戻るとリンクがコピーされます"
+
+msgid "Switch back to the editor to copy the link"
+msgstr "エディターに戻ってリンクをコピーしてください"
+
+msgid "Open link"
+msgstr "リンクを開く"

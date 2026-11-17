@@ -316,22 +316,28 @@ fn wire_upload_button(
                         return glib::ControlFlow::Break;
                     }
                     match result {
-                        Ok(share_url) => {
-                            if let Err(e) =
-                                crate::utils::clipboard::copy_text_to_gtk_clipboard(&share_url)
-                            {
-                                eprintln!("Failed to copy share link to clipboard: {e}");
+                        Ok(share_url) => match window.upgrade() {
+                            Some(window) => {
+                                let copied_now =
+                                    crate::utils::clipboard::copy_text_when_window_active(
+                                        window.upcast_ref(),
+                                        &share_url,
+                                    );
+                                let body = if copied_now {
+                                    t("Share link copied to clipboard")
+                                } else {
+                                    t("Switch back to the editor to copy the link")
+                                };
                                 crate::utils::notify::desktop_notification(
                                     &t("Upload complete"),
-                                    &tfmt("Share link: {url}", &[("url", &share_url)]),
-                                );
-                            } else {
-                                crate::utils::notify::desktop_notification(
-                                    &t("Upload complete"),
-                                    &t("Share link copied to clipboard"),
+                                    &body,
                                 );
                             }
-                        }
+                            None => crate::utils::notify::desktop_notification(
+                                &t("Upload complete"),
+                                &tfmt("Share link: {url}", &[("url", &share_url)]),
+                            ),
+                        },
                         Err(err) => {
                             if let crate::cloud::upload::UploadError::UpgradeRequired(message) =
                                 &err
