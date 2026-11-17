@@ -192,6 +192,25 @@ fn cursor_tab_button(label: &str) -> ToggleButton {
     button
 }
 
+/// Let a segmented button's label wrap instead of setting the width floor.
+///
+/// A label that does not wrap reports its whole text as its minimum width, and
+/// the segmented rows are homogeneous, so the longest segment would make both
+/// buttons as wide as its text and push the sidebar wider than its column.
+fn wrap_segment_label(button: &ToggleButton) {
+    let Some(child) = button.child() else {
+        return;
+    };
+    let Ok(label) = child.downcast::<Label>() else {
+        return;
+    };
+    label.set_wrap(true);
+    label.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
+    label.set_justify(Justification::Center);
+    label.set_xalign(0.5);
+    label.set_max_width_chars(1);
+}
+
 fn bind_cursor_f64(
     slider: &FillSlider,
     syncing: Rc<Cell<bool>>,
@@ -439,10 +458,12 @@ fn build_cursor_motion_tab(
     velocity_btn.add_css_class("recording-editor-cursor-segment");
     velocity_btn.set_has_frame(false);
     velocity_btn.set_hexpand(true);
+    wrap_segment_label(&velocity_btn);
     let directional_btn = ToggleButton::with_label(&t("Point along movement"));
     directional_btn.add_css_class("recording-editor-cursor-segment");
     directional_btn.set_has_frame(false);
     directional_btn.set_hexpand(true);
+    wrap_segment_label(&directional_btn);
     directional_btn.set_group(Some(&velocity_btn));
     rotation_modes.append(&velocity_btn);
     rotation_modes.append(&directional_btn);

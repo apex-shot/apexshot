@@ -2103,6 +2103,18 @@ mod tests {
             panel.contains("guard.sync_sidecar_cursor_filters();"),
             "a cursor write must reach the pointer plan"
         );
+        // The two segment labels are long. A non-wrapping label's minimum
+        // width is its whole text, and the segmented row is homogeneous, so
+        // the labels must wrap rather than widen the sidebar.
+        for call in [
+            "wrap_segment_label(&velocity_btn)",
+            "wrap_segment_label(&directional_btn)",
+        ] {
+            assert!(
+                panel.contains(call),
+                "the rotation segments must wrap their labels: {call}"
+            );
+        }
     }
 
     #[test]
