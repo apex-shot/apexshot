@@ -46,12 +46,12 @@
                 font-weight: 600;
             }
 
+            /* Why enhancement is off, set as plain secondary text in the
+               slot the size line uses, so it reads as part of the card
+               rather than a banner dropped on top of it. */
             .editor-root .editor-upscale-notice {
-                padding: 8px 10px;
-                border-left: 2px solid #ff670d;
-                border-radius: 6px;
-                background: rgba(255, 103, 13, 0.08);
-                color: rgba(255, 255, 255, 0.78);
+                padding: 0 2px;
+                color: rgba(255, 255, 255, 0.56);
                 font-size: 11px;
             }
 
@@ -68,7 +68,7 @@
             }
 
             .editor-root.editor-theme-light .editor-upscale-notice {
-                color: rgba(17, 24, 39, 0.78);
+                color: rgba(17, 24, 39, 0.58);
             }
 
             /* The compare action: a full-width row with the split glyph, its
