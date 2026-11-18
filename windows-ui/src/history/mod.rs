@@ -1,15 +1,16 @@
 //! Windows History window.
 //!
 //! The gallery, the Cloud page, and the window shell are shared with the
-//! Linux build. Motion edits stay a placeholder until the Windows Motion
-//! editor keeps its projects; its exported videos already list under
-//! Recordings.
+//! Linux build. Motion Edits lists saved Motion projects and the Motion
+//! videos the editor exported; those videos stay out of Recordings.
 
 pub mod actions;
 #[path = "../../../src/history/cloud_page.rs"]
 pub mod cloud_page;
 #[path = "../../../src/history/local_page.rs"]
 pub mod local_page;
+pub mod motion_edits_page;
+pub mod motion_exports;
 #[cfg(target_os = "windows")]
 pub mod placeholder_page;
 #[path = "../../../src/history/scan.rs"]
@@ -49,8 +50,7 @@ pub struct HistoryPage {
     pub searchable: bool,
 }
 
-/// The Windows page set: a placeholder for Motion projects, which the
-/// Windows Motion editor does not keep yet, the page the video editor's saved
+/// The Windows page set: Motion Edits, the page the video editor's saved
 /// lists feed, and the shared Cloud page.
 ///
 /// It lives here rather than in the shared window so the copy a Windows-only
@@ -61,14 +61,8 @@ pub fn windows_history_pages(
     toast: window::HistoryToast,
     search: &gtk4::Entry,
 ) -> [HistoryPage; 3] {
-    use crate::capture::editor::window::icon_names::custom;
-    use crate::i18n::t;
-
     [
-        placeholder_page::build_placeholder_page(
-            custom::SPLINE_SYMBOLIC,
-            &t("Motion videos you export appear in Recordings. Saved Motion projects are not kept on Windows yet."),
-        ),
+        motion_edits_page::build_motion_edits_page(toast.clone(), search),
         video_edits_page::build_video_edits_page(toast.clone(), search),
         cloud_page::build_cloud_page(toast),
     ]
