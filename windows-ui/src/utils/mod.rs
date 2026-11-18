@@ -70,6 +70,7 @@ pub mod clipboard {
 }
 
 pub mod notify;
+pub mod unique_name;
 
 /// A command for a console program started from this GUI app.
 ///

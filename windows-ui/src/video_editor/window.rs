@@ -2645,13 +2645,16 @@ fn choose_export_path(window: &ApplicationWindow, source: &Path, then: Rc<dyn Fn
     );
     let fallback = source.parent().unwrap_or_else(|| Path::new("."));
     let folder = crate::config::load_config().video_editor_export_dir(fallback);
-    let _ = chooser.set_current_folder(Some(&gio::File::for_path(folder)));
+    let _ = chooser.set_current_folder(Some(&gio::File::for_path(&folder)));
     let stem = source
         .file_stem()
         .and_then(|stem| stem.to_str())
         .filter(|stem| !stem.trim().is_empty())
         .unwrap_or("recording");
-    chooser.set_current_name(&format!("{stem}-edited.mp4"));
+    chooser.set_current_name(&crate::utils::unique_name::available_file_name(
+        &folder,
+        &format!("{stem}-edited.mp4"),
+    ));
     let filter = FileFilter::new();
     filter.set_name(Some(&t("MP4 video")));
     filter.add_pattern("*.mp4");

@@ -697,10 +697,10 @@ fn save_as_dialog(
         .and_then(Path::parent)
         .map(Path::to_path_buf)
         .unwrap_or_else(|| screenshot_folder(&config));
-    dialog.set_initial_folder(Some(&gtk4::gio::File::for_path(folder)));
-    dialog.set_initial_name(Some(&export_name(
-        kept_source.as_deref(),
-        &config.screenshot_format,
+    dialog.set_initial_folder(Some(&gtk4::gio::File::for_path(&folder)));
+    dialog.set_initial_name(Some(&crate::utils::unique_name::available_file_name(
+        &folder,
+        &export_name(kept_source.as_deref(), &config.screenshot_format),
     )));
     let filters = gtk4::gio::ListStore::new::<gtk4::FileFilter>();
     let images = gtk4::FileFilter::new();
@@ -962,7 +962,9 @@ fn choose_motion_video_destination(
     let config = crate::config::load_config().sanitized();
     let folder = config.motion_export_dir(&crate::recording::recording_output_dir(&config));
     dialog.set_initial_folder(Some(&gtk4::gio::File::for_path(&folder)));
-    dialog.set_initial_name(Some(name));
+    dialog.set_initial_name(Some(&crate::utils::unique_name::available_file_name(
+        &folder, name,
+    )));
     let filter = gtk4::FileFilter::new();
     filter.set_name(Some(&t("MP4 video")));
     filter.add_mime_type("video/mp4");
