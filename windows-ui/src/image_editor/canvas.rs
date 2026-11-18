@@ -28,6 +28,9 @@ const MIN_ZOOM: f64 = 0.05;
 const MAX_ZOOM: f64 = 16.0;
 /// Breathing room below the top chrome and above the zoom pill.
 const CONTENT_MARGIN: f64 = 16.0;
+/// Gap kept between a fitted image and the canvas area's side edges, the
+/// Linux editor's canvas padding.
+const SIDE_MARGIN: f64 = 24.0;
 const DOCKED_BAR_INSET: f64 = 48.0;
 const CROP_HANDLE_MARGIN: f64 = 20.0;
 const CROP_BOTTOM_CHROME: f64 = 64.0;
@@ -1037,6 +1040,11 @@ fn viewport_rect(
     } else {
         0.0
     };
+    let side = if crop_mode {
+        margin
+    } else {
+        SIDE_MARGIN * scale
+    };
     let top = (TOP_CHROME_HEIGHT + docked_inset) * scale + margin;
     let bottom = (if crop_mode {
         CROP_BOTTOM_CHROME
@@ -1045,9 +1053,9 @@ fn viewport_rect(
     }) * scale
         + margin;
     (
-        margin,
+        side,
         top,
-        (width - 2.0 * margin).max(1.0),
+        (width - 2.0 * side).max(1.0),
         (height - top - bottom).max(1.0),
     )
 }
@@ -1321,7 +1329,7 @@ fn restorable_session(
 mod tests {
     use super::{
         clamp_pan, crop_fit_zoom, fit_zoom, image_y, viewport_rect, zoom_text, CROP_BOTTOM_CHROME,
-        CROP_HANDLE_MARGIN, DOCKED_BAR_INSET, MAX_ZOOM, MIN_ZOOM,
+        CROP_HANDLE_MARGIN, DOCKED_BAR_INSET, MAX_ZOOM, MIN_ZOOM, SIDE_MARGIN,
     };
 
     #[test]
@@ -1396,6 +1404,19 @@ mod tests {
             }
         }
         assert!(crop_fit_zoom(100_000, 100_000, 800.0, 600.0) < MIN_ZOOM);
+    }
+
+    #[test]
+    fn fitted_image_keeps_a_gap_from_the_side_edges() {
+        for scale in [1.0, 1.25, 2.0] {
+            let (left, top, width, height) = viewport_rect(1000.0, 800.0, scale, 0.0, false);
+            let zoom = fit_zoom(4000, 1000, width, height);
+            let draw_w = 4000.0 * zoom;
+            let x = left + (width - draw_w) / 2.0;
+            assert!(x >= SIDE_MARGIN * scale - 1e-9);
+            assert!(x + draw_w <= 1000.0 - SIDE_MARGIN * scale + 1e-9);
+            assert!(top > 0.0 && height > 0.0);
+        }
     }
 
     #[test]
