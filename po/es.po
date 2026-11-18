@@ -5277,3 +5277,15 @@ msgstr "60 FPS hace la animación más fluida y tarda más en exportarse."
 
 msgid "Export cannot recover detail missing from the screenshot."
 msgstr "La exportación no puede recuperar detalles que faltan en la captura de pantalla."
+
+msgid "Keystroke captions"
+msgstr "Subtítulos de teclas"
+
+msgid "Show the shortcuts you press on screen in recordings."
+msgstr "Muestra en pantalla los atajos que pulsas en tus grabaciones."
+
+msgid "Camera cutout"
+msgstr "Recorte de cámara"
+
+msgid "Cut yourself out of the camera and set yourself on the screen."
+msgstr "Recórtate de la cámara y colócate sobre la pantalla."

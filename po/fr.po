@@ -5289,3 +5289,15 @@ msgstr "60 i/s rend l'animation plus fluide, mais l'export prend plus de temps."
 
 msgid "Export cannot recover detail missing from the screenshot."
 msgstr "L'export ne peut pas récupérer les détails absents de la capture d'écran."
+
+msgid "Keystroke captions"
+msgstr "Affichage des touches"
+
+msgid "Show the shortcuts you press on screen in recordings."
+msgstr "Affichez à l’écran les raccourcis que vous utilisez dans vos enregistrements."
+
+msgid "Camera cutout"
+msgstr "Détourage de la caméra"
+
+msgid "Cut yourself out of the camera and set yourself on the screen."
+msgstr "Détourez-vous de la caméra et placez-vous sur l’écran."
