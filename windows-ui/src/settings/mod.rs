@@ -36,7 +36,6 @@ pub(crate) mod shell;
 #[path = "../../../src/settings/shortcuts.rs"]
 mod shortcuts;
 mod shortcuts_status;
-#[path = "../../../src/settings/studio.rs"]
 mod studio;
 mod switches;
 #[path = "../../../src/settings/theme_picker.rs"]

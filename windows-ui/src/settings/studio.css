@@ -1,0 +1,74 @@
+/* Windows Studio page. Authored at 100%; install_css scales the px lengths to
+   the display's UI scale before the sheet reaches GTK. Everything else comes
+   from the shared Settings rows. */
+
+.settings-table-row label.studio-pill {
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.studio-pill-neutral {
+    color: rgba(255, 255, 255, 0.72);
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+.studio-pill-active {
+    color: #8fdcab;
+    background-color: rgba(63, 168, 106, 0.16);
+}
+
+.studio-pill-warning {
+    color: #eec181;
+    background-color: rgba(214, 154, 66, 0.15);
+}
+
+.studio-pill-attention {
+    color: #f0a396;
+    background-color: rgba(214, 96, 78, 0.15);
+}
+
+.settings-table-row label.studio-mono {
+    font-family: "Cascadia Mono", "Consolas", monospace;
+}
+
+.settings-table-row label.studio-flash {
+    font-weight: 400;
+    font-size: 12px;
+    color: #8fdcab;
+}
+
+.settings-table-row label.studio-error {
+    font-weight: 400;
+    font-size: 12px;
+    color: #f0a396;
+}
+
+.editor-root.editor-theme-light .studio-pill-neutral {
+    color: rgba(29, 33, 41, 0.75);
+    background-color: rgba(17, 24, 39, 0.06);
+}
+
+.editor-root.editor-theme-light .studio-pill-active,
+.editor-root.editor-theme-light .settings-table-row label.studio-flash {
+    color: #17643e;
+}
+
+.editor-root.editor-theme-light .studio-pill-active {
+    background-color: rgba(30, 122, 76, 0.10);
+}
+
+.editor-root.editor-theme-light .studio-pill-warning {
+    color: #85590f;
+    background-color: rgba(158, 106, 20, 0.10);
+}
+
+.editor-root.editor-theme-light .studio-pill-attention,
+.editor-root.editor-theme-light .settings-table-row label.studio-error {
+    color: #8f271b;
+}
+
+.editor-root.editor-theme-light .studio-pill-attention {
+    background-color: rgba(163, 45, 32, 0.08);
+}
