@@ -71,8 +71,23 @@ pub(super) fn capabilities_at(model: &ExportModel, composition_seconds: f64) -> 
         || (settings.smoothness - defaults.smoothness).abs() > 1e-7
         || (settings.motion_blur - defaults.motion_blur).abs() > 1e-7
         || early;
+    // Captions only count when the switch is on and the kept footage actually
+    // has keystrokes to show, so a plain export never meets the gate.
+    let captions = model.effects.captions;
+    let keystroke_captions = captions.shortcuts
+        && model.sidecar.as_ref().is_some_and(|sidecar| {
+            super::keystrokes::captions(&sidecar.keys, captions.show_single_letters)
+                .iter()
+                .any(|caption| caption.start < model.trim_end && caption.end > model.trim_start)
+        });
+    let camera_cutout = model
+        .webcam
+        .as_ref()
+        .is_some_and(|webcam| webcam.layouts.uses_cutout());
     StudioCapabilities {
         advanced_zoom: instant || ((animated || early) && changed_camera),
+        keystroke_captions,
+        camera_cutout,
         ..StudioCapabilities::default()
     }
 }

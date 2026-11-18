@@ -5259,3 +5259,15 @@ msgstr "60 FPS делает анимацию плавнее, но экспорт
 
 msgid "Export cannot recover detail missing from the screenshot."
 msgstr "Экспорт не может восстановить детали, которых нет на снимке экрана."
+
+msgid "Keystroke captions"
+msgstr "Подписи нажатий клавиш"
+
+msgid "Show the shortcuts you press on screen in recordings."
+msgstr "Показывайте на экране сочетания клавиш, которые вы нажимаете в записях."
+
+msgid "Camera cutout"
+msgstr "Вырезание из камеры"
+
+msgid "Cut yourself out of the camera and set yourself on the screen."
+msgstr "Вырежьте себя из изображения камеры и разместите поверх экрана."

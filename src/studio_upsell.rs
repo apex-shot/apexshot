@@ -320,6 +320,8 @@ enum Feature {
     Motion,
     Placement,
     Camera,
+    Captions,
+    Cutout,
     Upscale,
 }
 
@@ -330,6 +332,8 @@ impl Feature {
             Self::Motion => capabilities.motion_export,
             Self::Placement => capabilities.static_presentation,
             Self::Camera => capabilities.advanced_zoom,
+            Self::Captions => capabilities.keystroke_captions,
+            Self::Cutout => capabilities.camera_cutout,
             Self::Upscale => capabilities.image_upscale,
         }
     }
@@ -341,6 +345,8 @@ fn features_for(capabilities: StudioCapabilities) -> Vec<(Feature, bool)> {
         Feature::Motion,
         Feature::Placement,
         Feature::Camera,
+        Feature::Captions,
+        Feature::Cutout,
         Feature::Upscale,
     ]
     .map(|feature| (feature, feature.is_used_by(capabilities)))
@@ -862,6 +868,16 @@ fn feature_copy(feature: Feature, dark: bool) -> (String, String, &'static str) 
             t("Instant zooms, speed, smoothness and motion blur for recordings."),
             themed_icon(dark, custom::CAMERA, custom::CAMERA_LIGHT),
         ),
+        Feature::Captions => (
+            t("Keystroke captions"),
+            t("Show the shortcuts you press on screen in recordings."),
+            themed_icon(dark, custom::KEYBOARD, custom::KEYBOARD_LIGHT),
+        ),
+        Feature::Cutout => (
+            t("Camera cutout"),
+            t("Cut yourself out of the camera and set yourself on the screen."),
+            custom::WEBCAM_SYMBOLIC,
+        ),
         Feature::Upscale => (
             t("Neural upscaling"),
             t("Enhance small screenshots locally before image and Motion exports."),
@@ -1166,6 +1182,8 @@ mod tests {
                 (Feature::Style, false),
                 (Feature::Motion, false),
                 (Feature::Placement, false),
+                (Feature::Captions, false),
+                (Feature::Cutout, false),
                 (Feature::Upscale, false),
             ]
         );
@@ -1179,6 +1197,8 @@ mod tests {
             advanced_zoom: false,
             image_upscale: false,
             studio_style: false,
+            keystroke_captions: false,
+            camera_cutout: false,
         });
         assert_eq!(
             features,
@@ -1187,6 +1207,8 @@ mod tests {
                 (Feature::Placement, true),
                 (Feature::Style, false),
                 (Feature::Camera, false),
+                (Feature::Captions, false),
+                (Feature::Cutout, false),
                 (Feature::Upscale, false),
             ]
         );
@@ -1196,7 +1218,19 @@ mod tests {
     fn no_feature_is_marked_when_the_export_uses_none() {
         let features = features_for(StudioCapabilities::default());
         assert!(features.iter().all(|(_, used)| !used));
-        assert_eq!(features.len(), 5);
+        assert_eq!(features.len(), 7);
+    }
+
+    #[test]
+    fn captions_and_cutout_lead_when_a_recording_uses_them() {
+        let features = features_for(StudioCapabilities {
+            keystroke_captions: true,
+            camera_cutout: true,
+            ..StudioCapabilities::default()
+        });
+        assert_eq!(features[0], (Feature::Captions, true));
+        assert_eq!(features[1], (Feature::Cutout, true));
+        assert!(features[2..].iter().all(|(_, used)| !used));
     }
 
     #[test]

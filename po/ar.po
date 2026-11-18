@@ -5202,3 +5202,15 @@ msgstr "يجعل 60 إطارًا في الثانية الحركة أكثر سل�
 
 msgid "Export cannot recover detail missing from the screenshot."
 msgstr "لا يمكن للتصدير استعادة التفاصيل غير الموجودة في لقطة الشاشة."
+
+msgid "Keystroke captions"
+msgstr "تسميات المفاتيح"
+
+msgid "Show the shortcuts you press on screen in recordings."
+msgstr "اعرض الاختصارات التي تضغطها على الشاشة في التسجيلات."
+
+msgid "Camera cutout"
+msgstr "قصّ الكاميرا"
+
+msgid "Cut yourself out of the camera and set yourself on the screen."
+msgstr "اقتطع نفسك من الكاميرا وضع نفسك على الشاشة."

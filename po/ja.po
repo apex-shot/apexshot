@@ -5176,3 +5176,15 @@ msgstr "60 FPS ではアニメーションが滑らかになりますが、書�
 
 msgid "Export cannot recover detail missing from the screenshot."
 msgstr "スクリーンショットにない細部は、書き出しで復元できません。"
+
+msgid "Keystroke captions"
+msgstr "キー操作の字幕"
+
+msgid "Show the shortcuts you press on screen in recordings."
+msgstr "録画中に押したショートカットを画面に表示します。"
+
+msgid "Camera cutout"
+msgstr "カメラの切り抜き"
+
+msgid "Cut yourself out of the camera and set yourself on the screen."
+msgstr "カメラ映像から自分を切り抜いて画面上に配置します。"

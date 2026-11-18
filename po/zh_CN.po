@@ -5166,3 +5166,15 @@ msgstr "60 FPS 让动画更流畅，但导出需要更长时间。"
 
 msgid "Export cannot recover detail missing from the screenshot."
 msgstr "导出无法恢复截图中缺失的细节。"
+
+msgid "Keystroke captions"
+msgstr "按键字幕"
+
+msgid "Show the shortcuts you press on screen in recordings."
+msgstr "在录屏中显示你按下的快捷键。"
+
+msgid "Camera cutout"
+msgstr "摄像头抠像"
+
+msgid "Cut yourself out of the camera and set yourself on the screen."
+msgstr "将你从摄像头画面中抠出并放到屏幕上。"
