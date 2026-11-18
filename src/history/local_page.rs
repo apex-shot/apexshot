@@ -314,6 +314,14 @@ fn reload(state: &Rc<PageState>) {
             MediaKind::Video => scan::recording_folder(&config),
         };
         let entries = scan::scan_folder(&folder, kind);
+        // Windows Motion exports land in the recordings folder; they list
+        // under Motion Edits instead.
+        #[cfg(target_os = "windows")]
+        let entries = if kind == MediaKind::Video {
+            super::motion_exports::without_motion_exports(entries)
+        } else {
+            entries
+        };
         let _ = scan_tx.send(entries);
     });
 

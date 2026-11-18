@@ -181,6 +181,9 @@ struct Shared {
     playing: Cell<bool>,
     preview_changed: RefCell<Option<Rc<dyn Fn()>>>,
     state_changed: RefCell<Option<Rc<dyn Fn()>>>,
+    /// Listeners beyond the inspector's, called after it on every state
+    /// change; the editor window's Motion autosave is one.
+    extra_state_listeners: RefCell<Vec<Rc<dyn Fn()>>>,
     undo: RefCell<Vec<MotionState>>,
     redo: RefCell<Vec<MotionState>>,
     interaction: RefCell<Option<MotionState>>,
@@ -286,6 +289,10 @@ impl Shared {
         if let Some(callback) = self.state_changed.borrow().as_ref() {
             callback();
         }
+        let extra: Vec<Rc<dyn Fn()>> = self.extra_state_listeners.borrow().clone();
+        for listener in extra {
+            listener();
+        }
     }
 
     fn record_edit(&self, before: MotionState) {
@@ -362,6 +369,15 @@ impl Timeline {
 
     pub(super) fn set_state_listener(&self, listener: Rc<dyn Fn()>) {
         *self.shared.state_changed.borrow_mut() = Some(listener);
+    }
+
+    /// Also call `listener` on every Motion state change, after the
+    /// inspector's own listener.
+    pub(super) fn add_state_listener(&self, listener: Rc<dyn Fn()>) {
+        self.shared
+            .extra_state_listeners
+            .borrow_mut()
+            .push(listener);
     }
 
     pub(super) fn edit_motion(&self, edit: impl FnOnce(&mut MotionState), show_pose: bool) {
@@ -477,6 +493,24 @@ impl Timeline {
         self.shared.notify_state();
     }
 
+    /// Replace the whole Motion edit with one restored from disk. It is not
+    /// an edit the user made here, so it leaves no undo step behind.
+    pub(super) fn restore_motion(&self, apply: impl FnOnce(&mut MotionState)) {
+        self.pause();
+        let mut model = self.shared.model.borrow_mut();
+        apply(&mut model);
+        drop(model);
+        self.shared.undo.borrow_mut().clear();
+        self.shared.redo.borrow_mut().clear();
+        self.shared.interaction.borrow_mut().take();
+        self.shared.preview_on_finish.set(false);
+        self.shared.dragging_clip.set(false);
+        (self.update_clock)();
+        (self.redraw)();
+        self.shared.notify_preview();
+        self.shared.notify_state();
+    }
+
     pub(super) fn reset_source(&self) {
         (self.reset_source)();
     }
@@ -502,6 +536,7 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
         playing: Cell::new(false),
         preview_changed: RefCell::new(None),
         state_changed: RefCell::new(None),
+        extra_state_listeners: RefCell::new(Vec::new()),
         undo: RefCell::new(Vec::new()),
         redo: RefCell::new(Vec::new()),
         interaction: RefCell::new(None),

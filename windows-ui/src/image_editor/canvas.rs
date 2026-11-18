@@ -37,6 +37,8 @@ const CROP_BOTTOM_CHROME: f64 = 64.0;
 const TOAST_LIFETIME: Duration = Duration::from_millis(4200);
 
 type ChangeListeners = Rc<RefCell<Vec<Rc<dyn Fn()>>>>;
+/// Called with the file's path once an image finishes loading.
+type LoadListener = Rc<dyn Fn(&std::path::Path)>;
 
 struct SavedCropView {
     width: i32,
@@ -132,6 +134,8 @@ pub(super) struct Canvas {
     hover: Rc<Hover>,
     /// Subscribed change listeners (sub-bars, history pill) fired by the host.
     listeners: ChangeListeners,
+    /// Called with the path once an image finishes loading into the canvas.
+    load_listeners: RefCell<Vec<LoadListener>>,
 }
 
 pub(super) fn build(scale: f64, dark: bool) -> Rc<Canvas> {
@@ -293,6 +297,7 @@ pub(super) fn build(scale: f64, dark: bool) -> Rc<Canvas> {
         host,
         hover: Rc::new(Hover::default()),
         listeners,
+        load_listeners: RefCell::new(Vec::new()),
     });
 
     canvas.install_gestures();
@@ -393,6 +398,10 @@ impl Canvas {
                     *canvas.source_path.borrow_mut() = Some(loaded_path.clone());
                     crate::update::open_windows::register_image_editor(Some(loaded_path.as_path()));
                     canvas.finish_load(decoded);
+                    let listeners: Vec<LoadListener> = canvas.load_listeners.borrow().clone();
+                    for listener in listeners {
+                        listener(&loaded_path);
+                    }
                     glib::ControlFlow::Break
                 }
                 Ok(Err(error)) => {
@@ -740,6 +749,12 @@ impl Canvas {
     /// Subscribe to document/selection changes (bars, history pill).
     pub(super) fn add_change_listener(&self, listener: Rc<dyn Fn()>) {
         self.listeners.borrow_mut().push(listener);
+    }
+
+    /// Call `listener` with the file's path each time an image finishes
+    /// loading.
+    pub(super) fn add_load_listener(&self, listener: LoadListener) {
+        self.load_listeners.borrow_mut().push(listener);
     }
 
     /// The view transform the paint pass uses, rebuilt from live layout so
@@ -1217,19 +1232,25 @@ fn paint(
         let _ = context.restore();
     }
 
-    context.set_line_width(1.0);
-    if dark {
-        context.set_source_rgba(1.0, 1.0, 1.0, 0.14);
-    } else {
-        context.set_source_rgba(0.067, 0.094, 0.153, 0.16);
+    // The hairline marks the canvas edge only where a fill ends there. With
+    // no fill, a frame style's margin is transparent and the line would sit
+    // around empty space as a stray box.
+    let fill_reaches_edge = host.read(|st| st.background.has_fill()).unwrap_or(false);
+    if !host.has_document() || fill_reaches_edge {
+        context.set_line_width(1.0);
+        if dark {
+            context.set_source_rgba(1.0, 1.0, 1.0, 0.14);
+        } else {
+            context.set_source_rgba(0.067, 0.094, 0.153, 0.16);
+        }
+        context.rectangle(
+            x + 0.5,
+            y + 0.5,
+            (draw_width - 1.0).max(0.0),
+            (draw_height - 1.0).max(0.0),
+        );
+        let _ = context.stroke();
     }
-    context.rectangle(
-        x + 0.5,
-        y + 0.5,
-        (draw_width - 1.0).max(0.0),
-        (draw_height - 1.0).max(0.0),
-    );
-    let _ = context.stroke();
 
     if host.has_document() && !crop_mode {
         use crate::capture::editor::studio_watermark::ScreenRect;

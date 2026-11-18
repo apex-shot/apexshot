@@ -5266,6 +5266,12 @@ msgstr "Vuelve al editor para copiar el enlace"
 msgid "Open link"
 msgstr "Abrir enlace"
 
+msgid "Exported Motion video"
+msgstr "Vídeo Motion exportado"
+
+msgid "Motion edits you make and Motion videos you export will show up here."
+msgstr "Las ediciones Motion que hagas y los vídeos Motion que exportes aparecerán aquí."
+
 msgid "60 FPS makes animation smoother and takes longer to export."
 msgstr "60 FPS hace la animación más fluida y tarda más en exportarse."
 

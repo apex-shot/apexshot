@@ -120,6 +120,56 @@ fn extract_video_poster(path: &Path) -> Result<PathBuf, String> {
         .map_err(|e| format!("Could not read a frame from this recording: {e}"))
 }
 
+/// A remote thumbnail as a file the gallery can show. Some uploads report the
+/// video itself as their thumbnail, so a downloaded video becomes a scaled
+/// poster frame the same way a local recording does, cached beside it.
+fn remote_thumbnail(url: &str) -> Result<PathBuf, String> {
+    let downloaded = crate::cloud::listing::cached_thumbnail(url)
+        .map_err(|e| format!("Could not load this thumbnail: {e}"))?;
+    if !is_video_container(&downloaded) {
+        return Ok(downloaded);
+    }
+    let poster = downloaded.with_extension("poster.png");
+    if poster.is_file() {
+        return Ok(poster);
+    }
+    let frame = match extract_video_poster(&downloaded) {
+        Ok(frame) => frame,
+        // A long video is cut off at the download limit, which can leave out
+        // the index stored at its end; reading the link itself lets the
+        // decoder seek to it.
+        Err(_) => extract_video_poster(Path::new(url))?,
+    };
+    let result = write_scaled_thumbnail(&frame, &poster);
+    let _ = std::fs::remove_file(&frame);
+    if let Some(parent) = frame.parent() {
+        let _ = std::fs::remove_dir(parent);
+    }
+    result.map(|_| poster)
+}
+
+/// Whether `path` holds a video container: an ISO media file (`ftyp` at byte
+/// four) that is not a still-image brand, or WebM/Matroska.
+fn is_video_container(path: &Path) -> bool {
+    use std::io::Read;
+    let mut header = [0u8; 12];
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return false;
+    };
+    if file.read_exact(&mut header).is_err() {
+        return false;
+    }
+    is_video_header(&header)
+}
+
+fn is_video_header(header: &[u8; 12]) -> bool {
+    const STILL_BRANDS: [&[u8; 4]; 5] = [b"avif", b"avis", b"heic", b"heix", b"mif1"];
+    if &header[4..8] == b"ftyp" {
+        return !STILL_BRANDS.iter().any(|brand| &header[8..12] == *brand);
+    }
+    header[..4] == [0x1A, 0x45, 0xDF, 0xA3]
+}
+
 /// Decode `source`, crop-scale it to the card size and store it at `target`.
 ///
 /// The write goes to a per-call temp file first so two workers racing on the
@@ -245,8 +295,7 @@ fn worker_loop(pool: &'static Pool) {
 
         let result = match &request.source {
             ThumbnailSource::Local(entry) => thumbnail_for_entry(entry),
-            ThumbnailSource::Remote(url) => crate::cloud::listing::cached_thumbnail(url)
-                .map_err(|e| format!("Could not load this thumbnail: {e}")),
+            ThumbnailSource::Remote(url) => remote_thumbnail(url),
         };
 
         // A closed receiver just means the window went away.
@@ -431,5 +480,17 @@ mod tests {
         assert!(thumbnail_for_entry(&broken).is_err());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_downloaded_video_is_recognised_by_its_header() {
+        let mp4 = *b"\x00\x00\x00\x20ftypisom";
+        let webm = [0x1A, 0x45, 0xDF, 0xA3, 0, 0, 0, 0, 0, 0, 0, 0];
+        let avif = *b"\x00\x00\x00\x1cftypavif";
+        let png = *b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0d";
+        assert!(is_video_header(&mp4));
+        assert!(is_video_header(&webm));
+        assert!(!is_video_header(&avif));
+        assert!(!is_video_header(&png));
     }
 }

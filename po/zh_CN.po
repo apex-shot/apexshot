@@ -5155,6 +5155,12 @@ msgstr "返回编辑器以复制链接"
 msgid "Open link"
 msgstr "打开链接"
 
+msgid "Exported Motion video"
+msgstr "已导出的 Motion 视频"
+
+msgid "Motion edits you make and Motion videos you export will show up here."
+msgstr "你制作的动态编辑和导出的 Motion 视频将显示在这里。"
+
 msgid "60 FPS makes animation smoother and takes longer to export."
 msgstr "60 FPS 让动画更流畅，但导出需要更长时间。"
 
