@@ -17,7 +17,7 @@ mod compose_gpu;
 mod gpu;
 mod hybrid;
 mod machine;
-pub(super) mod rate;
+pub(crate) mod rate;
 
 pub(super) use canvas::CanvasLayout;
 

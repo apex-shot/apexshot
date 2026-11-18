@@ -5160,3 +5160,9 @@ msgstr "已导出的 Motion 视频"
 
 msgid "Motion edits you make and Motion videos you export will show up here."
 msgstr "你制作的动态编辑和导出的 Motion 视频将显示在这里。"
+
+msgid "60 FPS makes animation smoother and takes longer to export."
+msgstr "60 FPS 让动画更流畅，但导出需要更长时间。"
+
+msgid "Export cannot recover detail missing from the screenshot."
+msgstr "导出无法恢复截图中缺失的细节。"

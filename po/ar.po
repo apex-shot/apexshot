@@ -5196,3 +5196,9 @@ msgstr "فيديو Motion مُصدَّر"
 
 msgid "Motion edits you make and Motion videos you export will show up here."
 msgstr "ستظهر هنا تعديلات Motion التي تجريها ومقاطع فيديو Motion التي تصدّرها."
+
+msgid "60 FPS makes animation smoother and takes longer to export."
+msgstr "يجعل 60 إطارًا في الثانية الحركة أكثر سلاسة لكنه يستغرق وقتًا أطول في التصدير."
+
+msgid "Export cannot recover detail missing from the screenshot."
+msgstr "لا يمكن للتصدير استعادة التفاصيل غير الموجودة في لقطة الشاشة."

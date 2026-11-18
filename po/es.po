@@ -5271,3 +5271,9 @@ msgstr "Vídeo Motion exportado"
 
 msgid "Motion edits you make and Motion videos you export will show up here."
 msgstr "Las ediciones Motion que hagas y los vídeos Motion que exportes aparecerán aquí."
+
+msgid "60 FPS makes animation smoother and takes longer to export."
+msgstr "60 FPS hace la animación más fluida y tarda más en exportarse."
+
+msgid "Export cannot recover detail missing from the screenshot."
+msgstr "La exportación no puede recuperar detalles que faltan en la captura de pantalla."

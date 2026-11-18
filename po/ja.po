@@ -5170,3 +5170,9 @@ msgstr "書き出した Motion 動画"
 
 msgid "Motion edits you make and Motion videos you export will show up here."
 msgstr "作成したモーション編集と書き出した Motion 動画はここに表示されます。"
+
+msgid "60 FPS makes animation smoother and takes longer to export."
+msgstr "60 FPS ではアニメーションが滑らかになりますが、書き出しに時間がかかります。"
+
+msgid "Export cannot recover detail missing from the screenshot."
+msgstr "スクリーンショットにない細部は、書き出しで復元できません。"
