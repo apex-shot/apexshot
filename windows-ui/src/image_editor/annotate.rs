@@ -3168,17 +3168,19 @@ impl EditorHost {
     }
 
     /// Save the flattened document with the platform file dialog handling
-    /// overwrite confirmation; `on_saved` runs once the file is written.
+    /// overwrite confirmation; `on_done` runs once the save finishes, with
+    /// true when the file was written.
     pub fn save_as(
         &self,
         parent: &impl IsA<gtk4::Window>,
         path: &std::path::Path,
-        on_saved: Box<dyn Fn()>,
+        on_done: Box<dyn Fn(bool)>,
     ) {
         if self.background_loading() {
             self.report_error(crate::i18n::t(
                 "Wait for the background image to finish loading.",
             ));
+            on_done(false);
             return;
         }
         self.commit_text_if_active();
@@ -3189,10 +3191,11 @@ impl EditorHost {
                 &crate::i18n::t("Export failed"),
                 "Could not render the image.",
             );
+            on_done(false);
             return;
         };
         let session = self.read(EditableSession::capture);
-        self.save_snapshot(path, snapshot, session, on_saved);
+        self.save_snapshot(path, snapshot, session, on_done);
         let _ = parent;
     }
 
@@ -3201,7 +3204,7 @@ impl EditorHost {
         path: &std::path::Path,
         snapshot: image::RgbaImage,
         session: Option<EditableSession>,
-        on_saved: Box<dyn Fn()>,
+        on_done: Box<dyn Fn(bool)>,
     ) {
         let path = path.to_path_buf();
         let report = self.on_error.clone();
@@ -3225,7 +3228,7 @@ impl EditorHost {
                         &crate::i18n::t("Export complete"),
                         &reported_path.display().to_string(),
                     );
-                    on_saved();
+                    on_done(true);
                     glib::ControlFlow::Break
                 }
                 Ok(Err(error)) => {
@@ -3234,10 +3237,14 @@ impl EditorHost {
                         &crate::i18n::t("Export failed"),
                         &format!("Could not save the image: {error}"),
                     );
+                    on_done(false);
                     glib::ControlFlow::Break
                 }
                 Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                Err(_) => glib::ControlFlow::Break,
+                Err(_) => {
+                    on_done(false);
+                    glib::ControlFlow::Break
+                }
             }
         });
     }
