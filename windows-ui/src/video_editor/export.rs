@@ -6227,6 +6227,8 @@ mod webcam_export_tests {
 
     #[test]
     fn layout_cues_run_on_the_composition_clock() {
+        // The cues include a cutout, which is a Studio export.
+        let _entitlement = crate::studio_entitlement::test_studio_entitlement();
         let dir = std::env::temp_dir().join(format!(
             "apexshot-webcam-cues-{}-{:?}",
             std::process::id(),
