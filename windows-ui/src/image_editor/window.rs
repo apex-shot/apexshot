@@ -156,6 +156,27 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
         })
     };
     canvas.add_change_listener(sync_all.clone());
+    // Crash safety: autosave the session once edits have been quiet for two
+    // seconds, so a drag in progress is never written.
+    {
+        let pending: Rc<RefCell<Option<gtk4::glib::SourceId>>> = Rc::new(RefCell::new(None));
+        let canvas_weak = Rc::downgrade(&canvas);
+        canvas.add_change_listener(Rc::new(move || {
+            if let Some(source) = pending.borrow_mut().take() {
+                source.remove();
+            }
+            let canvas_weak = canvas_weak.clone();
+            let pending_clear = pending.clone();
+            let source =
+                gtk4::glib::timeout_add_local_once(std::time::Duration::from_secs(2), move || {
+                    pending_clear.borrow_mut().take();
+                    if let Some(canvas) = canvas_weak.upgrade() {
+                        canvas.autosave_session();
+                    }
+                });
+            *pending.borrow_mut() = Some(source);
+        }));
+    }
     sync_all();
 
     toolbar.undo.connect_clicked({

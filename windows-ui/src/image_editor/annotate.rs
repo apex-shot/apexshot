@@ -245,6 +245,12 @@ pub struct EditorHost {
     text_input_area: RefCell<Option<glib::WeakRef<DrawingArea>>>,
     text_input_transform: RefCell<Option<Rc<dyn Fn() -> ViewTransform>>>,
     text_input_focused: Cell<bool>,
+    /// The session last written beside the source file (or loaded from it),
+    /// so autosave writes only what changed.
+    last_persisted: RefCell<Option<crate::annotations::ImageSessionSnapshot>>,
+    /// Bumped by every session write; an autosave that a newer write has
+    /// overtaken never runs, and the close path waits out one in progress.
+    session_writes: Arc<std::sync::Mutex<u64>>,
 }
 
 impl EditorHost {
@@ -289,6 +295,8 @@ impl EditorHost {
             text_input_area: RefCell::new(None),
             text_input_transform: RefCell::new(None),
             text_input_focused: Cell::new(false),
+            last_persisted: RefCell::new(None),
+            session_writes: Arc::new(std::sync::Mutex::new(0)),
         })
     }
 
@@ -330,6 +338,7 @@ impl EditorHost {
             st.static_image_transform = session.static_image_transform.sanitized();
             true
         });
+        *self.last_persisted.borrow_mut() = self.read(|st| EditableSession::capture(st).snapshot());
     }
 
     /// Document swap without widget coupling (tests use this directly).
@@ -353,6 +362,7 @@ impl EditorHost {
         self.session_generation
             .set(self.session_generation.get() + 1);
         self.changed();
+        *self.last_persisted.borrow_mut() = self.read(|st| EditableSession::capture(st).snapshot());
     }
 
     fn start_detection(&self, state: &mut EditorState) {
@@ -553,12 +563,55 @@ impl EditorHost {
     /// restores them even when nothing was exported. This is the close path the
     /// update's graceful close relies on.
     pub(crate) fn persist_session(&self, path: &std::path::Path) {
+        // Supersede any autosave that has not started, and wait out one that has.
+        let mut generation = self
+            .session_writes
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        *generation += 1;
         let Some(session) = self.read(EditableSession::capture) else {
             return;
         };
         if let Err(error) = session.persist(path) {
             eprintln!("[image-editor] Could not save the editable annotations: {error}");
         }
+        *self.last_persisted.borrow_mut() = Some(session.snapshot());
+        drop(generation);
+    }
+
+    /// Crash safety: write the session beside `path` on a worker when it
+    /// differs from what was last written. A newer write supersedes one that
+    /// has not started yet.
+    pub(crate) fn autosave_session(&self, path: &std::path::Path) {
+        let Some(session) = self.read(EditableSession::capture) else {
+            return;
+        };
+        let snapshot = session.snapshot();
+        if self.last_persisted.borrow().as_ref() == Some(&snapshot) {
+            return;
+        }
+        *self.last_persisted.borrow_mut() = Some(snapshot);
+        let generation = {
+            let mut latest = self
+                .session_writes
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            *latest += 1;
+            *latest
+        };
+        let writes = self.session_writes.clone();
+        let path = path.to_path_buf();
+        std::thread::spawn(move || {
+            let latest = writes.lock().unwrap_or_else(|error| error.into_inner());
+            if *latest == generation {
+                if let Err(error) = session.persist(&path) {
+                    eprintln!(
+                        "[image-editor] Could not autosave the editable annotations: {error}"
+                    );
+                }
+            }
+            drop(latest);
+        });
     }
 
     /// The licence state, re-read at most once a second so painting never
@@ -3274,6 +3327,7 @@ pub(crate) fn session_key(path: &std::path::Path) -> std::path::PathBuf {
 
 /// What an exported image needs to reopen with editable annotations: the
 /// pre-annotation image and the annotation objects drawn over it.
+#[derive(Clone)]
 struct EditableSession {
     actions: Vec<AnnotationAction>,
     base_image: Arc<RgbaImage>,
@@ -3289,6 +3343,26 @@ impl EditableSession {
             static_image_transform: st.static_image_transform,
             source_upscale: st.source_upscale,
         }
+    }
+
+    /// What `persist` would write, for telling whether anything changed.
+    fn snapshot(&self) -> crate::annotations::ImageSessionSnapshot {
+        crate::annotations::ImageSessionSnapshot::from_editor(
+            self.base_image.width(),
+            self.base_image.height(),
+            &self.actions,
+            &crate::capture::editor::types::BackgroundStyle::None,
+            0.0,
+            crate::annotations::ShadowProfileSettings::default(),
+            None,
+            0.0,
+            false,
+            crate::capture::editor::types::BackgroundAlignment::Center,
+            18.0,
+            crate::capture::editor::types::CropAspectRatio::Original,
+            self.static_image_transform,
+            self.source_upscale,
+        )
     }
 
     /// Write the sidecar for the exported file, or drop a stale one when

@@ -24,7 +24,7 @@ pub mod annotations {
     pub use schema::{AnnotationFile, ShadowProfileSettings};
     pub use storage::{
         delete_annotations, load_annotations, load_original_image, save_annotations,
-        serializable_to_action, AnnotationError,
+        serializable_to_action, AnnotationError, ImageSessionSnapshot,
     };
 }
 pub mod capture;
