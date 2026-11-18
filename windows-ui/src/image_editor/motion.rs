@@ -57,6 +57,25 @@ impl MotionMode {
         frame_image(&self.host, &self.timeline, &watermark_surface)
     }
 
+    /// Restore the Motion edit saved for `source`, when one still matches the
+    /// file. Returns whether the restored edit has clips to show.
+    pub(super) fn restore_session(&self, source: &std::path::Path) -> bool {
+        let Some(project) = crate::capture::editor::motion_project::load_project(source) else {
+            return false;
+        };
+        self.timeline.restore_motion(|state| project.apply_to(state));
+        self.timeline.motion_state().has_segments()
+    }
+
+    /// Keep this Motion edit for `source`, or clear the saved one when
+    /// nothing was authored.
+    pub(super) fn persist_session(&self, source: &std::path::Path) {
+        crate::capture::editor::motion_project::persist_motion_session(
+            &self.timeline.motion_state(),
+            source,
+        );
+    }
+
     /// Render the whole composition to an MP4 on the main loop, one frame per
     /// tick, so the window stays responsive. The still card, titles and mark
     /// are painted through the same preview path used on screen; the backdrop

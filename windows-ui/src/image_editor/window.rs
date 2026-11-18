@@ -213,6 +213,31 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
             *pending.borrow_mut() = Some(source);
         }));
     }
+    // Motion edits live outside the annotation session, so they autosave on
+    // their own quiet timer, keyed to the image this window has open.
+    {
+        let pending: Rc<RefCell<Option<gtk4::glib::SourceId>>> = Rc::new(RefCell::new(None));
+        let canvas_weak = Rc::downgrade(&canvas);
+        let motion_weak = Rc::downgrade(&motion);
+        motion.timeline.add_state_listener(Rc::new(move || {
+            if let Some(source) = pending.borrow_mut().take() {
+                source.remove();
+            }
+            let canvas_weak = canvas_weak.clone();
+            let motion_weak = motion_weak.clone();
+            let pending_clear = pending.clone();
+            let source =
+                gtk4::glib::timeout_add_local_once(std::time::Duration::from_secs(2), move || {
+                    pending_clear.borrow_mut().take();
+                    if let (Some(canvas), Some(motion)) = (canvas_weak.upgrade(), motion_weak.upgrade()) {
+                        if let Some(path) = canvas.source_path() {
+                            motion.persist_session(&path);
+                        }
+                    }
+                });
+            *pending.borrow_mut() = Some(source);
+        }));
+    }
     sync_all();
 
     toolbar.undo.connect_clicked({
@@ -486,6 +511,19 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     overlay.add_overlay(mode_confirm.overlay());
     window.set_child(Some(&overlay));
 
+    // An image with a saved Motion edit gets it back, and opens in Motion when
+    // that edit has clips, so a Motion Edits card lands where the user left.
+    canvas.add_load_listener({
+        let motion = motion.clone();
+        let switch_mode = switch_mode.clone();
+        let in_motion = in_motion.clone();
+        Rc::new(move |path: &std::path::Path| {
+            if motion.restore_session(path) && !in_motion.get() {
+                switch_mode(true);
+            }
+        })
+    });
+
     canvas.open_button.connect_clicked({
         let canvas = canvas.clone();
         let window = window.clone();
@@ -511,8 +549,12 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     crate::update::open_windows::register_image_editor(initial);
     window.connect_close_request({
         let canvas = canvas.clone();
+        let motion = motion.clone();
         move |_| {
             canvas.persist_session_on_close();
+            if let Some(path) = canvas.source_path() {
+                motion.persist_session(&path);
+            }
             crate::update::open_windows::unregister();
             gtk4::glib::Propagation::Proceed
         }
@@ -913,6 +955,9 @@ fn save_motion_video_dialog(
                                     if config.remember_video_export_dir(&path) {
                                         let _ = crate::config::save_config(&config);
                                     }
+                                    // History lists this under Motion Edits,
+                                    // not Recordings.
+                                    crate::history::motion_exports::record_export(&path);
                                     crate::utils::notify::desktop_notification(
                                         &t("Export complete"),
                                         &path.display().to_string(),
