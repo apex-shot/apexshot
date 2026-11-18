@@ -2348,7 +2348,21 @@ impl EditorHost {
                             }
                         }
                     }
+                    // GTK starts the drag before this click handler runs, and
+                    // reselecting clears the grip the drag just took. Keep it
+                    // when the drag began at this press on the same action.
+                    let drag_grip = (st.drag_start_view == Some(view_point)).then_some((
+                        st.selected_action_index,
+                        st.select_drag_anchor,
+                        st.select_resize_handle,
+                    ));
                     st.select_action_at_point_with_scale(image_point, t.scale);
+                    if let Some((index, anchor, handle)) = drag_grip {
+                        if index.is_some() && index == st.selected_action_index {
+                            st.select_drag_anchor = anchor;
+                            st.select_resize_handle = handle;
+                        }
+                    }
                     ensure_arrow_controls(st);
                     let mut began_reedit = false;
                     if n_press >= 2 {
@@ -3636,6 +3650,43 @@ mod tests {
 
     fn host() -> Rc<EditorHost> {
         EditorHost::new(Rc::new(|| {}), Rc::new(|_| {}), Rc::new(|| (0.0, 0.0)))
+    }
+
+    #[test]
+    fn select_drags_an_annotation_when_the_drag_starts_before_the_click() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            for tool in [Tool::Arrow, Tool::Box, Tool::Line, Tool::Pen] {
+                let h = host();
+                *h.editor.borrow_mut() = Some(EditorState::new(RgbaImage::new(400, 300)));
+                let t = ViewTransform::for_image(400.0, 300.0);
+                let gesture = gtk4::GestureDrag::new();
+                h.activate_tool(tool);
+                h.drag_begin(&t, &gesture, Point { x: 50.0, y: 50.0 });
+                h.drag_update(&t, &gesture, 100.0, 60.0);
+                h.drag_end(&t, &gesture, 100.0, 60.0);
+                h.with_state(|st| st.selected_action_index = None);
+                h.activate_tool(Tool::Select);
+                let before = h.read(|st| format!("{:?}", st.actions[0])).unwrap();
+                // GTK's order: drag-begin, then the click's pressed handler.
+                let grab = Point {
+                    x: 75.0,
+                    y: if tool == Tool::Box { 50.0 } else { 65.0 },
+                };
+                h.drag_begin(&t, &gesture, grab);
+                h.press(&t, grab, 1, grab.x, grab.y);
+                h.drag_update(&t, &gesture, 40.0, 30.0);
+                h.drag_end(&t, &gesture, 40.0, 30.0);
+                h.with_state(|st| assert_eq!(st.selected_action_index, Some(0)));
+                let after = h.read(|st| format!("{:?}", st.actions[0])).unwrap();
+                assert_ne!(before, after, "{tool:?} did not move under Select");
+                // it moved as a whole: the same shape shifted by (40, 30)
+                h.undo();
+                let undone = h.read(|st| format!("{:?}", st.actions[0])).unwrap();
+                assert_eq!(before, undone, "{tool:?} move is one undo step");
+            }
+        }) else {
+            return;
+        };
     }
 
     #[test]
