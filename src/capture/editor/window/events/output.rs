@@ -53,6 +53,7 @@ pub(super) fn wire_output_lifecycle(
     export_motion: super::super::motion_host::MotionExport,
     studio_mark: super::super::studio_mark::StudioMark,
 ) {
+    let editing_lock = EditingLock::new(window);
     let state_copy = state.clone();
     let window_copy = window.downgrade();
     let copy_retry = copy_btn.downgrade();
@@ -130,11 +131,13 @@ pub(super) fn wire_output_lifecycle(
         std::sync::mpsc::channel::<Result<String, crate::cloud::upload::UploadError>>();
     let upload_btn_poll = upload_btn.clone();
     let uploading_poll = uploading.clone();
+    let upload_lock_poll = editing_lock.clone();
     let window_upload = window.downgrade();
     glib::timeout_add_local(Duration::from_millis(50), move || {
         match upload_done_rx.try_recv() {
             Ok(result) => {
                 uploading_poll.set(false);
+                upload_lock_poll.release();
                 upload_btn_poll.set_sensitive(true);
                 match result {
                     Ok(share_url) => {
@@ -168,6 +171,7 @@ pub(super) fn wire_output_lifecycle(
             Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 uploading_poll.set(false);
+                upload_lock_poll.release();
                 upload_btn_poll.set_sensitive(true);
                 glib::ControlFlow::Break
             }
@@ -178,6 +182,7 @@ pub(super) fn wire_output_lifecycle(
     let window_upload_gate = window.downgrade();
     let upload_retry = upload_btn.downgrade();
     let studio_mark_upload = studio_mark.clone();
+    let upload_lock = editing_lock.clone();
     upload_btn.connect_clicked(move |_| {
         if uploading_click.get() {
             return;
@@ -211,6 +216,7 @@ pub(super) fn wire_output_lifecycle(
         let snapshot = state_upload.lock().unwrap().export_snapshot();
 
         uploading_click.set(true);
+        upload_lock.acquire();
         upload_btn_click.set_sensitive(false);
 
         let path = path_upload.clone();
@@ -286,6 +292,7 @@ pub(super) fn wire_output_lifecycle(
     let export_busy = Rc::new(Cell::new(false));
     let export_spinner = save_spinner.clone();
     let export_btn = save_btn.clone();
+    let export_lock = editing_lock.clone();
     let studio_mark_save = studio_mark.clone();
     save_btn.connect_clicked(move |_| {
         let state_save = state_save.clone();
@@ -299,6 +306,7 @@ pub(super) fn wire_output_lifecycle(
         let export_busy = export_busy.clone();
         let export_spinner = export_spinner.clone();
         let export_btn = export_btn.clone();
+        let export_lock = export_lock.clone();
         let studio_mark = studio_mark_save.clone();
         glib::idle_add_local_once(move || {
             if export_busy.get() || save_chooser_open.get() {
@@ -361,6 +369,7 @@ pub(super) fn wire_output_lifecycle(
                 let export_busy_resp = export_busy.clone();
                 let export_spinner_resp = export_spinner.clone();
                 let export_btn_resp = export_btn.clone();
+                let export_lock_resp = export_lock.clone();
                 let export_motion = export_motion.clone();
                 chooser.connect_response(move |dialog, response| {
                     dialog.hide();
@@ -379,7 +388,12 @@ pub(super) fn wire_output_lifecycle(
                     if export_busy_resp.get() {
                         return;
                     }
-                    start_export_controls(&export_busy_resp, &export_spinner_resp, &export_btn_resp);
+                    start_export_controls(
+                        &export_busy_resp,
+                        &export_spinner_resp,
+                        &export_btn_resp,
+                        &export_lock_resp,
+                    );
 
                     let state_resp = state_resp.clone();
                     let path_resp = path_resp.clone();
@@ -389,6 +403,7 @@ pub(super) fn wire_output_lifecycle(
                     let export_busy_inner = export_busy_resp.clone();
                     let export_spinner_inner = export_spinner_resp.clone();
                     let export_btn_inner = export_btn_resp.clone();
+                    let export_lock_inner = export_lock_resp.clone();
                     glib::MainContext::default().spawn_local(async move {
                         match export_motion(&destination).await {
                             Ok(video_path) => {
@@ -417,6 +432,7 @@ pub(super) fn wire_output_lifecycle(
                                                 &export_busy_inner,
                                                 &export_spinner_inner,
                                                 &export_btn_inner,
+                                                &export_lock_inner,
                                             );
                                         }
                                     }
@@ -432,6 +448,7 @@ pub(super) fn wire_output_lifecycle(
                                             &export_busy_inner,
                                             &export_spinner_inner,
                                             &export_btn_inner,
+                                            &export_lock_inner,
                                         );
                                     }
                                 }
@@ -446,6 +463,7 @@ pub(super) fn wire_output_lifecycle(
                                     &export_busy_inner,
                                     &export_spinner_inner,
                                     &export_btn_inner,
+                                    &export_lock_inner,
                                 );
                             }
                         }
@@ -468,6 +486,7 @@ pub(super) fn wire_output_lifecycle(
                     export_busy,
                     export_spinner,
                     export_btn,
+                    export_lock,
                 );
                 return;
             }
@@ -486,6 +505,7 @@ pub(super) fn wire_output_lifecycle(
             let busy_done = export_busy.clone();
             let spinner_done = export_spinner.clone();
             let button_done = export_btn.clone();
+            let lock_done = export_lock.clone();
             let chooser = static_export_chooser(&parent, &suggestion);
             chooser.connect_response(move |dialog, response| {
                 dialog.hide();
@@ -519,6 +539,7 @@ pub(super) fn wire_output_lifecycle(
                     busy_done.clone(),
                     spinner_done.clone(),
                     button_done.clone(),
+                    lock_done.clone(),
                 );
             });
             *save_chooser.borrow_mut() = Some(chooser.clone());
@@ -698,20 +719,88 @@ fn notify_static_export_error(error: StaticExportError) {
     }
 }
 
-fn reset_export_controls(busy: &Cell<bool>, spinner: &Spinner, button: &Button) {
+fn reset_export_controls(
+    busy: &Cell<bool>,
+    spinner: &Spinner,
+    button: &Button,
+    lock: &EditingLock,
+) {
     busy.set(false);
     spinner.stop();
     spinner.set_visible(false);
     button.set_label(&crate::i18n::t("Export"));
     button.set_sensitive(true);
+    lock.release();
 }
 
-fn start_export_controls(busy: &Cell<bool>, spinner: &Spinner, button: &Button) {
+fn start_export_controls(
+    busy: &Cell<bool>,
+    spinner: &Spinner,
+    button: &Button,
+    lock: &EditingLock,
+) {
     busy.set(true);
     button.set_label(&crate::i18n::t("Exporting…"));
     button.set_sensitive(false);
     spinner.set_visible(true);
     spinner.start();
+    lock.acquire();
+}
+
+/// Blocks editing while an export or upload runs: the window content goes
+/// insensitive and a capture-phase key blocker swallows editor shortcuts, so
+/// the document cannot change under the running output.
+#[derive(Clone)]
+struct EditingLock {
+    window: glib::WeakRef<ApplicationWindow>,
+    holds: Rc<Cell<u32>>,
+    locked_child: Rc<RefCell<Option<gtk4::Widget>>>,
+}
+
+impl EditingLock {
+    fn new(window: &ApplicationWindow) -> Self {
+        let holds = Rc::new(Cell::new(0u32));
+        let blocker = gtk4::EventControllerKey::new();
+        blocker.set_propagation_phase(gtk4::PropagationPhase::Capture);
+        let blocked = holds.clone();
+        blocker.connect_key_pressed(move |_, _, _, _| {
+            if blocked.get() > 0 {
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+        window.add_controller(blocker);
+        Self {
+            window: window.downgrade(),
+            holds,
+            locked_child: Rc::new(RefCell::new(None)),
+        }
+    }
+
+    fn acquire(&self) {
+        let holds = self.holds.get();
+        self.holds.set(holds + 1);
+        if holds == 0 {
+            if let Some(child) = self.window.upgrade().and_then(|window| window.child()) {
+                child.set_sensitive(false);
+                *self.locked_child.borrow_mut() = Some(child);
+            }
+        }
+    }
+
+    fn release(&self) {
+        let holds = self.holds.get();
+        if holds == 0 {
+            return;
+        }
+        self.holds.set(holds - 1);
+        if holds == 1 {
+            if let Some(child) = self.locked_child.borrow_mut().take() {
+                child.set_sensitive(true);
+            }
+        }
+    }
 }
 
 fn start_static_export(
@@ -725,11 +814,12 @@ fn start_static_export(
     busy: Rc<Cell<bool>>,
     spinner: Spinner,
     button: Button,
+    lock: EditingLock,
 ) {
     if busy.get() {
         return;
     }
-    start_export_controls(&busy, &spinner, &button);
+    start_export_controls(&busy, &spinner, &button, &lock);
     let snapshot = state.lock().unwrap().export_snapshot();
     glib::MainContext::default().spawn_local(async move {
         let worker_destination = destination.clone();
@@ -754,7 +844,7 @@ fn start_static_export(
                     &destination.display().to_string(),
                 );
                 if !finish_image_export(&destination, close_after_export, &window, &app) {
-                    reset_export_controls(&busy, &spinner, &button);
+                    reset_export_controls(&busy, &spinner, &button, &lock);
                 }
             }
             Err(error) => {
@@ -763,7 +853,7 @@ fn start_static_export(
                 if session_failure {
                     let _ = finish_image_export(&destination, false, &window, &app);
                 }
-                reset_export_controls(&busy, &spinner, &button);
+                reset_export_controls(&busy, &spinner, &button, &lock);
             }
         }
     });
@@ -863,7 +953,7 @@ mod tests {
         let image = source.split("fn start_static_export(").nth(1).unwrap();
         assert!(image.contains("if busy.get()"));
         assert!(image.contains("gio::spawn_blocking(move ||"));
-        assert!(image.contains("reset_export_controls(&busy, &spinner, &button)"));
+        assert!(image.contains("reset_export_controls(&busy, &spinner, &button, &lock)"));
     }
 
     #[test]
@@ -1216,7 +1306,7 @@ mod tests {
         assert!(keep_open < quick_access);
         assert!(finish.contains("copy_screenshot_to_clipboard(path, &config)"));
         assert!(finish.contains("arg(\"preview\").arg(path)"));
-        assert!(source.contains("reset_export_controls(&busy, &spinner, &button)"));
+        assert!(source.contains("reset_export_controls(&busy, &spinner, &button, &lock)"));
         assert!(source.contains("if close_after_export"));
     }
 
