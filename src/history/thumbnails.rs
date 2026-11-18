@@ -133,7 +133,13 @@ fn remote_thumbnail(url: &str) -> Result<PathBuf, String> {
     if poster.is_file() {
         return Ok(poster);
     }
-    let frame = extract_video_poster(&downloaded)?;
+    let frame = match extract_video_poster(&downloaded) {
+        Ok(frame) => frame,
+        // A long video is cut off at the download limit, which can leave out
+        // the index stored at its end; reading the link itself lets the
+        // decoder seek to it.
+        Err(_) => extract_video_poster(Path::new(url))?,
+    };
     let result = write_scaled_thumbnail(&frame, &poster);
     let _ = std::fs::remove_file(&frame);
     if let Some(parent) = frame.parent() {
