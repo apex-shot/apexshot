@@ -52,37 +52,37 @@ the full desktop support table are in the [install guide](docs/INSTALL.md).
 
 ### Capture
 
-- **Screenshots** — full screen, area, window, and scrolling capture of long
+- **Screenshots**: full screen, area, window, and scrolling capture of long
   pages and windows
-- **Screen recording** — screen, area, or window, with microphone and system
+- **Screen recording**: screen, area, or window, with microphone and system
   audio, a countdown, and on-screen pause and stop controls
-- **Camera** — a webcam bubble you can place and style in the recording
-- **Text and QR codes** — copy the text out of any capture with OCR, and
+- **Camera**: a webcam bubble you can place and style in the recording
+- **Text and QR codes**: copy the text out of any capture with OCR, and
   detect QR codes automatically
 
 ### Edit
 
-- **Image editor** — arrows, shapes, text, numbered steps, highlighter, blur,
+- **Image editor**: arrows, shapes, text, numbered steps, highlighter, blur,
   pixelate, crop, and a color picker; backgrounds, padding, rounded corners,
   shadows, and frame styles; reopen an exported image with its annotations
   still editable
-- **Motion** — turn a still screenshot into a short animated video with camera
+- **Motion**: turn a still screenshot into a short animated video with camera
   moves, titles, and motion blur
-- **Video editor** — trim and cut, speed changes, automatic and manual zooms,
+- **Video editor**: trim and cut, speed changes, automatic and manual zooms,
   cursor smoothing and click effects, backgrounds, camera layouts, and exports
   in MP4 (H.264 or HEVC) with hardware encoding where available
-- **Autosave** — editor sessions are saved as you work, so a crash or a closed
+- **Autosave**: editor sessions are saved as you work, so a crash or a closed
   window doesn't lose your edit
 
 ### Share and organise
 
-- **History** — screenshots, recordings, Motion edits, video edits, and cloud
+- **History**: screenshots, recordings, Motion edits, video edits, and cloud
   uploads in one window
-- **Cloud** — upload to ApexShot Cloud for a share link, or to a self-hosted
+- **Cloud**: upload to ApexShot Cloud for a share link, or to a self-hosted
   XBackBone server
-- **Clipboard and Quick Access** — every capture lands on the clipboard and in
+- **Clipboard and Quick Access**: every capture lands on the clipboard and in
   a quick-access card for drag-and-drop
-- **Shortcuts and tray** — global hotkeys for every capture and recording
+- **Shortcuts and tray**: global hotkeys for every capture and recording
   action, from a system tray app that starts with your computer
 
 Not every feature is on both platforms yet; the
@@ -107,10 +107,10 @@ version so we can reproduce it quickly.
 
 ## Documentation
 
-- [Install guide](docs/INSTALL.md) — every platform and distro, updating,
+- [Install guide](docs/INSTALL.md): every platform and distro, updating,
   building from source, and the Linux CLI
-- [Contributing](CONTRIBUTING.md) — development setup, code layout, and style
-- [Developer docs](docs/README.md) — architecture, modules, and release
+- [Contributing](CONTRIBUTING.md): development setup, code layout, and style
+- [Developer docs](docs/README.md): architecture, modules, and release
   operations
 - [Security policy](SECURITY.md)
 

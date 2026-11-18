@@ -57,7 +57,7 @@ Works best today on:
 | GNOME Shell 46 (Wayland) | Supported by the extension; GNOME integration tested on Ubuntu 24.04, not an actual Zorin installation |
 | Sway / wlroots-like compositors (Wayland) | Implementation exists through GTK4 layer-shell, `wlr-screencopy`, and `wf-recorder`, but needs more manual validation |
 | KDE Plasma 6 / Niri / other Wayland desktops | ScreenCast portal + PipeWire path implemented, not yet personally tested |
-| Fedora / RHEL (Wayland) | Screenshots supported (Fedora KDE validated). **Video recording is not supported** — use Spectacle or Kooha for screen recording |
+| Fedora / RHEL (Wayland) | Screenshots supported (Fedora KDE validated). **Video recording is not supported**; use Spectacle or Kooha for screen recording |
 | openSUSE Tumbleweed / Leap (Wayland) | Development stage: RPM spec + `scripts/build-opensuse-rpm.sh` exist; **no published binary** yet (generic installer will refuse) |
 | NixOS (x86_64 Linux) | Source package provided through the repository flake; desktop capture, recording, and hotkeys still need runtime validation |
 | Alpine / Gentoo / Void (Wayland) | Development stage: distro-family metadata only; native packaging/testing pending |
@@ -68,7 +68,7 @@ If ApexShot breaks on your setup, please [open an issue](https://github.com/apex
 The issue templates ask for distro, desktop environment, and display server so
 triage stays fast.
 
-### Quick Install — Recommended
+### Quick install (recommended)
 
 Run the interactive installer. The production-tested paths are Ubuntu/Debian
 and Arch Linux; Fedora is usable for **screenshots** (video recording is not
@@ -94,7 +94,7 @@ The generic installer above will select this automatically. Direct command:
 curl -fsSL https://apexshot.org/install/ubuntu | bash
 ```
 
-### Quick Install — Arch Linux
+### Quick install on Arch Linux
 
 The generic installer above will select this automatically. Direct command:
 
@@ -166,7 +166,7 @@ For local development reinstalls on Fedora:
 ### openSUSE Tumbleweed / Leap
 
 openSUSE support is in development. **No binary openSUSE RPM is published on
-GitHub Releases yet** — the generic installer refuses openSUSE rather than
+GitHub Releases yet**, so the generic installer refuses openSUSE rather than
 installing a Fedora RPM by mistake. Build locally for packaging work:
 
 ```bash
@@ -290,9 +290,9 @@ sudo pacman -S --needed \
 
 After installation, ApexShot will launch an onboarding wizard to help you:
 
-1. **GNOME Extension** (required on GNOME) — Install the GNOME Shell extension for full functionality
-2. **Browser Extension** (optional) — Set up Chrome/Chromium extension for full-page capture
-3. **Cloud Upload** (optional) — Configure ApexShot Cloud or self-hosted XBackBone for share links
+1. **GNOME Extension** (required on GNOME): install the GNOME Shell extension for full functionality
+2. **Browser Extension** (optional): set up Chrome/Chromium extension for full-page capture
+3. **Cloud Upload** (optional): configure ApexShot Cloud or self-hosted XBackBone for share links
 
 ### Manual Install
 
@@ -394,9 +394,9 @@ journalctl /usr/bin/gnome-shell -f | grep apexshot
 
 #### What the Extension Provides
 
-- **Always-on-top preview windows** — Screenshot previews and annotation editor windows stay above other applications during drag operations
-- **Shell-managed recording mask** — A dimmed mask highlights the selected recording area
-- **Window list for the window picker** — Lets ApexShot enumerate and focus windows, which Wayland clients cannot do themselves
+- **Always-on-top preview windows**: screenshot previews and annotation editor windows stay above other applications during drag operations
+- **Shell-managed recording mask**: a dimmed mask highlights the selected recording area
+- **Window list for the window picker**: lets ApexShot enumerate and focus windows, which Wayland clients cannot do themselves
 
 #### Troubleshooting
 
@@ -469,7 +469,7 @@ apexshot --version               # Print version
 > Screenshots still work. See the [Fedora install section](#fedora-workstation--kde-plasma--spins).
 
 ApexShot uses a fully self-contained Rust stack for recording on systems
-without GNOME Shell (except Fedora, above). No Qt overlay, no shell extension —
+without GNOME Shell (except Fedora, above). No Qt overlay, no shell extension:
 the daemon, the GTK4 overlay, and native PipeWire handle everything.
 
 **How it works:**
@@ -516,6 +516,6 @@ apexshot record discard             # Discard without saving
 
 Configure global hotkeys in Settings > Shortcuts. The daemon supports:
 
-- **Capture shortcuts** — Full screen, area, window, last capture
-- **Recording shortcuts** — Start/stop/pause recording
-- **Custom shortcuts** — Record and assign any key combination per action
+- **Capture shortcuts**: full screen, area, window, last capture
+- **Recording shortcuts**: start/stop/pause recording
+- **Custom shortcuts**: record and assign any key combination per action
