@@ -153,7 +153,6 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
         let uploading = uploading.clone();
         let export = inspector.export_button.clone();
         let exporting = exporting.clone();
-        let in_motion = in_motion.clone();
         let toolbar = toolbar.clone();
         let canvas = canvas.clone();
         let effect_control = effect_control.clone();
@@ -1190,41 +1189,36 @@ fn upload_motion_video(
         let host = host.clone();
         let sync_all = sync_all.clone();
         let lock = lock.clone();
-        move |result| {
-            match result {
-                Ok(path) => {
-                    if let (Some(window), Some(button)) = (window.upgrade(), button.upgrade()) {
-                        upload_path(
-                            &window,
-                            &button,
-                            &uploading,
-                            config,
-                            path,
-                            Some(cleanup),
-                            Some(sync_all),
-                            Some(lock.clone()),
-                        );
-                    } else {
-                        uploading.set(false);
-                        let _ = std::fs::remove_dir_all(&cleanup);
-                        lock.release();
-                        sync_all();
-                    }
-                }
-                Err(error) => {
+        move |result| match result {
+            Ok(path) => {
+                if let (Some(window), Some(button)) = (window.upgrade(), button.upgrade()) {
+                    upload_path(
+                        &window,
+                        &button,
+                        &uploading,
+                        config,
+                        path,
+                        Some(cleanup),
+                        Some(sync_all),
+                        Some(lock.clone()),
+                    );
+                } else {
                     uploading.set(false);
-                    if let Some(button) = button.upgrade() {
-                        button.set_sensitive(true);
-                    }
                     let _ = std::fs::remove_dir_all(&cleanup);
                     lock.release();
                     sync_all();
-                    crate::utils::notify::desktop_notification_important(
-                        &t("Upload failed"),
-                        &error,
-                    );
-                    host.report_error(error);
                 }
+            }
+            Err(error) => {
+                uploading.set(false);
+                if let Some(button) = button.upgrade() {
+                    button.set_sensitive(true);
+                }
+                let _ = std::fs::remove_dir_all(&cleanup);
+                lock.release();
+                sync_all();
+                crate::utils::notify::desktop_notification_important(&t("Upload failed"), &error);
+                host.report_error(error);
             }
         }
     });
