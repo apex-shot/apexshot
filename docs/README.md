@@ -1,8 +1,14 @@
 # ApexShot documentation
 
-Reference documentation for the ApexShot desktop codebase. Architecture,
-module, and developer docs live here; active plans and strategy documents
-live in [`plans/`](plans/).
+Reference documentation for the ApexShot desktop codebase. Install, architecture,
+module, and developer docs live here; active plans live in [`plans/`](plans/).
+
+## Using ApexShot
+
+| Document | What it covers |
+|---|---|
+| [INSTALL.md](INSTALL.md) | Installing on Windows and every supported Linux distro, updating, the GNOME extension, and the Linux CLI. |
+| [AGENT_INTEGRATION.md](AGENT_INTEGRATION.md) | The JSON agent CLI and MCP server for scripted captures. |
 
 ## Reference
 
@@ -11,29 +17,32 @@ live in [`plans/`](plans/).
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Module layout and how the major subsystems fit together. |
 | [MODULES.md](MODULES.md) | Per-module reference for `src/`. |
 | [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) | Building, running, and debugging from source. |
-| [ARCH_SUPPORT.md](ARCH_SUPPORT.md) | Arch Linux packaging and distribution support. |
-| [AUR_PUBLISHING.md](AUR_PUBLISHING.md) | Release → AUR automation. |
-| [RELEASE_OPERATIONS.md](RELEASE_OPERATIONS.md) | Support path, pre-tag configuration, promotion, and rollback. |
-| [RELEASE_NOTES_CANDIDATE.md](RELEASE_NOTES_CANDIDATE.md) | Release-notes preface for the next stable build. |
-| [CLOUDFLARE_CDN_SETUP.md](CLOUDFLARE_CDN_SETUP.md) | Cloudflare CDN setup for release assets. |
+| [WINDOWS_EXPORT_PIPELINE.md](WINDOWS_EXPORT_PIPELINE.md) | How the Windows video editor renders and encodes an export. |
 | [EXPORT_HARDWARE_ENCODING.md](EXPORT_HARDWARE_ENCODING.md) | Hardware-accelerated export paths and limits. |
 | [GPU_CURSOR_COMPOSITING.md](GPU_CURSOR_COMPOSITING.md) | Cursor compositing on GPU capture paths. |
-| [WINDOWS_CAPTURE_REFERENCE.md](WINDOWS_CAPTURE_REFERENCE.md) | Windows capture architecture, studied constants, current gaps, and delivery order. |
-| [AUTOZOOM_REFERENCE.md](AUTOZOOM_REFERENCE.md) | Automatic zoom ranges, pointer-path framing, spring motion, and ApexShot parity gaps. |
+| [STUDIO_ENTITLEMENT.md](STUDIO_ENTITLEMENT.md) | The signed Studio licence format and its offline behaviour. |
+| [COMMERCIAL_TRANSITION.md](COMMERCIAL_TRANSITION.md) | What stays free and what Studio adds. |
 | [THIRD_PARTY_WALLPAPERS.md](THIRD_PARTY_WALLPAPERS.md) | Third-party wallpaper assets and licensing. |
-| [TEAM_PRODUCT_STANCE.md](TEAM_PRODUCT_STANCE.md) | Product stance on teams and workspaces. |
-| [COMMERCIAL_TRANSITION.md](COMMERCIAL_TRANSITION.md) | Commercial transition notes. |
-| [progress-fedora-kde-overlay-and-preview.md](progress-fedora-kde-overlay-and-preview.md) | Fedora/KDE overlay behaviour and the Fedora product limits. |
-| [ANNOUNCEMENTS.md](ANNOUNCEMENTS.md) | Historical launch announcements; partly outdated. |
 
-## Plans and strategy
+## Packaging and releases
+
+| Document | What it covers |
+|---|---|
+| [RELEASE_OPERATIONS.md](RELEASE_OPERATIONS.md) | Support path, pre-tag configuration, promotion, and rollback. |
+| [ARCH_SUPPORT.md](ARCH_SUPPORT.md) | Arch Linux packaging and distribution support. |
+| [AUR_PUBLISHING.md](AUR_PUBLISHING.md) | Release → AUR automation. |
+| [CLOUDFLARE_CDN_SETUP.md](CLOUDFLARE_CDN_SETUP.md) | Cloudflare CDN setup for release assets. |
+| [`packaging/windows/README.md`](../packaging/windows/README.md) | Building the Windows installer. |
+| [`packaging/nix/README.md`](../packaging/nix/README.md) | The Nix package. |
+| [`flatpak/README.md`](../flatpak/README.md) | Building the Flatpak locally. |
+
+## Plans
 
 Active planning documents. Finished plans are removed rather than archived;
 recover any of them from git history when needed.
 
 | Document | What it covers |
 |---|---|
-| [plans/APEXSHOT_DESKTOP_IMPLEMENTATION_PLAN.md](plans/APEXSHOT_DESKTOP_IMPLEMENTATION_PLAN.md) | Desktop distribution-first and teams plan. |
 | [plans/FLATHUB_LAUNCH_PLAN.md](plans/FLATHUB_LAUNCH_PLAN.md) | Flathub launch audit and remaining blockers. |
 | [plans/FLATPAK_STRATEGY.md](plans/FLATPAK_STRATEGY.md) | Flatpak packaging strategy. |
 | [plans/FLATPAK_TESTING.md](plans/FLATPAK_TESTING.md) | Flatpak acceptance checks. |

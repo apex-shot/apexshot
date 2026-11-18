@@ -532,7 +532,7 @@ Configuration stored in `~/.config/apexshot/config.yml`:
 - **Fedora video recording is intentionally unsupported.** Screenshot capture on
   Fedora (especially KDE Plasma Wayland) is supported; recording hotkeys/CLI
   refuse with a user notification. Prefer Spectacle or Kooha for Fedora screen
-  recording. See `docs/progress-fedora-kde-overlay-and-preview.md`.
+  recording. See the Fedora section of [INSTALL.md](INSTALL.md#fedora-workstation--kde-plasma--spins).
 
 **Priority manual validation targets:**
 - Fedora GNOME Wayland (screenshots only — recording is disabled by product decision)

@@ -74,9 +74,9 @@ Studio status line in Settings instead.
    `AUR_SSH_KNOWN_HOSTS` entry must be configured. Never discover the host key
    with `ssh-keyscan`. A missing AUR credential fails that job after the GitHub
    release is already published; it does not roll anything back.
-6. **Reconcile the public copy.** The store page, checkout terms, and
-   [RELEASE_NOTES_CANDIDATE.md](RELEASE_NOTES_CANDIDATE.md) must state the same
-   price, update window, and refund window before the draft goes public.
+6. **Reconcile the public copy.** The store page, checkout terms, and the
+   release notes preface must state the same price, update window, and
+   refund window before the draft goes public.
 
 ## Tagging and promotion
 
@@ -98,8 +98,7 @@ run exercises it.
 4. The AUR job follows a successful publication.
 5. **Check the announcement posted.** A release published with the default
    `GITHUB_TOKEN` does not trigger other workflows, so the
-   `release: published` webhook can be skipped (see
-   [DEAD_CODE_AND_QUALITY_AUDIT.md](DEAD_CODE_AND_QUALITY_AUDIT.md), BG-27).
+   `release: published` webhook can be skipped.
    Post the announcement manually when the channel stays quiet.
 
 ## Rollback

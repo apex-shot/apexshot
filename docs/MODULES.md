@@ -109,7 +109,7 @@ whether the user interacts through the Qt overlay (GNOME) or the daemon/CLI
 > `recording_supported()` keeps the tray, both capture toolbars, and the
 > Recording settings page from offering recording at all. Screenshots
 > and the rest of the app remain available. See
-> [`progress-fedora-kde-overlay-and-preview.md`](progress-fedora-kde-overlay-and-preview.md).
+> [the Fedora install notes](INSTALL.md#fedora-workstation--kde-plasma--spins).
 
 **Architecture overview for non-GNOME users:**
 
