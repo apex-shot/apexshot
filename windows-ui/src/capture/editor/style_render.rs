@@ -268,38 +268,26 @@ impl StyleGeometry {
                 let _ = context.fill();
             }
             _ => {
-                // Frost: a milky veil, whitest at the outer edge and easing
-                // toward the card, the wallpaper tinting it from beneath.
+                // Frost: one even milky veil over whatever sits behind the
+                // card, with a crisp edge. It has no lip, rim or contact line
+                // of its own: stacked strokes read as grey bands, not glass.
                 band(context);
-                context.set_source_rgba(1.0, 1.0, 1.0, 0.40);
+                context.set_source_rgba(1.0, 1.0, 1.0, 0.45);
                 let _ = context.fill();
-                context.new_path();
-                self.path(context, gap * 0.75);
-                context.set_line_width(gap * 0.5);
-                context.set_source_rgba(1.0, 1.0, 1.0, 0.16);
-                let _ = context.stroke();
-                context.new_path();
-                self.path(context, gap * 0.15);
-                context.set_line_width(gap * 0.3);
-                context.set_source_rgba(0.0, 0.0, 0.0, 0.06);
-                let _ = context.stroke();
+                let _ = context.restore();
+                return;
             }
         }
 
-        // Bright outer lip, one band-pixel in from the outer edge. Frost's
-        // veil is its own highlight, so it keeps a soft edge instead.
+        // Bright outer lip, one band-pixel in from the outer edge.
         context.set_operator(Operator::Add);
-        if self.style == FrameStyle::GlassLight {
-            context.set_operator(Operator::Over);
-        }
         context.new_path();
         self.path(context, gap - 0.75 * self.border_unit.clamp(1.0, 1.5));
         context.set_line_width(1.5);
         let lip = match self.style {
             // Smoke has no lit lip; the stroke below adds nothing.
             FrameStyle::GlassDark => lit(0.0, 0.0),
-            FrameStyle::Liquid => lit(0.30, 0.10),
-            _ => lit(0.10, 0.04),
+            _ => lit(0.30, 0.10),
         };
         let _ = context.set_source(lip);
         let _ = context.stroke();

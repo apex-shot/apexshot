@@ -1232,19 +1232,25 @@ fn paint(
         let _ = context.restore();
     }
 
-    context.set_line_width(1.0);
-    if dark {
-        context.set_source_rgba(1.0, 1.0, 1.0, 0.14);
-    } else {
-        context.set_source_rgba(0.067, 0.094, 0.153, 0.16);
+    // The hairline marks the canvas edge only where a fill ends there. With
+    // no fill, a frame style's margin is transparent and the line would sit
+    // around empty space as a stray box.
+    let fill_reaches_edge = host.read(|st| st.background.has_fill()).unwrap_or(false);
+    if !host.has_document() || fill_reaches_edge {
+        context.set_line_width(1.0);
+        if dark {
+            context.set_source_rgba(1.0, 1.0, 1.0, 0.14);
+        } else {
+            context.set_source_rgba(0.067, 0.094, 0.153, 0.16);
+        }
+        context.rectangle(
+            x + 0.5,
+            y + 0.5,
+            (draw_width - 1.0).max(0.0),
+            (draw_height - 1.0).max(0.0),
+        );
+        let _ = context.stroke();
     }
-    context.rectangle(
-        x + 0.5,
-        y + 0.5,
-        (draw_width - 1.0).max(0.0),
-        (draw_height - 1.0).max(0.0),
-    );
-    let _ = context.stroke();
 
     if host.has_document() && !crop_mode {
         use crate::capture::editor::studio_watermark::ScreenRect;
