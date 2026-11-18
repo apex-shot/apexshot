@@ -637,8 +637,8 @@ pub(crate) fn install_css() {
             font-size: {font}px;
         }}
         .video-export-options {{
-            background: #171717;
-            border: none;
+            background: #141414;
+            border: 1px solid rgba(255, 255, 255, 0.10);
             border-radius: {radius}px;
             padding: {pad}px;
             box-shadow: 0 {shadow_y}px {shadow_blur}px alpha(black, 0.3);
@@ -760,7 +760,7 @@ pub(crate) fn install_css() {
         .video-export-screen button.video-export-stop:disabled {{ background: #1b1b1b; color: #777777; }}
         .video-export-screen button.video-export-stop:focus-visible {{ outline: 2px solid #ff7c2f; outline-offset: 3px; }}
         .video-export-error {{ color: #ed786a; }}
-        .editor-theme-light .video-export-options {{ background: #ffffff; color: #202020; }}
+        .editor-theme-light .video-export-options {{ background: #f6f7fb; color: #202020; border-color: rgba(17, 24, 39, 0.10); }}
         .editor-theme-light .video-export-screen {{ background: #f6f6f6; color: #202020; }}
         .editor-theme-light .video-export-muted {{ color: #737373; }}
         .editor-theme-light .video-export-eyebrow {{ color: #737373; }}

@@ -2099,14 +2099,14 @@ button.recording-editor-timeline-tool image {
 
 .image-editor-confirm-card {
     padding: 18px;
-    background: #1c1c1e;
+    background: #141414;
     border: 1px solid rgba(255, 255, 255, 0.10);
     border-radius: 12px;
     box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
 }
 
 .image-editor-confirm-card.editor-theme-light {
-    background: #ffffff;
+    background: #f6f7fb;
     border-color: rgba(17, 24, 39, 0.10);
     box-shadow: 0 24px 64px rgba(17, 24, 39, 0.18);
 }
@@ -2303,7 +2303,7 @@ button.image-editor-confirm-continue:active {
  * stage, as the canvas and the toolbar use. Flat, no shadow. */
 .image-editor-upscale-card {
     background: #141414;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.10);
     border-radius: 12px;
     box-shadow: none;
 }
@@ -2516,16 +2516,16 @@ button.image-editor-upscale-seg-button:disabled {
 /* Light theme */
 
 .image-editor-upscale-card.editor-theme-light {
-    background: #ffffff;
-    border-color: rgba(17, 24, 39, 0.12);
+    background: #f6f7fb;
+    border-color: rgba(17, 24, 39, 0.10);
 }
 
 .image-editor-upscale-card.editor-theme-light .image-editor-upscale-stage {
-    background: #f6f7fb;
+    background: #eef0f5;
 }
 
 .image-editor-upscale-card.editor-theme-light .image-editor-upscale-panel {
-    background: #ffffff;
+    background: #f6f7fb;
     border-left-color: rgba(17, 24, 39, 0.08);
 }
 
