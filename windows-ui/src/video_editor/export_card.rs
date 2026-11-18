@@ -4,7 +4,7 @@ use super::export::{start_export_with_settings, ExportModel, ExportSettings, Exp
 use crate::i18n::{t, tfmt};
 use gtk4::prelude::*;
 use gtk4::{gdk, glib, Align, Box as GtkBox, Button, Label, Orientation, Overlay, ProgressBar};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::mpsc::TryRecvError;
@@ -62,8 +62,11 @@ pub(super) fn show(
     upload.set_visible(false);
     let reveal = Button::with_label(&t("Show in Explorer"));
     reveal.add_css_class("video-export-primary");
+    let open_link = Button::with_label(&t("Open link"));
+    open_link.set_visible(false);
     actions.append(&back);
     actions.append(&upload);
+    actions.append(&open_link);
     actions.append(&reveal);
     for widget in [
         destination.upcast_ref::<gtk4::Widget>(),
@@ -103,6 +106,51 @@ pub(super) fn show(
             if let (Some(shell), Some(screen)) = (shell.upgrade(), screen.upgrade()) {
                 shell.remove_overlay(&screen);
                 restore_editor(&shell);
+            }
+        }
+    });
+
+    let complete_detail = Rc::new(RefCell::new(String::new()));
+    let upload_path = Rc::new(RefCell::new(None::<PathBuf>));
+    let upload_ui = UploadUi {
+        path: upload_path.clone(),
+        destination: destination.clone(),
+        title: title.clone(),
+        bar: bar.clone(),
+        timing: timing.clone(),
+        detail: detail.clone(),
+        actions: actions.clone(),
+        upload: upload.clone(),
+        reveal: reveal.clone(),
+        open_link: open_link.clone(),
+        complete_detail: complete_detail.clone(),
+        share_url: Rc::new(RefCell::new(None)),
+        phase: Rc::new(Cell::new(UploadPhase::Ready)),
+    };
+    upload.connect_clicked({
+        let ui = upload_ui.clone();
+        move |_| match ui.phase.get() {
+            UploadPhase::Uploading => {}
+            UploadPhase::Complete => ui.copy_share_link(),
+            UploadPhase::Ready | UploadPhase::Failed => {
+                let config = crate::config::load_config().sanitized();
+                if !crate::cloud::upload::is_configured(&config) {
+                    let (title, body) = crate::cloud::upload::not_configured_notification(&config);
+                    crate::utils::notify::desktop_notification_important(&title, &body);
+                    return;
+                }
+                start_upload(&ui, config);
+            }
+        }
+    });
+    open_link.connect_clicked({
+        let ui = upload_ui.clone();
+        move |_| {
+            let url = ui.share_url.borrow().clone();
+            if let Some(url) = url {
+                if let Err(error) = crate::utils::open::open_url(&url) {
+                    ui.show_note(&error, true);
+                }
             }
         }
     });
@@ -201,86 +249,9 @@ pub(super) fn show(
                         detail.set_text(&notes.join("\n"));
                         detail.set_visible(true);
                     }
+                    *complete_detail.borrow_mut() = notes.join("\n");
+                    *upload_path.borrow_mut() = Some(path.clone());
                     upload.set_visible(true);
-                    upload.connect_clicked({
-                        let path = path.clone();
-                        let detail = detail.clone();
-                        let shell = shell.downgrade();
-                        move |button| {
-                            if !button.is_sensitive() {
-                                return;
-                            }
-                            let config = crate::config::load_config().sanitized();
-                            if !crate::cloud::upload::is_configured(&config) {
-                                let (title, body) =
-                                    crate::cloud::upload::not_configured_notification(&config);
-                                crate::utils::notify::desktop_notification_important(&title, &body);
-                                return;
-                            }
-
-                            button.set_sensitive(false);
-                            button.set_label(&t("Uploading…"));
-                            let (sender, receiver) = std::sync::mpsc::channel::<
-                                Result<String, crate::cloud::upload::UploadError>,
-                            >();
-                            let path = path.clone();
-                            std::thread::spawn(move || {
-                                let result = crate::cloud::upload::
-                                    upload_file_with_notifications_without_clipboard(
-                                        &config, &path,
-                                    )
-                                    .map(|result| result.share_url);
-                                let _ = sender.send(result);
-                            });
-
-                            let button = button.clone();
-                            let detail = detail.clone();
-                            let shell = shell.clone();
-                            glib::timeout_add_local(Duration::from_millis(100), move || {
-                                match receiver.try_recv() {
-                                    Ok(Ok(share_url)) => {
-                                        if let Some(display) = gdk::Display::default() {
-                                            display.clipboard().set_text(&share_url);
-                                        }
-                                        button.set_label(&t("Uploaded"));
-                                        detail.set_text(&tfmt(
-                                            "Share link copied to clipboard: {url}",
-                                            &[("url", &share_url)],
-                                        ));
-                                        detail.set_visible(true);
-                                        glib::ControlFlow::Break
-                                    }
-                                    Ok(Err(
-                                        crate::cloud::upload::UploadError::UpgradeRequired(message),
-                                    )) => {
-                                        button.set_sensitive(true);
-                                        button.set_label(&t("Upload"));
-                                        if let Some(window) = shell
-                                            .upgrade()
-                                            .and_then(|shell| shell.root())
-                                            .and_then(|root| root.downcast::<gtk4::Window>().ok())
-                                        {
-                                            crate::cloud::upgrade::show_prompt(&window, &message);
-                                        }
-                                        glib::ControlFlow::Break
-                                    }
-                                    Ok(Err(_)) => {
-                                        button.set_sensitive(true);
-                                        button.set_label(&t("Upload"));
-                                        glib::ControlFlow::Break
-                                    }
-                                    Err(std::sync::mpsc::TryRecvError::Empty) => {
-                                        glib::ControlFlow::Continue
-                                    }
-                                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                                        button.set_sensitive(true);
-                                        button.set_label(&t("Upload"));
-                                        glib::ControlFlow::Break
-                                    }
-                                }
-                            });
-                        }
-                    });
                     reveal.connect_clicked({
                         let detail = detail.clone();
                         move |_| {
@@ -334,6 +305,242 @@ fn restore_editor(shell: &Overlay) {
         editor.set_opacity(1.0);
         editor.set_sensitive(true);
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum UploadPhase {
+    Ready,
+    Uploading,
+    Complete,
+    Failed,
+}
+
+enum UploadEvent {
+    Progress { sent: u64, total: u64 },
+    Done(Result<String, crate::cloud::upload::UploadError>),
+}
+
+/// The export screen widgets an upload rewrites: the screen turns into the
+/// upload's progress view, then into its result, in the same place the
+/// export's own progress was shown.
+#[derive(Clone)]
+struct UploadUi {
+    /// The exported file, known once the export finishes.
+    path: Rc<RefCell<Option<PathBuf>>>,
+    destination: Label,
+    title: Label,
+    bar: ProgressBar,
+    timing: Label,
+    detail: Label,
+    actions: GtkBox,
+    upload: Button,
+    reveal: Button,
+    open_link: Button,
+    /// The export's own notes, shown again when an upload is abandoned.
+    complete_detail: Rc<RefCell<String>>,
+    share_url: Rc<RefCell<Option<String>>>,
+    phase: Rc<Cell<UploadPhase>>,
+}
+
+impl UploadUi {
+    fn window(&self) -> Option<gtk4::Window> {
+        self.upload
+            .root()
+            .and_then(|root| root.downcast::<gtk4::Window>().ok())
+    }
+
+    fn window_is_active(&self) -> bool {
+        self.window().is_some_and(|window| window.is_active())
+    }
+
+    fn show_note(&self, text: &str, error: bool) {
+        if error {
+            self.detail.add_css_class("video-export-error");
+        } else {
+            self.detail.remove_css_class("video-export-error");
+        }
+        self.detail.set_text(text);
+        self.detail.set_visible(!text.is_empty());
+    }
+
+    fn show_path(&self) {
+        if let Some(path) = self.path.borrow().as_ref() {
+            let text = path.to_string_lossy();
+            self.destination.set_text(&text);
+            self.destination.set_tooltip_text(Some(&text));
+        }
+    }
+
+    fn show_progress(&self, sent: u64, total: u64) {
+        let fraction = if total == 0 {
+            0.0
+        } else {
+            (sent as f64 / total as f64).clamp(0.0, 1.0)
+        };
+        self.bar.set_fraction(fraction);
+        self.title.set_text(&progress_title(
+            &t("Uploading video"),
+            upload_percent(sent, total),
+        ));
+        self.timing.set_text(&tfmt(
+            "{sent} of {total}",
+            &[
+                ("sent", &super::export::rate::format_bytes(sent as f64)),
+                ("total", &super::export::rate::format_bytes(total as f64)),
+            ],
+        ));
+    }
+
+    fn show_uploading(&self, total: u64) {
+        self.phase.set(UploadPhase::Uploading);
+        self.actions.set_visible(false);
+        self.show_note("", false);
+        self.bar.set_fraction(0.0);
+        self.bar.set_visible(true);
+        self.timing.set_visible(true);
+        self.show_progress(0, total);
+    }
+
+    fn show_complete(&self, url: String) {
+        self.phase.set(UploadPhase::Complete);
+        *self.share_url.borrow_mut() = Some(url.clone());
+        self.title.set_text(&t("Upload complete"));
+        self.bar.set_visible(false);
+        self.timing.set_visible(false);
+        self.destination.set_text(&url);
+        self.destination.set_tooltip_text(Some(&url));
+        self.copy_share_link();
+        if !self.window_is_active() {
+            crate::utils::notify::desktop_notification(
+                &t("Upload complete"),
+                &tfmt("Copied to clipboard\n{url}", &[("url", &url)]),
+            );
+        }
+        self.upload.set_label(&t("Copy link"));
+        self.upload.add_css_class("video-export-primary");
+        self.reveal.remove_css_class("video-export-primary");
+        self.open_link.set_visible(true);
+        self.actions.set_visible(true);
+        self.upload.grab_focus();
+    }
+
+    /// Back to the finished export, as if no upload had been started.
+    fn show_export_complete(&self) {
+        self.phase.set(UploadPhase::Ready);
+        self.title.set_text(&t("Exported successfully"));
+        self.bar.set_visible(false);
+        self.timing.set_visible(false);
+        self.show_path();
+        let notes = self.complete_detail.borrow().clone();
+        self.show_note(&notes, false);
+        self.upload.set_label(&t("Upload"));
+        self.actions.set_visible(true);
+    }
+
+    fn show_error(&self, message: &str) {
+        self.phase.set(UploadPhase::Failed);
+        self.title.set_text(&t("Upload failed"));
+        self.bar.set_visible(false);
+        self.timing.set_visible(false);
+        self.show_path();
+        self.show_note(message, true);
+        self.upload.set_label(&t("Try again"));
+        self.actions.set_visible(true);
+        self.upload.grab_focus();
+    }
+
+    fn copy_share_link(&self) {
+        let url = self.share_url.borrow().clone();
+        let Some(url) = url else {
+            return;
+        };
+        // The Windows clipboard keeps the text after this app exits, which
+        // GTK's own clipboard does not.
+        match crate::utils::clipboard::copy_text_via_windows_clipboard(&url)
+            .or_else(|_| crate::utils::clipboard::copy_text_to_clipboard(&url))
+        {
+            Ok(()) => self.show_note(&t("Link copied to clipboard"), false),
+            Err(error) => self.show_note(&error, true),
+        }
+    }
+}
+
+/// Integer upload progress, held below 100 until the upload reports it is done.
+fn upload_percent(sent: u64, total: u64) -> u32 {
+    if total == 0 {
+        return 0;
+    }
+    ((u128::from(sent) * 100) / u128::from(total)).min(99) as u32
+}
+
+fn progress_title(label: &str, percent: u32) -> String {
+    format!("{label} · {percent}%")
+}
+
+fn start_upload(ui: &UploadUi, config: crate::config::AppConfig) {
+    let Some(path) = ui.path.borrow().clone() else {
+        return;
+    };
+    let total = std::fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0);
+    ui.show_uploading(total);
+
+    let (sender, receiver) = std::sync::mpsc::channel::<UploadEvent>();
+    std::thread::spawn(move || {
+        let progress = sender.clone();
+        let last_percent = Cell::new(None::<u32>);
+        let result =
+            crate::cloud::upload::upload_file_with_progress(&config, &path, &move |sent, total| {
+                let percent = upload_percent(sent, total);
+                if last_percent.get() != Some(percent) {
+                    last_percent.set(Some(percent));
+                    let _ = progress.send(UploadEvent::Progress { sent, total });
+                }
+            })
+            .map(|result| result.share_url);
+        let _ = sender.send(UploadEvent::Done(result));
+    });
+
+    let ui = ui.clone();
+    glib::timeout_add_local(Duration::from_millis(100), move || {
+        let mut latest = None;
+        let outcome = loop {
+            match receiver.try_recv() {
+                Ok(UploadEvent::Progress { sent, total }) => latest = Some((sent, total)),
+                Ok(UploadEvent::Done(result)) => break Some(result.map_err(Some)),
+                Err(TryRecvError::Empty) => break None,
+                Err(TryRecvError::Disconnected) => break Some(Err(None)),
+            }
+        };
+        if let Some((sent, total)) = latest {
+            ui.show_progress(sent, total);
+        }
+        let Some(result) = outcome else {
+            return glib::ControlFlow::Continue;
+        };
+        match result {
+            Ok(url) => ui.show_complete(url),
+            Err(Some(crate::cloud::upload::UploadError::UpgradeRequired(message))) => {
+                ui.show_export_complete();
+                if let Some(window) = ui.window() {
+                    crate::cloud::upgrade::show_prompt(&window, &message);
+                }
+            }
+            Err(error) => {
+                let message = error.map_or_else(
+                    || t("ApexShot lost contact with the upload worker."),
+                    |error| error.to_string(),
+                );
+                if !ui.window_is_active() {
+                    crate::utils::notify::desktop_notification_important(
+                        &t("Upload failed"),
+                        &message,
+                    );
+                }
+                ui.show_error(&message);
+            }
+        }
+        glib::ControlFlow::Break
+    });
 }
 
 fn copy_file(path: &std::path::Path) -> Result<(), String> {
@@ -661,6 +868,24 @@ mod tests {
             eprintln!("skipping: GTK unavailable");
             return;
         };
+    }
+
+    #[test]
+    fn upload_percent_stays_below_a_hundred_until_the_upload_finishes() {
+        use super::upload_percent;
+        assert_eq!(upload_percent(0, 0), 0);
+        assert_eq!(upload_percent(0, 1000), 0);
+        assert_eq!(upload_percent(500, 1000), 50);
+        assert_eq!(upload_percent(1000, 1000), 99);
+        assert_eq!(upload_percent(u64::MAX, u64::MAX), 99);
+    }
+
+    #[test]
+    fn the_upload_title_matches_the_export_title() {
+        assert_eq!(
+            super::progress_title("Uploading video", 42),
+            "Uploading video · 42%"
+        );
     }
 
     #[test]
