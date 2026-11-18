@@ -689,6 +689,51 @@ void PointerTracker::discard()
     data_->activePresses = {};
 }
 
+double videoTimeFor(double t, const std::vector<SegmentTiming>& segments)
+{
+    if (segments.empty())
+        return t;
+    size_t index = 0;
+    for (size_t i = 1; i < segments.size(); ++i) {
+        if (t >= segments[i].mediaStart)
+            index = i;
+    }
+    const SegmentTiming& segment = segments[index];
+    return std::max(segment.videoStart,
+                    segment.videoStart + (t - segment.mediaStart) - segment.firstFrameDelay);
+}
+
+void PointerTracker::alignToVideo(const std::vector<SegmentTiming>& segments)
+{
+    if (segments.empty())
+        return;
+    const auto move = [&segments](double t) { return videoTimeFor(t, segments); };
+    // Samples taken before a segment's first frame all land on that frame;
+    // only the latest of them says where the pointer was when it appeared.
+    std::vector<PointerSample> pointer;
+    pointer.reserve(data_->pointer.size());
+    for (PointerSample sample : data_->pointer) {
+        sample.t = move(sample.t);
+        if (!pointer.empty() && pointer.back().t >= sample.t)
+            pointer.back() = sample;
+        else
+            pointer.push_back(sample);
+    }
+    data_->pointer = std::move(pointer);
+    for (ClickSample& click : data_->clicks)
+        click.t = move(click.t);
+    for (PressSample& press : data_->presses) {
+        press.down = move(press.down);
+        press.up = move(press.up);
+    }
+    for (ScrollSample& scroll : data_->scrolls)
+        scroll.t = move(scroll.t);
+    for (KeySample& key : data_->keys)
+        key.t = move(key.t);
+    for (VisibilitySample& visibility : data_->visibility)
+        visibility.t = move(visibility.t);
+}
+
 bool PointerTracker::installHook()
 {
     if (data_->hook)
