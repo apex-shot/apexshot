@@ -29,6 +29,7 @@ pub(super) struct Inspector {
     transform: GtkBox,
     export_quality: GtkBox,
     background_sync: Rc<dyn Fn()>,
+    set_appearance_motion: Rc<dyn Fn(bool)>,
     /// Clipboard copy, the flattened export and the Cloud upload the window
     /// wires to the document.
     pub copy_button: gtk4::Button,
@@ -46,6 +47,7 @@ impl Inspector {
     /// Entry always lands on the Composition page, like the Linux editor
     /// applies its mode.
     pub(super) fn set_mode(&self, motion: bool) {
+        (self.set_appearance_motion)(motion);
         self.actions.set_visible(true);
         self.transform.set_visible(!motion);
         self.export_quality.set_visible(!motion);
@@ -131,7 +133,7 @@ pub(super) fn build(
     scroller.set_hexpand(false);
 
     // Both modes use the same panel; only Static exposes its Transform.
-    let (appearance_page, transform, export_quality, background_sync) =
+    let (appearance_page, transform, export_quality, background_sync, set_appearance_motion) =
         sections::appearance_panel(scale, Some(host), &root, window);
     // The Motion dock: the notch's four pages, in the Linux tab order.
     let motion_stack = Stack::new();
@@ -199,6 +201,7 @@ pub(super) fn build(
         transform,
         export_quality,
         background_sync,
+        set_appearance_motion,
         copy_button,
         upload_button,
         export_button: export,

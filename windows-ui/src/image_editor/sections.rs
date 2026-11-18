@@ -1485,12 +1485,34 @@ fn frame_separator() -> GtkBox {
 
 /// The Frame disclosure: collapsed W/H inputs plus an expandable ratio
 /// grid whose tiles change the aspect ratio rather than a fixed pixel size.
-fn frame_disclosure(scale: f64, host: Option<&Rc<EditorHost>>) -> (GtkBox, Rc<dyn Fn()>) {
+fn frame_disclosure(
+    scale: f64,
+    host: Option<&Rc<EditorHost>>,
+    backdrop: Option<BackdropAction>,
+    motion: Rc<Cell<bool>>,
+) -> (GtkBox, Rc<dyn Fn()>) {
     let body = GtkBox::new(Orientation::Vertical, px(8.0, scale));
 
     body.append(&hint(
         "Ratio presets change the aspect ratio; platform presets also export at the size that platform asks for. W/H shows the export size. Click the selected preset again to reset.",
     ));
+    // Static images need a fill behind a frame: without one the frame is just
+    // empty canvas. Motion frames its own backdrop, so it never asks.
+    let notice = GtkBox::new(Orientation::Vertical, px(6.0, scale));
+    notice.append(&hint(
+        "Frame sizes need a background in image mode. Add one to change the canvas size.",
+    ));
+    let add_background = Button::with_label(&t("Add a background"));
+    add_background.set_has_frame(false);
+    add_background.add_css_class("image-editor-frame-add-background");
+    if let Some(backdrop) = backdrop.clone() {
+        add_background.connect_clicked(move |_| backdrop());
+    } else {
+        add_background.set_sensitive(false);
+    }
+    notice.append(&add_background);
+    notice.set_visible(false);
+    body.append(&notice);
 
     let dim_row = GtkBox::new(Orientation::Horizontal, px(6.0, scale));
     dim_row.add_css_class("image-editor-dim-row");
@@ -1640,12 +1662,24 @@ fn frame_disclosure(scale: f64, host: Option<&Rc<EditorHost>>) -> (GtkBox, Rc<dy
     let generation = Cell::new(u64::MAX);
     let sync = {
         let section = section.clone();
+        let notice = notice.clone();
+        let dim_row = dim_row.clone();
+        let revealer = revealer.clone();
+        let motion = motion.clone();
         Rc::new(move || {
             let Some(host) = &host else {
                 section.set_sensitive(false);
                 return;
             };
             section.set_sensitive(host.has_document());
+            let needs_background =
+                !motion.get() && host.read(|st| !st.background.has_fill()).unwrap_or(false);
+            dim_row.set_sensitive(!needs_background);
+            revealer.set_sensitive(!needs_background);
+            notice.set_visible(needs_background);
+            if host.read(|st| st.background.frame_aspect.is_none()) == Some(true) {
+                selection.clear();
+            }
             if generation.replace(host.session_generation.get()) != host.session_generation.get() {
                 selection.clear();
             }
@@ -2286,6 +2320,10 @@ fn build_source_pages(
     pages
 }
 
+/// The Appearance page, its Transform and Export quality cards, the sync
+/// that refreshes them, and the switch that tells them Motion is showing.
+type AppearancePanel = (GtkBox, GtkBox, GtkBox, Rc<dyn Fn()>, Rc<dyn Fn(bool)>);
+
 /// ── Shared Appearance panel ─────────────────────────────────────────
 ///
 /// The Linux builder is one function for both editors: the static editor
@@ -2296,7 +2334,8 @@ pub(super) fn appearance_panel(
     host: Option<&Rc<EditorHost>>,
     column: &GtkBox,
     window: &gtk4::ApplicationWindow,
-) -> (GtkBox, GtkBox, GtkBox, Rc<dyn Fn()>) {
+) -> AppearancePanel {
+    let motion = Rc::new(Cell::new(false));
     let body = GtkBox::new(Orientation::Vertical, px(12.0, scale));
     body.add_css_class("image-editor-inspector-body");
 
@@ -2305,7 +2344,8 @@ pub(super) fn appearance_panel(
     title.set_xalign(0.0);
     body.append(&title);
 
-    let (background, sync, apply_first_wallpaper) = background_card(scale, host, column, window);
+    let (background, sync, apply_first_wallpaper) =
+        background_card(scale, host, column, window, motion.clone());
     body.append(&background);
     let (export_quality, export_sync) = export_quality(scale, host, window);
     body.append(&export_quality);
@@ -2313,9 +2353,10 @@ pub(super) fn appearance_panel(
     body.append(&transform);
     let (shadow, shadow_sync) = shadow_disclosure(scale, host);
     body.append(&shadow);
-    let (style, style_sync) = style_disclosure(scale, host, Some(apply_first_wallpaper));
+    let (style, style_sync) = style_disclosure(scale, host, Some(apply_first_wallpaper.clone()));
     body.append(&style);
-    let (frame, frame_sync) = frame_disclosure(scale, host);
+    let (frame, frame_sync) =
+        frame_disclosure(scale, host, Some(apply_first_wallpaper), motion.clone());
     body.append(&frame);
     let sync = Rc::new(move || {
         sync();
@@ -2325,7 +2366,14 @@ pub(super) fn appearance_panel(
         transform_sync();
         export_sync();
     });
-    (body, transform, export_quality, sync)
+    let set_motion: Rc<dyn Fn(bool)> = {
+        let sync = sync.clone();
+        Rc::new(move |now: bool| {
+            motion.set(now);
+            sync();
+        })
+    };
+    (body, transform, export_quality, sync, set_motion)
 }
 
 /// The Background card: the fill-source tray and the shared sliders, the
@@ -2337,6 +2385,7 @@ fn background_card(
     host: Option<&Rc<EditorHost>>,
     column: &GtkBox,
     window: &gtk4::ApplicationWindow,
+    motion: Rc<Cell<bool>>,
 ) -> (GtkBox, Rc<dyn Fn()>, BackdropAction) {
     let section = section_card("Background", scale);
 
@@ -2361,6 +2410,7 @@ fn background_card(
         let selection = selection.clone();
         let host = host.cloned();
         let clear_custom = clear_custom.clone();
+        let motion = motion.clone();
         move |_| {
             if let Some(clear) = clear_custom.borrow().as_ref() {
                 clear();
@@ -2371,6 +2421,11 @@ fn background_card(
                 host.mutate(|st| {
                     st.begin_history_interaction();
                     st.background.fill = Fill::None;
+                    // A frame without a fill is empty canvas in image mode.
+                    if !motion.get() {
+                        st.background.frame_aspect = None;
+                        st.background.frame_size = None;
+                    }
                     st.background.changed();
                     st.finish_history_interaction();
                 });
@@ -2501,6 +2556,17 @@ mod tests {
         let mut child = widget.first_child();
         while let Some(current) = child {
             collect_class(&current, class, found);
+            child = current.next_sibling();
+        }
+    }
+
+    fn collect_labels(widget: &gtk4::Widget, found: &mut Vec<Label>) {
+        if let Some(label) = widget.downcast_ref::<Label>() {
+            found.push(label.clone());
+        }
+        let mut child = widget.first_child();
+        while let Some(current) = child {
+            collect_labels(&current, found);
             child = current.next_sibling();
         }
     }
@@ -2719,7 +2785,8 @@ mod tests {
             )));
             document.background.padding = 40.0;
             *host.editor.borrow_mut() = Some(document);
-            let (section, sync) = frame_disclosure(1.0, Some(&host));
+            let (section, sync) =
+                frame_disclosure(1.0, Some(&host), None, Rc::new(Cell::new(false)));
             sync();
             let mut tiles = Vec::new();
             let mut entries = Vec::new();
@@ -2781,7 +2848,8 @@ mod tests {
                 61,
                 Rgba([240, 0, 0, 255]),
             )));
-            let (section, sync) = frame_disclosure(1.0, Some(&host));
+            let (section, sync) =
+                frame_disclosure(1.0, Some(&host), None, Rc::new(Cell::new(false)));
             sync();
             let mut tiles = Vec::new();
             let mut entries = Vec::new();
@@ -2843,6 +2911,29 @@ mod tests {
                     .unwrap();
                 }
             }
+        }) else {
+            return;
+        };
+    }
+
+    #[test]
+    fn frame_sizes_ask_for_a_background_in_image_mode_only() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let host = test_host();
+            let motion = Rc::new(Cell::new(false));
+            let (section, sync) = frame_disclosure(1.0, Some(&host), None, motion.clone());
+            sync();
+            let mut labels = Vec::new();
+            collect_labels(section.upcast_ref(), &mut labels);
+            let notice = labels
+                .into_iter()
+                .find(|label| label.text().starts_with("Frame sizes need a background"))
+                .expect("the frame panel carries the background notice");
+            let container = notice.parent().expect("the notice sits in its own row");
+            assert!(container.is_visible(), "image mode asks for a fill");
+            motion.set(true);
+            sync();
+            assert!(!container.is_visible(), "motion frames its own backdrop");
         }) else {
             return;
         };
