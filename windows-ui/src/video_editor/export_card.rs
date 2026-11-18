@@ -622,7 +622,7 @@ fn clock(seconds: f64) -> String {
     }
 }
 
-pub(super) fn install_css() {
+pub(crate) fn install_css() {
     let Some(display) = gdk::Display::default() else {
         return;
     };

@@ -32,66 +32,23 @@ type VideoSetup = (
     Rc<RefCell<Option<ImageSurface>>>,
 );
 
-/// The frame size a Motion export renders at: the composed canvas or a
-/// platform preset, shrunk by the chosen factor.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) enum MotionExportSize {
-    #[default]
-    Canvas,
-    Medium,
-    Small,
-}
-
-impl MotionExportSize {
-    fn factor(self) -> f64 {
-        match self {
-            Self::Canvas => 1.0,
-            Self::Medium => 0.75,
-            Self::Small => 0.5,
-        }
-    }
-}
-
-/// The frame rate the encoder timestamps each sample at.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) enum MotionExportFps {
-    #[default]
-    Fps30,
-    Fps60,
-}
-
-impl MotionExportFps {
-    pub(super) fn value(self) -> u32 {
-        match self {
-            Self::Fps30 => MOTION_EXPORT_FPS,
-            Self::Fps60 => 60,
-        }
-    }
-}
-
-/// The H.264 quality floor: the sharp default or a smaller file.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) enum MotionExportQuality {
-    #[default]
-    High,
-    Smaller,
-}
-
-impl MotionExportQuality {
-    fn crf(self) -> u32 {
-        match self {
-            Self::High => 18,
-            Self::Smaller => 24,
-        }
-    }
-}
-
-/// The choices the export-options dialog hands the encoder.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// The choices the export sheet hands the encoder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct MotionExportOptions {
-    pub size: MotionExportSize,
-    pub fps: MotionExportFps,
-    pub quality: MotionExportQuality,
+    /// Short-edge target in pixels; `None` keeps the frame's own size.
+    pub resolution: Option<u32>,
+    pub fps: u32,
+    pub crf: u32,
+}
+
+impl Default for MotionExportOptions {
+    fn default() -> Self {
+        Self {
+            resolution: None,
+            fps: MOTION_EXPORT_FPS,
+            crf: 18,
+        }
+    }
 }
 
 pub(super) struct MotionMode {
@@ -119,17 +76,23 @@ impl MotionMode {
         frame_image(&self.host, &self.timeline, &watermark_surface)
     }
 
-    /// The even pixels a Motion export lands on under `size`: the preset's
-    /// frame or the composed canvas, shrunk by the chosen factor.
-    pub(super) fn export_dimensions(&self, size: MotionExportSize) -> Option<(i32, i32)> {
+    /// The even pixels a Motion export lands on: the preset's frame or the
+    /// composed canvas, scaled so its short edge meets `resolution`.
+    pub(super) fn export_dimensions(&self, resolution: Option<u32>) -> Option<(i32, i32)> {
         self.host.read(|st| {
             let (image_width, image_height) = st.working_image.dimensions();
             motion_output_size(
                 st.background.layout(image_width, image_height),
                 preset_size(st),
-                size,
+                resolution,
             )
         })
+    }
+
+    /// The length a Motion export at `fps` covers, in seconds.
+    pub(super) fn export_seconds(&self, fps: u32) -> f64 {
+        let fps = fps.max(1);
+        motion_frame_count(self.timeline.motion_state().duration, fps) as f64 / f64::from(fps)
     }
 
     /// Render the whole composition to an MP4 on the main loop, one frame per
@@ -218,10 +181,10 @@ impl MotionMode {
             .ok_or_else(|| t("Motion has no still to export."))?;
         // A platform preset renders straight at its pixels: the composition
         // already has the preset's aspect, so it scales to fill exactly and
-        // the vectors stay sharp. A shrunk canvas scales the same way; at
+        // the vectors stay sharp. A resolution target scales the same way; at
         // the canvas's own size the render keeps its 1:1 odd-pixel centering.
-        let (width, height) = motion_output_size(layout, frame_size, options.size);
-        let zoom = if frame_size.is_some() || options.size != MotionExportSize::Canvas {
+        let (width, height) = motion_output_size(layout, frame_size, options.resolution);
+        let zoom = if frame_size.is_some() || options.resolution.is_some() {
             (
                 f64::from(width) / layout.width.max(1.0),
                 f64::from(height) / layout.height.max(1.0),
@@ -255,11 +218,11 @@ impl MotionMode {
             .map_err(|error| error.to_string())?;
 
         let motion = self.timeline.motion_state();
-        let fps_value = options.fps.value();
+        let fps_value = options.fps.max(1);
         let frame_count = motion_frame_count(motion.duration, fps_value);
         let size = format!("{width}x{height}");
         let fps = fps_value.to_string();
-        let crf = options.quality.crf().to_string();
+        let crf = options.crf.to_string();
         // Encode into a temporary sibling and replace the destination on
         // success, so a failed or cancelled render never clobbers the file
         // that was already there.
@@ -974,19 +937,26 @@ fn even_output_size(value: f64) -> i32 {
     size + (size & 1)
 }
 
-/// The even frame an export covers under `size`: the preset's own pixels or
-/// the raw layout, shrunk by the choice.
+/// The even frame an export covers: the preset's own pixels or the raw
+/// layout, scaled so the short edge meets `resolution` when one is chosen.
 fn motion_output_size(
     layout: Layout,
     frame_size: Option<(u32, u32)>,
-    size: MotionExportSize,
+    resolution: Option<u32>,
 ) -> (i32, i32) {
-    let factor = size.factor();
     let (width, height) = match frame_size {
-        Some((width, height)) => (f64::from(width) * factor, f64::from(height) * factor),
-        None => (layout.width * factor, layout.height * factor),
+        Some((width, height)) => (f64::from(width), f64::from(height)),
+        None => (layout.width, layout.height),
     };
-    (even_output_size(width), even_output_size(height))
+    let short_edge = width.min(height);
+    let factor = match resolution {
+        Some(edge) if short_edge > 0.0 => f64::from(edge) / short_edge,
+        _ => 1.0,
+    };
+    (
+        even_output_size(width * factor),
+        even_output_size(height * factor),
+    )
 }
 
 fn motion_frame_count(duration: f64, fps: u32) -> usize {
@@ -1008,7 +978,7 @@ struct MotionVideoJob {
     width: i32,
     height: i32,
     /// Composition units to output pixels; `(1, 1)` unless a platform
-    /// preset or a shrunk export fixes the size.
+    /// preset or a resolution target fixes the size.
     zoom: (f64, f64),
     motion: MotionState,
     frame: usize,
@@ -1471,9 +1441,9 @@ mod tests {
                 (MotionExportOptions::default(), (32, 24), 6, "30/1"),
                 (
                     MotionExportOptions {
-                        size: MotionExportSize::Small,
-                        fps: MotionExportFps::Fps60,
-                        quality: MotionExportQuality::Smaller,
+                        resolution: Some(12),
+                        fps: 60,
+                        crf: 30,
                     },
                     (16, 12),
                     12,

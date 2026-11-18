@@ -5277,3 +5277,9 @@ msgstr "Revenez à l'éditeur pour copier le lien"
 
 msgid "Open link"
 msgstr "Ouvrir le lien"
+
+msgid "60 FPS makes animation smoother and takes longer to export."
+msgstr "60 i/s rend l'animation plus fluide, mais l'export prend plus de temps."
+
+msgid "Export cannot recover detail missing from the screenshot."
+msgstr "L'export ne peut pas récupérer les détails absents de la capture d'écran."

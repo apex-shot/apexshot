@@ -12,7 +12,7 @@ use gtk4::{
 use std::cell::Cell;
 use std::rc::Rc;
 
-const QUALITIES: [(u32, &str, &str); 4] = [
+pub(crate) const QUALITIES: [(u32, &str, &str); 4] = [
     (
         14,
         "Maximum",
@@ -36,7 +36,7 @@ const QUALITIES: [(u32, &str, &str); 4] = [
 ];
 
 /// Short-edge targets; `None` keeps the frame's own size.
-const RESOLUTIONS: [(Option<u32>, &str, &str); 4] = [
+pub(crate) const RESOLUTIONS: [(Option<u32>, &str, &str); 4] = [
     (None, "Original", ""),
     (Some(720), "HD", "720p"),
     (Some(1080), "FHD", "1080p"),
@@ -385,7 +385,7 @@ pub(super) fn show(
     save.grab_focus();
 }
 
-fn section(title: &str, scale: f64) -> GtkBox {
+pub(crate) fn section(title: &str, scale: f64) -> GtkBox {
     let section = GtkBox::new(Orientation::Vertical, (8.0 * scale).round() as i32);
     section.set_valign(Align::Start);
     let label = Label::new(Some(&t(title).to_uppercase()));
@@ -397,7 +397,7 @@ fn section(title: &str, scale: f64) -> GtkBox {
 
 /// One row of mutually exclusive choices; a non-empty detail adds a second,
 /// smaller line under the title.
-fn segmented(
+pub(crate) fn segmented(
     options: &[(String, String)],
     active: usize,
     scale: f64,
@@ -437,7 +437,7 @@ fn segmented(
     (track, buttons)
 }
 
-fn summary_row(summary: &GtkBox, label: &str, scale: f64) -> Label {
+pub(crate) fn summary_row(summary: &GtkBox, label: &str, scale: f64) -> Label {
     let row = GtkBox::new(Orientation::Horizontal, (12.0 * scale).round() as i32);
     let name = Label::new(Some(label));
     name.add_css_class("video-export-summary-label");
@@ -452,7 +452,7 @@ fn summary_row(summary: &GtkBox, label: &str, scale: f64) -> Label {
     value
 }
 
-fn fps_text(fps: f64) -> String {
+pub(crate) fn fps_text(fps: f64) -> String {
     if (fps - fps.round()).abs() < 0.01 {
         format!("{} FPS", fps.round() as u32)
     } else {
@@ -463,7 +463,7 @@ fn fps_text(fps: f64) -> String {
 /// The CRF an export writes: the project's own value while the quality segment
 /// still shows its tier, so opening the dialog never changes a project's
 /// quality; a tier the user picked uses that tier's CRF.
-fn effective_crf(project: u32, initial: usize, chosen: usize) -> u32 {
+pub(crate) fn effective_crf(project: u32, initial: usize, chosen: usize) -> u32 {
     if chosen == initial {
         project
     } else {
