@@ -35,6 +35,7 @@
 #include <QVector>
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <memory>
 
@@ -866,6 +867,13 @@ public:
     QString recoveredSidecarPath;
     /// Moments marked during this recording, in media milliseconds.
     QVector<qint64> markers;
+    /// When each capture segment's media clock started, in milliseconds since
+    /// the epoch, and the media time it started at, one entry per segment.
+    QVector<qint64> segmentClockStartUnixMs;
+    QVector<qint64> segmentMediaStartMs;
+    /// Each segment's place on the joined video, measured in `finalize`, that
+    /// the pointer sidecar is moved onto before it is written.
+    std::vector<Platform::SegmentTiming> pointerTimings;
 };
 
 qint64 RecordingSession::Private::elapsedMs() const
@@ -2085,6 +2093,7 @@ void RecordingSession::Private::cleanupAndEmit(bool kept,
             recoveredSidecarPath.clear();
         } else {
             pointerTracker.stop(elapsedMs());
+            pointerTracker.alignToVideo(pointerTimings);
             if (!pointerTracker.writeSidecar(path, webcamTrack, &sidecarError))
                 qWarning().noquote() << "[recording] could not write pointer sidecar:"
                                      << sidecarError;
@@ -2299,6 +2308,41 @@ void RecordingSession::Private::finalize()
     if (segments.isEmpty()) {
         cleanupAndEmit(false, QString(), QStringLiteral("No video frames were captured."));
         return;
+    }
+
+    // The pointer clock starts with each segment, but the segment's video
+    // starts at its first captured frame, a moment later. Measure that gap from
+    // the first-frame markers so the cursor lines up with the frames instead of
+    // trailing them; without every mark the times stay as they were.
+    pointerTimings.clear();
+    if (segments.size() == segmentClockStartUnixMs.size()
+        && segments.size() == segmentMediaStartMs.size()) {
+        // The rate conversion holds a frame until the next one arrives, so the
+        // mark lands one frame after the frame it times was captured.
+        const double frameSeconds = 1.0 / double(request.fps > 0 ? request.fps : 30);
+        double videoStart = 0.0;
+        for (int index = 0; index < segments.size(); ++index) {
+            const qint64 marker = markerWrittenMs(segments.at(index));
+            const double delay =
+                double(marker - segmentClockStartUnixMs.at(index)) / 1000.0 - frameSeconds;
+            const double length = videoDuration(segments.at(index));
+            if (marker < 0 || std::abs(delay) > 5.0
+                || (index + 1 < segments.size() && length <= 0.0)) {
+                recordingLog(QStringLiteral("pointer sync: segment %1 has no usable first-frame mark")
+                                 .arg(index));
+                pointerTimings.clear();
+                break;
+            }
+            Platform::SegmentTiming timing;
+            timing.mediaStart = double(segmentMediaStartMs.at(index)) / 1000.0;
+            timing.firstFrameDelay = delay;
+            timing.videoStart = videoStart;
+            pointerTimings.push_back(timing);
+            recordingLog(QStringLiteral("pointer sync: segment %1 first frame %2 s after its clock")
+                             .arg(index)
+                             .arg(delay, 0, 'f', 3));
+            videoStart += length;
+        }
     }
 
     const QString finalPath = request.outputPath;
@@ -2702,6 +2746,9 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
 
     d->state = Private::State::Recording;
     d->active.start();
+    d->segmentClockStartUnixMs = {QDateTime::currentMSecsSinceEpoch()};
+    d->segmentMediaStartMs = {0};
+    d->pointerTimings.clear();
     d->openManifestSession();
     d->pointerTracker.start(d->request.region,
                             d->request.fps,
@@ -2767,6 +2814,8 @@ void RecordingSession::resume()
 
     d->state = Private::State::Recording;
     d->active.start();
+    d->segmentClockStartUnixMs.append(QDateTime::currentMSecsSinceEpoch());
+    d->segmentMediaStartMs.append(d->elapsedBeforeMs);
     d->openManifestSession();
     d->pointerTracker.resume();
     if (d->micPauseStartMs >= 0) {

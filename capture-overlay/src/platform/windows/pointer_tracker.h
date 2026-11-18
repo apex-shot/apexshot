@@ -15,6 +15,7 @@
 
 #include <functional>
 #include <memory>
+#include <vector>
 
 namespace Platform {
 
@@ -62,6 +63,21 @@ struct WebcamTrack {
     bool is_valid() const { return !file.isEmpty() && width > 0 && height > 0; }
 };
 
+/// Where one capture segment's frames sit, so cursor times taken on the
+/// recorder's clock can be moved onto the joined video's own timeline.
+struct SegmentTiming {
+    /// The recorder's media time, in seconds, when this segment's clock started.
+    double mediaStart = 0.0;
+    /// How long after that the segment's first frame was captured, in seconds.
+    double firstFrameDelay = 0.0;
+    /// Where the segment's first frame sits in the joined video, in seconds.
+    double videoStart = 0.0;
+};
+
+/// `t`, in seconds on the recorder's clock, on the joined video's timeline.
+/// A moment before its segment's first frame is held at that frame.
+double videoTimeFor(double t, const std::vector<SegmentTiming>& segments);
+
 class PointerTracker final : public QObject
 {
 public:
@@ -78,6 +94,10 @@ public:
     void resume();
     void stop(qint64 mediaTimeMs);
     void discard();
+    /// Move every recorded time onto the joined video's timeline. Call after
+    /// `stop`, once each segment's first-frame time is known; an empty list
+    /// leaves the times as they are.
+    void alignToVideo(const std::vector<SegmentTiming>& segments);
     /// Write the sidecar. `webcam` is written as the `webcam` block when it is
     /// valid, so a recording without a camera carries no camera keys at all.
     bool writeSidecar(const QString& videoPath,

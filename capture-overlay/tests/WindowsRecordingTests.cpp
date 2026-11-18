@@ -37,8 +37,10 @@
 #define NOMINMAX
 #include <windows.h>
 #include <dwmapi.h>
+#include <cmath>
 #include <cstdio>
 #include <memory>
+#include <vector>
 
 namespace {
 
@@ -151,6 +153,45 @@ bool checkCursorKinds()
     }
 
     std::printf("CURSOR_KINDS=ok\n");
+    return true;
+}
+
+/// Cursor times move onto the video's timeline: each segment's first-frame
+/// delay is taken off, a moment before the first frame is held at it, and a
+/// later segment starts where the earlier ones' video ends.
+bool checkPointerVideoAlignment()
+{
+    const std::vector<Platform::SegmentTiming> segments{
+        {0.0, 0.3, 0.0},
+        {10.0, 0.5, 9.8},
+    };
+    const struct {
+        double recorded;
+        double expected;
+    } cases[] = {
+        {0.0, 0.0},
+        {0.2, 0.0},
+        {0.3, 0.0},
+        {5.3, 5.0},
+        {10.0, 9.8},
+        {10.5, 9.8},
+        {12.5, 11.8},
+    };
+    for (const auto& item : cases) {
+        const double moved = Platform::videoTimeFor(item.recorded, segments);
+        if (std::abs(moved - item.expected) > 1e-9) {
+            std::printf("FAIL pointer alignment: %.3f moved to %.3f, expected %.3f\n",
+                        item.recorded,
+                        moved,
+                        item.expected);
+            return false;
+        }
+    }
+    if (Platform::videoTimeFor(4.2, {}) != 4.2) {
+        std::printf("FAIL pointer alignment: no segments must leave times alone\n");
+        return false;
+    }
+    std::printf("OK pointer alignment\n");
     return true;
 }
 
@@ -1734,6 +1775,8 @@ int main(int argc, char** argv)
     if (!checkCursorKinds())
         return 1;
     if (!checkWebcamPlacement())
+        return 1;
+    if (!checkPointerVideoAlignment())
         return 1;
     if (!checkRecordingManifestJson())
         return 1;
