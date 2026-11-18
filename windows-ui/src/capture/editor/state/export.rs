@@ -22,31 +22,23 @@ impl EditorState {
     /// unredacted frame. Neural upscaling enlarges the flattened pixels and
     /// draws the vectors at the same factor.
     pub fn to_export_image(&self) -> Result<RgbaImage, EditorError> {
-        self.render_export().map(|image| self.fit_frame_size(image))
-    }
-
-    /// A platform frame preset exports at its exact pixels. The composed
-    /// canvas already has the preset's aspect, so this is one uniform scale.
-    fn fit_frame_size(&self, image: RgbaImage) -> RgbaImage {
-        let background = &self.background;
-        let Some((width, height)) = background
-            .frame_size
-            .filter(|_| background.frame_aspect.is_some())
-            .filter(|&(width, height)| width > 0 && height > 0)
-        else {
-            return image;
-        };
-        if image.dimensions() == (width, height) {
-            return image;
-        }
-        image::imageops::resize(&image, width, height, image::imageops::FilterType::Lanczos3)
+        self.render_export()
     }
 
     fn render_export(&self) -> Result<RgbaImage, EditorError> {
+        // A platform frame preset exports at its exact pixels: render into
+        // that size directly so the resample happens through Cairo's filter
+        // and the vectors are drawn at the exported resolution instead of
+        // being flattened first and Lanczos-stretched afterwards.
+        let target = self
+            .background
+            .frame_size
+            .filter(|_| self.background.frame_aspect.is_some())
+            .filter(|&(width, height)| width > 0 && height > 0);
         let base = self.export_base();
         let factor = self.source_upscale.factor();
         if factor == 1 {
-            return self.render_from_working(&base, &self.background, true);
+            return self.render_scaled(&base, &self.background, true, self.export_scale, target);
         }
         if let Some(reason) = self.upscale_unavailable_reason(self.source_upscale) {
             return Err(EditorError::ImageSave(reason));
@@ -58,6 +50,7 @@ impl EditorState {
             &self.background,
             true,
             self.export_scale * f64::from(factor),
+            target,
         )
     }
 
@@ -67,7 +60,7 @@ impl EditorState {
         appearance: &super::background::Appearance,
         transform: bool,
     ) -> Result<RgbaImage, EditorError> {
-        self.render_scaled(working, appearance, transform, self.export_scale)
+        self.render_scaled(working, appearance, transform, self.export_scale, None)
     }
 
     fn render_scaled(
@@ -76,6 +69,7 @@ impl EditorState {
         appearance: &super::background::Appearance,
         transform: bool,
         annotation_scale: f64,
+        output_size: Option<(u32, u32)>,
     ) -> Result<RgbaImage, EditorError> {
         let (image_width, image_height) = working.dimensions();
         if image_width == 0 || image_height == 0 {
@@ -84,9 +78,13 @@ impl EditorState {
             ));
         }
         let layout = appearance.layout(image_width, image_height);
-        let width = layout.width.ceil() as u32;
-        let height = layout.height.ceil() as u32;
-        if u64::from(width) * u64::from(height) > 100_000_000 {
+        let natural_size = (layout.width.ceil() as u32, layout.height.ceil() as u32);
+        let (width, height) = output_size.unwrap_or(natural_size);
+        // A tiny preset still pays for the full-size card and background
+        // intermediates, so the layout's own size keeps its old limit too.
+        if u64::from(width) * u64::from(height) > 100_000_000
+            || u64::from(natural_size.0) * u64::from(natural_size.1) > 100_000_000
+        {
             return Err(EditorError::ImageSave(
                 "background canvas is too large".into(),
             ));
@@ -104,14 +102,25 @@ impl EditorState {
         {
             let context = gtk4::cairo::Context::new(&surface)
                 .map_err(|e| EditorError::ImageSave(e.to_string()))?;
+            // Everything below draws in layout units; the export size only
+            // changes how many pixels that space lands on.
+            let (sx, sy) = if output_size.is_some() {
+                (
+                    f64::from(width) / layout.width,
+                    f64::from(height) / layout.height,
+                )
+            } else {
+                (1.0, 1.0)
+            };
+            context.scale(sx, sy);
             if appearance.has_fill() {
                 let background = appearance
                     .surface(layout, layout.width.max(layout.height))
                     .ok_or_else(|| EditorError::ImageSave("could not render background".into()))?;
                 context.save().ok();
                 context.scale(
-                    f64::from(width) / f64::from(background.width()),
-                    f64::from(height) / f64::from(background.height()),
+                    layout.width / f64::from(background.width()),
+                    layout.height / f64::from(background.height()),
                 );
                 context.set_source_surface(&background, 0.0, 0.0).ok();
                 context.source().set_extend(gtk4::cairo::Extend::Pad);
@@ -144,7 +153,15 @@ impl EditorState {
             style.paint_backings(&context);
             style.paint_underlay(&context);
             if transform && !self.static_image_transform.is_identity() {
-                let card = self.card_surface_scaled(working, layout.radius, annotation_scale)?;
+                // Upscaled exports rasterize the card at the output scale so
+                // its vectors stay sharp; downscales keep the full working
+                // resolution and resample through the projection's filter.
+                let card = self.card_surface_scaled(
+                    working,
+                    layout.radius,
+                    annotation_scale,
+                    (sx.max(1.0), sy.max(1.0)),
+                )?;
                 super::super::transform_render::paint_card(
                     &context,
                     &card,
@@ -171,6 +188,9 @@ impl EditorState {
                 context
                     .set_source_surface(&source, layout.image_x, layout.image_y)
                     .ok();
+                if sx != 1.0 || sy != 1.0 {
+                    context.source().set_filter(gtk4::cairo::Filter::Good);
+                }
                 context.paint().ok();
                 context.restore().ok();
                 style.paint_frame(&context);
@@ -309,19 +329,23 @@ impl EditorState {
         )
     }
 
+    /// The transformed card's pixels: `raster_scale` enlarges the
+    /// intermediate surface past the working resolution when the export
+    /// scales up, so the vectors it paints are not upscaled a second time.
     fn card_surface_scaled(
         &self,
         working: &RgbaImage,
         radius: f64,
         annotation_scale: f64,
+        raster_scale: (f64, f64),
     ) -> Result<gtk4::cairo::ImageSurface, EditorError> {
         let source = super::super::render::rgba_image_to_surface(working)
             .ok_or_else(|| EditorError::ImageSave("could not render image".into()))?;
         self.card_surface_from_source_scaled(
             &source,
             radius,
-            working.width(),
-            working.height(),
+            (f64::from(working.width()) * raster_scale.0).ceil() as u32,
+            (f64::from(working.height()) * raster_scale.1).ceil() as u32,
             annotation_scale,
         )
     }
@@ -896,6 +920,55 @@ mod tests {
         assert_eq!(image.dimensions(), (100, 100));
         assert_eq!(*image.get_pixel(50, 0), Rgba([0, 0, 0, 0]));
         assert_eq!(*image.get_pixel(50, 50), Rgba([240, 0, 0, 255]));
+    }
+
+    /// A fixed-size preset renders straight at its pixels: a hard vector
+    /// edge keeps the antialiasing rim drawn at the exported resolution
+    /// instead of picking up the extra mid tones the old whole-image Lanczos
+    /// stretch left behind.
+    #[test]
+    fn a_platform_preset_draws_vectors_at_the_export_size() {
+        use crate::capture::editor::types::{AnnotationAction, DrawColor, Point};
+
+        let line = || AnnotationAction::Line {
+            start: Point { x: 50.0, y: 0.0 },
+            end: Point { x: 50.0, y: 75.0 },
+            color: DrawColor::new(1.0, 1.0, 1.0, 1.0),
+            stroke_size: 2.0,
+            shadow: false,
+        };
+        let mut state = EditorState::new(RgbaImage::from_pixel(100, 75, Rgba([0, 0, 0, 255])));
+        state.actions.push(line());
+        state.background.frame_aspect = Some(FrameRatio::new(4, 3));
+        state.background.frame_size = Some((400, 300));
+        let direct = state.to_export_image().unwrap();
+        assert_eq!(direct.dimensions(), (400, 300));
+
+        // The old export flattened at the canvas size, then stretched the
+        // whole frame to the preset with Lanczos.
+        let mut native = EditorState::new(RgbaImage::from_pixel(100, 75, Rgba([0, 0, 0, 255])));
+        native.actions.push(line());
+        native.background.frame_aspect = Some(FrameRatio::new(4, 3));
+        let flattened = native.to_export_image().unwrap();
+        assert_eq!(flattened.dimensions(), (100, 75));
+        let stretched =
+            image::imageops::resize(&flattened, 400, 300, image::imageops::FilterType::Lanczos3);
+
+        let row = 150;
+        let intermediate = |image: &RgbaImage| {
+            (0..image.width())
+                .filter(|x| {
+                    let level = image.get_pixel(*x, row)[0];
+                    level > 16 && level < 240
+                })
+                .count()
+        };
+        assert!(
+            intermediate(&stretched) > intermediate(&direct),
+            "the resampled edge keeps more mid tones: {} vs {}",
+            intermediate(&stretched),
+            intermediate(&direct)
+        );
     }
 
     #[test]

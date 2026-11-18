@@ -23,6 +23,7 @@ mod inspector;
 mod mode_confirm;
 mod motion;
 mod motion_controls;
+mod motion_export_options;
 mod motion_text;
 mod number_control;
 mod picker_placement;

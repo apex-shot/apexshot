@@ -62,7 +62,7 @@ fn encode_image(path: &Path, image: &RgbaImage) -> Result<Vec<u8>, EditorError> 
             image::imageops::overlay(&mut flat, image, 0, 0);
             DynamicImage::ImageRgba8(flat)
                 .to_rgb8()
-                .write_to(&mut bytes, image::ImageFormat::Jpeg)
+                .write_to(&mut bytes, image::ImageOutputFormat::Jpeg(95))
                 .map_err(|e| EditorError::ImageSave(e.to_string()))
         }
         "webp" => image
@@ -79,7 +79,7 @@ fn encode_image(path: &Path, image: &RgbaImage) -> Result<Vec<u8>, EditorError> 
 /// REPLACE_EXISTING is the safe replace: the old destination survives when
 /// the move itself fails.
 #[cfg(windows)]
-fn replace_file(from: &Path, to: &Path) -> std::io::Result<()> {
+pub(crate) fn replace_file(from: &Path, to: &Path) -> std::io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{
         MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
@@ -101,11 +101,11 @@ fn replace_file(from: &Path, to: &Path) -> std::io::Result<()> {
 }
 
 #[cfg(not(windows))]
-fn replace_file(from: &Path, to: &Path) -> std::io::Result<()> {
+pub(crate) fn replace_file(from: &Path, to: &Path) -> std::io::Result<()> {
     std::fs::rename(from, to)
 }
 
-fn temporary_export_path(path: &Path) -> Result<PathBuf, EditorError> {
+pub(crate) fn temporary_export_path(path: &Path) -> Result<PathBuf, EditorError> {
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -145,7 +145,7 @@ fn temporary_export_path(path: &Path) -> Result<PathBuf, EditorError> {
     }
 
     Err(EditorError::ImageSave(
-        "could not allocate a temporary image export file".to_string(),
+        "could not allocate a temporary export file".to_string(),
     ))
 }
 
@@ -264,5 +264,37 @@ mod tests {
         assert_eq!(&bmp[58..62], &[255, 255, 255, 255]);
         assert_eq!(&bmp[62..66], &[0, 0, 255, 255]);
         assert_eq!(&bmp[66..70], &[0, 255, 0, 255]);
+    }
+
+    /// High-frequency gray detail is what a JPEG quality floor spends: the
+    /// encoder's old default of 75 blurs this checkerboard measurably more
+    /// than the explicit 95 the export now asks for.
+    #[test]
+    fn jpeg_export_keeps_more_detail_than_the_old_default() {
+        let mut image = RgbaImage::new(64, 64);
+        for (x, y, pixel) in image.enumerate_pixels_mut() {
+            let level = if (x / 2 + y / 2) % 2 == 0 { 40 } else { 215 };
+            *pixel = Rgba([level, level, level, 255]);
+        }
+        let decoded_error = |encoded: &[u8]| -> u64 {
+            image::load_from_memory_with_format(encoded, image::ImageFormat::Jpeg)
+                .unwrap()
+                .to_rgb8()
+                .enumerate_pixels()
+                .map(|(x, y, pixel)| u64::from(pixel[0].abs_diff(image.get_pixel(x, y)[0])))
+                .sum()
+        };
+        let current =
+            decoded_error(&encode_image(Path::new("fixture.jpg"), &image).expect("JPEG encodes"));
+        let mut previous = std::io::Cursor::new(Vec::new());
+        DynamicImage::ImageRgba8(image.clone())
+            .to_rgb8()
+            .write_to(&mut previous, image::ImageOutputFormat::Jpeg(75))
+            .unwrap();
+        let previous = decoded_error(&previous.into_inner());
+        assert!(
+            current < previous,
+            "quality 95 error {current} is not below the old default's {previous}"
+        );
     }
 }
