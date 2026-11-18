@@ -388,11 +388,18 @@ bool WindowCaptureSource::start(QString* error)
                 state->fail(lastErrorText("ConnectNamedPipe"));
             } else {
                 session.StartCapture();
-                const auto interval = std::chrono::microseconds(
-                    1000000 / std::max(1, state->fps));
+                // ffmpeg times the piped frames by counting them, so every tick
+                // has to put a frame in the pipe. The interval is exact, and a
+                // write that stalls is caught up with repeats of the frame rather
+                // than skipped, or the video would fall behind the real clock
+                // the cursor is timed on. Only a stall past a second gives up
+                // the missed ticks.
+                const int fps = std::max(1, state->fps);
+                const auto interval = std::chrono::nanoseconds(1000000000LL / fps);
                 auto next = std::chrono::steady_clock::now();
                 std::vector<uint8_t> frame;
-                while (state->running) {
+                bool failed = false;
+                while (state->running && !failed) {
                     next += interval;
                     std::this_thread::sleep_until(next);
                     if (!state->running)
@@ -412,6 +419,17 @@ bool WindowCaptureSource::start(QString* error)
                     if (!writeAll(state->pipe, frame.data(), frame.size())) {
                         state->fail(lastErrorText("WriteFile"));
                         break;
+                    }
+                    int repeats = 0;
+                    while (state->running && repeats < fps
+                           && std::chrono::steady_clock::now() >= next + interval) {
+                        next += interval;
+                        ++repeats;
+                        if (!writeAll(state->pipe, frame.data(), frame.size())) {
+                            state->fail(lastErrorText("WriteFile"));
+                            failed = true;
+                            break;
+                        }
                     }
                     {
                         std::lock_guard<std::mutex> lock(state->frameMutex);
