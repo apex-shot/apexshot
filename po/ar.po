@@ -5190,3 +5190,9 @@ msgstr "عُد إلى المحرر لنسخ الرابط"
 
 msgid "Open link"
 msgstr "فتح الرابط"
+
+msgid "Exported Motion video"
+msgstr "فيديو Motion مُصدَّر"
+
+msgid "Motion edits you make and Motion videos you export will show up here."
+msgstr "ستظهر هنا تعديلات Motion التي تجريها ومقاطع فيديو Motion التي تصدّرها."

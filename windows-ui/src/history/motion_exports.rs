@@ -81,7 +81,11 @@ fn recorded_keys_at(ledger: &Path) -> HashSet<String> {
 /// The editor's default export name, `<image> Motion.mp4`.
 fn has_motion_export_name(path: &Path) -> bool {
     path.file_name()
-        .map(|name| name.to_string_lossy().to_lowercase().ends_with(" motion.mp4"))
+        .map(|name| {
+            name.to_string_lossy()
+                .to_lowercase()
+                .ends_with(" motion.mp4")
+        })
         .unwrap_or(false)
 }
 
@@ -121,8 +125,7 @@ fn entry_for(path: &Path) -> Option<CaptureEntry> {
 pub fn list_exports() -> Vec<CaptureEntry> {
     let config = crate::config::load_config();
     let recordings = scan::recording_folder(&config);
-    let motion_folder =
-        config.motion_export_dir(&crate::recording::recording_output_dir(&config));
+    let motion_folder = config.motion_export_dir(&crate::recording::recording_output_dir(&config));
     let mut seen = HashSet::new();
     let mut entries = Vec::new();
     for path in read_ledger_at(&ledger_path()).exports {
@@ -139,7 +142,7 @@ pub fn list_exports() -> Vec<CaptureEntry> {
             }
         }
     }
-    entries.sort_by(|a, b| b.modified.cmp(&a.modified));
+    entries.sort_by_key(|entry| std::cmp::Reverse(entry.modified));
     entries
 }
 
@@ -172,7 +175,11 @@ mod tests {
         record_export_at(&ledger, &video);
         record_export_at(&ledger, &video);
         let recorded = recorded_keys_at(&ledger);
-        assert_eq!(recorded.len(), 1, "a second export of the same file is one entry");
+        assert_eq!(
+            recorded.len(),
+            1,
+            "a second export of the same file is one entry"
+        );
         assert!(is_motion_export(&video, &recorded));
         assert!(!is_motion_export(&recording, &recorded));
 
@@ -180,16 +187,32 @@ mod tests {
         let other = directory.join("Other.mp4");
         std::fs::write(&other, b"mp4").unwrap();
         record_export_at(&ledger, &other);
-        assert_eq!(recorded_keys_at(&ledger).len(), 1, "deleted videos drop out");
+        assert_eq!(
+            recorded_keys_at(&ledger).len(),
+            1,
+            "deleted videos drop out"
+        );
         let _ = std::fs::remove_dir_all(&directory);
     }
 
     #[test]
     fn the_default_export_name_counts_without_a_ledger_entry() {
         let recorded = HashSet::new();
-        assert!(is_motion_export(Path::new("C:/Videos/ApexShot Motion.mp4"), &recorded));
-        assert!(is_motion_export(Path::new("C:/Videos/shot 1 motion.MP4"), &recorded));
-        assert!(!is_motion_export(Path::new("C:/Videos/ApexShot Recording.mp4"), &recorded));
-        assert!(!is_motion_export(Path::new("C:/Videos/Motion.mp4"), &recorded));
+        assert!(is_motion_export(
+            Path::new("C:/Videos/ApexShot Motion.mp4"),
+            &recorded
+        ));
+        assert!(is_motion_export(
+            Path::new("C:/Videos/shot 1 motion.MP4"),
+            &recorded
+        ));
+        assert!(!is_motion_export(
+            Path::new("C:/Videos/ApexShot Recording.mp4"),
+            &recorded
+        ));
+        assert!(!is_motion_export(
+            Path::new("C:/Videos/Motion.mp4"),
+            &recorded
+        ));
     }
 }

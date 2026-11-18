@@ -63,7 +63,8 @@ impl MotionMode {
         let Some(project) = crate::capture::editor::motion_project::load_project(source) else {
             return false;
         };
-        self.timeline.restore_motion(|state| project.apply_to(state));
+        self.timeline
+            .restore_motion(|state| project.apply_to(state));
         self.timeline.motion_state().has_segments()
     }
 

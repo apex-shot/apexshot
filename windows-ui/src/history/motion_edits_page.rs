@@ -103,7 +103,7 @@ fn gather(now: SystemTime) -> Vec<CardData> {
             thumbnail,
         });
     }
-    cards.sort_by(|a, b| b.modified.cmp(&a.modified));
+    cards.sort_by_key(|card| std::cmp::Reverse(card.modified));
     cards
 }
 

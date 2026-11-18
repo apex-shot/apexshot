@@ -229,7 +229,9 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
             let source =
                 gtk4::glib::timeout_add_local_once(std::time::Duration::from_secs(2), move || {
                     pending_clear.borrow_mut().take();
-                    if let (Some(canvas), Some(motion)) = (canvas_weak.upgrade(), motion_weak.upgrade()) {
+                    if let (Some(canvas), Some(motion)) =
+                        (canvas_weak.upgrade(), motion_weak.upgrade())
+                    {
                         if let Some(path) = canvas.source_path() {
                             motion.persist_session(&path);
                         }

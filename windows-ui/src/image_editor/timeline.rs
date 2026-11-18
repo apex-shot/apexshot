@@ -374,7 +374,10 @@ impl Timeline {
     /// Also call `listener` on every Motion state change, after the
     /// inspector's own listener.
     pub(super) fn add_state_listener(&self, listener: Rc<dyn Fn()>) {
-        self.shared.extra_state_listeners.borrow_mut().push(listener);
+        self.shared
+            .extra_state_listeners
+            .borrow_mut()
+            .push(listener);
     }
 
     pub(super) fn edit_motion(&self, edit: impl FnOnce(&mut MotionState), show_pose: bool) {

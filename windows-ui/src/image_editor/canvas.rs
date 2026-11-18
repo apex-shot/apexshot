@@ -37,6 +37,8 @@ const CROP_BOTTOM_CHROME: f64 = 64.0;
 const TOAST_LIFETIME: Duration = Duration::from_millis(4200);
 
 type ChangeListeners = Rc<RefCell<Vec<Rc<dyn Fn()>>>>;
+/// Called with the file's path once an image finishes loading.
+type LoadListener = Rc<dyn Fn(&std::path::Path)>;
 
 struct SavedCropView {
     width: i32,
@@ -133,7 +135,7 @@ pub(super) struct Canvas {
     /// Subscribed change listeners (sub-bars, history pill) fired by the host.
     listeners: ChangeListeners,
     /// Called with the path once an image finishes loading into the canvas.
-    load_listeners: RefCell<Vec<Rc<dyn Fn(&std::path::Path)>>>,
+    load_listeners: RefCell<Vec<LoadListener>>,
 }
 
 pub(super) fn build(scale: f64, dark: bool) -> Rc<Canvas> {
@@ -396,8 +398,7 @@ impl Canvas {
                     *canvas.source_path.borrow_mut() = Some(loaded_path.clone());
                     crate::update::open_windows::register_image_editor(Some(loaded_path.as_path()));
                     canvas.finish_load(decoded);
-                    let listeners: Vec<Rc<dyn Fn(&std::path::Path)>> =
-                        canvas.load_listeners.borrow().clone();
+                    let listeners: Vec<LoadListener> = canvas.load_listeners.borrow().clone();
                     for listener in listeners {
                         listener(&loaded_path);
                     }
@@ -752,7 +753,7 @@ impl Canvas {
 
     /// Call `listener` with the file's path each time an image finishes
     /// loading.
-    pub(super) fn add_load_listener(&self, listener: Rc<dyn Fn(&std::path::Path)>) {
+    pub(super) fn add_load_listener(&self, listener: LoadListener) {
         self.load_listeners.borrow_mut().push(listener);
     }
 

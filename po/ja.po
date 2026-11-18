@@ -5164,3 +5164,9 @@ msgstr "エディターに戻ってリンクをコピーしてください"
 
 msgid "Open link"
 msgstr "リンクを開く"
+
+msgid "Exported Motion video"
+msgstr "書き出した Motion 動画"
+
+msgid "Motion edits you make and Motion videos you export will show up here."
+msgstr "作成したモーション編集と書き出した Motion 動画はここに表示されます。"
