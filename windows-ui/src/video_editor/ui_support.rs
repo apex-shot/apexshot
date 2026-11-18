@@ -76,6 +76,19 @@ const RECORDING_EDITOR_CSS: &str = concat!(
     .editor-theme-light .video-editor-disclosure-chevron {
         color: rgba(17, 24, 39, 0.5);
     }
+    .video-editor-studio-badge {
+        color: #ff9250;
+        background: rgba(255, 103, 13, 0.16);
+        border-radius: 999px;
+        padding: 1px 7px;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+    }
+    .editor-theme-light .video-editor-studio-badge {
+        color: #c2410c;
+        background: rgba(255, 103, 13, 0.12);
+    }
     "#,
 );
 

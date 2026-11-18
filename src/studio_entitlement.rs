@@ -33,6 +33,10 @@ pub struct StudioCapabilities {
     pub image_upscale: bool,
     /// Decorative still-image presentation: frame styles and scene shadows.
     pub studio_style: bool,
+    /// On-screen keystroke captions baked into a recording.
+    pub keystroke_captions: bool,
+    /// The camera person cut out of the webcam and set on the screen.
+    pub camera_cutout: bool,
 }
 
 impl StudioCapabilities {
@@ -42,6 +46,8 @@ impl StudioCapabilities {
             || self.advanced_zoom
             || self.image_upscale
             || self.studio_style
+            || self.keystroke_captions
+            || self.camera_cutout
     }
 }
 

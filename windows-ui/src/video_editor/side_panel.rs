@@ -780,6 +780,7 @@ fn build_cursor_panel(
             let visibility =
                 remembered_section(scale, &states, "visibility", &t("Visibility"), true);
             let keyboard = remembered_section(scale, &states, "keyboard", &t("Keyboard"), true);
+            mark_studio(&keyboard);
             let typing = remembered_section(scale, &states, "typing", &t("Typing"), true);
             style_page.append(&style.root);
             follow_page.append(&movement.root);
@@ -1673,6 +1674,7 @@ fn build_zoom_panel(
 
     let selected = webcam_section(scale, &t("This zoom"), true);
     let animation = webcam_section(scale, &t("Animation"), true);
+    mark_studio(&animation);
     animation
         .root
         .set_tooltip_text(Some(&t("These settings apply to every zoom.")));
@@ -2728,6 +2730,40 @@ pub(super) fn webcam_section(scale: f64, title: &str, open: bool) -> WebcamSecti
     }
 }
 
+/// The quiet Studio tier marker on a section header. The controls stay usable;
+/// the badge only says which tier owns them, so it hides once Studio is
+/// unlocked. Activation can happen while the editor is open, so the check runs
+/// again whenever the header is shown.
+fn studio_badge(header: &GtkBox) -> Label {
+    let badge = Label::new(Some(&t("Studio")));
+    badge.add_css_class("video-editor-studio-badge");
+    badge.set_valign(Align::Center);
+    badge.set_tooltip_text(Some(&t("Included with Studio")));
+    badge.set_visible(!crate::studio_entitlement::studio_unlocked());
+    header.connect_map({
+        let badge = badge.downgrade();
+        move |_| {
+            if let Some(badge) = badge.upgrade() {
+                badge.set_visible(!crate::studio_entitlement::studio_unlocked());
+            }
+        }
+    });
+    badge
+}
+
+/// Put the Studio badge in a section's header, after its title.
+fn mark_studio(section: &WebcamSection) {
+    let Some(header) = section
+        .root
+        .first_child()
+        .and_then(|widget| widget.downcast::<GtkBox>().ok())
+    else {
+        return;
+    };
+    let badge = studio_badge(&header);
+    header.insert_child_after(&badge, header.first_child().as_ref());
+}
+
 /// Which of a panel's sections are open, by key, so a panel that rebuilds its
 /// controls keeps the sections the user opened or closed.
 type SectionStates = Rc<RefCell<std::collections::HashMap<&'static str, bool>>>;
@@ -3442,7 +3478,12 @@ fn build_webcam_cutout(
 ) -> WebcamCutoutContext {
     let root = GtkBox::new(Orientation::Vertical, (8.0 * scale).round() as i32);
     root.set_hexpand(true);
-    root.append(&webcam_hint(&t("Shared by every cutout layout.")));
+    let hint_row = GtkBox::new(Orientation::Horizontal, (8.0 * scale).round() as i32);
+    let hint = webcam_hint(&t("Shared by every cutout layout."));
+    hint.set_hexpand(true);
+    hint_row.append(&hint);
+    hint_row.append(&studio_badge(&hint_row));
+    root.append(&hint_row);
     root.append(&webcam_kicker(&t("POSITION")));
     let segment = GtkBox::new(Orientation::Horizontal, 0);
     segment.add_css_class("recording-editor-webcam-scope");
