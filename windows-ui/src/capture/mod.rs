@@ -49,8 +49,11 @@ pub mod editor {
     #[rustfmt::skip]
     pub mod image_transform;
 
-    /// The Cast light layer's on-disk shape the still-image sidecar shares
-    /// with the Motion project file.
+    /// The Motion project file, shared with the Linux editor so both
+    /// platforms read and write the same JSON; the still-image sidecar
+    /// reuses its Cast light layer shape.
+    #[path = "../../../../src/capture/editor/motion_project.rs"]
+    #[rustfmt::skip]
     pub mod motion_project;
 
     pub(crate) mod shadow_render;
