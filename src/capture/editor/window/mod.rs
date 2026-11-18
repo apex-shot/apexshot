@@ -19,8 +19,8 @@ use super::pen_weight::{HighlighterMode, PenWeight};
 use super::selection::action_bounds_with_padding;
 use super::state::EditorState;
 use super::types::{
-    tool_button_index, AnnotationAction, ArrowStyle, BackgroundStyle, DrawColor, EditorError, Tool,
-    ViewTransform,
+    tool_button_index, AnnotationAction, ArrowStyle, BackgroundAlignment, BackgroundStyle,
+    CropAspectRatio, DrawColor, EditorError, Tool, ViewTransform,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -3047,17 +3047,71 @@ fn setup_editor_window_full(
         );
     }
 
+    // Crash safety: the session is written beside the image while it is
+    // edited, not only on close. A write waits until the session has held
+    // still for one tick, so a drag in progress is never written, and runs on
+    // a worker so encoding the original never stalls the canvas.
+    let session_writes: Arc<Mutex<u64>> = Arc::new(Mutex::new(0));
+    let last_written = Rc::new(RefCell::new(session_baseline.clone()));
+    if !empty_drop_zone {
+        let state = state.clone();
+        let path = path.clone();
+        let window = window.downgrade();
+        let session_alive = session_alive.clone();
+        let baseline = session_baseline.clone();
+        let last_written = last_written.clone();
+        let writes = session_writes.clone();
+        let previous_tick = RefCell::new(session_baseline.clone());
+        glib::timeout_add_local(std::time::Duration::from_secs(2), move || {
+            if !session_alive.get() || window.upgrade().is_none() {
+                return glib::ControlFlow::Break;
+            }
+            let st = state.lock().unwrap();
+            let current = image_session_snapshot(&st);
+            let settled = *previous_tick.borrow() == current;
+            *previous_tick.borrow_mut() = current.clone();
+            if !settled || *last_written.borrow() == current {
+                return glib::ControlFlow::Continue;
+            }
+            let delete = session_write_deletes(&current, &baseline);
+            let job = ImageSessionWrite::capture(&path, &st, delete);
+            drop(st);
+            *last_written.borrow_mut() = current;
+            let generation = {
+                let mut latest = writes.lock().unwrap_or_else(|error| error.into_inner());
+                *latest += 1;
+                *latest
+            };
+            let writes = writes.clone();
+            std::thread::spawn(move || {
+                let latest = writes.lock().unwrap_or_else(|error| error.into_inner());
+                if *latest == generation {
+                    job.write();
+                }
+                drop(latest);
+            });
+            glib::ControlFlow::Continue
+        });
+    }
     let state_prefs = state.clone();
     let session_alive_prefs = session_alive.clone();
     let path_persist = path.clone();
     let motion_session_persist = motion_host.session();
+    let last_written_close = last_written.clone();
+    let session_writes_close = session_writes.clone();
     window.connect_close_request(move |_| {
         // Superseded session: don't save stale preferences on close.
         if !session_alive_prefs.get() {
             return glib::Propagation::Proceed;
         }
         if !empty_drop_zone {
-            persist_image_session_on_close(&path_persist, &state_prefs, &session_baseline);
+            persist_image_session_on_close(
+                &path_persist,
+                &state_prefs,
+                &session_baseline,
+                &last_written_close,
+                &session_writes_close,
+            );
             // Motion edits live outside EditorState, so they persist
             // separately. An untouched Motion session writes no sidecar.
             let motion = motion_session_persist.runtime.borrow();
@@ -3093,29 +3147,115 @@ fn image_session_snapshot(state: &EditorState) -> crate::annotations::ImageSessi
     )
 }
 
+/// One editable-session write, detached from `EditorState` so a worker thread
+/// can do the hashing and the PNG encoding of the original.
+struct ImageSessionWrite {
+    path: PathBuf,
+    /// Nothing left to re-edit: drop the sidecar instead of writing one.
+    delete: bool,
+    width: u32,
+    height: u32,
+    actions: Vec<AnnotationAction>,
+    base_image: Arc<image::RgbaImage>,
+    background_style: BackgroundStyle,
+    background_padding: f64,
+    shadow_profile: crate::annotations::ShadowProfileSettings,
+    cast_light: Option<crate::capture::editor::motion_project::MotionSceneShadowFile>,
+    background_insert: f64,
+    auto_balance: bool,
+    background_alignment: BackgroundAlignment,
+    background_corner_radius: f64,
+    background_aspect_ratio: CropAspectRatio,
+    static_image_transform: super::image_transform::StaticImageTransform,
+    source_upscale: super::upscale::SourceUpscale,
+}
+
+impl ImageSessionWrite {
+    fn capture(path: &std::path::Path, state: &EditorState, delete: bool) -> Self {
+        let (shadow_profile, cast_light) = background_panel::persisted_shadows(state);
+        Self {
+            path: path.to_path_buf(),
+            delete,
+            width: state.base_image.width(),
+            height: state.base_image.height(),
+            actions: state.actions.clone(),
+            base_image: Arc::clone(&state.base_image),
+            background_style: state.background_style.clone(),
+            background_padding: state.background_padding,
+            shadow_profile,
+            cast_light,
+            background_insert: state.background_insert,
+            auto_balance: state.auto_balance,
+            background_alignment: state.background_alignment,
+            background_corner_radius: state.background_corner_radius,
+            background_aspect_ratio: state.background_aspect_ratio,
+            static_image_transform: state.static_image_transform,
+            source_upscale: state.source_upscale,
+        }
+    }
+
+    fn write(self) {
+        if self.delete {
+            if crate::annotations::annotations_exist(&self.path) {
+                if let Err(error) = crate::annotations::delete_annotations(&self.path) {
+                    eprintln!("[editor] Warning: Failed to delete annotations: {error}");
+                }
+            }
+            return;
+        }
+        if let Err(error) = crate::annotations::save_annotations(
+            &self.path,
+            self.width,
+            self.height,
+            &self.actions,
+            &self.base_image,
+            &self.background_style,
+            self.background_padding,
+            self.shadow_profile,
+            self.cast_light,
+            self.background_insert,
+            self.auto_balance,
+            self.background_alignment,
+            self.background_corner_radius,
+            self.background_aspect_ratio,
+            self.static_image_transform,
+            self.source_upscale,
+        ) {
+            eprintln!("[editor] Warning: Failed to save annotations: {error}");
+        }
+    }
+}
+
+/// Whether a session with nothing left to re-edit should drop the sidecar,
+/// the same rule the close path has always used.
+fn session_write_deletes(
+    current: &crate::annotations::ImageSessionSnapshot,
+    baseline: &crate::annotations::ImageSessionSnapshot,
+) -> bool {
+    current.is_empty()
+        && current.canvas_width == baseline.canvas_width
+        && current.canvas_height == baseline.canvas_height
+}
+
 fn persist_image_session_on_close(
     path: &std::path::Path,
     state: &Arc<Mutex<EditorState>>,
     baseline: &crate::annotations::ImageSessionSnapshot,
+    last_written: &RefCell<crate::annotations::ImageSessionSnapshot>,
+    writes: &Arc<Mutex<u64>>,
 ) {
+    // Supersede any autosave that has not started, and wait out one that has.
+    let mut generation = writes.lock().unwrap_or_else(|error| error.into_inner());
+    *generation += 1;
     let st = state.lock().unwrap();
     let current = image_session_snapshot(&st);
-    if current == *baseline {
+    if current == *last_written.borrow() {
         return;
     }
-    if current.is_empty()
-        && current.canvas_width == baseline.canvas_width
-        && current.canvas_height == baseline.canvas_height
-        && crate::annotations::annotations_exist(path)
-    {
-        if let Err(error) = crate::annotations::delete_annotations(path) {
-            eprintln!("[editor] Warning: Failed to delete annotations: {error}");
-        }
-        return;
-    }
-    if let Err(error) = events::persist_image_session(path, &st) {
-        eprintln!("[editor] Warning: Failed to save annotations: {error}");
-    }
+    let delete = session_write_deletes(&current, baseline);
+    ImageSessionWrite::capture(path, &st, delete).write();
+    *last_written.borrow_mut() = current;
+    drop(generation);
 }
 
 #[cfg(test)]
