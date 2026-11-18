@@ -5164,3 +5164,9 @@ msgstr "エディターに戻ってリンクをコピーしてください"
 
 msgid "Open link"
 msgstr "リンクを開く"
+
+msgid "60 FPS makes animation smoother and takes longer to export."
+msgstr "60 FPS ではアニメーションが滑らかになりますが、書き出しに時間がかかります。"
+
+msgid "Export cannot recover detail missing from the screenshot."
+msgstr "スクリーンショットにない細部は、書き出しで復元できません。"

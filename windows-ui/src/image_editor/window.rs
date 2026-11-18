@@ -844,6 +844,54 @@ fn save_motion_video_dialog(
         return;
     }
 
+    let chooser_window = window.downgrade();
+    let host = host.clone();
+    let motion = motion.clone();
+    let inspector = inspector.clone();
+    let exporting = exporting.clone();
+    let cancel = cancel.clone();
+    let name = name.to_string();
+    let lock = lock.clone();
+    super::motion_export_options::show(window, &motion.clone(), move |options| {
+        let Some(window) = chooser_window.upgrade() else {
+            return;
+        };
+        choose_motion_video_destination(
+            &window,
+            &host,
+            &motion,
+            &inspector,
+            &exporting,
+            &cancel,
+            &name,
+            options,
+            sync_all.clone(),
+            &lock,
+        );
+    });
+}
+
+/// The platform chooser for the Motion MP4's destination, opened after the
+/// export options dialog answers. Keeps the chooser's naming and folder
+/// memory, the progress label and the notifications it always had.
+#[allow(clippy::too_many_arguments)]
+fn choose_motion_video_destination(
+    window: &ApplicationWindow,
+    host: &Rc<super::annotate::EditorHost>,
+    motion: &Rc<motion::MotionMode>,
+    inspector: &Rc<inspector::Inspector>,
+    exporting: &Rc<Cell<bool>>,
+    cancel: &MotionCancel,
+    name: &str,
+    options: motion::MotionExportOptions,
+    sync_all: Rc<dyn Fn()>,
+    lock: &Rc<EditingLock>,
+) {
+    // The options dialog was modal, but an export or a document change could
+    // still have landed while it was open.
+    if lock.locked() || exporting.get() || !host.has_document() || host.background_loading() {
+        return;
+    }
     let dialog = gtk4::FileDialog::new();
     dialog.set_title(&t("Export Motion video"));
     let config = crate::config::load_config().sanitized();
@@ -884,6 +932,7 @@ fn save_motion_video_dialog(
                 sync_all();
                 let result = motion.export_video(
                     path,
+                    options,
                     {
                         let export_button = inspector.export_button.clone();
                         move |done, total| {
@@ -1203,46 +1252,54 @@ fn upload_motion_video(
     button.set_sensitive(false);
     lock.acquire();
     sync_all();
-    let result = motion.export_video(path, |_, _| {}, {
-        let window = window.downgrade();
-        let button = button.downgrade();
-        let uploading = uploading.clone();
-        let host = host.clone();
-        let sync_all = sync_all.clone();
-        let lock = lock.clone();
-        move |result| match result {
-            Ok(path) => {
-                if let (Some(window), Some(button)) = (window.upgrade(), button.upgrade()) {
-                    upload_path(
-                        &window,
-                        &button,
-                        &uploading,
-                        config,
-                        path,
-                        Some(cleanup),
-                        Some(sync_all),
-                        Some(lock.clone()),
-                    );
-                } else {
+    let result = motion.export_video(
+        path,
+        super::motion::MotionExportOptions::default(),
+        |_, _| {},
+        {
+            let window = window.downgrade();
+            let button = button.downgrade();
+            let uploading = uploading.clone();
+            let host = host.clone();
+            let sync_all = sync_all.clone();
+            let lock = lock.clone();
+            move |result| match result {
+                Ok(path) => {
+                    if let (Some(window), Some(button)) = (window.upgrade(), button.upgrade()) {
+                        upload_path(
+                            &window,
+                            &button,
+                            &uploading,
+                            config,
+                            path,
+                            Some(cleanup),
+                            Some(sync_all),
+                            Some(lock.clone()),
+                        );
+                    } else {
+                        uploading.set(false);
+                        let _ = std::fs::remove_dir_all(&cleanup);
+                        lock.release();
+                        sync_all();
+                    }
+                }
+                Err(error) => {
                     uploading.set(false);
+                    if let Some(button) = button.upgrade() {
+                        button.set_sensitive(true);
+                    }
                     let _ = std::fs::remove_dir_all(&cleanup);
                     lock.release();
                     sync_all();
+                    crate::utils::notify::desktop_notification_important(
+                        &t("Upload failed"),
+                        &error,
+                    );
+                    host.report_error(error);
                 }
             }
-            Err(error) => {
-                uploading.set(false);
-                if let Some(button) = button.upgrade() {
-                    button.set_sensitive(true);
-                }
-                let _ = std::fs::remove_dir_all(&cleanup);
-                lock.release();
-                sync_all();
-                crate::utils::notify::desktop_notification_important(&t("Upload failed"), &error);
-                host.report_error(error);
-            }
-        }
-    });
+        },
+    );
     if let Err(error) = result {
         lock.release();
         uploading.set(false);

@@ -5154,3 +5154,9 @@ msgstr "返回编辑器以复制链接"
 
 msgid "Open link"
 msgstr "打开链接"
+
+msgid "60 FPS makes animation smoother and takes longer to export."
+msgstr "60 FPS 让动画更流畅，但导出需要更长时间。"
+
+msgid "Export cannot recover detail missing from the screenshot."
+msgstr "导出无法恢复截图中缺失的细节。"

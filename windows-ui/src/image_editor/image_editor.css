@@ -2139,6 +2139,52 @@ button.recording-editor-timeline-tool image {
     color: rgba(17, 24, 39, 0.72);
 }
 
+/* The skip box follows the editor's accent instead of the toolkit's blue. */
+checkbutton.image-editor-confirm-skip check {
+    min-width: 14px;
+    min-height: 14px;
+    margin-right: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.32);
+    border-radius: 4px;
+    background: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: #ffffff;
+}
+
+checkbutton.image-editor-confirm-skip check:hover {
+    border-color: rgba(255, 255, 255, 0.52);
+}
+
+checkbutton.image-editor-confirm-skip check:checked {
+    background: #ff670d;
+    border-color: #ff670d;
+    color: #ffffff;
+}
+
+checkbutton.image-editor-confirm-skip check:checked:hover {
+    background: #ff7c2f;
+    border-color: #ff7c2f;
+}
+
+checkbutton.image-editor-confirm-skip:focus-visible check {
+    outline: 2px solid #ff7c2f;
+    outline-offset: 2px;
+}
+
+.image-editor-confirm-card.editor-theme-light checkbutton.image-editor-confirm-skip check {
+    border-color: rgba(17, 24, 39, 0.32);
+}
+
+.image-editor-confirm-card.editor-theme-light checkbutton.image-editor-confirm-skip check:hover {
+    border-color: rgba(17, 24, 39, 0.52);
+}
+
+.image-editor-confirm-card.editor-theme-light checkbutton.image-editor-confirm-skip check:checked {
+    background: #ff670d;
+    border-color: #ff670d;
+}
+
 button.image-editor-confirm-cancel {
     padding: 5px 12px;
     border: none;

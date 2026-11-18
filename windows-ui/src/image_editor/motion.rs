@@ -32,6 +32,25 @@ type VideoSetup = (
     Rc<RefCell<Option<ImageSurface>>>,
 );
 
+/// The choices the export sheet hands the encoder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct MotionExportOptions {
+    /// Short-edge target in pixels; `None` keeps the frame's own size.
+    pub resolution: Option<u32>,
+    pub fps: u32,
+    pub crf: u32,
+}
+
+impl Default for MotionExportOptions {
+    fn default() -> Self {
+        Self {
+            resolution: None,
+            fps: MOTION_EXPORT_FPS,
+            crf: 18,
+        }
+    }
+}
+
 pub(super) struct MotionMode {
     /// The page the workspace stack shows while Motion is open.
     pub page: GtkBox,
@@ -57,6 +76,25 @@ impl MotionMode {
         frame_image(&self.host, &self.timeline, &watermark_surface)
     }
 
+    /// The even pixels a Motion export lands on: the preset's frame or the
+    /// composed canvas, scaled so its short edge meets `resolution`.
+    pub(super) fn export_dimensions(&self, resolution: Option<u32>) -> Option<(i32, i32)> {
+        self.host.read(|st| {
+            let (image_width, image_height) = st.working_image.dimensions();
+            motion_output_size(
+                st.background.layout(image_width, image_height),
+                preset_size(st),
+                resolution,
+            )
+        })
+    }
+
+    /// The length a Motion export at `fps` covers, in seconds.
+    pub(super) fn export_seconds(&self, fps: u32) -> f64 {
+        let fps = fps.max(1);
+        motion_frame_count(self.timeline.motion_state().duration, fps) as f64 / f64::from(fps)
+    }
+
     /// Render the whole composition to an MP4 on the main loop, one frame per
     /// tick, so the window stays responsive. The still card, titles and mark
     /// are painted through the same preview path used on screen; the backdrop
@@ -65,10 +103,11 @@ impl MotionMode {
     pub(super) fn export_video(
         &self,
         destination: PathBuf,
+        options: MotionExportOptions,
         on_progress: impl Fn(usize, usize) + 'static,
         on_done: impl FnOnce(Result<PathBuf, String>) + 'static,
     ) -> Result<Rc<Cell<bool>>, String> {
-        let (job, watermark_surface) = self.prepare_video_job(destination)?;
+        let (job, watermark_surface) = self.prepare_video_job(destination, options)?;
         let cancel = Rc::new(Cell::new(false));
         let cancel_tick = cancel.clone();
         let done: VideoDone = Rc::new(RefCell::new(Some(Box::new(on_done))));
@@ -102,8 +141,12 @@ impl MotionMode {
     }
 
     #[cfg(test)]
-    fn export_video_blocking(&self, destination: PathBuf) -> Result<PathBuf, String> {
-        let (job, watermark_surface) = self.prepare_video_job(destination)?;
+    fn export_video_blocking(
+        &self,
+        destination: PathBuf,
+        options: MotionExportOptions,
+    ) -> Result<PathBuf, String> {
+        let (job, watermark_surface) = self.prepare_video_job(destination, options)?;
         let mut job = job.borrow_mut();
         while job.frame < job.frame_count {
             if let Err(error) = job.render_frame(&self.host, &watermark_surface) {
@@ -113,7 +156,11 @@ impl MotionMode {
         job.finish()
     }
 
-    fn prepare_video_job(&self, destination: PathBuf) -> Result<VideoSetup, String> {
+    fn prepare_video_job(
+        &self,
+        destination: PathBuf,
+        options: MotionExportOptions,
+    ) -> Result<VideoSetup, String> {
         crate::studio_entitlement::ensure_export_allowed(
             crate::studio_entitlement::capabilities_for_motion_export(),
         )
@@ -134,22 +181,16 @@ impl MotionMode {
             .ok_or_else(|| t("Motion has no still to export."))?;
         // A platform preset renders straight at its pixels: the composition
         // already has the preset's aspect, so it scales to fill exactly and
-        // the vectors stay sharp. Otherwise the video is the canvas itself.
-        let (width, height, zoom) = match frame_size {
-            Some((width, height)) => {
-                let width = even_output_size(f64::from(width));
-                let height = even_output_size(f64::from(height));
-                let zoom = (
-                    f64::from(width) / layout.width.max(1.0),
-                    f64::from(height) / layout.height.max(1.0),
-                );
-                (width, height, zoom)
-            }
-            None => (
-                even_output_size(layout.width),
-                even_output_size(layout.height),
-                (1.0, 1.0),
-            ),
+        // the vectors stay sharp. A resolution target scales the same way; at
+        // the canvas's own size the render keeps its 1:1 odd-pixel centering.
+        let (width, height) = motion_output_size(layout, frame_size, options.resolution);
+        let zoom = if frame_size.is_some() || options.resolution.is_some() {
+            (
+                f64::from(width) / layout.width.max(1.0),
+                f64::from(height) / layout.height.max(1.0),
+            )
+        } else {
+            (1.0, 1.0)
         };
         let extra_x = (f64::from(width) / zoom.0 - layout.width) / 2.0;
         let extra_y = (f64::from(height) / zoom.1 - layout.height) / 2.0;
@@ -177,9 +218,16 @@ impl MotionMode {
             .map_err(|error| error.to_string())?;
 
         let motion = self.timeline.motion_state();
-        let frame_count = motion_frame_count(motion.duration);
+        let fps_value = options.fps.max(1);
+        let frame_count = motion_frame_count(motion.duration, fps_value);
         let size = format!("{width}x{height}");
-        let fps = MOTION_EXPORT_FPS.to_string();
+        let fps = fps_value.to_string();
+        let crf = options.crf.to_string();
+        // Encode into a temporary sibling and replace the destination on
+        // success, so a failed or cancelled render never clobbers the file
+        // that was already there.
+        let temporary_path = crate::capture::editor::io_ops::temporary_export_path(&destination)
+            .map_err(|error| error.to_string())?;
         let mut command = crate::recording::editor::ffmpeg::export_command();
         let mut child = command
             .args([
@@ -202,19 +250,23 @@ impl MotionMode {
                 "-pix_fmt",
                 "yuv420p",
                 "-crf",
-                "18",
+                crf.as_str(),
                 "-movflags",
                 "+faststart",
             ])
-            .arg(&destination)
+            .arg(&temporary_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
-            .map_err(|error| format!("Could not start ffmpeg: {error}"))?;
+            .map_err(|error| {
+                let _ = std::fs::remove_file(&temporary_path);
+                format!("Could not start ffmpeg: {error}")
+            })?;
         let Some(stdin) = child.stdin.take() else {
             let _ = child.kill();
             let _ = child.wait();
+            let _ = std::fs::remove_file(&temporary_path);
             return Err(t("Could not open the Motion encoder input."));
         };
 
@@ -233,7 +285,9 @@ impl MotionMode {
             motion,
             frame: 0,
             frame_count,
+            fps: fps_value,
             destination,
+            temporary_path,
         }));
         Ok((job, self.inspector.watermark.surface()))
     }
@@ -883,8 +937,30 @@ fn even_output_size(value: f64) -> i32 {
     size + (size & 1)
 }
 
-fn motion_frame_count(duration: f64) -> usize {
-    let fps = f64::from(MOTION_EXPORT_FPS);
+/// The even frame an export covers: the preset's own pixels or the raw
+/// layout, scaled so the short edge meets `resolution` when one is chosen.
+fn motion_output_size(
+    layout: Layout,
+    frame_size: Option<(u32, u32)>,
+    resolution: Option<u32>,
+) -> (i32, i32) {
+    let (width, height) = match frame_size {
+        Some((width, height)) => (f64::from(width), f64::from(height)),
+        None => (layout.width, layout.height),
+    };
+    let short_edge = width.min(height);
+    let factor = match resolution {
+        Some(edge) if short_edge > 0.0 => f64::from(edge) / short_edge,
+        _ => 1.0,
+    };
+    (
+        even_output_size(width * factor),
+        even_output_size(height * factor),
+    )
+}
+
+fn motion_frame_count(duration: f64, fps: u32) -> usize {
+    let fps = f64::from(fps);
     ((duration.max(1.0 / fps) * fps).round() as usize).max(1)
 }
 
@@ -902,12 +978,17 @@ struct MotionVideoJob {
     width: i32,
     height: i32,
     /// Composition units to output pixels; `(1, 1)` unless a platform
-    /// preset fixes the size.
+    /// preset or a resolution target fixes the size.
     zoom: (f64, f64),
     motion: MotionState,
     frame: usize,
     frame_count: usize,
+    /// The frame rate each rendered sample is timestamped at.
+    fps: u32,
     destination: PathBuf,
+    /// The sibling ffmpeg actually writes; `destination` is replaced with it
+    /// only once the encode finishes cleanly.
+    temporary_path: PathBuf,
 }
 
 impl MotionVideoJob {
@@ -916,7 +997,7 @@ impl MotionVideoJob {
         host: &super::annotate::EditorHost,
         watermark_surface: &Rc<RefCell<Option<ImageSurface>>>,
     ) -> Result<(), String> {
-        let time = self.frame as f64 / f64::from(MOTION_EXPORT_FPS);
+        let time = self.frame as f64 / f64::from(self.fps);
         // The encoder spends the full-quality budget on the same exposure
         // window the preview shows, capped so a frame stays bounded.
         let frames = timeline::motion_blur_frames(
@@ -984,10 +1065,19 @@ impl MotionVideoJob {
 
     fn finish(&mut self) -> Result<PathBuf, String> {
         self.stdin.take();
-        let status = self.child.wait().map_err(|error| error.to_string())?;
+        let status = match self.child.wait() {
+            Ok(status) => status,
+            Err(error) => return self.abort(error.to_string()),
+        };
         if !status.success() {
-            let _ = std::fs::remove_file(&self.destination);
+            let _ = std::fs::remove_file(&self.temporary_path);
             return Err(t("ffmpeg failed to encode the Motion video."));
+        }
+        if let Err(error) =
+            crate::capture::editor::io_ops::replace_file(&self.temporary_path, &self.destination)
+        {
+            let _ = std::fs::remove_file(&self.temporary_path);
+            return Err(error.to_string());
         }
         Ok(self.destination.clone())
     }
@@ -996,7 +1086,7 @@ impl MotionVideoJob {
         self.stdin.take();
         let _ = self.child.kill();
         let _ = self.child.wait();
-        let _ = std::fs::remove_file(&self.destination);
+        let _ = std::fs::remove_file(&self.temporary_path);
         Err(error)
     }
 }
@@ -1293,8 +1383,10 @@ mod tests {
         assert_eq!(even_output_size(100.0), 100);
         assert_eq!(even_output_size(101.0), 102);
         assert_eq!(even_output_size(0.0), 2);
-        assert_eq!(motion_frame_count(1.0), 30);
-        assert_eq!(motion_frame_count(0.01), 1);
+        assert_eq!(motion_frame_count(1.0, 30), 30);
+        assert_eq!(motion_frame_count(1.0, 60), 60);
+        assert_eq!(motion_frame_count(0.01, 30), 1);
+        assert_eq!(motion_frame_count(0.01, 60), 1);
     }
 
     #[test]
@@ -1321,50 +1413,92 @@ mod tests {
             let mode = build(1.0, true, inspector, &canvas);
             mode.timeline
                 .edit_motion(|state| state.duration = 0.2, false);
-            let path = std::env::temp_dir()
-                .join(format!("apexshot-motion-export-{}.mp4", std::process::id()));
-            let output = mode
-                .export_video_blocking(path.clone())
-                .expect("the Motion export succeeded");
-            assert_eq!(output, path);
-            let length = std::fs::metadata(&output).expect("exported file").len();
-            assert!(length > 1000, "MP4 is only {length} bytes");
-            let probe =
-                std::process::Command::new(crate::recording::editor::ffmpeg::ffprobe_executable())
-                    .args([
-                        "-v",
-                        "error",
-                        "-select_streams",
-                        "v:0",
-                        "-show_entries",
-                        "stream=codec_name,width,height,nb_frames",
-                        "-of",
-                        "default=noprint_wrappers=1",
-                    ])
-                    .arg(&output)
-                    .output()
-                    .expect("run ffprobe");
-            assert!(probe.status.success());
-            let fields = String::from_utf8_lossy(&probe.stdout);
-            let mut codec = "";
-            let mut width = 0;
-            let mut height = 0;
-            let mut frames = 0;
-            for line in fields.lines() {
-                if let Some((key, value)) = line.split_once('=') {
-                    match key {
-                        "codec_name" => codec = value,
-                        "width" => width = value.parse().unwrap_or(0),
-                        "height" => height = value.parse().unwrap_or(0),
-                        "nb_frames" => frames = value.parse().unwrap_or(0),
-                        _ => {}
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or_default();
+            let directory = std::env::temp_dir().join(format!(
+                "apexshot-motion-export-{}-{stamp}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&directory).unwrap();
+
+            // The encode writes through a temporary sibling, so cancelling a
+            // prepared job leaves an earlier file at the destination intact.
+            let sentinel_path = directory.join("sentinel.mp4");
+            std::fs::write(&sentinel_path, b"sentinel").unwrap();
+            let (job, _mark) = mode
+                .prepare_video_job(sentinel_path.clone(), MotionExportOptions::default())
+                .expect("prepare the Motion export");
+            let temporary = job.borrow().temporary_path.clone();
+            let aborted = job.borrow_mut().abort(t("Export cancelled"));
+            assert!(aborted.is_err());
+            assert_eq!(std::fs::read(&sentinel_path).unwrap(), b"sentinel");
+            assert!(!temporary.exists(), "the temporary MP4 is removed");
+            let _ = std::fs::remove_file(&sentinel_path);
+
+            for (index, (options, dimensions, frames, rate)) in [
+                (MotionExportOptions::default(), (32, 24), 6, "30/1"),
+                (
+                    MotionExportOptions {
+                        resolution: Some(12),
+                        fps: 60,
+                        crf: 30,
+                    },
+                    (16, 12),
+                    12,
+                    "60/1",
+                ),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let path = directory.join(format!("export-{index}.mp4"));
+                let output = mode
+                    .export_video_blocking(path.clone(), options)
+                    .expect("the Motion export succeeded");
+                assert_eq!(output, path);
+                let probe = std::process::Command::new(
+                    crate::recording::editor::ffmpeg::ffprobe_executable(),
+                )
+                .args([
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "v:0",
+                    "-show_entries",
+                    "stream=codec_name,width,height,nb_frames,r_frame_rate",
+                    "-of",
+                    "default=noprint_wrappers=1",
+                ])
+                .arg(&output)
+                .output()
+                .expect("run ffprobe");
+                assert!(probe.status.success());
+                let fields = String::from_utf8_lossy(&probe.stdout);
+                let mut codec = "";
+                let mut width = 0;
+                let mut height = 0;
+                let mut count = 0;
+                let mut frame_rate = "";
+                for line in fields.lines() {
+                    if let Some((key, value)) = line.split_once('=') {
+                        match key {
+                            "codec_name" => codec = value,
+                            "width" => width = value.parse().unwrap_or(0),
+                            "height" => height = value.parse().unwrap_or(0),
+                            "nb_frames" => count = value.parse().unwrap_or(0),
+                            "r_frame_rate" => frame_rate = value,
+                            _ => {}
+                        }
                     }
                 }
+                assert_eq!(codec, "h264");
+                assert_eq!((width, height), dimensions);
+                assert_eq!(count, frames, "MP4 frame count");
+                assert_eq!(frame_rate, rate, "MP4 frame rate");
             }
-            assert_eq!(codec, "h264");
-            assert!(width > 0 && height > 0 && width % 2 == 0 && height % 2 == 0);
-            assert!(frames > 1, "MP4 has {frames} frames");
-            let _ = std::fs::remove_file(&output);
+            let _ = std::fs::remove_dir_all(&directory);
         }) else {
             eprintln!("skipping: GTK unavailable");
             return;
