@@ -422,6 +422,14 @@ impl Canvas {
         self.host.persist_session(&path);
     }
 
+    /// Autosave the annotations for this window's file while it is edited.
+    pub(super) fn autosave_session(&self) {
+        let Some(path) = self.source_path() else {
+            return;
+        };
+        self.host.autosave_session(&path);
+    }
+
     /// Step the zoom in, as the pill's plus and Ctrl+plus do.
     pub(super) fn zoom_in(&self) {
         self.zoom_by(ZOOM_STEP);

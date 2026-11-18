@@ -565,6 +565,23 @@ fn wire_close_persist(
     export_cancellation: Arc<AtomicBool>,
     close_after_export: Rc<Cell<bool>>,
 ) {
+    // Crash safety: the project is written while the video is edited, not
+    // only on close. `persist_video_session` compares against the file on
+    // disk, so a tick with nothing new writes nothing.
+    {
+        let state = state.clone();
+        let window = window.downgrade();
+        glib::timeout_add_local(std::time::Duration::from_secs(2), move || {
+            if window.upgrade().is_none() {
+                return glib::ControlFlow::Break;
+            }
+            // `try_lock`: a tick never waits on the export or the preview.
+            if let Ok(state) = state.try_lock() {
+                persist_video_session(&state);
+            }
+            glib::ControlFlow::Continue
+        });
+    }
     window.connect_close_request(move |window| {
         if !state.lock().unwrap().has_source_video() {
             return glib::Propagation::Proceed;
@@ -1070,6 +1087,11 @@ mod tests {
             .map(|i| start + 1 + i)
             .unwrap_or(source.len());
         let handler = &source[start..end];
+        // The autosave tick before the handler also persists, so the ordering
+        // check starts at the close handler itself.
+        let handler = &handler[handler
+            .find("connect_close_request")
+            .expect("close request handler")..];
 
         let cancel = handler
             .find("export_cancellation.store(true, Ordering::Release)")
