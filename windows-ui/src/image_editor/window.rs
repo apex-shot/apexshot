@@ -133,6 +133,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
 
     let editing_lock = Rc::new(EditingLock {
         holds: Cell::new(0),
+        choosing: Cell::new(false),
         targets: vec![
             workspace_stack.clone().upcast(),
             toolbar_stack.clone().upcast(),
@@ -637,7 +638,7 @@ fn save_as_dialog(
     lock: &Rc<EditingLock>,
     sync_all: Rc<dyn Fn()>,
 ) {
-    if lock.locked() || !host.has_document() || host.background_loading() {
+    if lock.locked() || lock.choosing() || !host.has_document() || host.background_loading() {
         return;
     }
     let retry_window = window.downgrade();
@@ -712,7 +713,10 @@ fn save_as_dialog(
     dialog.set_default_filter(Some(&images));
     let host = host.clone();
     let parent = window.clone();
+    let chooser_lock = lock.clone();
+    chooser_lock.set_choosing(true);
     dialog.save(Some(window), gtk4::gio::Cancellable::NONE, move |result| {
+        chooser_lock.set_choosing(false);
         if let Ok(file) = result {
             if let Some(path) = file.path() {
                 host.save_as(&parent, &path, on_done());
@@ -787,6 +791,9 @@ fn set_motion_controls_sensitive(inspector: &inspector::Inspector, sensitive: bo
 /// when the last export or upload finishes.
 struct EditingLock {
     holds: Cell<u32>,
+    /// Set while an export's Save dialog is open, so a second Export click or
+    /// Ctrl+S cannot open another one before the first export starts.
+    choosing: Cell<bool>,
     targets: Vec<gtk4::Widget>,
     inspector: Rc<inspector::Inspector>,
 }
@@ -794,6 +801,14 @@ struct EditingLock {
 impl EditingLock {
     fn locked(&self) -> bool {
         self.holds.get() > 0
+    }
+
+    fn choosing(&self) -> bool {
+        self.choosing.get()
+    }
+
+    fn set_choosing(&self, choosing: bool) {
+        self.choosing.set(choosing);
     }
 
     fn acquire(&self) {
@@ -840,6 +855,7 @@ fn save_motion_video_dialog(
     lock: &Rc<EditingLock>,
 ) {
     if lock.locked()
+        || lock.choosing()
         || exporting.get()
         || uploading.get()
         || !host.has_document()
@@ -933,7 +949,12 @@ fn choose_motion_video_destination(
 ) {
     // The options dialog was modal, but an export or a document change could
     // still have landed while it was open.
-    if lock.locked() || exporting.get() || !host.has_document() || host.background_loading() {
+    if lock.locked()
+        || lock.choosing()
+        || exporting.get()
+        || !host.has_document()
+        || host.background_loading()
+    {
         return;
     }
     let dialog = gtk4::FileDialog::new();
@@ -959,7 +980,9 @@ fn choose_motion_video_destination(
     let cancel = cancel.clone();
     let sync_all = sync_all.clone();
     let lock = lock.clone();
+    lock.set_choosing(true);
     dialog.save(Some(window), gtk4::gio::Cancellable::NONE, move |result| {
+        lock.set_choosing(false);
         if let Ok(file) = result {
             if let Some(path) = file.path() {
                 let path = with_mp4_extension(path);

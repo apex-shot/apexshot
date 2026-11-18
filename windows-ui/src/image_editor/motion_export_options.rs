@@ -22,6 +22,9 @@ const FRAME_RATES: [u32; 3] = [60, 30, 24];
 /// 30 FPS stays the default the export always had.
 const DEFAULT_FPS_INDEX: usize = 1;
 
+/// Names the sheet's overlay so a second request finds the open one.
+const SHEET_NAME: &str = "motion-export-sheet";
+
 type OnExport = Box<dyn FnOnce(MotionExportOptions)>;
 
 /// Lay the export sheet over the editor; `on_export` runs with the choices
@@ -35,6 +38,14 @@ pub(super) fn show(
         on_export(MotionExportOptions::default());
         return;
     };
+    // Ctrl+S reaches the window while the sheet is up; one sheet at a time.
+    let mut child = shell.first_child();
+    while let Some(widget) = child {
+        if widget.widget_name() == SHEET_NAME {
+            return;
+        }
+        child = widget.next_sibling();
+    }
     crate::video_editor::export_card::install_css();
     let scale = crate::platform::ui_scale();
     let px = |n: f64| (n * scale).round() as i32;
@@ -67,6 +78,7 @@ pub(super) fn show(
     // The sheet's CSS reads the theme from an ancestor, and the window's root
     // overlay does not inherit the editor root's theme class.
     let host = Overlay::new();
+    host.set_widget_name(SHEET_NAME);
     host.add_css_class(if dark {
         "editor-theme-dark"
     } else {
