@@ -36,8 +36,16 @@ const GH_RELEASES_PAGE = 'https://github.com/apex-shot/apexshot/releases/latest'
  * a stable link and the in-app updater keeps reading the same release.
  */
 const DOWNLOADS = {
-  '/download/windows': '-setup.exe',
+  '/download/windows': { suffix: '-setup.exe', distro: 'windows', assetType: 'windows_installer' },
 };
+
+/**
+ * Download telemetry, the same endpoint the Linux install scripts report to.
+ * A redirect only proves the download started (the browser fetches the file
+ * from GitHub), so these are recorded as `download_started`.
+ */
+const TELEMETRY_URL = 'https://apexshot.org/api/download-telemetry';
+const BOT_UA = /bot|crawl|spider|slurp|preview|facebookexternalhit|embedly|headless|lighthouse|monitor|uptime/i;
 
 /** Public URL path -> script filename inside `scripts/`. */
 const ROUTES = {
@@ -85,7 +93,8 @@ function redirect(location, cacheControl) {
  * response is cached at the edge for five minutes so downloads do not spend
  * the unauthenticated rate limit; any failure falls back to the release page.
  */
-async function downloadRedirect(suffix) {
+async function downloadRedirect(download, request, ctx) {
+  const { suffix } = download;
   try {
     const upstream = await fetch(GH_LATEST_API, {
       headers: {
@@ -100,6 +109,9 @@ async function downloadRedirect(suffix) {
         candidate.name.endsWith(suffix),
       );
       if (asset) {
+        if (request.method === 'GET') {
+          ctx.waitUntil(recordDownload(download, release, asset, request));
+        }
         return redirect(asset.browser_download_url, 'public, max-age=300');
       }
       console.error(`latest release ${release.tag_name} has no *${suffix} asset`);
@@ -112,8 +124,34 @@ async function downloadRedirect(suffix) {
   return redirect(GH_RELEASES_PAGE, 'no-store');
 }
 
+/** Best effort: telemetry must never delay or break the download. */
+async function recordDownload(download, release, asset, request) {
+  const userAgent = request.headers.get('user-agent') || '';
+  if (!userAgent || BOT_UA.test(userAgent)) return;
+  try {
+    await fetch(TELEMETRY_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'user-agent': userAgent.slice(0, 255) },
+      body: JSON.stringify({
+        event: 'download_started',
+        script: 'website',
+        distro: download.distro,
+        channel: 'install',
+        version: String(release.tag_name || '').replace(/^v/i, '') || null,
+        asset_type: download.assetType,
+        asset_name: asset.name,
+        status: 'redirected',
+        size_bytes: typeof asset.size === 'number' ? asset.size : null,
+        install_id: null,
+      }),
+    });
+  } catch (err) {
+    console.error(`download telemetry failed: ${err}`);
+  }
+}
+
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     if (request.method !== 'GET' && request.method !== 'HEAD') {
       return new Response('method not allowed\n', {
         status: 405,
@@ -124,9 +162,9 @@ export default {
     const url = new URL(request.url);
     const path = normalisePath(url.pathname);
 
-    const suffix = DOWNLOADS[path];
-    if (suffix) {
-      return downloadRedirect(suffix);
+    const download = DOWNLOADS[path];
+    if (download) {
+      return downloadRedirect(download, request, ctx);
     }
 
     const file = ROUTES[path];
