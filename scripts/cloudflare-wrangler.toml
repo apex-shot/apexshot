@@ -25,6 +25,10 @@ compatibility_date = "2025-01-01"
 routes = [
   { pattern = "apexshot.org/install*", zone_name = "apexshot.org" },
   { pattern = "apexshot.org/update*", zone_name = "apexshot.org" },
+  # Exact path, no wildcard, so any other /download page on the site is left
+  # to the origin. The Worker answers with a redirect to the latest release's
+  # Windows installer on GitHub.
+  { pattern = "apexshot.org/download/windows", zone_name = "apexshot.org" },
 ]
 
 # Keep the workers.dev URL alive so the Worker can be tested directly, without

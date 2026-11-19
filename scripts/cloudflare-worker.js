@@ -15,7 +15,10 @@
  * throttled, or unreachable in a user's region. The GitHub fallback means a
  * failed or skipped R2 script sync in CI can never brick installs.
  *
- * Only the paths in ROUTES are handled; every other request on the zone
+ * It also serves `/download/windows`, a redirect to the latest release's
+ * Windows installer on GitHub (see DOWNLOADS).
+ *
+ * Only the paths in ROUTES and DOWNLOADS are handled; every other request on the zone
  * falls through to the normal apexshot.org origin untouched.
  *
  * Config file: scripts/cloudflare-wrangler.toml
@@ -23,6 +26,18 @@
  */
 
 const GH_RAW = 'https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts';
+const GH_LATEST_API = 'https://api.github.com/repos/apex-shot/apexshot/releases/latest';
+const GH_RELEASES_PAGE = 'https://github.com/apex-shot/apexshot/releases/latest';
+
+/**
+ * Public URL path -> suffix of the release asset it redirects to. The file is
+ * never proxied or mirrored: the Worker looks up the latest GitHub release and
+ * answers with a redirect to the asset's own download URL, so the website gets
+ * a stable link and the in-app updater keeps reading the same release.
+ */
+const DOWNLOADS = {
+  '/download/windows': '-setup.exe',
+};
 
 /** Public URL path -> script filename inside `scripts/`. */
 const ROUTES = {
@@ -58,6 +73,45 @@ function scriptResponse(body, source, cacheControl) {
   });
 }
 
+function redirect(location, cacheControl) {
+  return new Response(null, {
+    status: 302,
+    headers: { location, 'cache-control': cacheControl },
+  });
+}
+
+/**
+ * Redirect to the latest release's asset ending in `suffix`. The GitHub API
+ * response is cached at the edge for five minutes so downloads do not spend
+ * the unauthenticated rate limit; any failure falls back to the release page.
+ */
+async function downloadRedirect(suffix) {
+  try {
+    const upstream = await fetch(GH_LATEST_API, {
+      headers: {
+        accept: 'application/vnd.github+json',
+        'user-agent': 'apexshot-install-worker',
+      },
+      cf: { cacheTtl: 300, cacheEverything: true },
+    });
+    if (upstream.ok) {
+      const release = await upstream.json();
+      const asset = (release.assets || []).find((candidate) =>
+        candidate.name.endsWith(suffix),
+      );
+      if (asset) {
+        return redirect(asset.browser_download_url, 'public, max-age=300');
+      }
+      console.error(`latest release ${release.tag_name} has no *${suffix} asset`);
+    } else {
+      console.error(`latest release lookup returned ${upstream.status}`);
+    }
+  } catch (err) {
+    console.error(`latest release lookup failed: ${err}`);
+  }
+  return redirect(GH_RELEASES_PAGE, 'no-store');
+}
+
 export default {
   async fetch(request, env) {
     if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -68,7 +122,14 @@ export default {
     }
 
     const url = new URL(request.url);
-    const file = ROUTES[normalisePath(url.pathname)];
+    const path = normalisePath(url.pathname);
+
+    const suffix = DOWNLOADS[path];
+    if (suffix) {
+      return downloadRedirect(suffix);
+    }
+
+    const file = ROUTES[path];
 
     if (!file) {
       return new Response('unknown installer path\n', {

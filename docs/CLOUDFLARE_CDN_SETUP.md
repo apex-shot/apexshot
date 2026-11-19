@@ -36,6 +36,8 @@ apexshot.org/install            -> Worker  -> R2 "scripts/install.sh", else GitH
 apexshot.org/update             -> Worker  -> R2 "scripts/update.sh",  else GitHub raw
 apexshot.org/install/{ubuntu,arch,fedora}
                                 -> Worker  -> per-distro installer
+apexshot.org/download/windows   -> Worker  -> 302 to the latest release's
+                                              ApexShot-<version>-setup.exe on GitHub
 
 dl.apexshot.org/latest          -> R2 object, plain text: "v0.2.35"
 dl.apexshot.org/v0.2.35/…       -> R2 objects: .deb, .rpm, .pkg.tar.zst, ext zip, SHA256SUMS
@@ -138,6 +140,9 @@ curl -fsSLI https://apexshot.org/install | grep -iE 'x-apexshot-source|content-t
 curl -fsSL https://apexshot.org/install/ubuntu | head -n 3
 curl -fsSL https://apexshot.org/install/arch   | head -n 3
 curl -fsSL https://apexshot.org/install/fedora | head -n 3
+
+# Windows installer -> 302 whose location ends in -setup.exe
+curl -fsSI https://apexshot.org/download/windows | grep -iE '^(HTTP|location)'
 
 # Unknown path -> 404 (and NOT a script)
 curl -fsSI https://apexshot.org/install/nope | head -n 1
