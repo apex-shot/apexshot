@@ -48,6 +48,11 @@
     <binary>apexshot</binary>
   </provides>
   <releases>
+    <release version="0.3.0" date="2026-11-19">
+      <description>
+        <p>ApexShot for Windows in beta; redesigned Linux image and video editors with the zoom camera, compact timelines, recording sound and keystroke captions; upload progress and automatic saving in the editors; and a standalone update window.</p>
+      </description>
+    </release>
     <release version="0.2.36" date="2026-10-19">
       <description>
         <p>Offline neural enhancement for small captures in Studio exports, Motion exports that share the editor preview's framing and colour, and signed offline Studio activation with update eligibility.</p>
