@@ -70,11 +70,7 @@ Studio status line in Settings instead.
    Self-review stays allowed: the maintainer is the only reviewer, and blocking
    self-review would make promotion impossible. The workflow's actor check and
    exact confirmation string remain required anyway.
-5. **AUR, only if publishing there.** `AUR_SSH_PRIVATE_KEY` and a pinned
-   `AUR_SSH_KNOWN_HOSTS` entry must be configured. Never discover the host key
-   with `ssh-keyscan`. A missing AUR credential fails that job after the GitHub
-   release is already published; it does not roll anything back.
-6. **Reconcile the public copy.** The store page, checkout terms, and the
+5. **Reconcile the public copy.** The store page, checkout terms, and the
    release notes preface must state the same price, update window, and
    refund window before the draft goes public.
 
@@ -95,8 +91,7 @@ run exercises it.
    authorize-promotion` requires the configured maintainer, `refs/heads/main`,
    a stable tag, and that exact confirmation; the `stable-release` environment
    approval is a second layer on top.
-4. The AUR job follows a successful publication.
-5. **Check the announcement posted.** A release published with the default
+4. **Check the announcement posted.** A release published with the default
    `GITHUB_TOKEN` does not trigger other workflows, so the
    `release: published` webhook can be skipped.
    Post the announcement manually when the channel stays quiet.
@@ -109,7 +104,6 @@ Cost rises sharply with each window. Decide which one you are in before acting.
 | --- | --- | --- |
 | Draft, not promoted | Nothing is public | Delete the draft and the tag, fix, re-tag. Nothing has been announced. |
 | Published, asset or feature broken | Assets are public; the tag workflow refuses to overwrite a published release | Do not delete it. Publish a corrective patch release, and edit the release body with a known-issues note. If installs must stop, marking the release `--prerelease` moves the "latest" pointer back to the previous release. |
-| Published, AUR recipe wrong | The AUR package serves the bad recipe | Revert the recipe commit in the AUR repository; the GitHub assets are unaffected. |
 | Paid path broken with sales open | Purchases continue | Stop sales in the provider first, then fix forward. Already-issued entitlements keep validating offline. |
 | Cloud or hosting fault | Desktop is unaffected | Handled in the apexshot-cloud repository, not here. |
 
