@@ -227,14 +227,17 @@ fn build_capture_overlay() {
     // so it's available when running `cargo run` during development.
     let binary_src = build_dir.join("apexshot-capture");
     if binary_src.exists() {
-        // Walk up from OUT_DIR to find target/{debug,release}/
-        // OUT_DIR is typically: target/{profile}/build/<crate>-<hash>/out
-        if let Some(target_dir) = PathBuf::from(&out_dir).ancestors().find(|p| {
-            p.join("apexshot").exists()
-                || p.file_name()
-                    .map(|n| n == "debug" || n == "release")
-                    .unwrap_or(false)
-        }) {
+        // OUT_DIR sits under the profile's `build` directory in both Cargo
+        // layouts: target/{profile}/build/<crate>-<hash>/out, and since Rust
+        // 1.100 target/{profile}/build/<crate>/<hash>/out. The profile
+        // directory is the parent of that `build` directory. Matching on a
+        // directory that merely contains `apexshot` picked `build` itself on
+        // the newer layout, because it now holds a `build/apexshot/` folder.
+        if let Some(target_dir) = PathBuf::from(&out_dir)
+            .ancestors()
+            .find(|p| p.file_name().is_some_and(|n| n == "build"))
+            .and_then(|build| build.parent())
+        {
             let dest = target_dir.join("apexshot-capture");
             let _ = std::fs::copy(&binary_src, &dest);
         }

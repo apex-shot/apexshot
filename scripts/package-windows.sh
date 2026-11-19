@@ -239,8 +239,17 @@ PATH="$gtk_posix/bin:$PATH" ldd "$exe" 2>/dev/null |
             cp "$gtk_dir/bin/$name" "$stage/bin/"
         fi
     done
-if [[ ! -f $stage/bin/gtk-4-1.dll ]]; then
-    die "could not resolve the GTK runtime from $gtk_dir; the prefix must hold bin/gtk-4-1.dll and the DLLs it loads"
+# An MSVC GTK build names its DLL gtk-4-1.dll; the MSYS2 MinGW package the
+# release job installs names it libgtk-4-1.dll.
+gtk_dll=""
+for candidate in gtk-4-1.dll libgtk-4-1.dll; do
+    if [[ -f $stage/bin/$candidate ]]; then
+        gtk_dll=$candidate
+        break
+    fi
+done
+if [[ -z $gtk_dll ]]; then
+    die "could not resolve the GTK runtime from $gtk_dir; the prefix must hold bin/gtk-4-1.dll or bin/libgtk-4-1.dll and the DLLs it loads"
 fi
 cp -r "$gtk_dir/share/glib-2.0" "$gtk_dir/share/icons" "$gtk_dir/share/gtk-4.0" "$stage/share/"
 mkdir -p "$stage/lib/gdk-pixbuf-2.0"
@@ -304,7 +313,7 @@ for required in \
     bin/apexshot-update.exe \
     bin/ffmpeg.exe \
     bin/ffprobe.exe \
-    bin/gtk-4-1.dll \
+    "bin/$gtk_dll" \
     bin/Qt5Core.dll \
     share/apexshot/fonts/DMSans-Regular.ttf \
     share/apexshot/fonts/Inter-Regular.ttf \
