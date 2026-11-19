@@ -283,7 +283,7 @@ class WorkflowSourceTests(unittest.TestCase):
         self.assertIn("stable-release-${{ github.repository }}-${{ github.ref_name }}", stage)
         self.assertIn("$GITHUB_SHA", stage)
 
-    def test_promotion_workflow_gates_publish_and_aur_on_manual_authorized_validation(self):
+    def test_promotion_workflow_gates_publish_on_manual_authorized_validation(self):
         workflow = (Path(__file__).parent.parent / ".github/workflows/promote-release.yml").read_text(encoding="utf-8")
         self.assertIn("workflow_dispatch:", workflow)
         self.assertIn("environment: stable-release", workflow)
@@ -291,16 +291,16 @@ class WorkflowSourceTests(unittest.TestCase):
         self.assertIn("validate-assets staged-assets", workflow)
         self.assertIn("--require-stable", workflow)
         self.assertIn("--verify-key", workflow)
-        self.assertIn("needs: [promote]", workflow)
         self.assertIn("validate-marker-advances", workflow)
         self.assertIn("validate-key-continuity", workflow)
-        self.assertIn("AUR_SSH_KNOWN_HOSTS", workflow)
-        self.assertNotIn("ssh-keyscan", workflow)
         self.assertIn("stable-release-${{ github.repository }}-${{ inputs.tag }}", workflow)
         self.assertIn("--source-commit", workflow)
+        # Promotion ends at the GitHub release; nothing publishes to AUR.
+        self.assertNotIn("AUR_SSH_PRIVATE_KEY", workflow)
+        self.assertNotIn("aur.archlinux.org", workflow)
         self.assertLess(
-            workflow.index("name: Install release verification tools"),
-            workflow.index("name: Confirm the stable release is published"),
+            workflow.index("validate-assets staged-assets"),
+            workflow.index("name: Publish the verified stable release"),
         )
 
     def test_local_flatpak_build_uses_validated_public_config_without_becoming_a_submission_manifest(
