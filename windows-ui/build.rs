@@ -4,6 +4,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=APEXSHOT_STUDIO_VERIFY_KEY");
     println!("cargo:rerun-if-env-changed=APEXSHOT_STUDIO_RELEASE_TIMESTAMP");
     println!("cargo:rerun-if-env-changed=APEXSHOT_ALLOW_NO_STUDIO");
+    println!("cargo:rerun-if-env-changed=CI");
     configure_studio();
     configure_windows_resources();
 
@@ -128,20 +129,32 @@ fn configure_windows_resources() {
         parts.next().unwrap_or(0)
     );
 
+    // The version pair goes through a header, the way the Qt shell's CMake
+    // build hands it over, not through `-D` macros: windres runs its
+    // preprocessor through a shell that strips the quotes off a quoted macro
+    // value, so `VERSION_STR` arrived bare and the GNU release build shipped
+    // every executable without its icon and version block.
+    let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR is set"));
+    std::fs::write(
+        out_dir.join("apexshot-version.h"),
+        format!("#define VERSION {numbers}\n#define VERSION_STR \"{version}\"\n"),
+    )
+    .expect("write apexshot-version.h");
+
     let compiled = embed_resource::compile(
         "../packaging/windows/apexshot.rc",
-        embed_resource::ParamsMacrosAndIncludeDirs(
-            [
-                format!("VERSION={numbers}"),
-                // rc substitutes the value verbatim, so the quotes belong in
-                // the macro: `VALUE "FileVersion", VERSION_STR` has to expand
-                // to a quoted string, not to an escaped one.
-                format!("VERSION_STR=\"{version}\""),
-            ],
-            ["../packaging/windows"],
-        ),
+        embed_resource::ParamsIncludeDirs([
+            out_dir.display().to_string(),
+            "../packaging/windows".to_owned(),
+        ]),
     );
     if compiled != embed_resource::CompilationResult::Ok {
+        // A release without the icon and version block shows the toolkit's
+        // icon in the taskbar and the bare file name in notifications, so CI
+        // treats a failed resource build as an error rather than a warning.
+        if std::env::var_os("CI").is_some() {
+            panic!("the Windows icon and version block were not embedded: {compiled}");
+        }
         println!("cargo:warning=the Windows icon and version block were not embedded: {compiled}");
     }
 }

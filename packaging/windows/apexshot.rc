@@ -4,10 +4,10 @@
 // The constants are numeric because rc.exe runs here without the Windows SDK
 // headers on its include path: 0x40004 is VOS_NT_WINDOWS32, 0x1 is VFT_APP.
 //
-// The version pair arrives one of two ways, because rc takes a quoted value on
-// its command line only when the shell handles the quoting: the Rust build
-// passes both as macros, and CMake writes them into a header beside the
-// compiled shell, since a quote cannot survive its way through to rc.exe.
+// The version pair arrives in a generated header: the Rust build writes it to
+// its OUT_DIR and CMake beside the compiled shell. A quoted `-D` value does not
+// survive windres, which hands it to its preprocessor through a shell that
+// strips the quotes. A caller may still define both macros itself.
 #ifndef VERSION_STR
 #include "apexshot-version.h"
 #endif

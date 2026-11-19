@@ -29,7 +29,10 @@
 
 [Setup]
 ; A fixed AppId keeps an upgrade in place instead of stacking a second install.
-AppId={{{#AppGuid}
+; `{{` is a literal brace, so the closing one must be spelled out: without it
+; the uninstall key loses its `}` and no longer matches the one InitializeSetup
+; looks for, which turns every upgrade into a second install.
+AppId={{{#AppGuid}}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
