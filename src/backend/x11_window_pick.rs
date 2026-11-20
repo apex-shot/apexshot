@@ -58,6 +58,7 @@ pub struct X11PickedWindow {
     frame: Window,
     client: Option<Window>,
     extents_atom: u32,
+    net_extents_atom: u32,
     backend: X11Backend,
     screen: (i32, i32),
     include_cursor: bool,
@@ -90,8 +91,11 @@ impl X11PickedWindow {
             .and_then(|client| root_rect(&self.conn, client, self.root).ok());
         let extents = self
             .client
-            .and_then(|client| gtk_frame_extents(&self.conn, client, self.extents_atom));
-        capture_rect(frame, client, extents, self.screen).ok_or_else(|| {
+            .and_then(|client| cardinal4(&self.conn, client, self.extents_atom));
+        let net_extents = self
+            .client
+            .and_then(|client| cardinal4(&self.conn, client, self.net_extents_atom));
+        capture_rect(frame, client, extents, net_extents, self.screen).ok_or_else(|| {
             DisplayError::CaptureError("The selected window is no longer visible".into())
         })
     }
@@ -136,6 +140,7 @@ pub fn pick_window(include_cursor: bool) -> anyhow::Result<PickOutcome> {
 
     let wm_state = intern_atom(&conn, b"WM_STATE")?;
     let extents_atom = intern_atom(&conn, b"_GTK_FRAME_EXTENTS")?;
+    let net_extents_atom = intern_atom(&conn, b"_NET_FRAME_EXTENTS")?;
     let client = find_client_window(&conn, frame, wm_state);
     let backend = X11Backend::new()?;
     let picked = X11PickedWindow {
@@ -144,6 +149,7 @@ pub fn pick_window(include_cursor: bool) -> anyhow::Result<PickOutcome> {
         frame,
         client,
         extents_atom,
+        net_extents_atom,
         backend,
         screen: screen_size,
         include_cursor,
@@ -322,8 +328,10 @@ fn root_rect(conn: &RustConnection, window: Window, root: Window) -> anyhow::Res
     })
 }
 
-/// Read the shadow extents a client-side-decorated window draws around itself.
-fn gtk_frame_extents(conn: &RustConnection, window: Window, atom: u32) -> Option<[u32; 4]> {
+/// Read a left, right, top, bottom CARDINAL[4] property such as the shadow a
+/// client-side-decorated window draws (`_GTK_FRAME_EXTENTS`) or the visible
+/// decorations the window manager adds (`_NET_FRAME_EXTENTS`).
+fn cardinal4(conn: &RustConnection, window: Window, atom: u32) -> Option<[u32; 4]> {
     let reply = conn
         .get_property(false, window, atom, AtomEnum::CARDINAL, 0, 4)
         .ok()?
@@ -336,20 +344,29 @@ fn gtk_frame_extents(conn: &RustConnection, window: Window, atom: u32) -> Option
     }
 }
 
-/// The rectangle to capture: the frame, or the client minus its CSD shadow,
-/// clamped to the screen. `None` when nothing visible is left.
+/// The rectangle to capture, clamped to the screen: the client minus its CSD
+/// shadow, or the client plus the window manager's visible decorations, or the
+/// frame as a last resort. The frame itself can include invisible resize
+/// borders, so it is not preferred. `None` when nothing visible is left.
 fn capture_rect(
     frame: Rect,
     client: Option<Rect>,
     extents: Option<[u32; 4]>,
+    net_extents: Option<[u32; 4]>,
     screen: (i32, i32),
 ) -> Option<Rect> {
-    let (base_x, base_y, base_width, base_height) = match (client, extents) {
-        (Some(client), Some([left, right, top, bottom])) => (
+    let (base_x, base_y, base_width, base_height) = match (client, extents, net_extents) {
+        (Some(client), Some([left, right, top, bottom]), _) => (
             i64::from(client.x) + i64::from(left),
             i64::from(client.y) + i64::from(top),
             i64::from(client.width) - i64::from(left) - i64::from(right),
             i64::from(client.height) - i64::from(top) - i64::from(bottom),
+        ),
+        (Some(client), None, Some([left, right, top, bottom])) => (
+            i64::from(client.x) - i64::from(left),
+            i64::from(client.y) - i64::from(top),
+            i64::from(client.width) + i64::from(left) + i64::from(right),
+            i64::from(client.height) + i64::from(top) + i64::from(bottom),
         ),
         _ => (
             i64::from(frame.x),
@@ -393,6 +410,7 @@ mod tests {
             rect(100, 100, 300, 400),
             Some(rect(110, 120, 280, 380)),
             Some([10, 10, 20, 10]),
+            None,
             (1920, 1080),
         );
         assert_eq!(picked, Some(rect(120, 140, 260, 350)));
@@ -403,23 +421,37 @@ mod tests {
         let frame = rect(100, 100, 300, 200);
         let client = rect(110, 120, 280, 180);
         assert_eq!(
-            capture_rect(frame, Some(client), None, (1920, 1080)),
+            capture_rect(frame, Some(client), None, None, (1920, 1080)),
             Some(frame)
         );
         assert_eq!(
-            capture_rect(frame, None, Some([10, 10, 10, 10]), (1920, 1080)),
+            capture_rect(frame, None, Some([10, 10, 10, 10]), None, (1920, 1080)),
             Some(frame)
         );
     }
 
     #[test]
+    fn wm_decorations_are_added_and_invisible_borders_left_out() {
+        // A frame with 10 px invisible resize borders around a client under
+        // a 32 px title bar: only the title bar and client are captured.
+        let picked = capture_rect(
+            rect(949, 142, 754, 484),
+            Some(rect(959, 182, 734, 434)),
+            None,
+            Some([0, 0, 32, 0]),
+            (1920, 1080),
+        );
+        assert_eq!(picked, Some(rect(959, 150, 734, 466)));
+    }
+
+    #[test]
     fn result_is_clamped_to_the_screen() {
         assert_eq!(
-            capture_rect(rect(-50, -40, 300, 200), None, None, (1000, 800)),
+            capture_rect(rect(-50, -40, 300, 200), None, None, None, (1000, 800)),
             Some(rect(0, 0, 250, 160))
         );
         assert_eq!(
-            capture_rect(rect(900, 700, 300, 200), None, None, (1000, 800)),
+            capture_rect(rect(900, 700, 300, 200), None, None, None, (1000, 800)),
             Some(rect(900, 700, 100, 100))
         );
     }
@@ -430,6 +462,7 @@ mod tests {
             rect(900, 700, 300, 200),
             Some(rect(900, 700, 300, 200)),
             Some([20, 20, 30, 30]),
+            None,
             (1000, 800),
         );
         assert_eq!(picked, Some(rect(920, 730, 80, 70)));
@@ -438,11 +471,11 @@ mod tests {
     #[test]
     fn fully_hidden_or_empty_windows_have_no_rect() {
         assert_eq!(
-            capture_rect(rect(1000, 0, 100, 100), None, None, (1000, 800)),
+            capture_rect(rect(1000, 0, 100, 100), None, None, None, (1000, 800)),
             None
         );
         assert_eq!(
-            capture_rect(rect(0, 0, 0, 0), None, None, (1000, 800)),
+            capture_rect(rect(0, 0, 0, 0), None, None, None, (1000, 800)),
             None
         );
         assert_eq!(
@@ -450,6 +483,7 @@ mod tests {
                 rect(100, 100, 300, 300),
                 Some(rect(110, 110, 100, 100)),
                 Some([60, 60, 60, 60]),
+                None,
                 (1000, 800)
             ),
             None
