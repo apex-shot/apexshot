@@ -20,6 +20,7 @@ use std::sync::{
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::oneshot;
+use x11rb::properties::{WmSizeHints, WmSizeHintsSpecification};
 use x11rb::wrapper::ConnectionExt;
 use x11rb::{
     connection::Connection,
@@ -150,11 +151,41 @@ impl Default for RecordingControlsParams {
     }
 }
 
+/// How the controls window is driven.
+#[derive(Debug, Clone, Copy)]
+struct ControlsWindowMode {
+    /// Print the X11 window id and the stop/discard commands to stdout so the
+    /// recording process can mask the bar and forward the commands.
+    announce_to_recorder: bool,
+    /// Keep the bar outside the capture rectangle when the desktop has room.
+    keep_outside_capture: bool,
+}
+
+impl ControlsWindowMode {
+    const PLAIN: Self = Self {
+        announce_to_recorder: false,
+        keep_outside_capture: false,
+    };
+    const RECORDER: Self = Self {
+        announce_to_recorder: true,
+        keep_outside_capture: true,
+    };
+}
+
 pub fn run_recording_controls(
     params: RecordingControlsParams,
     session_id: Option<String>,
     _bus_name: Option<String>,
     stop_tx: oneshot::Sender<StopAction>,
+) -> Result<(), StopOverlayError> {
+    run_recording_controls_window(params, session_id, stop_tx, ControlsWindowMode::PLAIN)
+}
+
+fn run_recording_controls_window(
+    params: RecordingControlsParams,
+    session_id: Option<String>,
+    stop_tx: oneshot::Sender<StopAction>,
+    mode: ControlsWindowMode,
 ) -> Result<(), StopOverlayError> {
     let stop_tx: Arc<Mutex<Option<oneshot::Sender<StopAction>>>> =
         Arc::new(Mutex::new(Some(stop_tx)));
@@ -187,6 +218,7 @@ pub fn run_recording_controls(
             stop_tx_activate.clone(),
             dim_windows,
             session_id.clone(),
+            mode,
         );
         controls_window.set_visible(true); // Show immediately for non-countdown mode
     });
@@ -199,6 +231,15 @@ pub fn run_recording_countdown_bar(
     params: RecordingControlsParams,
     seconds: u32,
 ) -> Result<bool, StopOverlayError> {
+    // The X11 recorder spawns this entry with a session id and no countdown
+    // seconds to host the recording controls bar in its own process.
+    if seconds == 0 && params.session_id.is_some() {
+        let session_id = params.session_id.clone();
+        let (stop_tx, _stop_rx) = oneshot::channel();
+        run_recording_controls_window(params, session_id, stop_tx, ControlsWindowMode::RECORDER)?;
+        return Ok(true);
+    }
+
     let app = Application::builder()
         .application_id("com.apexshot.recording")
         .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
@@ -249,6 +290,7 @@ pub fn run_recording_ui(
             stop_tx.clone(),
             dim_windows.clone(),
             params.session_id.clone(),
+            ControlsWindowMode::PLAIN,
         );
         setup_countdown_window(
             application,
@@ -374,6 +416,7 @@ fn setup_window(
     stop_tx: Arc<Mutex<Option<oneshot::Sender<StopAction>>>>,
     dim_windows: Vec<ApplicationWindow>,
     session_id: Option<String>,
+    mode: ControlsWindowMode,
 ) -> ApplicationWindow {
     install_controls_css();
 
@@ -386,7 +429,17 @@ fn setup_window(
     let is_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
     let layer_shell_active = is_wayland && gtk4_layer_shell::is_supported();
 
-    let initial_pos = if layer_shell_active {
+    let initial_pos = if mode.keep_outside_capture && !layer_shell_active {
+        if can_show_bar_outside_capture(&params, desktop_bounds) {
+            compute_bar_position(&params, desktop_bounds)
+        } else {
+            // No room above or below the capture: fall back to the bar's
+            // normal top position, exactly like a fullscreen recording.
+            let mut normal = params.clone();
+            normal.is_fullscreen = true;
+            compute_bar_position(&normal, desktop_bounds)
+        }
+    } else if layer_shell_active {
         if let Some(ref m) = monitor {
             let geom = m.geometry();
             let mut local_params = params.clone();
@@ -463,9 +516,12 @@ fn setup_window(
             window,
             move |_| {
                 suppress_x11_controls_window_type(&window);
+                if mode.announce_to_recorder {
+                    announce_controls_x11_window(&window);
+                }
                 let _ = request_x11_always_on_top(&window);
                 let (x, y) = current_pos_realize.get();
-                let _ = position_x11_window(&window, x, y);
+                let _ = place_x11_controls_window(&window, x, y);
             }
         ));
 
@@ -476,7 +532,8 @@ fn setup_window(
             move |_| {
                 let (x, y) = current_pos_map.get();
                 let _ = request_x11_always_on_top(&window);
-                let _ = position_x11_window(&window, x, y);
+                let _ = place_x11_controls_window(&window, x, y);
+                schedule_x11_controls_position(&window, current_pos_map.clone());
             }
         ));
     }
@@ -617,6 +674,14 @@ fn setup_window(
             .collect();
         Rc::new(move |action: StopAction| {
             send_stop_action(&stop_tx, action);
+            if mode.announce_to_recorder {
+                match action {
+                    StopAction::Save => println!("stop"),
+                    StopAction::Discard => println!("discard"),
+                }
+                use std::io::Write;
+                let _ = std::io::stdout().flush();
+            }
             for dim_window in &dim_window_weaks {
                 if let Some(window) = dim_window.upgrade() {
                     window.close();
@@ -1636,6 +1701,22 @@ fn send_stop_action(stop_tx: &Arc<Mutex<Option<oneshot::Sender<StopAction>>>>, a
     }
 }
 
+/// Print the controls window's X11 id so the recording process can mask it.
+fn announce_controls_x11_window(window: &impl IsA<gtk4::Window>) {
+    let Some(surface) = window.as_ref().surface() else {
+        return;
+    };
+    let Ok(x11_surface) = surface.downcast::<X11Surface>() else {
+        return;
+    };
+    let Ok(xid) = u32::try_from(x11_surface.xid()) else {
+        return;
+    };
+    println!("xid {xid}");
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
+}
+
 fn suppress_x11_controls_window_type(window: &impl IsA<gtk4::Window>) {
     let Some(surface) = window.as_ref().surface() else {
         return;
@@ -1672,15 +1753,7 @@ fn suppress_x11_controls_window_type(window: &impl IsA<gtk4::Window>) {
 }
 
 fn request_x11_always_on_top(window: &impl IsA<gtk4::Window>) -> Result<(), String> {
-    let surface = window
-        .as_ref()
-        .surface()
-        .ok_or_else(|| "missing GTK surface".to_string())?;
-    let x11_surface = surface
-        .downcast::<X11Surface>()
-        .map_err(|_| "surface is not X11 (compositor does not expose X11 backend)".to_string())?;
-    let xid = u32::try_from(x11_surface.xid())
-        .map_err(|_| "X11 window id is out of range for xproto window type".to_string())?;
+    let xid = x11_surface_window_id(window)?;
     let (conn, screen_num) = x11rb::connect(None).map_err(|e| e.to_string())?;
     let root = conn
         .setup()
@@ -1705,15 +1778,7 @@ fn request_x11_always_on_top(window: &impl IsA<gtk4::Window>) -> Result<(), Stri
 }
 
 fn position_x11_window(window: &impl IsA<gtk4::Window>, x: i32, y: i32) -> Result<(), String> {
-    let surface = window
-        .as_ref()
-        .surface()
-        .ok_or_else(|| "missing GTK surface".to_string())?;
-    let x11_surface = surface
-        .downcast::<X11Surface>()
-        .map_err(|_| "surface is not X11 (compositor does not expose X11 backend)".to_string())?;
-    let xid = u32::try_from(x11_surface.xid())
-        .map_err(|_| "X11 window id is out of range for xproto window type".to_string())?;
+    let xid = x11_surface_window_id(window)?;
     let (conn, _) = x11rb::connect(None).map_err(|e| e.to_string())?;
     conn.configure_window(
         xid,
@@ -1725,6 +1790,138 @@ fn position_x11_window(window: &impl IsA<gtk4::Window>, x: i32, y: i32) -> Resul
     .map_err(|e| e.to_string())?;
     conn.flush().map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// How long after mapping the controls bar gets before its position is
+/// re-applied. By then the window manager has reparented the toplevel into its
+/// own frame, which is the window a position request has to target.
+const X11_CONTROLS_REPOSITION_DELAY: Duration = Duration::from_millis(150);
+
+/// Put the controls bar at `(x, y)` on screen.
+///
+/// The position is written into `WM_NORMAL_HINTS` as a user-specified
+/// position, so a reparenting window manager maps the window there instead of
+/// at its own default spot. The configure request then targets the window the
+/// manager actually moves: the client while it is still a child of the root,
+/// and its frame once the manager has wrapped it.
+fn place_x11_controls_window(
+    window: &impl IsA<gtk4::Window>,
+    x: i32,
+    y: i32,
+) -> Result<(), String> {
+    let xid = x11_surface_window_id(window)?;
+    let (conn, screen_num) = x11rb::connect(None).map_err(|e| e.to_string())?;
+    let root = conn
+        .setup()
+        .roots
+        .get(screen_num)
+        .map(|screen| screen.root)
+        .ok_or_else(|| "missing X11 root window".to_string())?;
+
+    let mut hints = WmSizeHints::get_normal_hints(&conn, xid)
+        .ok()
+        .and_then(|cookie| cookie.reply().ok())
+        .flatten()
+        .unwrap_or_default();
+    hints.position = Some((WmSizeHintsSpecification::UserSpecified, x, y));
+    hints
+        .set_normal_hints(&conn, xid)
+        .map_err(|e| e.to_string())?;
+
+    let target = x11_move_target(&conn, xid, root)?;
+    let (target_x, target_y) = if target == xid {
+        (x, y)
+    } else {
+        let client = conn
+            .translate_coordinates(xid, root, 0, 0)
+            .map_err(|e| e.to_string())?
+            .reply()
+            .map_err(|e| e.to_string())?;
+        let frame = conn
+            .translate_coordinates(target, root, 0, 0)
+            .map_err(|e| e.to_string())?
+            .reply()
+            .map_err(|e| e.to_string())?;
+        frame_origin_for_position(
+            (x, y),
+            (
+                i32::from(client.dst_x) - i32::from(frame.dst_x),
+                i32::from(client.dst_y) - i32::from(frame.dst_y),
+            ),
+        )
+    };
+
+    conn.configure_window(
+        target,
+        &xproto::ConfigureWindowAux::new()
+            .x(target_x)
+            .y(target_y)
+            .stack_mode(xproto::StackMode::ABOVE),
+    )
+    .map_err(|e| e.to_string())?;
+    conn.flush().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Re-apply the controls bar's position once the event loop is idle and again
+/// after the window manager has had time to reparent it.
+fn schedule_x11_controls_position(window: &ApplicationWindow, position: Rc<Cell<(i32, i32)>>) {
+    let idle_window = window.downgrade();
+    let idle_position = position.clone();
+    glib::idle_add_local_once(move || {
+        if let Some(window) = idle_window.upgrade() {
+            let (x, y) = idle_position.get();
+            let _ = place_x11_controls_window(&window, x, y);
+        }
+    });
+
+    let timeout_window = window.downgrade();
+    glib::timeout_add_local_once(X11_CONTROLS_REPOSITION_DELAY, move || {
+        if let Some(window) = timeout_window.upgrade() {
+            let (x, y) = position.get();
+            let _ = place_x11_controls_window(&window, x, y);
+        }
+    });
+}
+
+/// The window a position request has to name: the client while it is still a
+/// direct child of the root, otherwise the frame a reparenting window manager
+/// wrapped it in.
+fn x11_move_target<C: Connection>(conn: &C, xid: u32, root: u32) -> Result<u32, String> {
+    let mut current = xid;
+    for _ in 0..8 {
+        if current == root {
+            return Ok(xid);
+        }
+        let tree = conn
+            .query_tree(current)
+            .map_err(|e| e.to_string())?
+            .reply()
+            .map_err(|e| e.to_string())?;
+        if tree.parent == root || tree.parent == 0 {
+            return Ok(current);
+        }
+        current = tree.parent;
+    }
+    Ok(current)
+}
+
+/// Origin of a frame that puts its child at `target`, given the child's offset
+/// inside that frame.
+fn frame_origin_for_position(target: (i32, i32), client_offset: (i32, i32)) -> (i32, i32) {
+    (target.0 - client_offset.0, target.1 - client_offset.1)
+}
+
+fn x11_surface_window_id(window: &impl IsA<gtk4::Window>) -> Result<u32, String> {
+    let surface = window
+        .as_ref()
+        .surface()
+        .ok_or_else(|| "missing GTK surface".to_string())?;
+    let x11_surface = surface
+        .downcast::<X11Surface>()
+        .map_err(|_| "surface is not X11 (compositor does not expose X11 backend)".to_string())?;
+    u32::try_from(x11_surface.xid())
+        .map_err(|_| "X11 window id is out of range for xproto window type".to_string())
 }
 
 fn intern_atom<C: Connection>(conn: &C, atom_name: &[u8]) -> Result<u32, String> {
@@ -1760,4 +1957,71 @@ fn send_net_wm_state_client_message<C: Connection>(
     .map_err(|e| e.to_string())?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const DESKTOP: (i32, i32, i32, i32) = (0, 0, 1920, 1080);
+
+    fn window_recording(capture: (i32, i32, i32, i32)) -> RecordingControlsParams {
+        RecordingControlsParams {
+            capture_x: capture.0,
+            capture_y: capture.1,
+            capture_w: capture.2,
+            capture_h: capture.3,
+            is_fullscreen: false,
+            show_timer: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn window_recording_places_the_bar_below_the_window() {
+        let params = window_recording((600, 232, 800, 600));
+        assert!(can_show_bar_outside_capture(&params, DESKTOP));
+        assert_eq!(compute_bar_position(&params, DESKTOP), (836, 844));
+    }
+
+    #[test]
+    fn window_recording_places_the_bar_above_when_below_does_not_fit() {
+        let params = window_recording((600, 500, 800, 600));
+        assert!(can_show_bar_outside_capture(&params, DESKTOP));
+        assert_eq!(compute_bar_position(&params, DESKTOP), (836, 422));
+    }
+
+    #[test]
+    fn window_recording_without_room_falls_back_to_the_top_centre() {
+        let params = window_recording((-200, -100, 2400, 1300));
+        assert!(!can_show_bar_outside_capture(&params, DESKTOP));
+        let mut normal = params.clone();
+        normal.is_fullscreen = true;
+        assert_eq!(compute_bar_position(&normal, DESKTOP), (796, 16));
+    }
+
+    #[test]
+    fn fullscreen_keeps_the_bar_at_the_top_centre() {
+        let params = RecordingControlsParams {
+            is_fullscreen: true,
+            ..Default::default()
+        };
+        assert!(!can_show_bar_outside_capture(&params, DESKTOP));
+        assert_eq!(compute_bar_position(&params, DESKTOP), (796, 16));
+    }
+
+    #[test]
+    fn window_recording_on_the_second_display_centres_on_it() {
+        let params = window_recording((2200, 100, 800, 600));
+        assert_eq!(
+            compute_bar_position(&params, (0, 0, 3840, 1080)),
+            (2436, 712)
+        );
+    }
+
+    #[test]
+    fn frame_origin_subtracts_the_client_offset() {
+        assert_eq!(frame_origin_for_position((836, 844), (0, 0)), (836, 844));
+        assert_eq!(frame_origin_for_position((836, 844), (1, 24)), (835, 820));
+    }
 }
