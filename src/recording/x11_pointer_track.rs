@@ -25,6 +25,10 @@ const STILL_SAMPLE_INTERVAL_SECONDS: f64 = 0.1;
 /// Duplicate clicks closer than this in time and space are the same press.
 const CLICK_DEDUPE_SECONDS: f64 = 0.03;
 const CLICK_DEDUPE_PX: i32 = 2;
+/// A press is kept at least this long. Synthetic and very fast clicks can
+/// report the press and release in the same server millisecond, and the
+/// sidecar drops zero-length presses.
+const MIN_PRESS_SECONDS: f64 = 0.001;
 /// How far a held pointer must move to count as a drag.
 const DRAG_THRESHOLD_PX: f64 = 4.0;
 /// XFixes cursor names are re-read at this cadence.
@@ -135,8 +139,9 @@ impl PressTracker {
             return;
         };
         let press = self.open.remove(index);
+        let up = t.max(press.down_t + MIN_PRESS_SECONDS);
         self.presses
-            .push((press.down_t, t, press.button, press.dragged));
+            .push((press.down_t, up, press.button, press.dragged));
         if self.presses.len() > MAX_PRESSES {
             compact_keep_alternating(&mut self.presses);
         }
@@ -371,9 +376,12 @@ fn raw_event_seconds(
 }
 
 /// Feed raw button events to the tracker, using each event's own server
-/// timestamp and the last position the poll loop saw.
+/// timestamp. A press reads the pointer position when it is handled, since the
+/// pointer may have moved since the last poll; the poll's position is the
+/// fallback.
 fn drain_raw_button_events(
     conn: &x11rb::rust_connection::RustConnection,
+    root: x11rb::protocol::xproto::Window,
     tracker: &mut PointerTracker,
     position: (i32, i32),
     t0_us: i64,
@@ -396,7 +404,8 @@ fn drain_raw_button_events(
         *last_t = t;
         let button = i32::try_from(detail).unwrap_or_default();
         if press {
-            tracker.press_button(t, position.0, position.1, button);
+            let (x, y) = query_pointer(conn, root).map_or(position, |(x, y, _)| (x, y));
+            tracker.press_button(t, x, y, button);
         } else {
             tracker.release_button(t, button);
         }
@@ -498,6 +507,7 @@ fn track(
         if raw_buttons {
             drain_raw_button_events(
                 &conn,
+                root,
                 &mut tracker,
                 last_position,
                 t0_us,
@@ -525,6 +535,7 @@ fn track(
     if raw_buttons {
         drain_raw_button_events(
             &conn,
+            root,
             &mut tracker,
             last_position,
             t0_us,
@@ -662,6 +673,20 @@ mod tests {
             assert_eq!(kind, expected, "name {name:?}");
             assert_eq!(CursorKind::parse(kind).as_str(), expected, "name {name:?}");
         }
+    }
+
+    #[test]
+    fn a_press_released_in_the_same_millisecond_keeps_a_minimum_length() {
+        let mut tracker = started_tracker();
+        tracker.press_button(2.0, 10, 10, 1);
+        tracker.release_button(2.0, 1);
+
+        let result = tracker.finish(2.5);
+
+        assert_eq!(result.presses.len(), 1);
+        let (down, up, button, dragged) = result.presses[0];
+        assert_eq!((down, button, dragged), (2.0, 1, false));
+        assert!(up > down);
     }
 
     #[test]
