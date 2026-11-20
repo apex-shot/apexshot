@@ -128,6 +128,10 @@ private:
     int itemCount() const;
     int itemWidth(int index) const;
     int preferredWidth() const;
+    /// Whether the Scroll item exists in the current mode. Scrolling capture
+    /// is a screenshot feature, so the slot is dropped while Video is
+    /// selected where no webcam toggle takes it over.
+    bool scrollSlotVisible() const;
     QString labelFor(int index) const;
     QString displayedLabel(int index, const QFont& font) const;
     QRectF itemRect(int index) const;
