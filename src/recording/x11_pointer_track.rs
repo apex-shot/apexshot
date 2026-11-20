@@ -17,6 +17,7 @@ use x11rb::protocol::xproto::ConnectionExt as XprotoExt;
 use x11rb::protocol::Event;
 
 use super::editor::sidecar::{CaptureRegion, MAX_CLICKS, MAX_POINTER_SAMPLES, MAX_PRESSES};
+use crate::backend::x11_window_pick::{X11WindowFollower, X11WindowSource};
 
 /// Pointer and button poll interval.
 const POINTER_POLL: Duration = Duration::from_millis(16);
@@ -320,7 +321,7 @@ fn stop_active() {
     }
 }
 
-pub(super) fn start(follow: Option<(u32, i32, i32)>) -> anyhow::Result<()> {
+pub(super) fn start(follow: Option<X11WindowSource>) -> anyhow::Result<()> {
     stop_active();
     let (ready_tx, ready_rx) = mpsc::channel();
     let (stop_tx, stop_rx) = mpsc::channel();
@@ -378,14 +379,14 @@ fn raw_event_seconds(
 /// Feed raw button events to the tracker, using each event's own server
 /// timestamp. A press reads the pointer position when it is handled, since the
 /// pointer may have moved since the last poll; the poll's position is the
-/// fallback. `shift` moves the read position back by how far the followed
-/// window has moved since the recording started.
+/// fallback. `follow` maps the read position into the sidecar's pick-time
+/// region after the window moved or resized.
 fn drain_raw_button_events(
     conn: &x11rb::rust_connection::RustConnection,
     root: x11rb::protocol::xproto::Window,
     tracker: &mut PointerTracker,
     position: (i32, i32),
-    shift: (i32, i32),
+    follow: Option<&WindowFollow>,
     t0_us: i64,
     offset_ms: &mut Option<i64>,
     last_t: &mut f64,
@@ -407,7 +408,7 @@ fn drain_raw_button_events(
         let button = i32::try_from(detail).unwrap_or_default();
         if press {
             let (x, y) = match query_pointer(conn, root) {
-                Some((x, y, _)) => shift_position((x, y), shift),
+                Some((x, y, _)) => follow.map_or((x, y), |follow| follow.map((x, y))),
                 None => position,
             };
             tracker.press_button(t, x, y, button);
@@ -429,46 +430,52 @@ fn query_pointer(
     ))
 }
 
-/// The root-space origin of a followed window's frame.
-fn window_origin(
-    conn: &x11rb::rust_connection::RustConnection,
-    root: x11rb::protocol::xproto::Window,
-    window: x11rb::protocol::xproto::Window,
-) -> Option<(i32, i32)> {
-    let reply = conn
-        .translate_coordinates(window, root, 0, 0)
-        .ok()?
-        .reply()
-        .ok()?;
-    Some((i32::from(reply.dst_x), i32::from(reply.dst_y)))
-}
-
-/// Move a root-space position back by how far the followed window has moved
-/// since the recording started, keeping positions relative to the pick-time
-/// capture region.
-fn shift_position(position: (i32, i32), shift: (i32, i32)) -> (i32, i32) {
-    (
-        position.0.saturating_sub(shift.0),
-        position.1.saturating_sub(shift.1),
-    )
-}
-
-/// How far the followed window has moved since the recording started. The last
-/// known origin stands in when the window disappears.
-fn follow_shift(
-    conn: &x11rb::rust_connection::RustConnection,
-    root: x11rb::protocol::xproto::Window,
-    follow: Option<u32>,
-    start: Option<(i32, i32)>,
-    current: &mut Option<(i32, i32)>,
+/// Maps a root-space position into the sidecar's pick-time region after the
+/// followed window moved or resized. The recording crops to the window and
+/// letterboxes the result back into the pick-time size, so the scale is the
+/// smaller of the two axis ratios and the unused axis is centred.
+fn map_to_region(
+    position: (i32, i32),
+    rect: (i32, i32, u32, u32),
+    region: (i32, i32, u32, u32),
 ) -> (i32, i32) {
-    let (Some(frame), Some(start)) = (follow, start) else {
-        return (0, 0);
-    };
-    if let Some(origin) = window_origin(conn, root, frame) {
-        *current = Some(origin);
+    let (region_x, region_y, region_w, region_h) = region;
+    let (rect_x, rect_y, rect_w, rect_h) = rect;
+    let scale = (f64::from(region_w) / f64::from(rect_w.max(1)))
+        .min(f64::from(region_h) / f64::from(rect_h.max(1)));
+    let offset_x = (f64::from(region_w) - f64::from(rect_w) * scale) / 2.0;
+    let offset_y = (f64::from(region_h) - f64::from(rect_h) * scale) / 2.0;
+    let x = f64::from(region_x) + offset_x + (f64::from(position.0) - f64::from(rect_x)) * scale;
+    let y = f64::from(region_y) + offset_y + (f64::from(position.1) - f64::from(rect_y)) * scale;
+    (x.round() as i32, y.round() as i32)
+}
+
+/// The followed window's current rectangle, mapped into the pick-time region.
+struct WindowFollow {
+    follower: X11WindowFollower,
+    region: (i32, i32, u32, u32),
+    rect: (i32, i32, u32, u32),
+}
+
+impl WindowFollow {
+    fn new(source: &X11WindowSource) -> anyhow::Result<Self> {
+        Ok(Self {
+            follower: X11WindowFollower::new(source)?,
+            region: (source.x, source.y, source.width, source.height),
+            rect: (source.x, source.y, source.width, source.height),
+        })
     }
-    (*current).map_or((0, 0), |origin| (origin.0 - start.0, origin.1 - start.1))
+
+    /// Re-read the window's rectangle; a window that goes away keeps the last.
+    fn refresh(&mut self) {
+        if let Some(rect) = self.follower.visible_rect() {
+            self.rect = rect;
+        }
+    }
+
+    fn map(&self, position: (i32, i32)) -> (i32, i32) {
+        map_to_region(position, self.rect, self.region)
+    }
 }
 
 fn query_cursor_kind(conn: &x11rb::rust_connection::RustConnection) -> String {
@@ -485,7 +492,7 @@ fn query_cursor_kind(conn: &x11rb::rust_connection::RustConnection) -> String {
 fn track(
     stop_rx: mpsc::Receiver<()>,
     ready_tx: mpsc::Sender<anyhow::Result<()>>,
-    follow: Option<(u32, i32, i32)>,
+    follow_source: Option<X11WindowSource>,
 ) -> PointerTrackResult {
     let (conn, screen_num) = match x11rb::connect(None) {
         Ok(connection) => connection,
@@ -498,12 +505,18 @@ fn track(
         let _ = ready_tx.send(Err(anyhow::anyhow!("X11 screen {} is missing", screen_num)));
         return empty_result();
     };
-    // The pick-time origin is the baseline, not the origin when tracking starts:
-    // the window may move during the countdown, and the capture region was
-    // fixed at pick time.
-    let follow_frame = follow.map(|(frame, _, _)| frame);
-    let follow_start = follow.map(|(_, x, y)| (x, y));
-    let mut follow_current = follow_start;
+    // The mapping starts from the pick-time rectangle: the window may move or
+    // resize during the countdown, and the capture region was fixed at pick
+    // time. Without a follower the raw positions stand.
+    let mut follow = follow_source
+        .as_ref()
+        .and_then(|source| match WindowFollow::new(source) {
+            Ok(follow) => Some(follow),
+            Err(err) => {
+                eprintln!("[recording] X11 window pointer mapping unavailable: {err}");
+                None
+            }
+        });
     let has_xfixes = match conn.xfixes_query_version(4, 0) {
         Ok(cookie) => cookie.reply().is_ok(),
         Err(_) => false,
@@ -535,6 +548,10 @@ fn track(
         let _ = ready_tx.send(Err(anyhow::anyhow!("X11 QueryPointer failed")));
         return empty_result();
     };
+    if let Some(follow) = follow.as_mut() {
+        follow.refresh();
+    }
+    let (x, y) = follow.as_ref().map_or((x, y), |follow| follow.map((x, y)));
     let mut kind = if has_xfixes {
         query_cursor_kind(&conn)
     } else {
@@ -558,14 +575,16 @@ fn track(
             Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
             Err(mpsc::RecvTimeoutError::Timeout) => {}
         }
-        let shift = follow_shift(&conn, root, follow_frame, follow_start, &mut follow_current);
+        if let Some(follow) = follow.as_mut() {
+            follow.refresh();
+        }
         if raw_buttons {
             drain_raw_button_events(
                 &conn,
                 root,
                 &mut tracker,
                 last_position,
-                shift,
+                follow.as_ref(),
                 t0_us,
                 &mut raw_offset_ms,
                 &mut last_raw_t,
@@ -575,7 +594,7 @@ fn track(
         let Some((x, y, mask)) = query_pointer(&conn, root) else {
             continue;
         };
-        let (x, y) = shift_position((x, y), shift);
+        let (x, y) = follow.as_ref().map_or((x, y), |follow| follow.map((x, y)));
         last_position = (x, y);
         if has_xfixes && now_us - last_cursor_query_us >= CURSOR_NAME_INTERVAL_US {
             kind = query_cursor_kind(&conn);
@@ -589,14 +608,16 @@ fn track(
         }
     }
 
-    let shift = follow_shift(&conn, root, follow_frame, follow_start, &mut follow_current);
+    if let Some(follow) = follow.as_mut() {
+        follow.refresh();
+    }
     if raw_buttons {
         drain_raw_button_events(
             &conn,
             root,
             &mut tracker,
             last_position,
-            shift,
+            follow.as_ref(),
             t0_us,
             &mut raw_offset_ms,
             &mut last_raw_t,
@@ -604,7 +625,7 @@ fn track(
     }
     let now_us = glib::monotonic_time();
     if let Some((x, y, mask)) = query_pointer(&conn, root) {
-        let (x, y) = shift_position((x, y), shift);
+        let (x, y) = follow.as_ref().map_or((x, y), |follow| follow.map((x, y)));
         if has_xfixes {
             kind = query_cursor_kind(&conn);
         }
@@ -791,15 +812,39 @@ mod tests {
     }
 
     #[test]
-    fn pointer_positions_shift_back_by_the_window_move() {
-        let start = (949, 142);
-        let moved = (1000, 200);
-        let shift = (moved.0 - start.0, moved.1 - start.1);
+    fn the_window_mapping_is_the_identity_without_movement() {
+        let region = (100, 120, 800, 600);
+
+        assert_eq!(map_to_region((450, 300), region, region), (450, 300));
+        assert_eq!(map_to_region((100, 120), region, region), (100, 120));
+    }
+
+    #[test]
+    fn the_window_mapping_follows_a_pure_move() {
+        let region = (949, 142, 734, 466);
+        let moved = (1000, 200, 734, 466);
 
         // The same spot inside the window sits 51 right and 58 down in root
         // coordinates after the move.
-        assert_eq!(shift_position((1010, 210), shift), (959, 152));
-        assert_eq!(shift_position((959, 150), (0, 0)), (959, 150));
+        assert_eq!(map_to_region((1010, 210), moved, region), (959, 152));
+    }
+
+    #[test]
+    fn the_window_mapping_letterboxes_a_shrunk_window() {
+        let region = (100, 100, 1000, 500);
+        // Half the width, same height: scale 1, 250 px bars on each side.
+        let shrunk = (200, 200, 500, 500);
+
+        assert_eq!(map_to_region((450, 450), shrunk, region), (600, 350));
+    }
+
+    #[test]
+    fn the_window_mapping_letterboxes_a_grown_window() {
+        let region = (100, 100, 1000, 500);
+        // Twice the width, same height: scale 0.5, 125 px bars above and below.
+        let grown = (0, 0, 2000, 500);
+
+        assert_eq!(map_to_region((1000, 250), grown, region), (600, 350));
     }
 
     #[test]

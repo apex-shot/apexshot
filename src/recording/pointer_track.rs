@@ -4,6 +4,7 @@
 //! in-process poller instead. Callers only see this facade, the same result
 //! shape, and the same start/stop lifecycle.
 
+use crate::backend::x11_window_pick::X11WindowSource;
 use crate::gnome_shell::PointerTrackResult;
 use std::sync::Mutex;
 
@@ -50,10 +51,10 @@ fn take_active() -> Tracker {
         .unwrap_or(Tracker::None)
 }
 
-/// Start tracking. `follow` is the X11 frame window whose movement the
-/// positions must follow, with its root origin at pick time; the GNOME path
-/// has its own coordinates and ignores it.
-pub(super) fn start(follow: Option<(u32, i32, i32)>) -> anyhow::Result<()> {
+/// Start tracking. `follow` is the X11 window whose movement and resizes the
+/// positions must follow; the GNOME path has its own coordinates and ignores
+/// it.
+pub(super) fn start(follow: Option<X11WindowSource>) -> anyhow::Result<()> {
     if gnome_path() {
         crate::gnome_shell::start_pointer_track()?;
         set_active(Tracker::Gnome);

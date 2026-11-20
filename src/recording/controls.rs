@@ -361,11 +361,7 @@ impl PointerTrackSession {
             ..RecordingManifest::new(device_pixel_ratio)
         };
         let _ = take_harvested_pointer_track();
-        match super::pointer_track::start(
-            config
-                .x11_window
-                .map(|window| (window.frame, window.origin_x, window.origin_y)),
-        ) {
+        match super::pointer_track::start(config.x11_window) {
             Ok(()) => {
                 if window_cursor_metadata {
                     eprintln!("[recording] window pointer and click tracking started");

@@ -163,8 +163,8 @@ pub struct RecordingConfig {
     pub cursor: bool,
     pub pointer_track: bool,
     /// The window the recording follows on X11, when the target was picked
-    /// outside GNOME. The source then captures the window's own drawable
-    /// instead of the pick-time screen rectangle.
+    /// outside GNOME. The source captures the screen and crops it to the
+    /// window's current visible rectangle.
     pub x11_window: Option<crate::backend::x11_window_pick::X11WindowSource>,
     pub hidpi: bool,
     // Video tab settings

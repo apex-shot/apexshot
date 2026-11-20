@@ -2,9 +2,10 @@
 //!
 //! Wayland takes its window grant from the portal, and GNOME on X11 keeps that
 //! path too. Elsewhere the in-process picker returns the clicked window and the
-//! recording captures the window's own drawable, cropped to its visible part.
-//! The recording follows the window when it moves; a resize keeps the pick-time
-//! size and crop.
+//! recording captures the screen, cropping it to the window's current visible
+//! rectangle. The recording follows the window when it moves or resizes,
+//! scaling it into the pick-time size with letterboxing. Because it records the
+//! screen area, a window covered by another window shows what is on top.
 
 use super::{RecordError, RecordResult, RecordingConfig, RecordingTarget};
 
@@ -22,12 +23,6 @@ fn should_pick_x11_window(
         .unwrap_or_default()
         .to_ascii_uppercase()
         .contains("GNOME")
-}
-
-/// H.264 needs even dimensions. Encoder normalization rounds these again,
-/// which is harmless because the value is already even.
-fn even_dimension(value: u32) -> u32 {
-    (value & !1).max(2)
 }
 
 /// Convert an X11 window-target config into the picked window's area.
@@ -68,19 +63,16 @@ pub(crate) async fn resolve_x11_window_target(
     match picked {
         crate::backend::x11_window_pick::PickOutcome::Cancelled => Ok(None),
         crate::backend::x11_window_pick::PickOutcome::Picked(window) => {
-            let (x, y, width, height) = window.root_rect().map_err(|err| {
-                RecordError::GStreamerError(format!("could not read the selected window: {err}"))
-            })?;
-            let follow = window.follow_source().map_err(|err| {
+            let source = window.follow_source().map_err(|err| {
                 RecordError::GStreamerError(format!("could not read the selected window: {err}"))
             })?;
             let mut resolved = config;
             resolved.target = RecordingTarget::Area;
-            resolved.x = Some(x);
-            resolved.y = Some(y);
-            resolved.width = Some(even_dimension(width));
-            resolved.height = Some(even_dimension(height));
-            resolved.x11_window = Some(follow);
+            resolved.x = Some(source.x);
+            resolved.y = Some(source.y);
+            resolved.width = Some(source.width);
+            resolved.height = Some(source.height);
+            resolved.x11_window = Some(source);
             // Area captures on X11 get the cursor sidecar and Auto Zoom.
             resolved.pointer_track = super::pointer_track::should_use();
             Ok(Some(resolved))
@@ -124,14 +116,5 @@ mod tests {
             true,
             Some("X-Cinnamon")
         ));
-    }
-
-    #[test]
-    fn even_dimensions_round_down_to_at_least_two() {
-        assert_eq!(even_dimension(641), 640);
-        assert_eq!(even_dimension(480), 480);
-        assert_eq!(even_dimension(3), 2);
-        assert_eq!(even_dimension(2), 2);
-        assert_eq!(even_dimension(1), 2);
     }
 }

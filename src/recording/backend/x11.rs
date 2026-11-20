@@ -10,10 +10,12 @@ use gst::prelude::*;
 use gstreamer as gst;
 use gstreamer::glib;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use x11rb::connection::Connection;
+
+use crate::backend::x11_window_pick::{crop_for_rect, X11WindowFollower, X11WindowSource};
 
 /// Bound on handing EOS to the pipeline. A wedged source streaming thread can
 /// hold the pipeline's stream lock, so a synchronous `send_event` may never
@@ -21,6 +23,8 @@ use x11rb::connection::Connection;
 const STOP_EOS_SEND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 /// Bound on the final NULL transition, which can block the same way.
 const TEARDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+/// How often a window recording re-reads the window's visible rectangle.
+const WINDOW_CROP_POLL: std::time::Duration = std::time::Duration::from_millis(50);
 
 /// Best-effort audio for the X11 path: the shared GStreamer audio bin linked
 /// into the video muxer. Audio is a new capability here — any setup failure
@@ -50,6 +54,96 @@ fn build_x11_audio_bin(
         }
         Err(err) => {
             eprintln!("[recording] X11 audio skipped: {err}");
+            None
+        }
+    }
+}
+
+/// Polls the picked window's visible rectangle and re-crops the live capture.
+/// The crop starts at the pick-time rectangle; a window that goes away keeps
+/// the last one.
+struct WindowCropWatcher {
+    stop: Arc<AtomicBool>,
+    join: Option<std::thread::JoinHandle<()>>,
+}
+
+impl WindowCropWatcher {
+    fn stop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(join) = self.join.take() {
+            let _ = join.join();
+        }
+    }
+}
+
+impl Drop for WindowCropWatcher {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+/// The crop to apply for a newly seen window rectangle, or `None` when it
+/// matches the crop already set.
+fn crop_update(
+    last: (u32, u32, u32, u32),
+    rect: (i32, i32, u32, u32),
+    screen: (u32, u32),
+) -> Option<(u32, u32, u32, u32)> {
+    let next = crop_for_rect(rect, screen);
+    (next != last).then_some(next)
+}
+
+fn start_window_crop_watcher(
+    source: X11WindowSource,
+    pipeline: &gst::Pipeline,
+) -> Option<WindowCropWatcher> {
+    let follower = match X11WindowFollower::new(&source) {
+        Ok(follower) => follower,
+        Err(err) => {
+            eprintln!("[recording] X11 window resize tracking unavailable: {err}");
+            return None;
+        }
+    };
+    let screen = follower.screen_size();
+    let pipeline = pipeline.clone();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_flag = Arc::clone(&stop);
+    let join = std::thread::Builder::new()
+        .name("apexshot-x11-crop".into())
+        .spawn(move || {
+            // Start from the crop the pipeline was built with.
+            let mut last = crop_for_rect(
+                (source.x, source.y, source.width, source.height),
+                (source.screen_width, source.screen_height),
+            );
+            while !stop_flag.load(Ordering::SeqCst) {
+                std::thread::sleep(WINDOW_CROP_POLL);
+                if stop_flag.load(Ordering::SeqCst) {
+                    break;
+                }
+                let Some(rect) = follower.visible_rect() else {
+                    continue;
+                };
+                let Some(next) = crop_update(last, rect, screen) else {
+                    continue;
+                };
+                let Some(wcrop) = pipeline.by_name("wcrop") else {
+                    continue;
+                };
+                wcrop.set_property("left", next.0 as i32);
+                wcrop.set_property("top", next.1 as i32);
+                wcrop.set_property("right", next.2 as i32);
+                wcrop.set_property("bottom", next.3 as i32);
+                last = next;
+            }
+        });
+    match join {
+        Ok(join) => Some(WindowCropWatcher {
+            stop,
+            join: Some(join),
+        }),
+        Err(err) => {
+            eprintln!("[recording] failed to spawn the X11 window crop watcher: {err}");
             None
         }
     }
@@ -126,6 +220,12 @@ pub(super) async fn record_x11_with_gstreamer(
             });
         }
     }
+
+    // Window recordings re-crop the screen as the window moves or resizes.
+    // The watcher polls on its own X connection and stops before teardown.
+    let mut crop_watcher = config
+        .x11_window
+        .and_then(|source| start_window_crop_watcher(source, &pipeline));
 
     pipeline
         .set_state(gst::State::Playing)
@@ -213,6 +313,9 @@ pub(super) async fn record_x11_with_gstreamer(
                             break;
                         }
                         MessageView::Error(err) => {
+                            if let Some(watcher) = crop_watcher.as_mut() {
+                                watcher.stop();
+                            }
                             let _ = pipeline.set_state(gst::State::Null);
                             return Err(RecordError::GStreamerError(err.error().to_string()));
                         }
@@ -231,6 +334,11 @@ pub(super) async fn record_x11_with_gstreamer(
         }
     }
 
+    // The watcher is stopped before any teardown so no property set races the
+    // pipeline shutdown.
+    if let Some(mut watcher) = crop_watcher.take() {
+        watcher.stop();
+    }
     if paused {
         let _ = pipeline.set_state(gst::State::Playing);
     }
@@ -364,21 +472,25 @@ async fn set_state_null_bounded(
 /// Build a GStreamer pipeline string for X11 capture (preserved from old code).
 /// The muxer is named when audio is attached so the audio bin can request a pad.
 ///
-/// `source_size` is what `ximagesrc` will produce (the followed window's crop,
-/// the configured region, or the screen size for fullscreen). With a
-/// `config.max_resolution` cap the
-/// pipeline scales to the aspect-preserving fit via `fit_within_max_resolution`
-/// and pins exact even dimensions (I420 cannot take odd sizes), e.g.
-/// 1920x1200 → 768x480 under the 854x480 box, with `pixel-aspect-ratio=1/1`
-/// and never upscaling; an even source already inside the box records
-/// untouched (no scale segment). When the source size is unknown the
-/// historical caps range still applies the ceiling. The raw caps pin
-/// `format=I420,colorimetry=bt709` so the encoder input matches the Wayland
-/// backend's yuv420p + bt709 output (I420 alone negotiates smpte170m), and a
-/// `h264parse` sits before the mp4mux because it only accepts avc/avc3 while
-/// openh264enc (and byte-stream x264enc) emit byte-stream. The scale segment
-/// must not sit adjacent to the framerate caps: gst-parse rejects two
-/// consecutive caps filters.
+/// `source_size` is what the capture feeds the encoder: the followed window's
+/// pick-time size, the configured region, or the screen size for fullscreen.
+/// With a `config.max_resolution` cap the pipeline scales to the
+/// aspect-preserving fit via `fit_within_max_resolution` and pins exact even
+/// dimensions (I420 cannot take odd sizes), e.g. 1920x1200 → 768x480 under the
+/// 854x480 box, with `pixel-aspect-ratio=1/1` and never upscaling; an even
+/// source already inside the box records untouched (no scale segment). When
+/// the source size is unknown the historical caps range still applies the
+/// ceiling. The raw caps pin `format=I420,colorimetry=bt709` so the encoder
+/// input matches the Wayland backend's yuv420p + bt709 output (I420 alone
+/// negotiates smpte170m), and a `h264parse` sits before the mp4mux because it
+/// only accepts avc/avc3 while openh264enc (and byte-stream x264enc) emit
+/// byte-stream. The scale segment must not sit adjacent to the framerate caps:
+/// gst-parse rejects two consecutive caps filters.
+///
+/// A window recording reads the root window and crops it to the window's
+/// current visible rectangle, then letterboxes the result into the fixed
+/// pick-time (or capped) size. That crop-and-scale pair replaces the shared
+/// scale stage so the output never carries a second, conflicting scale.
 fn build_x11_gstreamer_pipeline(
     config: &RecordingConfig,
     profile: &EncoderProfile,
@@ -418,6 +530,25 @@ fn build_x11_gstreamer_pipeline(
         ),
         (None, None) => (String::new(), None),
     };
+    let (window_segment, scale_segment) = match config.x11_window {
+        Some(window) => {
+            let crop = crop_for_rect(
+                (window.x, window.y, window.width, window.height),
+                (window.screen_width, window.screen_height),
+            );
+            let (out_w, out_h) = output_size.unwrap_or((window.width, window.height));
+            (
+                format!(
+                    " ! videocrop name=wcrop left={} top={} right={} bottom={} \
+                     ! videoscale add-borders=true \
+                     ! video/x-raw,width={out_w},height={out_h},pixel-aspect-ratio=1/1",
+                    crop.0, crop.1, crop.2, crop.3
+                ),
+                String::new(),
+            )
+        }
+        None => (String::new(), scale_segment),
+    };
     let encoder_props = video_encoder_props(profile, config, output_size);
     let encoder_segment = if encoder_props.is_empty() {
         profile.encoder.to_string()
@@ -441,8 +572,9 @@ fn build_x11_gstreamer_pipeline(
     };
 
     Ok(format!(
-        "{} ! videoconvert ! {} ! videorate{} ! queue ! {}{} ! {} ! filesink location=\"{}\"",
+        "{}{} ! videoconvert ! {} ! videorate{} ! queue ! {}{} ! {} ! filesink location=\"{}\"",
         video_source,
+        window_segment,
         video_raw_caps,
         scale_segment,
         encoder_segment,
@@ -460,17 +592,13 @@ pub(in crate::recording) fn get_x11_source(config: &RecordingConfig) -> RecordRe
     } else {
         "false"
     };
-    // A picked window is captured from its own drawable, so it keeps showing
-    // the window when it moves. The crop is relative to the frame window.
-    if let Some(window) = config.x11_window {
+    // A picked window is read from the root window; the pipeline crops it to
+    // the window's current visible rectangle, so a resize cannot make
+    // ximagesrc read past the window.
+    if config.x11_window.is_some() {
         return Ok(format!(
-            "ximagesrc name=vsrc xid={} show-pointer={} use-damage=false startx={} starty={} endx={} endy={}",
-            window.frame,
-            show_pointer,
-            window.crop_x,
-            window.crop_y,
-            window.crop_x + window.width - 1,
-            window.crop_y + window.height - 1
+            "ximagesrc name=vsrc show-pointer={} use-damage=false",
+            show_pointer
         ));
     }
     let mut source = format!(
@@ -492,10 +620,10 @@ pub(in crate::recording) fn get_x11_source(config: &RecordingConfig) -> RecordRe
     Ok(source)
 }
 
-/// The dimensions `ximagesrc` will produce: the followed window's crop, the
-/// configured region when the config pins one (mirroring [`get_x11_source`]),
-/// otherwise the X screen size for fullscreen capture. `None` only when the
-/// screen query fails.
+/// The capture size before the optional cap: the followed window's pick-time
+/// size, the configured region when the config pins one (mirroring
+/// [`get_x11_source`]), otherwise the X screen size for fullscreen capture.
+/// `None` only when the screen query fails.
 pub(in crate::recording) fn x11_source_size(config: &RecordingConfig) -> Option<(u32, u32)> {
     if let Some(window) = config.x11_window {
         return Some((window.width, window.height));
@@ -830,49 +958,105 @@ mod tests {
         assert_eq!(x11_source_size(&area), Some((640, 480)));
     }
 
-    #[test]
-    fn x11_window_source_uses_the_window_drawable_and_crop() {
-        let config = RecordingConfig {
-            x11_window: Some(crate::backend::x11_window_pick::X11WindowSource {
-                origin_x: 0,
-                origin_y: 0,
-                frame: 928,
-                crop_x: 10,
-                crop_y: 8,
-                width: 734,
-                height: 466,
-            }),
-            ..x11_config(None)
-        };
-
-        let pipeline = build(&config, h264_profile(), x11_source_size(&config));
-
-        assert!(pipeline.contains(
-            "ximagesrc name=vsrc xid=928 show-pointer=true use-damage=false startx=10 starty=8 endx=743 endy=473"
-        ));
-        assert_eq!(x11_source_size(&config), Some((734, 466)));
+    fn window_source() -> crate::backend::x11_window_pick::X11WindowSource {
+        crate::backend::x11_window_pick::X11WindowSource {
+            frame: 928,
+            client: Some(931),
+            x: 120,
+            y: 140,
+            width: 260,
+            height: 350,
+            screen_width: 1920,
+            screen_height: 1080,
+        }
     }
 
     #[test]
-    fn x11_window_source_hides_the_os_cursor_when_pointer_tracking() {
+    fn x11_window_pipeline_crops_the_screen_and_letterboxes_into_the_pick_size() {
+        let config = RecordingConfig {
+            x11_window: Some(window_source()),
+            ..x11_config(None)
+        };
+
+        let pipeline = build(&config, h264_profile(), x11_source_size(&config));
+
+        assert!(!pipeline.contains("xid="));
+        assert!(pipeline.contains(
+            "ximagesrc name=vsrc show-pointer=true use-damage=false \
+             ! videocrop name=wcrop left=120 top=140 right=1540 bottom=590 \
+             ! videoscale add-borders=true \
+             ! video/x-raw,width=260,height=350,pixel-aspect-ratio=1/1 \
+             ! videoconvert"
+        ));
+        // The letterbox scale replaces the shared cap scale.
+        assert_eq!(pipeline.matches("videoscale").count(), 1);
+        assert_eq!(x11_source_size(&config), Some((260, 350)));
+    }
+
+    #[test]
+    fn x11_window_pipeline_letterboxes_into_the_capped_size() {
+        let config = RecordingConfig {
+            x11_window: Some(crate::backend::x11_window_pick::X11WindowSource {
+                frame: 7,
+                client: None,
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1200,
+                screen_width: 1920,
+                screen_height: 1200,
+            }),
+            ..x11_config(Some((854, 480)))
+        };
+
+        let pipeline = build(&config, h264_profile(), x11_source_size(&config));
+
+        assert!(pipeline.contains(
+            "! videocrop name=wcrop left=0 top=0 right=0 bottom=0 \
+             ! videoscale add-borders=true \
+             ! video/x-raw,width=768,height=480,pixel-aspect-ratio=1/1"
+        ));
+        assert_eq!(pipeline.matches("videoscale").count(), 1);
+        // The capped size drives the CRF tier like any other source.
+        assert!(pipeline.contains("quantizer=15"));
+    }
+
+    #[test]
+    fn x11_window_pipeline_hides_the_os_cursor_when_pointer_tracking() {
         let config = RecordingConfig {
             pointer_track: true,
             x11_window: Some(crate::backend::x11_window_pick::X11WindowSource {
-                origin_x: 0,
-                origin_y: 0,
                 frame: 7,
-                crop_x: 0,
-                crop_y: 0,
+                client: None,
+                x: 0,
+                y: 0,
                 width: 640,
                 height: 480,
+                screen_width: 1920,
+                screen_height: 1080,
             }),
             ..x11_config(None)
         };
 
         let pipeline = build(&config, h264_profile(), x11_source_size(&config));
 
+        assert!(pipeline.contains("ximagesrc name=vsrc show-pointer=false use-damage=false"));
         assert!(pipeline.contains(
-            "ximagesrc name=vsrc xid=7 show-pointer=false use-damage=false startx=0 starty=0 endx=639 endy=479"
+            "! videocrop name=wcrop left=0 top=0 right=1280 bottom=600 \
+             ! videoscale add-borders=true \
+             ! video/x-raw,width=640,height=480,pixel-aspect-ratio=1/1"
         ));
+    }
+
+    #[test]
+    fn a_window_crop_update_only_reports_changes() {
+        let screen = (1920, 1080);
+        let last = (100, 120, 1720, 860);
+
+        assert_eq!(crop_update(last, (100, 120, 100, 100), screen), None);
+        assert_eq!(
+            crop_update(last, (140, 120, 100, 100), screen),
+            Some((140, 120, 1680, 860))
+        );
     }
 }
