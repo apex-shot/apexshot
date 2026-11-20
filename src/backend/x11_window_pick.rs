@@ -212,6 +212,13 @@ impl X11PickedWindow {
         })
     }
 
+    /// The window synthetic input should target: the client when the frame
+    /// has one, so wheel events reach the application rather than the
+    /// window-manager decorations.
+    pub fn input_window(&self) -> Window {
+        self.client.unwrap_or(self.frame)
+    }
+
     /// Re-read the window's current root-space rectangle; it may have moved.
     fn current_rect(&self) -> DisplayResult<Rect> {
         let (frame, client, extents, net_extents) = self.window_parts()?;
@@ -296,6 +303,95 @@ pub fn pick_window(include_cursor: bool) -> anyhow::Result<PickOutcome> {
     };
     picked.current_rect()?;
     Ok(PickOutcome::Picked(Box::new(picked)))
+}
+
+/// One JSON line for the pick helper: the picked window's visible rectangle,
+/// a user cancel, or a failure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PickReport {
+    Picked {
+        x: i32,
+        y: i32,
+        width: u32,
+        height: u32,
+        window: u32,
+    },
+    Cancelled,
+    Error(String),
+}
+
+impl PickReport {
+    /// The compact one-line payload the capture helper parses.
+    pub fn to_json(&self) -> String {
+        match self {
+            PickReport::Picked {
+                x,
+                y,
+                width,
+                height,
+                window,
+            } => format!(
+                r#"{{"x":{x},"y":{y},"width":{width},"height":{height},"window":{window}}}"#
+            ),
+            PickReport::Cancelled => r#"{"cancelled":true}"#.to_string(),
+            PickReport::Error(message) => {
+                format!(r#"{{"error":"{}"}}"#, json_escape(message))
+            }
+        }
+    }
+}
+
+fn json_escape(value: &str) -> String {
+    use std::fmt::Write as _;
+
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            character if character.is_control() => {
+                let _ = write!(escaped, "\\u{:04x}", u32::from(character));
+            }
+            character => escaped.push(character),
+        }
+    }
+    escaped
+}
+
+/// Run the `x11-pick-window-internal` helper: pick a window with the root
+/// crosshair and print its rectangle for the capture overlay.
+pub fn run_internal_helper() -> anyhow::Result<()> {
+    let report = match pick_window(false) {
+        Ok(PickOutcome::Picked(window)) => match window.current_rect() {
+            Ok(rect) if rect.width > 0 && rect.height > 0 => PickReport::Picked {
+                x: rect.x,
+                y: rect.y,
+                width: rect.width as u32,
+                height: rect.height as u32,
+                window: window.input_window(),
+            },
+            Ok(_) => PickReport::Error("The selected window has no visible area.".into()),
+            Err(error) => PickReport::Error(error.to_string()),
+        },
+        Ok(PickOutcome::Cancelled) => PickReport::Cancelled,
+        Err(error) => PickReport::Error(error.to_string()),
+    };
+
+    {
+        use std::io::Write as _;
+
+        let mut stdout = std::io::stdout().lock();
+        writeln!(stdout, "{}", report.to_json())?;
+        stdout.flush()?;
+    }
+
+    match report {
+        PickReport::Error(message) => bail!(message),
+        _ => Ok(()),
+    }
 }
 
 /// Active pointer and keyboard grabs released when the pick ends.
@@ -674,5 +770,25 @@ mod tests {
         assert_eq!(even_size(480), 480);
         assert_eq!(even_size(1), 2);
         assert_eq!(even_size(0), 2);
+    }
+
+    #[test]
+    fn pick_report_json_has_one_shape_per_outcome() {
+        assert_eq!(
+            PickReport::Picked {
+                x: -10,
+                y: 20,
+                width: 640,
+                height: 480,
+                window: 0x1a2b,
+            }
+            .to_json(),
+            r#"{"x":-10,"y":20,"width":640,"height":480,"window":6699}"#
+        );
+        assert_eq!(PickReport::Cancelled.to_json(), r#"{"cancelled":true}"#);
+        assert_eq!(
+            PickReport::Error("bad \"value\"\n".into()).to_json(),
+            r#"{"error":"bad \"value\"\n"}"#
+        );
     }
 }

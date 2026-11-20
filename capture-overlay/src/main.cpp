@@ -6,6 +6,8 @@
 #include "RecordingControlsWindow.h"
 #include "ScreenCapture.h"
 #include "Sandbox.h"
+#include "platform/windows/scroll_controls.h"
+#include "platform/x11/scroll_capture_x11.h"
 
 #include <QApplication>
 #include <QDateTime>
@@ -253,6 +255,72 @@ void waitForOverlayUnmap()
         QThread::msleep(300);
         QApplication::processEvents(QEventLoop::AllEvents, 50);
     }
+}
+
+/// Drive one scrolling capture to completion and print the stitched PNG the
+/// same way the other area paths report their image.
+int runX11ScrollCapture(const QRect& region, quintptr windowId)
+{
+    Platform::ScrollCaptureSession session;
+    QImage result;
+    QString error;
+    bool sessionFinished = false;
+    bool succeeded = false;
+
+    QObject::connect(&session,
+                     &Platform::ScrollCaptureSession::finished,
+                     [&](bool ok, const QImage& image, const QString& message) {
+                         sessionFinished = true;
+                         succeeded = ok;
+                         result = image;
+                         error = message;
+                     });
+
+    QEventLoop loop;
+    QObject::connect(&session,
+                     &Platform::ScrollCaptureSession::finished,
+                     &loop,
+                     &QEventLoop::quit);
+
+    QString startError;
+    if (!session.start(region, windowId, startError)) {
+        std::fprintf(stderr,
+                     "apexshot-capture: scroll capture failed: %s\n",
+                     startError.toLocal8Bit().constData());
+        return 2;
+    }
+
+    if (!sessionFinished) {
+        auto* controls = new ScrollControls(&session, region);
+        controls->show();
+        controls->raise();
+    }
+
+    if (!sessionFinished)
+        loop.exec();
+
+    if (!succeeded) {
+        if (error.isEmpty()) {
+            std::fprintf(stderr, "apexshot-capture: scroll capture cancelled\n");
+            return 1;
+        }
+        std::fprintf(stderr,
+                     "apexshot-capture: scroll capture failed: %s\n",
+                     error.toLocal8Bit().constData());
+        return 2;
+    }
+
+    QString imagePath;
+    QSize imageSize;
+    QString saveError;
+    if (!ScreenCapture::saveImageToTempPng(result, imagePath, imageSize, saveError)) {
+        std::fprintf(stderr,
+                     "apexshot-capture: scroll capture failed: %s\n",
+                     saveError.toLocal8Bit().constData());
+        return 2;
+    }
+    printCaptureScreenJson(imagePath, imageSize, "scroll");
+    return 0;
 }
 
 } // namespace
@@ -952,9 +1020,16 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
             CaptureModeToolbar::DeviceDefaults toolbarDefaults;
             toolbarDefaults.microphone = initialMic;
             toolbarDefaults.speaker = initialSpeaker;
+            // Scrolling capture needs the root window and synthetic input,
+            // both of which only the unsandboxed X11 session offers.
+            QString scrollError;
+            const bool scrollCaptureAvailable =
+                !isFlatpakSandboxed()
+                && !ScreenCapture::isWaylandSession()
+                && Platform::ScrollCaptureSession::available(&scrollError);
             captureMenuResult = CaptureModeToolbar::choose(
-                &sessionServer, nullptr, !recordingUnavailable, false, false,
-                toolbarDefaults);
+                &sessionServer, nullptr, !recordingUnavailable, false,
+                scrollCaptureAvailable, toolbarDefaults);
             if (captureMenuResult.action == CaptureModeToolbar::Action::Cancel) {
                 sessionServer.close();
                 QLocalServer::removeServer(sessionSocketPath);
@@ -999,6 +1074,24 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
                                false,
                                window);
         };
+
+        if (captureMenuResult.action == CaptureModeToolbar::Action::Window
+            && captureMenuResult.scroll) {
+            ScreenCapture::X11WindowPick pick;
+            QString pickError;
+            const auto pickStatus = ScreenCapture::pickX11Window(pick, pickError);
+            sessionServer.close();
+            QLocalServer::removeServer(sessionSocketPath);
+            if (pickStatus == ScreenCapture::WindowPickStatus::Cancelled)
+                return 1;
+            if (pickStatus == ScreenCapture::WindowPickStatus::Failed) {
+                std::fprintf(stderr,
+                             "apexshot-capture: scroll window pick failed: %s\n",
+                             pickError.toLocal8Bit().constData());
+                return 2;
+            }
+            return runX11ScrollCapture(pick.rect, pick.windowId);
+        }
 
         if (captureMenuResult.recording
             && captureMenuResult.action == CaptureModeToolbar::Action::Window) {
@@ -1432,6 +1525,22 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
     if (ret != 0) {
         std::fprintf(stderr, "apexshot-capture: event loop exited with code %d\n", ret);
         return 1;
+    }
+
+    if (areaInitMode && captureMenuResult.scroll) {
+        const QRect selection = overlay->desktopSelection();
+        if (selection.width() < 32 || selection.height() < 32) {
+            std::fprintf(stderr, "apexshot-capture: scroll capture region is too small\n");
+            return 2;
+        }
+        QScreen* screen = targetScreen ? targetScreen : QGuiApplication::primaryScreen();
+        const qreal dpr = screen ? screen->devicePixelRatio() : 1.0;
+        const QRect region(
+            qRound(selection.x() * dpr),
+            qRound(selection.y() * dpr),
+            qRound(selection.width() * dpr),
+            qRound(selection.height() * dpr));
+        return runX11ScrollCapture(region, 0);
     }
 
     if (areaInitMode && overlay->scrollCaptureCompleted()) {

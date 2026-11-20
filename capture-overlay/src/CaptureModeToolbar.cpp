@@ -488,7 +488,14 @@ void CaptureModeToolbar::resizeForMode()
 /// is a capture mode and has no meaning once a recording is being set up.
 bool CaptureModeToolbar::cameraSlot(int index) const
 {
+#ifdef Q_OS_WIN
     return m_enableScrollCapture && m_recording && index == 7;
+#else
+    // Recording has no camera source outside Windows, so the slot stays the
+    // Scroll mode switch instead of becoming a camera toggle that does nothing.
+    Q_UNUSED(index);
+    return false;
+#endif
 }
 
 QRectF CaptureModeToolbar::itemRect(int index) const
@@ -1002,7 +1009,8 @@ void CaptureModeToolbar::mousePressEvent(QMouseEvent* event)
         break;
     case 4:
         if ((!m_recording && !m_scroll && (m_timerSeconds == 0 || m_timedSelection))
-            || ((m_recording || m_scroll) && m_allowAreaRecording))
+            || ((m_recording || m_scroll) && m_allowAreaRecording)
+            || (m_scroll && m_enableScrollCapture))
             finish(Action::Area);
         break;
     case 5:
