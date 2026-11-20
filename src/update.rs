@@ -1,6 +1,8 @@
 //! Lightweight release checks for the tray-first ApexShot experience.
 //!
-//! Checking happens at most once per day, never blocks startup, and only sends
+//! A found update is cached for a day and a "no update" answer for a few hours,
+//! so a release published shortly after a check still surfaces the same day.
+//! Checking never blocks startup, and only sends
 //! the app version to GitHub as part of the standard User-Agent header.  The
 //! result is cached locally so offline launches and GitHub outages are quiet.
 
@@ -18,6 +20,12 @@ const LATEST_RELEASE_API: &str = "https://api.github.com/repos/apex-shot/apexsho
 /// Official entrypoint for distribution-aware native package updates.
 pub const UPDATE_SCRIPT_URL: &str = "https://apexshot.org/update";
 const CHECK_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
+/// How long a "no newer release" answer is trusted. Shorter than
+/// `CHECK_INTERVAL` so a release published right after a check is not hidden
+/// for a whole day, however often the daemon restarts.
+const NO_UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(4 * 60 * 60);
+/// How often a long-running daemon re-runs the (cached) check.
+const DAEMON_RECHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const PROMPT_SNOOZE: Duration = Duration::from_secs(24 * 60 * 60);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(4);
 const MAX_RELEASE_METADATA_BYTES: u64 = 16 * 1024;
@@ -81,7 +89,20 @@ fn now_unix() -> u64 {
 }
 
 fn checked_recently(state: &UpdateCheckState) -> bool {
-    now_unix().saturating_sub(state.last_checked_unix) < CHECK_INTERVAL.as_secs()
+    checked_recently_at(state, now_unix())
+}
+
+fn checked_recently_at(state: &UpdateCheckState, now: u64) -> bool {
+    let interval = if state
+        .available_update
+        .as_ref()
+        .is_some_and(is_newer_than_installed)
+    {
+        CHECK_INTERVAL
+    } else {
+        NO_UPDATE_CHECK_INTERVAL
+    };
+    now.saturating_sub(state.last_checked_unix) < interval.as_secs()
 }
 
 fn load_state(path: &std::path::Path) -> UpdateCheckState {
@@ -330,12 +351,21 @@ pub fn check_for_update() -> Option<UpdateInfo> {
     available_update
 }
 
-/// Starts a non-blocking check and sends the result to the caller when a new
-/// release exists. This is intentionally a standard thread: `ureq` is blocking.
-pub fn spawn_update_check(on_update: impl FnOnce(UpdateInfo) + Send + 'static) {
+/// Starts a background checker and sends each newly found release to the
+/// caller once. The daemon is long-lived, so the check repeats every hour; the
+/// cache in `check_for_update` decides whether that reaches the network.
+/// This is intentionally a standard thread: `ureq` is blocking.
+pub fn spawn_update_check(on_update: impl Fn(UpdateInfo) + Send + 'static) {
     std::thread::spawn(move || {
-        if let Some(update) = check_for_update() {
-            on_update(update);
+        let mut reported: Option<String> = None;
+        loop {
+            if let Some(update) = check_for_update() {
+                if reported.as_deref() != Some(update.version.as_str()) {
+                    reported = Some(update.version.clone());
+                    on_update(update);
+                }
+            }
+            std::thread::sleep(DAEMON_RECHECK_INTERVAL);
         }
     });
 }
@@ -439,6 +469,35 @@ fn update_terminal_command() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn checked_at(last_checked_unix: u64, update: Option<&str>) -> UpdateCheckState {
+        UpdateCheckState {
+            last_checked_unix,
+            available_update: update.map(|version| UpdateInfo {
+                version: version.into(),
+                release_url: RELEASES_URL.into(),
+                studio_release_timestamp: None,
+                studio_key_fingerprint: None,
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn no_update_answer_expires_before_a_found_update() {
+        let hour = 60 * 60;
+        let none = checked_at(1_000_000, None);
+        assert!(checked_recently_at(&none, 1_000_000 + 3 * hour));
+        assert!(!checked_recently_at(&none, 1_000_000 + 5 * hour));
+
+        let found = checked_at(1_000_000, Some("999.0.0"));
+        assert!(checked_recently_at(&found, 1_000_000 + 23 * hour));
+        assert!(!checked_recently_at(&found, 1_000_000 + 25 * hour));
+
+        // A cached release the running build already has counts as no update.
+        let installed = checked_at(1_000_000, Some(env!("CARGO_PKG_VERSION")));
+        assert!(!checked_recently_at(&installed, 1_000_000 + 5 * hour));
+    }
 
     #[test]
     fn compares_release_versions_numerically() {
