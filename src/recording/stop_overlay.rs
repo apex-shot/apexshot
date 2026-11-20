@@ -1650,6 +1650,9 @@ fn suppress_x11_controls_window_type(window: &impl IsA<gtk4::Window>) {
         return;
     };
 
+    // Transparent windows must stay composited on X11: bypassing the
+    // compositor paints their transparent areas black.
+
     if let (Ok(type_cookie), Ok(notif_cookie)) = (
         conn.intern_atom(false, b"_NET_WM_WINDOW_TYPE"),
         conn.intern_atom(false, b"_NET_WM_WINDOW_TYPE_NOTIFICATION"),
@@ -1661,18 +1664,6 @@ fn suppress_x11_controls_window_type(window: &impl IsA<gtk4::Window>) {
                 type_reply.atom,
                 xproto::AtomEnum::ATOM,
                 &[notif_reply.atom],
-            );
-        }
-    }
-
-    if let Ok(cookie) = conn.intern_atom(false, b"_NET_WM_BYPASS_COMPOSITOR") {
-        if let Ok(reply) = cookie.reply() {
-            let _ = conn.change_property32(
-                xproto::PropMode::REPLACE,
-                xid,
-                reply.atom,
-                xproto::AtomEnum::CARDINAL,
-                &[1u32],
             );
         }
     }

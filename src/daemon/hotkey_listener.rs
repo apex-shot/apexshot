@@ -12,6 +12,12 @@ pub(super) async fn run_hotkey_listener(
         return Ok(());
     }
 
+    // X11 sessions grab keys directly; neither GNOME Shell nor the
+    // GlobalShortcuts portal is available on non-GNOME X11 desktops.
+    if super::hotkey_x11::is_x11_session() {
+        return super::hotkey_x11::run_hotkey_listener_x11(&cfg, tx).await;
+    }
+
     // Ensure GIO_LAUNCHED_DESKTOP_FILE is set so GNOME trusts us even when
     // launched from a terminal. The hotkeys module's ensure_desktop_entry()
     // writes the file; we just need to export the env vars.
