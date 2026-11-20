@@ -7,7 +7,7 @@
 /// 4. Debug build output directory embedded by build.rs via `APEXSHOT_CAPTURE_BIN_DIR`.
 /// 5. Common target profile directories relative to the exe (handles `cargo run` edge cases).
 /// 6. PATH lookup.
-fn find_capture_binary() -> Option<PathBuf> {
+pub(crate) fn find_capture_binary() -> Option<PathBuf> {
     // 1. Env override — highest priority for manual testing
     if let Some(p) = std::env::var_os("APEXSHOT_CAPTURE_BIN") {
         let path = PathBuf::from(p);

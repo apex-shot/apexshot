@@ -950,53 +950,49 @@ async fn start_shell_recording(
 /// recording starts without it, so a missing bar can never leak into frames.
 const X11_CONTROLS_START_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
 
+/// The control bar's stdin. The command forwarder shares it so a pause or
+/// resume started by a shortcut or the tray is mirrored on the bar.
+type X11ControlsStdin = std::sync::Arc<std::sync::Mutex<Option<std::process::ChildStdin>>>;
+
+fn clear_x11_controls_stdin(stdin: &X11ControlsStdin) {
+    if let Ok(mut guard) = stdin.lock() {
+        guard.take();
+    }
+}
+
 /// Owns the X11 control bar process for the length of one recording.
 struct X11ControlsBar {
     child: std::process::Child,
     xid: u32,
+    stdin: X11ControlsStdin,
 }
 
 impl Drop for X11ControlsBar {
     fn drop(&mut self) {
+        // Let the Qt bar close its window before the process goes away.
+        if let Ok(mut guard) = self.stdin.lock() {
+            if let Some(mut stdin) = guard.take() {
+                use std::io::Write;
+                let _ = stdin.write_all(b"end\n");
+                let _ = stdin.flush();
+            }
+        }
         super::x11_controls_mask::clear_controls_window_if(self.xid);
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
 }
 
-/// Run the GTK control bar in its own process.
+/// Turn the bar's stdout into mask updates and recording commands.
 ///
-/// The bar shares `recording-countdown-internal` because the main-binary
-/// dispatch lives in main.rs; a session id and zero seconds select the
-/// controls window instead of a countdown. The bar prints its X11 window id
-/// and the commands it issues to stdout; the commands go through the same
-/// recording control server the shortcuts and tray use, and the id lets the
-/// recording mask the bar out of the frames.
-fn spawn_x11_controls_bar(
-    params: &RecordingControlsParams,
-    session_id: &str,
-) -> Option<(std::process::Child, oneshot::Receiver<u32>)> {
-    let exe = std::env::current_exe().ok()?;
-    let mut bar_params = params.clone();
-    bar_params.session_id = Some(session_id.to_string());
-    bar_params.dim_screen = false;
-    bar_params.use_shell_mask = false;
-    bar_params.countdown_enabled = false;
-    let params_json = serde_json::to_string(&bar_params).ok()?;
-    let mut child = std::process::Command::new(exe)
-        .arg("recording-countdown-internal")
-        .arg(params_json)
-        .arg("0")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::inherit())
-        .spawn()
-        .map_err(|err| eprintln!("[recording] X11 controls bar failed to launch: {err}"))
-        .ok()?;
-    let stdout = child.stdout.take()?;
-    let (xid_tx, xid_rx) = oneshot::channel();
-
-    let reader = std::thread::Builder::new()
+/// Every bar prints its X11 window id and the commands it issues on stdout.
+/// The commands go through the same recording control server the shortcuts and
+/// tray use, and the id lets the recording mask the bar out of the frames.
+fn read_x11_controls_stdout(
+    stdout: std::process::ChildStdout,
+    xid_tx: oneshot::Sender<u32>,
+) -> std::io::Result<()> {
+    std::thread::Builder::new()
         .name("apexshot-x11-controls".into())
         .spawn(move || {
             use std::io::BufRead;
@@ -1034,8 +1030,106 @@ fn spawn_x11_controls_bar(
             if let Some(tx) = xid_tx.take() {
                 let _ = tx.send(0);
             }
-        });
-    if let Err(err) = reader {
+        })
+        .map(|_| ())
+}
+
+/// Run the shared Qt control bar in the capture helper.
+///
+/// The bar is the same painted widget the Windows shell uses, so both
+/// platforms show one design. The helper mirrors the Rust-owned recording:
+/// bar commands arrive on its stdout, pause and resume come back on stdin.
+fn spawn_x11_qt_controls_bar(
+    params: &RecordingControlsParams,
+    session_id: &str,
+    stdin: &X11ControlsStdin,
+) -> Option<(std::process::Child, oneshot::Receiver<u32>)> {
+    let helper = crate::capture_overlay::find_capture_binary()?;
+    let mut bar_params = params.clone();
+    bar_params.session_id = Some(session_id.to_string());
+    bar_params.dim_screen = false;
+    bar_params.use_shell_mask = false;
+    bar_params.countdown_enabled = false;
+    let params_json = serde_json::to_string(&bar_params).ok()?;
+    let mut child = match std::process::Command::new(&helper)
+        .arg("--recording-controls")
+        .arg(&params_json)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::inherit())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(err) => {
+            eprintln!(
+                "[recording] Qt controls bar failed to launch ({}): {err}",
+                helper.display()
+            );
+            return None;
+        }
+    };
+
+    let Some(child_stdin) = child.stdin.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return None;
+    };
+    match stdin.lock() {
+        Ok(mut guard) => *guard = Some(child_stdin),
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+    }
+
+    let Some(stdout) = child.stdout.take() else {
+        clear_x11_controls_stdin(stdin);
+        let _ = child.kill();
+        let _ = child.wait();
+        return None;
+    };
+    let (xid_tx, xid_rx) = oneshot::channel();
+    if let Err(err) = read_x11_controls_stdout(stdout, xid_tx) {
+        eprintln!("[recording] X11 controls bar reader failed: {err}");
+        clear_x11_controls_stdin(stdin);
+        let _ = child.kill();
+        let _ = child.wait();
+        return None;
+    }
+    Some((child, xid_rx))
+}
+
+/// Run the GTK control bar in its own process.
+///
+/// The bar shares `recording-countdown-internal` because the main-binary
+/// dispatch lives in main.rs; a session id and zero seconds select the
+/// controls window instead of a countdown. This is the fallback used when the
+/// capture helper cannot run the shared bar.
+fn spawn_x11_gtk_controls_bar(
+    params: &RecordingControlsParams,
+    session_id: &str,
+) -> Option<(std::process::Child, oneshot::Receiver<u32>)> {
+    let exe = std::env::current_exe().ok()?;
+    let mut bar_params = params.clone();
+    bar_params.session_id = Some(session_id.to_string());
+    bar_params.dim_screen = false;
+    bar_params.use_shell_mask = false;
+    bar_params.countdown_enabled = false;
+    let params_json = serde_json::to_string(&bar_params).ok()?;
+    let mut child = std::process::Command::new(exe)
+        .arg("recording-countdown-internal")
+        .arg(params_json)
+        .arg("0")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::inherit())
+        .spawn()
+        .map_err(|err| eprintln!("[recording] X11 controls bar failed to launch: {err}"))
+        .ok()?;
+    let stdout = child.stdout.take()?;
+    let (xid_tx, xid_rx) = oneshot::channel();
+    if let Err(err) = read_x11_controls_stdout(stdout, xid_tx) {
         eprintln!("[recording] X11 controls bar reader failed: {err}");
         let _ = child.kill();
         let _ = child.wait();
@@ -1044,20 +1138,71 @@ fn spawn_x11_controls_bar(
     Some((child, xid_rx))
 }
 
-async fn start_x11_controls_bar(
+fn spawn_x11_controls_bar(
     params: &RecordingControlsParams,
     session_id: &str,
-) -> Option<X11ControlsBar> {
-    let (mut child, xid_rx) = spawn_x11_controls_bar(params, session_id)?;
+    stdin: &X11ControlsStdin,
+) -> Option<(std::process::Child, oneshot::Receiver<u32>, bool)> {
+    if let Some((child, xid_rx)) = spawn_x11_qt_controls_bar(params, session_id, stdin) {
+        return Some((child, xid_rx, true));
+    }
+    spawn_x11_gtk_controls_bar(params, session_id).map(|(child, xid_rx)| (child, xid_rx, false))
+}
+
+async fn await_x11_controls_xid(
+    child: &mut std::process::Child,
+    xid_rx: oneshot::Receiver<u32>,
+) -> Option<u32> {
     match tokio::time::timeout(X11_CONTROLS_START_TIMEOUT, xid_rx).await {
-        Ok(Ok(xid)) if xid != 0 => Some(X11ControlsBar { child, xid }),
+        Ok(Ok(xid)) if xid != 0 => Some(xid),
         _ => {
-            eprintln!("[recording] X11 controls bar did not report a window; recording without it");
-            let _ = child.kill();
-            let _ = child.wait();
+            // A process that already exited could not open its window; the
+            // caller decides whether a fallback bar is worth starting.
+            if !matches!(child.try_wait(), Ok(Some(_))) {
+                eprintln!(
+                    "[recording] X11 controls bar did not report a window; recording without it"
+                );
+            }
             None
         }
     }
+}
+
+async fn start_x11_controls_bar(
+    params: &RecordingControlsParams,
+    session_id: &str,
+    stdin: &X11ControlsStdin,
+) -> Option<X11ControlsBar> {
+    let (mut child, xid_rx, using_qt_bar) = spawn_x11_controls_bar(params, session_id, stdin)?;
+    if let Some(xid) = await_x11_controls_xid(&mut child, xid_rx).await {
+        return Some(X11ControlsBar {
+            child,
+            xid,
+            stdin: stdin.clone(),
+        });
+    }
+
+    let exited_early = matches!(child.try_wait(), Ok(Some(_)));
+    clear_x11_controls_stdin(stdin);
+    let _ = child.kill();
+    let _ = child.wait();
+
+    // The helper could not open its window, so the installed capture binary
+    // may predate this mode. Keep the GTK bar working as before.
+    if using_qt_bar && exited_early {
+        eprintln!("[recording] Qt controls bar exited early; using the GTK bar");
+        let (mut child, xid_rx) = spawn_x11_gtk_controls_bar(params, session_id)?;
+        if let Some(xid) = await_x11_controls_xid(&mut child, xid_rx).await {
+            return Some(X11ControlsBar {
+                child,
+                xid,
+                stdin: stdin.clone(),
+            });
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    None
 }
 
 /// Non-GNOME recording path (Fedora KDE, wlroots, etc.).
@@ -1139,9 +1284,28 @@ pub async fn run_recording_with_native_controls(
     let (control_command_tx, mut control_command_rx) =
         mpsc::unbounded_channel::<RecordingControlCommand>();
 
+    // Every command reaches the recorder through this forwarder, whether the
+    // bar, a shortcut, or the tray sent it, so it is also the one place that
+    // can keep the bar's pause state in step.
+    let controls_stdin: X11ControlsStdin = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let bar_stdin = controls_stdin.clone();
     let dbus_tx = recording_command_tx.clone();
     let dbus_forward = tokio::spawn(async move {
         while let Some(cmd) = control_command_rx.recv().await {
+            let state_line: &[u8] = match cmd {
+                RecordingControlCommand::Pause => b"paused\n",
+                RecordingControlCommand::Resume => b"resumed\n",
+                _ => b"",
+            };
+            if !state_line.is_empty() {
+                if let Ok(mut guard) = bar_stdin.lock() {
+                    if let Some(stdin) = guard.as_mut() {
+                        use std::io::Write;
+                        let _ = stdin.write_all(state_line);
+                        let _ = stdin.flush();
+                    }
+                }
+            }
             if dbus_tx.send(cmd).is_err() {
                 break;
             }
@@ -1150,7 +1314,7 @@ pub async fn run_recording_with_native_controls(
 
     control_server.set_command_sender(control_command_tx);
     let mut controls_bar = if show_controls && crate::backend::is_x11_session() {
-        start_x11_controls_bar(&params, &session_id).await
+        start_x11_controls_bar(&params, &session_id, &controls_stdin).await
     } else {
         None
     };

@@ -20,6 +20,7 @@ use std::sync::{
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::oneshot;
+use x11rb::properties::{WmSizeHints, WmSizeHintsSpecification};
 use x11rb::wrapper::ConnectionExt;
 use x11rb::{
     connection::Connection,
@@ -520,7 +521,7 @@ fn setup_window(
                 }
                 let _ = request_x11_always_on_top(&window);
                 let (x, y) = current_pos_realize.get();
-                let _ = position_x11_window(&window, x, y);
+                let _ = place_x11_controls_window(&window, x, y);
             }
         ));
 
@@ -531,7 +532,8 @@ fn setup_window(
             move |_| {
                 let (x, y) = current_pos_map.get();
                 let _ = request_x11_always_on_top(&window);
-                let _ = position_x11_window(&window, x, y);
+                let _ = place_x11_controls_window(&window, x, y);
+                schedule_x11_controls_position(&window, current_pos_map.clone());
             }
         ));
     }
@@ -1751,15 +1753,7 @@ fn suppress_x11_controls_window_type(window: &impl IsA<gtk4::Window>) {
 }
 
 fn request_x11_always_on_top(window: &impl IsA<gtk4::Window>) -> Result<(), String> {
-    let surface = window
-        .as_ref()
-        .surface()
-        .ok_or_else(|| "missing GTK surface".to_string())?;
-    let x11_surface = surface
-        .downcast::<X11Surface>()
-        .map_err(|_| "surface is not X11 (compositor does not expose X11 backend)".to_string())?;
-    let xid = u32::try_from(x11_surface.xid())
-        .map_err(|_| "X11 window id is out of range for xproto window type".to_string())?;
+    let xid = x11_surface_window_id(window)?;
     let (conn, screen_num) = x11rb::connect(None).map_err(|e| e.to_string())?;
     let root = conn
         .setup()
@@ -1784,15 +1778,7 @@ fn request_x11_always_on_top(window: &impl IsA<gtk4::Window>) -> Result<(), Stri
 }
 
 fn position_x11_window(window: &impl IsA<gtk4::Window>, x: i32, y: i32) -> Result<(), String> {
-    let surface = window
-        .as_ref()
-        .surface()
-        .ok_or_else(|| "missing GTK surface".to_string())?;
-    let x11_surface = surface
-        .downcast::<X11Surface>()
-        .map_err(|_| "surface is not X11 (compositor does not expose X11 backend)".to_string())?;
-    let xid = u32::try_from(x11_surface.xid())
-        .map_err(|_| "X11 window id is out of range for xproto window type".to_string())?;
+    let xid = x11_surface_window_id(window)?;
     let (conn, _) = x11rb::connect(None).map_err(|e| e.to_string())?;
     conn.configure_window(
         xid,
@@ -1804,6 +1790,138 @@ fn position_x11_window(window: &impl IsA<gtk4::Window>, x: i32, y: i32) -> Resul
     .map_err(|e| e.to_string())?;
     conn.flush().map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// How long after mapping the controls bar gets before its position is
+/// re-applied. By then the window manager has reparented the toplevel into its
+/// own frame, which is the window a position request has to target.
+const X11_CONTROLS_REPOSITION_DELAY: Duration = Duration::from_millis(150);
+
+/// Put the controls bar at `(x, y)` on screen.
+///
+/// The position is written into `WM_NORMAL_HINTS` as a user-specified
+/// position, so a reparenting window manager maps the window there instead of
+/// at its own default spot. The configure request then targets the window the
+/// manager actually moves: the client while it is still a child of the root,
+/// and its frame once the manager has wrapped it.
+fn place_x11_controls_window(
+    window: &impl IsA<gtk4::Window>,
+    x: i32,
+    y: i32,
+) -> Result<(), String> {
+    let xid = x11_surface_window_id(window)?;
+    let (conn, screen_num) = x11rb::connect(None).map_err(|e| e.to_string())?;
+    let root = conn
+        .setup()
+        .roots
+        .get(screen_num)
+        .map(|screen| screen.root)
+        .ok_or_else(|| "missing X11 root window".to_string())?;
+
+    let mut hints = WmSizeHints::get_normal_hints(&conn, xid)
+        .ok()
+        .and_then(|cookie| cookie.reply().ok())
+        .flatten()
+        .unwrap_or_default();
+    hints.position = Some((WmSizeHintsSpecification::UserSpecified, x, y));
+    hints
+        .set_normal_hints(&conn, xid)
+        .map_err(|e| e.to_string())?;
+
+    let target = x11_move_target(&conn, xid, root)?;
+    let (target_x, target_y) = if target == xid {
+        (x, y)
+    } else {
+        let client = conn
+            .translate_coordinates(xid, root, 0, 0)
+            .map_err(|e| e.to_string())?
+            .reply()
+            .map_err(|e| e.to_string())?;
+        let frame = conn
+            .translate_coordinates(target, root, 0, 0)
+            .map_err(|e| e.to_string())?
+            .reply()
+            .map_err(|e| e.to_string())?;
+        frame_origin_for_position(
+            (x, y),
+            (
+                i32::from(client.dst_x) - i32::from(frame.dst_x),
+                i32::from(client.dst_y) - i32::from(frame.dst_y),
+            ),
+        )
+    };
+
+    conn.configure_window(
+        target,
+        &xproto::ConfigureWindowAux::new()
+            .x(target_x)
+            .y(target_y)
+            .stack_mode(xproto::StackMode::ABOVE),
+    )
+    .map_err(|e| e.to_string())?;
+    conn.flush().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Re-apply the controls bar's position once the event loop is idle and again
+/// after the window manager has had time to reparent it.
+fn schedule_x11_controls_position(window: &ApplicationWindow, position: Rc<Cell<(i32, i32)>>) {
+    let idle_window = window.downgrade();
+    let idle_position = position.clone();
+    glib::idle_add_local_once(move || {
+        if let Some(window) = idle_window.upgrade() {
+            let (x, y) = idle_position.get();
+            let _ = place_x11_controls_window(&window, x, y);
+        }
+    });
+
+    let timeout_window = window.downgrade();
+    glib::timeout_add_local_once(X11_CONTROLS_REPOSITION_DELAY, move || {
+        if let Some(window) = timeout_window.upgrade() {
+            let (x, y) = position.get();
+            let _ = place_x11_controls_window(&window, x, y);
+        }
+    });
+}
+
+/// The window a position request has to name: the client while it is still a
+/// direct child of the root, otherwise the frame a reparenting window manager
+/// wrapped it in.
+fn x11_move_target<C: Connection>(conn: &C, xid: u32, root: u32) -> Result<u32, String> {
+    let mut current = xid;
+    for _ in 0..8 {
+        if current == root {
+            return Ok(xid);
+        }
+        let tree = conn
+            .query_tree(current)
+            .map_err(|e| e.to_string())?
+            .reply()
+            .map_err(|e| e.to_string())?;
+        if tree.parent == root || tree.parent == 0 {
+            return Ok(current);
+        }
+        current = tree.parent;
+    }
+    Ok(current)
+}
+
+/// Origin of a frame that puts its child at `target`, given the child's offset
+/// inside that frame.
+fn frame_origin_for_position(target: (i32, i32), client_offset: (i32, i32)) -> (i32, i32) {
+    (target.0 - client_offset.0, target.1 - client_offset.1)
+}
+
+fn x11_surface_window_id(window: &impl IsA<gtk4::Window>) -> Result<u32, String> {
+    let surface = window
+        .as_ref()
+        .surface()
+        .ok_or_else(|| "missing GTK surface".to_string())?;
+    let x11_surface = surface
+        .downcast::<X11Surface>()
+        .map_err(|_| "surface is not X11 (compositor does not expose X11 backend)".to_string())?;
+    u32::try_from(x11_surface.xid())
+        .map_err(|_| "X11 window id is out of range for xproto window type".to_string())
 }
 
 fn intern_atom<C: Connection>(conn: &C, atom_name: &[u8]) -> Result<u32, String> {
@@ -1839,4 +1957,71 @@ fn send_net_wm_state_client_message<C: Connection>(
     .map_err(|e| e.to_string())?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const DESKTOP: (i32, i32, i32, i32) = (0, 0, 1920, 1080);
+
+    fn window_recording(capture: (i32, i32, i32, i32)) -> RecordingControlsParams {
+        RecordingControlsParams {
+            capture_x: capture.0,
+            capture_y: capture.1,
+            capture_w: capture.2,
+            capture_h: capture.3,
+            is_fullscreen: false,
+            show_timer: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn window_recording_places_the_bar_below_the_window() {
+        let params = window_recording((600, 232, 800, 600));
+        assert!(can_show_bar_outside_capture(&params, DESKTOP));
+        assert_eq!(compute_bar_position(&params, DESKTOP), (836, 844));
+    }
+
+    #[test]
+    fn window_recording_places_the_bar_above_when_below_does_not_fit() {
+        let params = window_recording((600, 500, 800, 600));
+        assert!(can_show_bar_outside_capture(&params, DESKTOP));
+        assert_eq!(compute_bar_position(&params, DESKTOP), (836, 422));
+    }
+
+    #[test]
+    fn window_recording_without_room_falls_back_to_the_top_centre() {
+        let params = window_recording((-200, -100, 2400, 1300));
+        assert!(!can_show_bar_outside_capture(&params, DESKTOP));
+        let mut normal = params.clone();
+        normal.is_fullscreen = true;
+        assert_eq!(compute_bar_position(&normal, DESKTOP), (796, 16));
+    }
+
+    #[test]
+    fn fullscreen_keeps_the_bar_at_the_top_centre() {
+        let params = RecordingControlsParams {
+            is_fullscreen: true,
+            ..Default::default()
+        };
+        assert!(!can_show_bar_outside_capture(&params, DESKTOP));
+        assert_eq!(compute_bar_position(&params, DESKTOP), (796, 16));
+    }
+
+    #[test]
+    fn window_recording_on_the_second_display_centres_on_it() {
+        let params = window_recording((2200, 100, 800, 600));
+        assert_eq!(
+            compute_bar_position(&params, (0, 0, 3840, 1080)),
+            (2436, 712)
+        );
+    }
+
+    #[test]
+    fn frame_origin_subtracts_the_client_offset() {
+        assert_eq!(frame_origin_for_position((836, 844), (0, 0)), (836, 844));
+        assert_eq!(frame_origin_for_position((836, 844), (1, 24)), (835, 820));
+    }
 }
