@@ -30,9 +30,11 @@ mod audio;
 mod backend;
 mod controls;
 mod gst_audio;
+mod pointer_track;
 mod recording_manifest;
 mod timeline;
 mod wf_recorder;
+mod x11_pointer_track;
 
 pub(crate) use backend::normalize_window_still_frame;
 
@@ -288,7 +290,7 @@ impl RecordingConfig {
             x: None,
             y: None,
             cursor: app_config.rec_cursor,
-            pointer_track: crate::gnome_shell::should_use_pointer_track(),
+            pointer_track: self::pointer_track::should_use(),
             hidpi: app_config.rec_hidpi,
             max_resolution,
             fps,

@@ -1,3 +1,4 @@
+use super::super::timeline::RecordingTimeline;
 use super::super::{
     gst_audio, notify_daemon_event, RecordError, RecordResult, RecordingConfig,
     RecordingControlCommand, RecordingTerminalAction,
@@ -7,7 +8,10 @@ use super::profile::{video_encoder_props, EncoderProfile};
 use super::session::RecordingAudioExclusiveGuard;
 use gst::prelude::*;
 use gstreamer as gst;
+use gstreamer::glib;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use x11rb::connection::Connection;
 
@@ -60,7 +64,7 @@ pub(super) async fn record_x11_with_gstreamer(
     profile: &EncoderProfile,
     final_path: &Path,
     command_rx: Option<mpsc::UnboundedReceiver<RecordingControlCommand>>,
-) -> RecordResult<(PathBuf, RecordingTerminalAction)> {
+) -> RecordResult<(PathBuf, RecordingTerminalAction, Option<RecordingTimeline>)> {
     let _audio_exclusive =
         RecordingAudioExclusiveGuard::acquire(config.mic_enabled || config.speaker_enabled);
     gst::init().map_err(|e| RecordError::InitError(e.to_string()))?;
@@ -108,6 +112,21 @@ pub(super) async fn record_x11_with_gstreamer(
         ));
     }
 
+    // Stamp the media clock when the first buffer leaves the capture source.
+    // The pointer sidecar is rebased onto this origin afterwards.
+    let frame_origin_us = Arc::new(AtomicI64::new(0));
+    if let Some(source) = pipeline.by_name("vsrc") {
+        if let Some(pad) = source.static_pad("src") {
+            let origin = Arc::clone(&frame_origin_us);
+            let _ = pad.add_probe(gst::PadProbeType::BUFFER, move |_, _| {
+                if origin.load(Ordering::SeqCst) == 0 {
+                    origin.store(glib::monotonic_time(), Ordering::SeqCst);
+                }
+                gst::PadProbeReturn::Remove
+            });
+        }
+    }
+
     pipeline
         .set_state(gst::State::Playing)
         .map_err(|e| RecordError::GStreamerError(format!("Failed to start pipeline: {}", e)))?;
@@ -122,6 +141,8 @@ pub(super) async fn record_x11_with_gstreamer(
     let mut paused = false;
     let mut eos_received = false;
     let mut stopped_low_disk = false;
+    let mut stop_us: Option<i64> = None;
+    let mut timeline = RecordingTimeline::default();
 
     loop {
         tokio::select! {
@@ -137,16 +158,19 @@ pub(super) async fn record_x11_with_gstreamer(
                 };
                 match command {
                     RecordingControlCommand::Restart => {
+                        stop_us = Some(glib::monotonic_time());
                         stop_action = RecordingTerminalAction::Restart;
                         stopping = true;
                         break;
                     }
                     RecordingControlCommand::StopSave => {
+                        stop_us = Some(glib::monotonic_time());
                         stop_action = RecordingTerminalAction::Save;
                         stopping = true;
                         break;
                     }
                     RecordingControlCommand::StopDiscard => {
+                        stop_us = Some(glib::monotonic_time());
                         stop_action = RecordingTerminalAction::Discard;
                         stopping = true;
                         break;
@@ -155,6 +179,7 @@ pub(super) async fn record_x11_with_gstreamer(
                         pipeline
                             .set_state(gst::State::Paused)
                             .map_err(|e| RecordError::GStreamerError(format!("Failed to pause pipeline: {e}")))?;
+                        timeline.pause(glib::monotonic_time());
                         paused = true;
                         notify_daemon_event("recording_session_paused");
                     }
@@ -171,6 +196,7 @@ pub(super) async fn record_x11_with_gstreamer(
                         pipeline
                             .set_state(gst::State::Playing)
                             .map_err(|e| RecordError::GStreamerError(format!("Failed to resume pipeline: {e}")))?;
+                        timeline.resume(glib::monotonic_time());
                         paused = false;
                         notify_daemon_event("recording_session_resumed");
                     }
@@ -208,6 +234,15 @@ pub(super) async fn record_x11_with_gstreamer(
     if paused {
         let _ = pipeline.set_state(gst::State::Playing);
     }
+    let stop_us = stop_us.unwrap_or_else(glib::monotonic_time);
+    timeline.finish(stop_us);
+    let origin_us = frame_origin_us.load(Ordering::SeqCst);
+    let timeline = if origin_us > 0 {
+        timeline.frame_time_us(origin_us);
+        Some(timeline)
+    } else {
+        None
+    };
     // EOS is handed to the pipeline off the async task, bounded by a timeout.
     let mut eos_send_failed = false;
     if stopping && !eos_received {
@@ -242,7 +277,7 @@ pub(super) async fn record_x11_with_gstreamer(
         let _ = std::fs::remove_file(final_path);
     }
 
-    Ok((final_path.to_path_buf(), stop_action))
+    Ok((final_path.to_path_buf(), stop_action, timeline))
 }
 
 async fn await_pipeline_eos(bus: &gst::Bus, timeout: std::time::Duration) -> Result<(), String> {
@@ -417,8 +452,17 @@ fn build_x11_gstreamer_pipeline(
 }
 
 pub(in crate::recording) fn get_x11_source(config: &RecordingConfig) -> RecordResult<String> {
-    let show_pointer = if config.cursor { "true" } else { "false" };
-    let mut source = format!("ximagesrc show-pointer={} use-damage=false", show_pointer);
+    // The editor draws its own cursor when a pointer sidecar exists, so the
+    // recorded frames must not carry the OS cursor.
+    let show_pointer = if config.cursor && !config.pointer_track_enabled() {
+        "true"
+    } else {
+        "false"
+    };
+    let mut source = format!(
+        "ximagesrc name=vsrc show-pointer={} use-damage=false",
+        show_pointer
+    );
 
     if let (Some(x), Some(y), Some(w), Some(h)) = (config.x, config.y, config.width, config.height)
     {
@@ -514,7 +558,7 @@ mod tests {
         // → -5 → quantizer 15) exactly like the Wayland libx264 branch.
         assert_eq!(
             pipeline,
-            "ximagesrc show-pointer=true use-damage=false startx=0 starty=0 endx=1919 endy=1199 \
+            "ximagesrc name=vsrc show-pointer=true use-damage=false startx=0 starty=0 endx=1919 endy=1199 \
              ! videoconvert ! video/x-raw,framerate=30/1,format=I420,colorimetry=bt709 ! videorate \
              ! videoscale ! video/x-raw,width=768,height=480,pixel-aspect-ratio=1/1 \
              ! queue ! x264enc speed-preset=veryfast pass=qual quantizer=15 key-int-max=60 \
@@ -740,6 +784,18 @@ mod tests {
             source.contains("tokio::time::sleep(std::time::Duration::from_millis(50)).await"),
             "the EOS wait must yield on the async tick rather than block",
         );
+    }
+
+    #[test]
+    fn x11_pipeline_hides_the_os_cursor_when_pointer_tracking() {
+        let config = RecordingConfig {
+            pointer_track: true,
+            ..x11_config(None)
+        };
+
+        let pipeline = build(&config, h264_profile(), Some((1920, 1200)));
+
+        assert!(pipeline.contains("ximagesrc name=vsrc show-pointer=false use-damage=false"));
     }
 
     #[test]

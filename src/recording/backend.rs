@@ -203,10 +203,10 @@ pub(super) async fn start_recording_with_prepared_backend(
 
     record_x11_with_gstreamer(&built.config, built.profile, &built.final_path, command_rx)
         .await
-        .map(|(path, action)| super::RecordedSession {
+        .map(|(path, action, timeline)| super::RecordedSession {
             path,
             action,
-            timeline: None,
+            timeline,
         })
 }
 

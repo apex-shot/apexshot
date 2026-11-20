@@ -27,15 +27,15 @@ fn preserve_first_pointer_track(
     true
 }
 
-/// Stop GNOME pointer tracking as soon as capture ends so hotkeys work while
+/// Stop pointer tracking as soon as capture ends so hotkeys work while
 /// the file is still being muxed. `finish_save` writes the stashed samples.
 pub(super) fn harvest_pointer_track_on_session_end() {
-    if !crate::gnome_shell::is_shell_overlay_service_available() {
+    if !super::pointer_track::service_available() {
         return;
     }
 
     // Capture end and outer recording cleanup can both emit session_ended.
-    // StopPointerTrack is destructive: the first call returns the recording,
+    // Stopping is destructive: the first call returns the recording,
     // while a second returns an empty t0=0 payload. Never let that duplicate
     // notification erase samples that are waiting for finish_save.
     if HARVESTED_POINTER_TRACK
@@ -46,7 +46,7 @@ pub(super) fn harvest_pointer_track_on_session_end() {
         return;
     }
 
-    if let Ok(result) = crate::gnome_shell::stop_pointer_track() {
+    if let Ok(result) = super::pointer_track::stop() {
         if let Ok(mut guard) = HARVESTED_POINTER_TRACK.lock() {
             let _ = preserve_first_pointer_track(&mut guard, result);
         }
@@ -331,7 +331,9 @@ impl PointerTrackSession {
         window_cursor_metadata: bool,
     ) -> Self {
         let should_track = config.pointer_track_enabled()
-            || (config.target == super::RecordingTarget::Window && window_cursor_metadata);
+            || (config.target == super::RecordingTarget::Window
+                && window_cursor_metadata
+                && !super::pointer_track::uses_x11_tracker());
         if !should_track {
             if config.target == super::RecordingTarget::Window {
                 let _ = take_harvested_pointer_track();
@@ -343,8 +345,14 @@ impl PointerTrackSession {
                 manifest: RecordingManifest::new(1.0),
             };
         }
-        let (device_pixel_ratio, recorded_size) =
-            recording_pixel_geometry(config, region, window_cursor_metadata);
+        let (device_pixel_ratio, recorded_size) = if super::pointer_track::uses_x11_tracker() {
+            let size = region.is_area().then(|| {
+                super::backend::fit_within_max_resolution(region.w, region.h, config.max_resolution)
+            });
+            (1.0, size)
+        } else {
+            recording_pixel_geometry(config, region, window_cursor_metadata)
+        };
         let manifest = RecordingManifest {
             frame_rate: Some(f64::from(config.fps)),
             target: Some(recording_target_name(config.target).into()),
@@ -353,7 +361,7 @@ impl PointerTrackSession {
             ..RecordingManifest::new(device_pixel_ratio)
         };
         let _ = take_harvested_pointer_track();
-        match crate::gnome_shell::start_pointer_track() {
+        match super::pointer_track::start() {
             Ok(()) => {
                 if window_cursor_metadata {
                     eprintln!("[recording] window pointer and click tracking started");
@@ -371,6 +379,10 @@ impl PointerTrackSession {
                 if window_cursor_metadata {
                     eprintln!("[recording] StartPointerTrack failed ({err}); window cursor will remain editable without Auto Zoom click data");
                     notify_window_click_tracking_unavailable();
+                } else if super::pointer_track::uses_x11_tracker() {
+                    eprintln!(
+                        "[recording] X11 pointer track failed ({err}); continuing without sidecar"
+                    );
                 } else {
                     eprintln!(
                         "[recording] StartPointerTrack failed ({err}); continuing without sidecar"
@@ -421,7 +433,7 @@ impl PointerTrackSession {
                     &self.manifest,
                 );
             }
-            None => crate::gnome_shell::stop_pointer_track(),
+            None => super::pointer_track::stop(),
         };
         match result {
             Ok(result) => {
@@ -454,7 +466,7 @@ impl PointerTrackSession {
                     );
                 }
                 if result.samples.is_empty() {
-                    eprintln!("[recording] StopPointerTrack returned no pointer samples");
+                    eprintln!("[recording] pointer track returned no pointer samples");
                     crate::utils::notify::desktop_notification(
                         &crate::i18n::t("Pointer track missing"),
                         &crate::i18n::t("No cursor samples were captured. Zoom centers will use the frame center."),
@@ -521,7 +533,9 @@ impl PointerTrackSession {
                 }
             }
             Err(err) => {
-                eprintln!("[recording] StopPointerTrack failed ({err}); deleting partial sidecar");
+                eprintln!(
+                    "[recording] pointer track stop failed ({err}); deleting partial sidecar"
+                );
                 PointerSidecar::delete_next_to_video(output_path);
                 false
             }
@@ -532,8 +546,8 @@ impl PointerTrackSession {
         let was_started = self.started;
         self.started = false;
         if take_harvested_pointer_track().is_none() && was_started {
-            if let Err(err) = crate::gnome_shell::stop_pointer_track() {
-                eprintln!("[recording] StopPointerTrack on discard failed: {err}");
+            if let Err(err) = super::pointer_track::stop() {
+                eprintln!("[recording] pointer track stop on discard failed: {err}");
             }
         }
         delete_recording_outputs(output_path);
@@ -549,8 +563,8 @@ impl Drop for PointerTrackSession {
         if take_harvested_pointer_track().is_some() {
             return;
         }
-        if let Err(err) = crate::gnome_shell::stop_pointer_track() {
-            eprintln!("[recording] StopPointerTrack during cleanup failed: {err}");
+        if let Err(err) = super::pointer_track::stop() {
+            eprintln!("[recording] pointer track stop during cleanup failed: {err}");
         }
     }
 }
@@ -756,7 +770,7 @@ pub fn prepare_overlay_recording_request(
         x: capture_x,
         y: capture_y,
         cursor: true,
-        pointer_track: !request.window && crate::gnome_shell::should_use_pointer_track(),
+        pointer_track: !request.window && super::pointer_track::should_use(),
         hidpi: request.hidpi,
         max_resolution,
         fps,
@@ -982,6 +996,21 @@ pub async fn run_recording_with_native_controls(
     });
 
     control_server.set_command_sender(control_command_tx);
+    let mut pointer_track = if config.pointer_track_enabled() {
+        let fullscreen_monitor = if params.is_fullscreen && super::pointer_track::uses_x11_tracker()
+        {
+            super::x11_pointer_track::screen_region()
+        } else {
+            None
+        };
+        Some(PointerTrackSession::start(
+            &config,
+            pointer_capture_region(&config, fullscreen_monitor),
+            false,
+        ))
+    } else {
+        None
+    };
     super::notify_daemon_event("recording_session_started");
     let outcome = if let Some(prepared_backend) = prepared_backend {
         super::backend::start_recording_with_prepared_backend(prepared_backend, Some(command_rx))
@@ -995,6 +1024,9 @@ pub async fn run_recording_with_native_controls(
     let outcome = match outcome {
         Ok(outcome) => outcome,
         Err(err) => {
+            if let Some(pointer_track) = pointer_track.take() {
+                pointer_track.finish_discard(&config.output_path);
+            }
             super::notify_recording_session_ended_best_effort();
             return Err(err.into());
         }
@@ -1011,6 +1043,9 @@ pub async fn run_recording_with_native_controls(
             {
                 super::notify_daemon_event(event);
             }
+            if let Some(pointer_track) = pointer_track.take() {
+                pointer_track.finish_discard(&path);
+            }
             delete_recording_outputs(&path);
             Box::pin(run_recording_with_native_controls(config, params)).await
         }
@@ -1023,6 +1058,9 @@ pub async fn run_recording_with_native_controls(
                 super::daemon_event_for_terminal_action(super::RecordingTerminalAction::Save)
             {
                 super::notify_daemon_event(event);
+            }
+            if let Some(pointer_track) = pointer_track.take() {
+                pointer_track.finish_save(&path, timeline.as_ref());
             }
             if config.target == super::RecordingTarget::Window {
                 if let Some(timeline) = timeline.as_ref() {
@@ -1060,6 +1098,9 @@ pub async fn run_recording_with_native_controls(
                 super::daemon_event_for_terminal_action(super::RecordingTerminalAction::Discard)
             {
                 super::notify_daemon_event(event);
+            }
+            if let Some(pointer_track) = pointer_track.take() {
+                pointer_track.finish_discard(&path);
             }
             Ok((path, StopAction::Discard))
         }
@@ -1820,7 +1861,7 @@ mod tests {
         assert_eq!(prepared.recording_config.cursor, true);
         assert_eq!(
             prepared.recording_config.pointer_track,
-            crate::gnome_shell::should_use_pointer_track()
+            crate::recording::pointer_track::should_use()
         );
         assert_eq!(prepared.recording_config.hidpi, true);
         assert_eq!(prepared.recording_config.max_resolution, Some((854, 480)));
