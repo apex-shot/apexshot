@@ -111,15 +111,16 @@ async fn handle_recording_target(target: crate::recording::RecordingTarget) {
         }
         Err(e) => {
             eprintln!("[daemon] Recording error: {e}");
-            if target == crate::recording::RecordingTarget::Window
-                && !e
-                    .downcast_ref::<crate::recording::RecordError>()
-                    .is_some_and(|error| matches!(error, crate::recording::RecordError::Cancelled))
-            {
-                crate::utils::notify::desktop_notification(
-                    &crate::i18n::t("Window recording unavailable"),
-                    &e.to_string(),
-                );
+            let cancelled = e
+                .downcast_ref::<crate::recording::RecordError>()
+                .is_some_and(|error| matches!(error, crate::recording::RecordError::Cancelled));
+            if !cancelled {
+                let title = if target == crate::recording::RecordingTarget::Window {
+                    crate::i18n::t("Window recording unavailable")
+                } else {
+                    crate::i18n::t("Recording failed")
+                };
+                crate::utils::notify::desktop_notification(&title, &e.to_string());
             }
         }
     }

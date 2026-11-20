@@ -18,6 +18,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
+use crate::capture::editor::window::icon_names;
 use crate::i18n::t;
 
 pub(super) fn build_preview(
@@ -705,7 +706,7 @@ pub(super) fn build_stage_tools(
     crop.add_css_class("recording-editor-stage-chip");
     crop.set_tooltip_text(Some(&t("Crop video")));
     let crop_row = GtkBox::new(Orientation::Horizontal, 6);
-    let crop_icon = Image::from_icon_name("image-crop-symbolic");
+    let crop_icon = Image::from_icon_name(icon_names::custom::CROP_SYMBOLIC);
     crop_icon.set_pixel_size(13);
     let crop_label = Label::new(Some(&t("Crop video")));
     crop_label.add_css_class("recording-editor-stage-chip-label");

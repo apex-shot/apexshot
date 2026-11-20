@@ -29,6 +29,7 @@ mod audio;
 mod capture_handlers;
 mod dispatch;
 mod hotkey_listener;
+mod hotkey_x11;
 mod recording_handlers;
 mod scroll;
 
