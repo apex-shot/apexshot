@@ -36,18 +36,7 @@ const LOCK_VARIANTS: [u16; 4] = [0, LOCK_MASK, MOD2_MASK, LOCK_MASK | MOD2_MASK]
 
 /// True when the session is X11, where keys must be grabbed directly.
 pub(super) fn is_x11_session() -> bool {
-    is_x11_session_env(
-        std::env::var("XDG_SESSION_TYPE").ok().as_deref(),
-        std::env::var_os("WAYLAND_DISPLAY").is_some(),
-        std::env::var_os("DISPLAY").is_some(),
-    )
-}
-
-fn is_x11_session_env(session_type: Option<&str>, wayland_display: bool, display: bool) -> bool {
-    if session_type.is_some_and(|value| value.eq_ignore_ascii_case("x11")) {
-        return true;
-    }
-    !wayland_display && display
+    crate::backend::is_x11_session()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -389,14 +378,6 @@ mod tests {
         for required in [0, LOCK_MASK, MOD2_MASK, LOCK_MASK | MOD2_MASK] {
             assert!(LOCK_VARIANTS.contains(&required));
         }
-    }
-
-    #[test]
-    fn x11_session_detection() {
-        assert!(is_x11_session_env(Some("x11"), false, true));
-        assert!(is_x11_session_env(None, false, true));
-        assert!(!is_x11_session_env(None, true, true));
-        assert!(!is_x11_session_env(None, false, false));
     }
 
     #[test]

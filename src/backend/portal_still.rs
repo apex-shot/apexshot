@@ -518,6 +518,7 @@ enum StillSource {
     Native(StillMonitor),
     Portal(PortalStillSession),
     Window(PortalWindowStillSession),
+    X11Window(Box<super::x11_window_pick::X11PickedWindow>),
 }
 
 fn named_monitor(
@@ -593,6 +594,7 @@ impl StillSource {
             }
             Self::Portal(session) => runtime.block_on(session.capture()),
             Self::Window(session) => runtime.block_on(session.capture()),
+            Self::X11Window(window) => window.capture(),
         }
     }
 
@@ -601,6 +603,7 @@ impl StillSource {
             Self::Native(_) => {}
             Self::Portal(session) => runtime.block_on(session.close()),
             Self::Window(session) => runtime.block_on(session.close()),
+            Self::X11Window(_) => {}
         }
     }
 }
@@ -685,6 +688,9 @@ pub fn run_window_internal_helper(args: &[String]) -> anyhow::Result<()> {
     if args.len() != 3 {
         anyhow::bail!("Invalid portal window still helper arguments");
     }
+    if super::is_x11_session() {
+        return run_x11_window_internal_helper(args[2] == "1");
+    }
     let runtime = tokio::runtime::Runtime::new()?;
     let source = match runtime.block_on(PortalWindowStillSession::prepare(args[2] == "1")) {
         Ok(session) => StillSource::Window(session),
@@ -696,6 +702,32 @@ pub fn run_window_internal_helper(args: &[String]) -> anyhow::Result<()> {
             return Err(error.into());
         }
     };
+    let result = run_capture_requests(&source, &runtime, serde_json::json!({"ready": true}));
+    source.close(&runtime);
+    result
+}
+
+/// Pick a window on the root window instead of asking a ScreenCast portal.
+fn run_x11_window_internal_helper(include_cursor: bool) -> anyhow::Result<()> {
+    let window = match super::x11_window_pick::pick_window(include_cursor) {
+        Ok(super::x11_window_pick::PickOutcome::Picked(window)) => window,
+        Ok(super::x11_window_pick::PickOutcome::Cancelled) => {
+            write_message(serde_json::json!({
+                "error": "Window selection cancelled",
+                "cancelled": true
+            }))?;
+            return Ok(());
+        }
+        Err(error) => {
+            write_message(serde_json::json!({
+                "error": error.to_string(),
+                "cancelled": false
+            }))?;
+            return Err(error);
+        }
+    };
+    let runtime = tokio::runtime::Runtime::new()?;
+    let source = StillSource::X11Window(window);
     let result = run_capture_requests(&source, &runtime, serde_json::json!({"ready": true}));
     source.close(&runtime);
     result
