@@ -35,6 +35,7 @@ mod recording_manifest;
 mod timeline;
 mod wf_recorder;
 mod x11_pointer_track;
+mod x11_window_target;
 
 pub(crate) use backend::normalize_window_still_frame;
 

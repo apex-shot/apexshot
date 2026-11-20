@@ -81,6 +81,18 @@ impl X11PickedWindow {
         Ok(capture)
     }
 
+    /// The visible window rectangle in root coordinates: client plus window-manager
+    /// decorations, minus invisible borders and CSD shadow, clamped to the screen.
+    pub fn root_rect(&self) -> DisplayResult<(i32, i32, u32, u32)> {
+        let rect = self.current_rect()?;
+        Ok((
+            rect.x,
+            rect.y,
+            u32::try_from(rect.width).unwrap_or(0),
+            u32::try_from(rect.height).unwrap_or(0),
+        ))
+    }
+
     /// Re-read the window's current root-space rectangle; it may have moved.
     fn current_rect(&self) -> DisplayResult<Rect> {
         let frame = root_rect(&self.conn, self.frame, self.root).map_err(|_| {

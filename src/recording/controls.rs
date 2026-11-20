@@ -936,11 +936,32 @@ async fn start_shell_recording(
 /// notifications.
 pub async fn run_recording_with_native_controls(
     config: super::RecordingConfig,
-    params: RecordingControlsParams,
+    mut params: RecordingControlsParams,
 ) -> anyhow::Result<(PathBuf, StopAction)> {
     // Belt-and-suspenders: Fedora never records (entry points refuse first).
     if super::is_fedora_recording_unsupported() {
         super::refuse_fedora_recording()?;
+    }
+
+    // X11 desktops without a ScreenCast portal pick the window here, before the
+    // backend is prepared, so the crosshair appears before the countdown.
+    let output_path = config.output_path.clone();
+    let window_target = config.target == super::RecordingTarget::Window;
+    let config = match super::x11_window_target::resolve_x11_window_target(config).await {
+        Ok(Some(config)) => config,
+        Ok(None) => {
+            super::notify_recording_session_ended_best_effort();
+            return Ok((output_path, StopAction::Discard));
+        }
+        Err(err) => return Err(err.into()),
+    };
+    if window_target && config.target == super::RecordingTarget::Area {
+        // Window requests carry zeroed geometry until the picker resolves it.
+        params.capture_x = config.x.unwrap_or(0);
+        params.capture_y = config.y.unwrap_or(0);
+        params.capture_w = config.width.map_or(0, |w| i32::try_from(w).unwrap_or(0));
+        params.capture_h = config.height.map_or(0, |h| i32::try_from(h).unwrap_or(0));
+        params.is_fullscreen = false;
     }
 
     // Prepare the capture backend *before* countdown so any portal / permission
