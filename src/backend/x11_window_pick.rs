@@ -45,6 +45,21 @@ struct Rect {
     height: i32,
 }
 
+/// An `ximagesrc` source that captures the window's own drawable and follows
+/// it when it moves: the frame window plus the visible part's crop inside it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct X11WindowSource {
+    pub frame: u32,
+    /// The frame's root-space origin at pick time; cursor positions are
+    /// reported relative to this so a moved window stays aligned.
+    pub origin_x: i32,
+    pub origin_y: i32,
+    pub crop_x: u32,
+    pub crop_y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
 /// Result of a pick: either a window ready for captures, or a user cancel.
 pub enum PickOutcome {
     Picked(Box<X11PickedWindow>),
@@ -93,8 +108,38 @@ impl X11PickedWindow {
         ))
     }
 
+    /// The source that follows this window: the frame's own drawable and the
+    /// visible part's crop inside it. `ximagesrc` keeps showing the window when
+    /// it moves, unlike a fixed screen rectangle.
+    pub fn follow_source(&self) -> DisplayResult<X11WindowSource> {
+        let (frame, client, extents, net_extents) = self.window_parts()?;
+        let (crop_x, crop_y, width, height) = frame_crop(frame, client, extents, net_extents)
+            .ok_or_else(|| {
+                DisplayError::CaptureError("The selected window is no longer visible".into())
+            })?;
+        Ok(X11WindowSource {
+            frame: self.frame,
+            origin_x: frame.x,
+            origin_y: frame.y,
+            crop_x,
+            crop_y,
+            width,
+            height,
+        })
+    }
+
     /// Re-read the window's current root-space rectangle; it may have moved.
     fn current_rect(&self) -> DisplayResult<Rect> {
+        let (frame, client, extents, net_extents) = self.window_parts()?;
+        capture_rect(frame, client, extents, net_extents, self.screen).ok_or_else(|| {
+            DisplayError::CaptureError("The selected window is no longer visible".into())
+        })
+    }
+
+    /// The frame and client rectangles plus both decoration-extent properties.
+    fn window_parts(
+        &self,
+    ) -> DisplayResult<(Rect, Option<Rect>, Option<[u32; 4]>, Option<[u32; 4]>)> {
         let frame = root_rect(&self.conn, self.frame, self.root).map_err(|_| {
             DisplayError::CaptureError("The selected window is no longer available".into())
         })?;
@@ -107,9 +152,7 @@ impl X11PickedWindow {
         let net_extents = self
             .client
             .and_then(|client| cardinal4(&self.conn, client, self.net_extents_atom));
-        capture_rect(frame, client, extents, net_extents, self.screen).ok_or_else(|| {
-            DisplayError::CaptureError("The selected window is no longer visible".into())
-        })
+        Ok((frame, client, extents, net_extents))
     }
 }
 
@@ -356,18 +399,16 @@ fn cardinal4(conn: &RustConnection, window: Window, atom: u32) -> Option<[u32; 4
     }
 }
 
-/// The rectangle to capture, clamped to the screen: the client minus its CSD
-/// shadow, or the client plus the window manager's visible decorations, or the
-/// frame as a last resort. The frame itself can include invisible resize
-/// borders, so it is not preferred. `None` when nothing visible is left.
-fn capture_rect(
+/// The visible rectangle in root coordinates before clamping: the client minus
+/// its CSD shadow, the client plus the window manager's visible decorations, or
+/// the frame as a last resort.
+fn visible_base(
     frame: Rect,
     client: Option<Rect>,
     extents: Option<[u32; 4]>,
     net_extents: Option<[u32; 4]>,
-    screen: (i32, i32),
-) -> Option<Rect> {
-    let (base_x, base_y, base_width, base_height) = match (client, extents, net_extents) {
+) -> (i64, i64, i64, i64) {
+    match (client, extents, net_extents) {
         (Some(client), Some([left, right, top, bottom]), _) => (
             i64::from(client.x) + i64::from(left),
             i64::from(client.y) + i64::from(top),
@@ -386,7 +427,22 @@ fn capture_rect(
             i64::from(frame.width),
             i64::from(frame.height),
         ),
-    };
+    }
+}
+
+/// The rectangle to capture, clamped to the screen: the client minus its CSD
+/// shadow, or the client plus the window manager's visible decorations, or the
+/// frame as a last resort. The frame itself can include invisible resize
+/// borders, so it is not preferred. `None` when nothing visible is left.
+fn capture_rect(
+    frame: Rect,
+    client: Option<Rect>,
+    extents: Option<[u32; 4]>,
+    net_extents: Option<[u32; 4]>,
+    screen: (i32, i32),
+) -> Option<Rect> {
+    let (base_x, base_y, base_width, base_height) =
+        visible_base(frame, client, extents, net_extents);
     let (screen_width, screen_height) = (i64::from(screen.0), i64::from(screen.1));
     let left = base_x.max(0);
     let top = base_y.max(0);
@@ -401,6 +457,35 @@ fn capture_rect(
         width: i32::try_from(right - left).ok()?,
         height: i32::try_from(bottom - top).ok()?,
     })
+}
+
+/// The visible part's crop inside the frame's own drawable. The base rectangle
+/// is the same one [`capture_rect`] uses, but it is expressed relative to the
+/// frame and clamped to the frame's bounds rather than the screen: an `xid`
+/// capture keeps the whole window even when it is partly off-screen. Width and
+/// height are rounded down to even so the encoder accepts them.
+fn frame_crop(
+    frame: Rect,
+    client: Option<Rect>,
+    extents: Option<[u32; 4]>,
+    net_extents: Option<[u32; 4]>,
+) -> Option<(u32, u32, u32, u32)> {
+    let (base_x, base_y, base_width, base_height) =
+        visible_base(frame, client, extents, net_extents);
+    let frame_left = i64::from(frame.x);
+    let frame_top = i64::from(frame.y);
+    let left = (base_x - frame_left).max(0);
+    let top = (base_y - frame_top).max(0);
+    let right = (base_x + base_width - frame_left).min(i64::from(frame.width));
+    let bottom = (base_y + base_height - frame_top).min(i64::from(frame.height));
+    if right <= left || bottom <= top {
+        return None;
+    }
+    let crop_x = u32::try_from(left).ok()?;
+    let crop_y = u32::try_from(top).ok()?;
+    let width = u32::try_from(right - left).ok()?;
+    let height = u32::try_from(bottom - top).ok()?;
+    Some((crop_x, crop_y, (width & !1).max(2), (height & !1).max(2)))
 }
 
 #[cfg(test)]
@@ -500,5 +585,71 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn the_frame_crop_is_relative_to_the_frame() {
+        // A frame at root (949, 142) with the visible rect (client plus the
+        // window manager's title bar) at root (959, 150), 734x466.
+        assert_eq!(
+            frame_crop(
+                rect(949, 142, 754, 484),
+                Some(rect(959, 182, 734, 434)),
+                None,
+                Some([0, 0, 32, 0]),
+            ),
+            Some((10, 8, 734, 466))
+        );
+    }
+
+    #[test]
+    fn the_frame_crop_excludes_csd_shadow() {
+        assert_eq!(
+            frame_crop(
+                rect(100, 100, 300, 400),
+                Some(rect(110, 120, 280, 380)),
+                Some([10, 10, 20, 10]),
+                None,
+            ),
+            Some((20, 40, 260, 350))
+        );
+    }
+
+    #[test]
+    fn the_frame_crop_keeps_a_window_partly_off_screen() {
+        // xid capture still has the whole drawable, so the screen must not
+        // clamp the crop.
+        assert_eq!(
+            frame_crop(rect(-50, -40, 300, 200), None, None, None),
+            Some((0, 0, 300, 200))
+        );
+    }
+
+    #[test]
+    fn the_frame_crop_is_clamped_to_the_frame() {
+        // A client larger than its frame: only the part inside the frame is
+        // captured.
+        assert_eq!(
+            frame_crop(
+                rect(100, 100, 300, 200),
+                Some(rect(110, 120, 280, 380)),
+                None,
+                Some([0, 0, 0, 0]),
+            ),
+            Some((10, 20, 280, 180))
+        );
+    }
+
+    #[test]
+    fn the_frame_crop_rounds_down_to_even_dimensions() {
+        assert_eq!(
+            frame_crop(rect(0, 0, 101, 101), None, None, None),
+            Some((0, 0, 100, 100))
+        );
+        assert_eq!(
+            frame_crop(rect(0, 0, 1, 1), None, None, None),
+            Some((0, 0, 2, 2))
+        );
+        assert_eq!(frame_crop(rect(0, 0, 0, 0), None, None, None), None);
     }
 }

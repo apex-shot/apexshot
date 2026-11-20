@@ -361,7 +361,11 @@ impl PointerTrackSession {
             ..RecordingManifest::new(device_pixel_ratio)
         };
         let _ = take_harvested_pointer_track();
-        match super::pointer_track::start() {
+        match super::pointer_track::start(
+            config
+                .x11_window
+                .map(|window| (window.frame, window.origin_x, window.origin_y)),
+        ) {
             Ok(()) => {
                 if window_cursor_metadata {
                     eprintln!("[recording] window pointer and click tracking started");
@@ -580,6 +584,19 @@ fn maybe_prompt_gnome_extension() {
     }
 }
 
+/// The user-facing body for a failed recording: the underlying cause without
+/// the internal context prefixes that only belong in the log.
+fn recording_failure_body(err: &anyhow::Error) -> String {
+    let mut body = err.to_string();
+    while let Some(rest) = body
+        .strip_prefix("failed to run recording controls: ")
+        .or_else(|| body.strip_prefix("Recording failed: "))
+    {
+        body = rest.to_string();
+    }
+    body
+}
+
 fn should_open_recording_editor(open_editor: bool) -> bool {
     open_editor
 }
@@ -771,6 +788,7 @@ pub fn prepare_overlay_recording_request(
         y: capture_y,
         cursor: true,
         pointer_track: !request.window && super::pointer_track::should_use(),
+        x11_window: None,
         hidpi: request.hidpi,
         max_resolution,
         fps,
@@ -1429,11 +1447,17 @@ pub fn run_overlay_recording_request_with_gtk(
             }
             crate::gnome_shell::hide_recording_mask_best_effort();
             super::notify_recording_session_ended_best_effort();
-            crate::utils::notify::desktop_notification(
-                &crate::i18n::t("Recording failed"),
-                &err.to_string(),
-            );
-            Err(anyhow::anyhow!("Recording failed: {err}"))
+            eprintln!("[recording] Recording failed: {err}");
+            let body = recording_failure_body(&err);
+            // A missing shell extension has its own, more helpful
+            // notification in the daemon; leave that case to it.
+            if !body.contains("GNOME Shell extension is not installed") {
+                crate::utils::notify::desktop_notification(
+                    &crate::i18n::t("Recording failed"),
+                    &body,
+                );
+            }
+            Err(anyhow::Error::new(super::RecordingFailureNotified(err)))
         }
     }
 }
@@ -2313,5 +2337,29 @@ mod tests {
         );
 
         assert!(prepared.controls_params.is_some());
+    }
+
+    #[test]
+    fn recording_failure_body_drops_the_internal_prefixes() {
+        let controls =
+            anyhow::anyhow!("failed to run recording controls: Wayland portal error: monitor lost");
+        assert_eq!(
+            recording_failure_body(&controls),
+            "Wayland portal error: monitor lost"
+        );
+
+        let double = anyhow::anyhow!(
+            "Recording failed: failed to run recording controls: GStreamer error: no encoder"
+        );
+        assert_eq!(
+            recording_failure_body(&double),
+            "GStreamer error: no encoder"
+        );
+
+        let plain = anyhow::anyhow!("GStreamer error: no encoder");
+        assert_eq!(
+            recording_failure_body(&plain),
+            "GStreamer error: no encoder"
+        );
     }
 }

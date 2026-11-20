@@ -50,13 +50,16 @@ fn take_active() -> Tracker {
         .unwrap_or(Tracker::None)
 }
 
-pub(super) fn start() -> anyhow::Result<()> {
+/// Start tracking. `follow` is the X11 frame window whose movement the
+/// positions must follow, with its root origin at pick time; the GNOME path
+/// has its own coordinates and ignores it.
+pub(super) fn start(follow: Option<(u32, i32, i32)>) -> anyhow::Result<()> {
     if gnome_path() {
         crate::gnome_shell::start_pointer_track()?;
         set_active(Tracker::Gnome);
         Ok(())
     } else {
-        super::x11_pointer_track::start()?;
+        super::x11_pointer_track::start(follow)?;
         set_active(Tracker::X11);
         Ok(())
     }

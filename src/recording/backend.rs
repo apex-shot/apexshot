@@ -292,6 +292,7 @@ mod tests {
             y: Some(80),
             cursor: true,
             pointer_track: false,
+            x11_window: None,
             hidpi: false,
             max_resolution: None,
             fps: 30,

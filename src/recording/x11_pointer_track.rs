@@ -320,13 +320,13 @@ fn stop_active() {
     }
 }
 
-pub(super) fn start() -> anyhow::Result<()> {
+pub(super) fn start(follow: Option<(u32, i32, i32)>) -> anyhow::Result<()> {
     stop_active();
     let (ready_tx, ready_rx) = mpsc::channel();
     let (stop_tx, stop_rx) = mpsc::channel();
     let join = std::thread::Builder::new()
         .name("apexshot-x11-pointer".into())
-        .spawn(move || track(stop_rx, ready_tx))
+        .spawn(move || track(stop_rx, ready_tx, follow))
         .map_err(|err| anyhow::anyhow!("failed to spawn X11 pointer tracker: {err}"))?;
     match ready_rx.recv_timeout(Duration::from_secs(5)) {
         Ok(Ok(())) => {
@@ -378,12 +378,14 @@ fn raw_event_seconds(
 /// Feed raw button events to the tracker, using each event's own server
 /// timestamp. A press reads the pointer position when it is handled, since the
 /// pointer may have moved since the last poll; the poll's position is the
-/// fallback.
+/// fallback. `shift` moves the read position back by how far the followed
+/// window has moved since the recording started.
 fn drain_raw_button_events(
     conn: &x11rb::rust_connection::RustConnection,
     root: x11rb::protocol::xproto::Window,
     tracker: &mut PointerTracker,
     position: (i32, i32),
+    shift: (i32, i32),
     t0_us: i64,
     offset_ms: &mut Option<i64>,
     last_t: &mut f64,
@@ -404,7 +406,10 @@ fn drain_raw_button_events(
         *last_t = t;
         let button = i32::try_from(detail).unwrap_or_default();
         if press {
-            let (x, y) = query_pointer(conn, root).map_or(position, |(x, y, _)| (x, y));
+            let (x, y) = match query_pointer(conn, root) {
+                Some((x, y, _)) => shift_position((x, y), shift),
+                None => position,
+            };
             tracker.press_button(t, x, y, button);
         } else {
             tracker.release_button(t, button);
@@ -424,6 +429,48 @@ fn query_pointer(
     ))
 }
 
+/// The root-space origin of a followed window's frame.
+fn window_origin(
+    conn: &x11rb::rust_connection::RustConnection,
+    root: x11rb::protocol::xproto::Window,
+    window: x11rb::protocol::xproto::Window,
+) -> Option<(i32, i32)> {
+    let reply = conn
+        .translate_coordinates(window, root, 0, 0)
+        .ok()?
+        .reply()
+        .ok()?;
+    Some((i32::from(reply.dst_x), i32::from(reply.dst_y)))
+}
+
+/// Move a root-space position back by how far the followed window has moved
+/// since the recording started, keeping positions relative to the pick-time
+/// capture region.
+fn shift_position(position: (i32, i32), shift: (i32, i32)) -> (i32, i32) {
+    (
+        position.0.saturating_sub(shift.0),
+        position.1.saturating_sub(shift.1),
+    )
+}
+
+/// How far the followed window has moved since the recording started. The last
+/// known origin stands in when the window disappears.
+fn follow_shift(
+    conn: &x11rb::rust_connection::RustConnection,
+    root: x11rb::protocol::xproto::Window,
+    follow: Option<u32>,
+    start: Option<(i32, i32)>,
+    current: &mut Option<(i32, i32)>,
+) -> (i32, i32) {
+    let (Some(frame), Some(start)) = (follow, start) else {
+        return (0, 0);
+    };
+    if let Some(origin) = window_origin(conn, root, frame) {
+        *current = Some(origin);
+    }
+    (*current).map_or((0, 0), |origin| (origin.0 - start.0, origin.1 - start.1))
+}
+
 fn query_cursor_kind(conn: &x11rb::rust_connection::RustConnection) -> String {
     let reply = conn
         .xfixes_get_cursor_image_and_name()
@@ -438,6 +485,7 @@ fn query_cursor_kind(conn: &x11rb::rust_connection::RustConnection) -> String {
 fn track(
     stop_rx: mpsc::Receiver<()>,
     ready_tx: mpsc::Sender<anyhow::Result<()>>,
+    follow: Option<(u32, i32, i32)>,
 ) -> PointerTrackResult {
     let (conn, screen_num) = match x11rb::connect(None) {
         Ok(connection) => connection,
@@ -450,6 +498,12 @@ fn track(
         let _ = ready_tx.send(Err(anyhow::anyhow!("X11 screen {} is missing", screen_num)));
         return empty_result();
     };
+    // The pick-time origin is the baseline, not the origin when tracking starts:
+    // the window may move during the countdown, and the capture region was
+    // fixed at pick time.
+    let follow_frame = follow.map(|(frame, _, _)| frame);
+    let follow_start = follow.map(|(_, x, y)| (x, y));
+    let mut follow_current = follow_start;
     let has_xfixes = match conn.xfixes_query_version(4, 0) {
         Ok(cookie) => cookie.reply().is_ok(),
         Err(_) => false,
@@ -504,12 +558,14 @@ fn track(
             Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
             Err(mpsc::RecvTimeoutError::Timeout) => {}
         }
+        let shift = follow_shift(&conn, root, follow_frame, follow_start, &mut follow_current);
         if raw_buttons {
             drain_raw_button_events(
                 &conn,
                 root,
                 &mut tracker,
                 last_position,
+                shift,
                 t0_us,
                 &mut raw_offset_ms,
                 &mut last_raw_t,
@@ -519,6 +575,7 @@ fn track(
         let Some((x, y, mask)) = query_pointer(&conn, root) else {
             continue;
         };
+        let (x, y) = shift_position((x, y), shift);
         last_position = (x, y);
         if has_xfixes && now_us - last_cursor_query_us >= CURSOR_NAME_INTERVAL_US {
             kind = query_cursor_kind(&conn);
@@ -532,12 +589,14 @@ fn track(
         }
     }
 
+    let shift = follow_shift(&conn, root, follow_frame, follow_start, &mut follow_current);
     if raw_buttons {
         drain_raw_button_events(
             &conn,
             root,
             &mut tracker,
             last_position,
+            shift,
             t0_us,
             &mut raw_offset_ms,
             &mut last_raw_t,
@@ -545,6 +604,7 @@ fn track(
     }
     let now_us = glib::monotonic_time();
     if let Some((x, y, mask)) = query_pointer(&conn, root) {
+        let (x, y) = shift_position((x, y), shift);
         if has_xfixes {
             kind = query_cursor_kind(&conn);
         }
@@ -728,6 +788,18 @@ mod tests {
         assert_eq!(second, 24.005);
         assert_eq!(backwards, second);
         assert_eq!(future, 25.0);
+    }
+
+    #[test]
+    fn pointer_positions_shift_back_by_the_window_move() {
+        let start = (949, 142);
+        let moved = (1000, 200);
+        let shift = (moved.0 - start.0, moved.1 - start.1);
+
+        // The same spot inside the window sits 51 right and 58 down in root
+        // coordinates after the move.
+        assert_eq!(shift_position((1010, 210), shift), (959, 152));
+        assert_eq!(shift_position((959, 150), (0, 0)), (959, 150));
     }
 
     #[test]

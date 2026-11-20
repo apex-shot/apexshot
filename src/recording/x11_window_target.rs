@@ -1,9 +1,10 @@
 //! Window-target recordings on X11 desktops without a ScreenCast portal.
 //!
 //! Wayland takes its window grant from the portal, and GNOME on X11 keeps that
-//! path too. Elsewhere the in-process picker returns the clicked window's
-//! rectangle and the recording runs as an area capture of that rectangle.
-//! Picking happens once, so a window that moves afterwards is not followed.
+//! path too. Elsewhere the in-process picker returns the clicked window and the
+//! recording captures the window's own drawable, cropped to its visible part.
+//! The recording follows the window when it moves; a resize keeps the pick-time
+//! size and crop.
 
 use super::{RecordError, RecordResult, RecordingConfig, RecordingTarget};
 
@@ -70,12 +71,16 @@ pub(crate) async fn resolve_x11_window_target(
             let (x, y, width, height) = window.root_rect().map_err(|err| {
                 RecordError::GStreamerError(format!("could not read the selected window: {err}"))
             })?;
+            let follow = window.follow_source().map_err(|err| {
+                RecordError::GStreamerError(format!("could not read the selected window: {err}"))
+            })?;
             let mut resolved = config;
             resolved.target = RecordingTarget::Area;
             resolved.x = Some(x);
             resolved.y = Some(y);
             resolved.width = Some(even_dimension(width));
             resolved.height = Some(even_dimension(height));
+            resolved.x11_window = Some(follow);
             // Area captures on X11 get the cursor sidecar and Auto Zoom.
             resolved.pointer_track = super::pointer_track::should_use();
             Ok(Some(resolved))

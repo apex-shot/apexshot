@@ -364,8 +364,9 @@ async fn set_state_null_bounded(
 /// Build a GStreamer pipeline string for X11 capture (preserved from old code).
 /// The muxer is named when audio is attached so the audio bin can request a pad.
 ///
-/// `source_size` is what `ximagesrc` will produce (the configured region, or
-/// the screen size for fullscreen). With a `config.max_resolution` cap the
+/// `source_size` is what `ximagesrc` will produce (the followed window's crop,
+/// the configured region, or the screen size for fullscreen). With a
+/// `config.max_resolution` cap the
 /// pipeline scales to the aspect-preserving fit via `fit_within_max_resolution`
 /// and pins exact even dimensions (I420 cannot take odd sizes), e.g.
 /// 1920x1200 → 768x480 under the 854x480 box, with `pixel-aspect-ratio=1/1`
@@ -459,6 +460,19 @@ pub(in crate::recording) fn get_x11_source(config: &RecordingConfig) -> RecordRe
     } else {
         "false"
     };
+    // A picked window is captured from its own drawable, so it keeps showing
+    // the window when it moves. The crop is relative to the frame window.
+    if let Some(window) = config.x11_window {
+        return Ok(format!(
+            "ximagesrc name=vsrc xid={} show-pointer={} use-damage=false startx={} starty={} endx={} endy={}",
+            window.frame,
+            show_pointer,
+            window.crop_x,
+            window.crop_y,
+            window.crop_x + window.width - 1,
+            window.crop_y + window.height - 1
+        ));
+    }
     let mut source = format!(
         "ximagesrc name=vsrc show-pointer={} use-damage=false",
         show_pointer
@@ -478,10 +492,14 @@ pub(in crate::recording) fn get_x11_source(config: &RecordingConfig) -> RecordRe
     Ok(source)
 }
 
-/// The dimensions `ximagesrc` will produce: the configured region when the
-/// config pins one (mirroring [`get_x11_source`]), otherwise the X screen
-/// size for fullscreen capture. `None` only when the screen query fails.
+/// The dimensions `ximagesrc` will produce: the followed window's crop, the
+/// configured region when the config pins one (mirroring [`get_x11_source`]),
+/// otherwise the X screen size for fullscreen capture. `None` only when the
+/// screen query fails.
 pub(in crate::recording) fn x11_source_size(config: &RecordingConfig) -> Option<(u32, u32)> {
+    if let Some(window) = config.x11_window {
+        return Some((window.width, window.height));
+    }
     if let (Some(_x), Some(_y), Some(w), Some(h)) =
         (config.x, config.y, config.width, config.height)
     {
@@ -514,6 +532,7 @@ mod tests {
             y: Some(0),
             cursor: true,
             pointer_track: false,
+            x11_window: None,
             hidpi: false,
             max_resolution,
             fps: 30,
@@ -809,5 +828,51 @@ mod tests {
             ..x11_config(None)
         };
         assert_eq!(x11_source_size(&area), Some((640, 480)));
+    }
+
+    #[test]
+    fn x11_window_source_uses_the_window_drawable_and_crop() {
+        let config = RecordingConfig {
+            x11_window: Some(crate::backend::x11_window_pick::X11WindowSource {
+                origin_x: 0,
+                origin_y: 0,
+                frame: 928,
+                crop_x: 10,
+                crop_y: 8,
+                width: 734,
+                height: 466,
+            }),
+            ..x11_config(None)
+        };
+
+        let pipeline = build(&config, h264_profile(), x11_source_size(&config));
+
+        assert!(pipeline.contains(
+            "ximagesrc name=vsrc xid=928 show-pointer=true use-damage=false startx=10 starty=8 endx=743 endy=473"
+        ));
+        assert_eq!(x11_source_size(&config), Some((734, 466)));
+    }
+
+    #[test]
+    fn x11_window_source_hides_the_os_cursor_when_pointer_tracking() {
+        let config = RecordingConfig {
+            pointer_track: true,
+            x11_window: Some(crate::backend::x11_window_pick::X11WindowSource {
+                origin_x: 0,
+                origin_y: 0,
+                frame: 7,
+                crop_x: 0,
+                crop_y: 0,
+                width: 640,
+                height: 480,
+            }),
+            ..x11_config(None)
+        };
+
+        let pipeline = build(&config, h264_profile(), x11_source_size(&config));
+
+        assert!(pipeline.contains(
+            "ximagesrc name=vsrc xid=7 show-pointer=false use-damage=false startx=0 starty=0 endx=639 endy=479"
+        ));
     }
 }

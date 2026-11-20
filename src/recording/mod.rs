@@ -63,6 +63,13 @@ pub enum RecordError {
     NoEncoderFound,
 }
 
+/// A recording failure that the controls outcome handler already reported to
+/// the user. Callers can tell it apart from a failure they still need to
+/// notify about.
+#[derive(Debug, Error)]
+#[error("{0}")]
+pub struct RecordingFailureNotified(pub anyhow::Error);
+
 pub use audio::{list_audio_inputs, list_audio_outputs};
 
 /// GStreamer pulsesrc level meter used by the daemon/overlay instead of a
@@ -155,6 +162,10 @@ pub struct RecordingConfig {
     pub y: Option<i32>,
     pub cursor: bool,
     pub pointer_track: bool,
+    /// The window the recording follows on X11, when the target was picked
+    /// outside GNOME. The source then captures the window's own drawable
+    /// instead of the pick-time screen rectangle.
+    pub x11_window: Option<crate::backend::x11_window_pick::X11WindowSource>,
     pub hidpi: bool,
     // Video tab settings
     pub max_resolution: Option<(u32, u32)>,
@@ -239,6 +250,7 @@ impl Default for RecordingConfig {
             y: None,
             cursor: true,
             pointer_track: false,
+            x11_window: None,
             hidpi: true,
             max_resolution: None,
             fps: 30,
@@ -292,6 +304,7 @@ impl RecordingConfig {
             y: None,
             cursor: app_config.rec_cursor,
             pointer_track: self::pointer_track::should_use(),
+            x11_window: None,
             hidpi: app_config.rec_hidpi,
             max_resolution,
             fps,
