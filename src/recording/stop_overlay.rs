@@ -150,11 +150,41 @@ impl Default for RecordingControlsParams {
     }
 }
 
+/// How the controls window is driven.
+#[derive(Debug, Clone, Copy)]
+struct ControlsWindowMode {
+    /// Print the X11 window id and the stop/discard commands to stdout so the
+    /// recording process can mask the bar and forward the commands.
+    announce_to_recorder: bool,
+    /// Keep the bar outside the capture rectangle when the desktop has room.
+    keep_outside_capture: bool,
+}
+
+impl ControlsWindowMode {
+    const PLAIN: Self = Self {
+        announce_to_recorder: false,
+        keep_outside_capture: false,
+    };
+    const RECORDER: Self = Self {
+        announce_to_recorder: true,
+        keep_outside_capture: true,
+    };
+}
+
 pub fn run_recording_controls(
     params: RecordingControlsParams,
     session_id: Option<String>,
     _bus_name: Option<String>,
     stop_tx: oneshot::Sender<StopAction>,
+) -> Result<(), StopOverlayError> {
+    run_recording_controls_window(params, session_id, stop_tx, ControlsWindowMode::PLAIN)
+}
+
+fn run_recording_controls_window(
+    params: RecordingControlsParams,
+    session_id: Option<String>,
+    stop_tx: oneshot::Sender<StopAction>,
+    mode: ControlsWindowMode,
 ) -> Result<(), StopOverlayError> {
     let stop_tx: Arc<Mutex<Option<oneshot::Sender<StopAction>>>> =
         Arc::new(Mutex::new(Some(stop_tx)));
@@ -187,6 +217,7 @@ pub fn run_recording_controls(
             stop_tx_activate.clone(),
             dim_windows,
             session_id.clone(),
+            mode,
         );
         controls_window.set_visible(true); // Show immediately for non-countdown mode
     });
@@ -199,6 +230,15 @@ pub fn run_recording_countdown_bar(
     params: RecordingControlsParams,
     seconds: u32,
 ) -> Result<bool, StopOverlayError> {
+    // The X11 recorder spawns this entry with a session id and no countdown
+    // seconds to host the recording controls bar in its own process.
+    if seconds == 0 && params.session_id.is_some() {
+        let session_id = params.session_id.clone();
+        let (stop_tx, _stop_rx) = oneshot::channel();
+        run_recording_controls_window(params, session_id, stop_tx, ControlsWindowMode::RECORDER)?;
+        return Ok(true);
+    }
+
     let app = Application::builder()
         .application_id("com.apexshot.recording")
         .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
@@ -249,6 +289,7 @@ pub fn run_recording_ui(
             stop_tx.clone(),
             dim_windows.clone(),
             params.session_id.clone(),
+            ControlsWindowMode::PLAIN,
         );
         setup_countdown_window(
             application,
@@ -374,6 +415,7 @@ fn setup_window(
     stop_tx: Arc<Mutex<Option<oneshot::Sender<StopAction>>>>,
     dim_windows: Vec<ApplicationWindow>,
     session_id: Option<String>,
+    mode: ControlsWindowMode,
 ) -> ApplicationWindow {
     install_controls_css();
 
@@ -386,7 +428,17 @@ fn setup_window(
     let is_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
     let layer_shell_active = is_wayland && gtk4_layer_shell::is_supported();
 
-    let initial_pos = if layer_shell_active {
+    let initial_pos = if mode.keep_outside_capture && !layer_shell_active {
+        if can_show_bar_outside_capture(&params, desktop_bounds) {
+            compute_bar_position(&params, desktop_bounds)
+        } else {
+            // No room above or below the capture: fall back to the bar's
+            // normal top position, exactly like a fullscreen recording.
+            let mut normal = params.clone();
+            normal.is_fullscreen = true;
+            compute_bar_position(&normal, desktop_bounds)
+        }
+    } else if layer_shell_active {
         if let Some(ref m) = monitor {
             let geom = m.geometry();
             let mut local_params = params.clone();
@@ -463,6 +515,9 @@ fn setup_window(
             window,
             move |_| {
                 suppress_x11_controls_window_type(&window);
+                if mode.announce_to_recorder {
+                    announce_controls_x11_window(&window);
+                }
                 let _ = request_x11_always_on_top(&window);
                 let (x, y) = current_pos_realize.get();
                 let _ = position_x11_window(&window, x, y);
@@ -617,6 +672,14 @@ fn setup_window(
             .collect();
         Rc::new(move |action: StopAction| {
             send_stop_action(&stop_tx, action);
+            if mode.announce_to_recorder {
+                match action {
+                    StopAction::Save => println!("stop"),
+                    StopAction::Discard => println!("discard"),
+                }
+                use std::io::Write;
+                let _ = std::io::stdout().flush();
+            }
             for dim_window in &dim_window_weaks {
                 if let Some(window) = dim_window.upgrade() {
                     window.close();
@@ -1634,6 +1697,22 @@ fn send_stop_action(stop_tx: &Arc<Mutex<Option<oneshot::Sender<StopAction>>>>, a
     if let Some(tx) = stop_tx.lock().ok().and_then(|mut guard| guard.take()) {
         let _ = tx.send(action);
     }
+}
+
+/// Print the controls window's X11 id so the recording process can mask it.
+fn announce_controls_x11_window(window: &impl IsA<gtk4::Window>) {
+    let Some(surface) = window.as_ref().surface() else {
+        return;
+    };
+    let Ok(x11_surface) = surface.downcast::<X11Surface>() else {
+        return;
+    };
+    let Ok(xid) = u32::try_from(x11_surface.xid()) else {
+        return;
+    };
+    println!("xid {xid}");
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
 }
 
 fn suppress_x11_controls_window_type(window: &impl IsA<gtk4::Window>) {
