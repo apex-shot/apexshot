@@ -6,8 +6,8 @@
 //! not that the driver can encode a frame. This module answers the stronger
 //! question by actually encoding a few synthetic frames at the settings an
 //! export would use and checking the exit status. A machine whose driver is
-//! missing, too old, or busy fails the probe and gets libx264 instead of a
-//! failed export.
+//! missing, too old, or busy fails the probe and gets the software encoder
+//! instead of a failed export.
 //!
 //! The editor export does **not** switch to hardware on its own. VA-API and
 //! NVENC do not share libx264's rate control: the same quality tier produces a
@@ -16,15 +16,16 @@
 //! GPUs and drivers, so the same tier can produce a different file. Hardware is
 //! therefore used only when the user explicitly
 //! asks for it with `APEXSHOT_EXPORT_HW_ENCODER` (`nvenc`, `vaapi`, or `auto`),
-//! and only after the probe succeeds. Every other case keeps libx264, so the
-//! default export is byte-for-byte what it was before this module existed.
+//! and only after the probe succeeds. Every other case keeps the software
+//! encoder: libx264 where ffmpeg has it, or libopenh264 on builds that ship
+//! only that (`ffmpeg-free` on Fedora).
 
 use super::export_settings::{Codec, HardwarePreference};
 use std::process::Command;
 use std::sync::OnceLock;
 
 /// The environment variable that opts an export into hardware encoding. Unset
-/// or unrecognised values keep libx264.
+/// or unrecognised values keep the software encoder.
 pub const EXPORT_ENCODER_ENV: &str = "APEXSHOT_EXPORT_HW_ENCODER";
 
 /// The filter-graph tail VA-API needs so its encoder can read the frames.
@@ -168,7 +169,8 @@ pub fn hardware_input_args(encoder: HardwareEncoder) -> Vec<String> {
     }
 }
 
-/// The filter-graph tail `encoder` needs, if any. `None` for libx264 and NVENC,
+/// The filter-graph tail `encoder` needs, if any. `None` for the software
+/// encoders and NVENC,
 /// which read system-memory frames.
 pub fn hardware_upload_suffix(encoder: Option<HardwareEncoder>) -> Option<&'static str> {
     encoder
@@ -318,12 +320,27 @@ pub(crate) fn export_encoder(
     }
 }
 
+/// The software H.264 encoder an export should use.
+///
+/// libx264 is the default where the build has it. Fedora's `ffmpeg-free` ships
+/// only libopenh264, so the export and its availability check have to follow
+/// that instead of reporting H.264 as unavailable. `None` means neither is
+/// compiled in.
+pub(crate) fn software_h264_encoder() -> Option<&'static str> {
+    if crate::recording::backend::ffmpeg_encoder_available("libx264") {
+        Some("libx264")
+    } else if crate::recording::backend::ffmpeg_encoder_available("libopenh264") {
+        Some("libopenh264")
+    } else {
+        None
+    }
+}
+
 pub(crate) fn software_encoder_available(codec: Codec) -> bool {
-    let name = match codec {
-        Codec::Hevc => "libx265",
-        _ => "libx264",
-    };
-    crate::recording::backend::ffmpeg_encoder_available(name)
+    match codec {
+        Codec::Hevc => crate::recording::backend::ffmpeg_encoder_available("libx265"),
+        _ => software_h264_encoder().is_some(),
+    }
 }
 
 pub(crate) fn codec_export_available(codec: Codec, preference: HardwarePreference) -> bool {
@@ -369,7 +386,7 @@ pub fn detect_hardware_encoder() -> Option<HardwareEncoder> {
 /// the software default are testable without touching the process environment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Preference {
-    /// libx264: the default, and what every unrecognised value means.
+    /// The default software encoder, and what every unrecognised value means.
     Software,
     /// Use whatever working hardware encoder the probe finds.
     Auto,
@@ -386,12 +403,13 @@ fn parse_preference(value: &str) -> Preference {
     }
 }
 
-/// The hardware encoder an export should use, or `None` for libx264.
+/// The hardware encoder an export should use, or `None` for the software
+/// encoder.
 ///
 /// `None` is the default and the fallback: hardware requires an explicit
 /// `APEXSHOT_EXPORT_HW_ENCODER` request *and* a passing runtime probe. An
-/// explicit request that cannot encode falls back to libx264 with a note rather
-/// than failing an export that would otherwise have finished.
+/// explicit request that cannot encode falls back to the software encoder with
+/// a note rather than failing an export that would otherwise have finished.
 ///
 /// Cached once per process: a multi-segment export builds one command per
 /// segment, and the probe must not run once per segment.
@@ -406,7 +424,7 @@ pub fn selected_export_encoder() -> Option<HardwareEncoder> {
                     Some(encoder)
                 } else {
                     eprintln!(
-                        "[export] {} was requested but cannot encode on this machine; using libx264",
+                        "[export] {} was requested but cannot encode on this machine; using the software encoder",
                         encoder.ffmpeg_name()
                     );
                     None
@@ -422,7 +440,7 @@ mod tests {
 
     #[test]
     fn an_unset_or_unknown_opt_in_keeps_software() {
-        // The default has to stay libx264, because a silent switch would change
+        // The default has to stay software, because a silent switch would change
         // the output file the user picked a quality tier for.
         assert_eq!(parse_preference(""), Preference::Software);
         assert_eq!(parse_preference("  "), Preference::Software);
