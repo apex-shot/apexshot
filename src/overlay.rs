@@ -6,6 +6,7 @@
 mod api;
 mod background;
 mod capture_menu;
+mod capture_menu_icons;
 pub(crate) mod drawing;
 mod geometry;
 mod hit_testing;
