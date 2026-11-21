@@ -30,6 +30,30 @@ pub const DEFAULT_SCALE: f64 = 2.0;
 /// this instead of being dropped.
 pub const MIN_WINDOW_SECONDS: f64 = 0.1;
 
+/// How far the cursor must travel before a rest counts as a settle, as a
+/// fraction of the frame diagonal.
+///
+/// Without it, a recording that opens with the pointer parked over a control
+/// would zoom on a cursor that never went anywhere.
+pub const SETTLE_TRAVEL_FRACTION: f64 = 0.08;
+/// How far the cursor may drift while resting, as a fraction of the frame
+/// diagonal.
+pub const SETTLE_REST_RADIUS_FRACTION: f64 = 0.015;
+/// The smallest rest radius, so a tiny captured region still has a usable
+/// one.
+pub const SETTLE_REST_RADIUS_MIN_PX: f64 = 6.0;
+/// How long the cursor must stay inside the rest radius for a pause to count.
+///
+/// Samples only arrive when the cursor moves, so a rest shows up as a gap in
+/// the samples; a shorter gap is usually the pointer crossing a control on its
+/// way somewhere else.
+pub const SETTLE_REST_SECONDS: f64 = 0.45;
+/// Settles this close to the recording's start are ignored.
+pub const SETTLE_START_IGNORE_SECONDS: f64 = 0.3;
+/// Two settles closer than this keep the first: one pause should not become
+/// two zooms.
+pub const SETTLE_MIN_SPACING_SECONDS: f64 = 0.8;
+
 /// A recorded click in source time and encoded-video pixels.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Click {
@@ -293,6 +317,125 @@ pub fn pointer_from_sidecar(
         .collect()
 }
 
+/// Distance between two recorded positions.
+fn distance(left: (f64, f64), right: (f64, f64)) -> f64 {
+    let dx = left.0 - right.0;
+    let dy = left.1 - right.1;
+    (dx * dx + dy * dy).sqrt()
+}
+
+/// The frame diagonal the settle thresholds are measured against.
+///
+/// The video size is the real frame. If it is missing or unusable, fall back
+/// to the largest coordinates the pointer reached so the thresholds still
+/// scale with the footage.
+fn settle_diagonal(width: f64, height: f64, pointer: &[PointerPoint]) -> f64 {
+    if width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0 {
+        return (width * width + height * height).sqrt();
+    }
+    let mut max = (0.0_f64, 0.0_f64);
+    for point in pointer {
+        max.0 = max.0.max(point.position.0);
+        max.1 = max.1.max(point.position.1);
+    }
+    (max.0 * max.0 + max.1 * max.1).sqrt()
+}
+
+/// Derive click-like settle points from pointer movement.
+///
+/// Recordings from compositors that cannot report clicks still carry pointer
+/// positions. People act after moving somewhere and stopping, so the moments
+/// the cursor comes to rest stand in for the missing clicks. Each settle is the
+/// time the rest began and the mean position of the resting samples, ready to
+/// feed [`automatic_zooms`] exactly the way recorded clicks are.
+///
+/// Samples are expected in source-time order, as the rest of the module does.
+/// A rest only counts after real travel since the previous settle (or the start
+/// of the recording), and the final window [`automatic_zooms`] ignores is
+/// ignored here too.
+pub fn settle_points(
+    pointer: &[PointerPoint],
+    width: f64,
+    height: f64,
+    duration: f64,
+) -> Vec<Click> {
+    if !duration.is_finite() {
+        return Vec::new();
+    }
+    let samples: Vec<PointerPoint> = pointer
+        .iter()
+        .copied()
+        .filter(|point| {
+            point.time.is_finite() && point.position.0.is_finite() && point.position.1.is_finite()
+        })
+        .collect();
+    if samples.len() < 2 {
+        return Vec::new();
+    }
+
+    let diagonal = settle_diagonal(width, height, &samples);
+    let radius = (diagonal * SETTLE_REST_RADIUS_FRACTION).max(SETTLE_REST_RADIUS_MIN_PX);
+    let travel_required = diagonal * SETTLE_TRAVEL_FRACTION;
+    let cutoff = duration - END_IGNORE_SECONDS;
+
+    // Path length up to each sample, so travel since the last settle is a
+    // subtraction instead of a second walk.
+    let mut travelled = Vec::with_capacity(samples.len());
+    travelled.push(0.0);
+    for pair in samples.windows(2) {
+        let step = distance(pair[0].position, pair[1].position);
+        let total = travelled.last().copied().unwrap_or(0.0) + step;
+        travelled.push(total);
+    }
+
+    let mut settles = Vec::new();
+    let mut settled_at = 0;
+    let mut last_settle_time = f64::NEG_INFINITY;
+    let mut index = 0;
+    while index < samples.len() {
+        // A rest is a run of samples that all stay inside the radius around
+        // this one, lasting until the next sample that leaves it (or the end
+        // of the recording). Sources differ in density: some only report on
+        // movement, so a rest is a silent gap, while others repeat the
+        // position every frame, so a rest is many jittery samples. Both are
+        // measured the same way.
+        let anchor = samples[index].position;
+        let mut last = index;
+        while last + 1 < samples.len() && distance(samples[last + 1].position, anchor) <= radius {
+            last += 1;
+        }
+        let rest_end = samples.get(last + 1).map_or(duration, |next| next.time);
+        if rest_end - samples[index].time < SETTLE_REST_SECONDS {
+            index += 1;
+            continue;
+        }
+
+        let start = samples[index].time;
+        let travelled_since_settle = travelled[index] - travelled[settled_at];
+        let ignored = start < SETTLE_START_IGNORE_SECONDS
+            || start >= cutoff
+            || travelled_since_settle < travel_required
+            || start - last_settle_time < SETTLE_MIN_SPACING_SECONDS;
+        if !ignored {
+            let resting = &samples[index..=last];
+            let mean = (
+                resting.iter().map(|point| point.position.0).sum::<f64>() / resting.len() as f64,
+                resting.iter().map(|point| point.position.1).sum::<f64>() / resting.len() as f64,
+            );
+            settles.push(Click {
+                time: start,
+                position: mean,
+            });
+            settled_at = index;
+            last_settle_time = start;
+        }
+
+        // Every gap inside this rest belongs to the same pause.
+        index = last + 1;
+    }
+    settles
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -316,6 +459,13 @@ mod tests {
         Click {
             time,
             position: (640.0, 360.0),
+        }
+    }
+
+    fn point(time: f64, x: f64, y: f64) -> PointerPoint {
+        PointerPoint {
+            time,
+            position: (x, y),
         }
     }
 
@@ -569,5 +719,141 @@ mod tests {
         let zooms = automatic_zooms(&clicks, &[], 10.0);
         assert_eq!(zooms.len(), 1);
         assert!((zooms[0].end - 5.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn no_pointer_samples_make_no_settles() {
+        assert!(settle_points(&[], 640.0, 480.0, 10.0).is_empty());
+    }
+
+    #[test]
+    fn a_move_then_rest_becomes_one_settle() {
+        let pointer = [
+            point(0.5, 0.0, 0.0),
+            point(1.0, 400.0, 300.0),
+            point(1.5, 400.0, 300.0),
+            point(2.3, 100.0, 100.0),
+        ];
+        let settles = settle_points(&pointer, 640.0, 480.0, 2.5);
+        assert_eq!(settles.len(), 1);
+        assert!((settles[0].time - 1.0).abs() < 1e-9);
+        assert_eq!(settles[0].position, (400.0, 300.0));
+    }
+
+    #[test]
+    fn jitter_while_resting_is_still_one_settle() {
+        let pointer = [
+            point(0.5, 0.0, 0.0),
+            point(1.0, 400.0, 300.0),
+            point(1.2, 402.0, 298.0),
+            point(1.4, 399.0, 303.0),
+            point(2.4, 401.0, 301.0),
+            point(2.8, 100.0, 100.0),
+        ];
+        let settles = settle_points(&pointer, 640.0, 480.0, 2.9);
+        assert_eq!(settles.len(), 1);
+        // The rest starts when the cursor arrives, and its position is the
+        // mean of the samples that stayed inside the rest radius.
+        assert!((settles[0].time - 1.0).abs() < 1e-9);
+        assert!((settles[0].position.0 - 400.5).abs() < 1e-9);
+        assert!((settles[0].position.1 - 300.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_rest_reported_every_frame_is_still_one_settle() {
+        // Sources that repeat the cursor every frame never leave a silent
+        // gap: a jittery hold at 30 samples a second must still read as rest.
+        let mut pointer = vec![point(0.5, 0.0, 0.0), point(0.9, 300.0, 200.0)];
+        for frame in 0..30 {
+            let jitter = if frame % 2 == 0 { 1.0 } else { -1.0 };
+            pointer.push(point(1.0 + frame as f64 / 30.0, 400.0 + jitter, 300.0));
+        }
+        // The final move lands inside the ignored last second, so the hold
+        // is the only settle.
+        pointer.push(point(2.2, 100.0, 100.0));
+        let settles = settle_points(&pointer, 640.0, 480.0, 2.5);
+        assert_eq!(settles.len(), 1);
+        assert!((settles[0].time - 1.0).abs() < 1e-9);
+        assert!((settles[0].position.0 - 400.0).abs() < 1e-9);
+        assert!((settles[0].position.1 - 300.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn slow_continuous_movement_makes_no_settles() {
+        // Small steps every tenth of a second: steady motion with no pause
+        // long enough to read as a rest, even though the cursor travels far.
+        let pointer: Vec<PointerPoint> = (0..=20)
+            .map(|step| point(step as f64 * 0.1, step as f64 * 6.0, 0.0))
+            .collect();
+        assert!(settle_points(&pointer, 640.0, 480.0, 2.1).is_empty());
+    }
+
+    #[test]
+    fn a_rest_without_travel_makes_no_settle() {
+        let pointer = [
+            point(0.5, 200.0, 200.0),
+            point(1.5, 200.0, 200.0),
+            point(2.0, 500.0, 400.0),
+        ];
+        assert!(settle_points(&pointer, 640.0, 480.0, 2.1).is_empty());
+    }
+
+    #[test]
+    fn two_rests_half_a_second_apart_keep_the_first() {
+        let pointer = [
+            point(0.5, 0.0, 0.0),
+            point(1.0, 400.0, 300.0),
+            point(1.5, 50.0, 50.0),
+            point(2.0, 50.0, 50.0),
+            point(2.4, 500.0, 400.0),
+        ];
+        let settles = settle_points(&pointer, 640.0, 480.0, 2.5);
+        assert_eq!(settles.len(), 1);
+        assert!((settles[0].time - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_rest_in_the_first_third_of_a_second_is_ignored() {
+        let pointer = [
+            point(0.05, 0.0, 0.0),
+            point(0.2, 400.0, 300.0),
+            point(0.9, 400.0, 300.0),
+            point(1.8, 100.0, 100.0),
+        ];
+        assert!(settle_points(&pointer, 640.0, 480.0, 2.0).is_empty());
+    }
+
+    #[test]
+    fn a_rest_in_the_final_ignored_window_makes_no_settle() {
+        // Steady movement, then the cursor stops inside the last second that
+        // `automatic_zooms` never opens a zoom in.
+        let pointer: Vec<PointerPoint> = (0..=38)
+            .map(|step| point(0.5 + step as f64 * 0.1, step as f64 * 2.0, 0.0))
+            .collect();
+        assert!(settle_points(&pointer, 640.0, 480.0, 5.0).is_empty());
+    }
+
+    #[test]
+    fn a_trailing_rest_is_inferred_from_the_gap_to_the_duration() {
+        let pointer = [point(0.5, 0.0, 0.0), point(0.6, 400.0, 300.0)];
+        let settles = settle_points(&pointer, 640.0, 480.0, 2.0);
+        assert_eq!(settles.len(), 1);
+        assert!((settles[0].time - 0.6).abs() < 1e-9);
+        assert_eq!(settles[0].position, (400.0, 300.0));
+    }
+
+    #[test]
+    fn settle_points_feed_automatic_zooms() {
+        let pointer = [
+            point(0.5, 0.0, 0.0),
+            point(1.0, 400.0, 300.0),
+            point(1.6, 400.0, 300.0),
+            point(2.9, 100.0, 100.0),
+        ];
+        let settles = settle_points(&pointer, 640.0, 480.0, 3.0);
+        assert_eq!(settles.len(), 1);
+        let zooms = automatic_zooms(&settles, &pointer, 3.0);
+        assert_eq!(zooms.len(), 1);
+        assert!((zooms[0].start - 0.7).abs() < 1e-9);
     }
 }

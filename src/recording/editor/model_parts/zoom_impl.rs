@@ -751,9 +751,16 @@ impl VideoEditState {
         };
         let width = self.metadata.width as f64;
         let height = self.metadata.height as f64;
-        let clicks = auto_zoom::clicks_from_sidecar(sidecar, width, height);
+        let duration = self.source_duration();
+        let mut clicks = auto_zoom::clicks_from_sidecar(sidecar, width, height);
         let pointer = auto_zoom::pointer_from_sidecar(sidecar, width, height);
-        let zooms = auto_zoom::automatic_zooms(&clicks, &pointer, self.source_duration());
+        // Some compositors cannot report clicks. Fall back to the moments the
+        // cursor came to rest; they stand in for the interactions a click
+        // would have seeded.
+        if clicks.is_empty() && !pointer.is_empty() {
+            clicks = auto_zoom::settle_points(&pointer, width, height, duration);
+        }
+        let zooms = auto_zoom::automatic_zooms(&clicks, &pointer, duration);
         if zooms.is_empty() {
             return Vec::new();
         }
