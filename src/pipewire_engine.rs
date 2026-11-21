@@ -1311,12 +1311,49 @@ fn build_crop_meta_pod() -> Vec<u8> {
     )
 }
 
-fn build_cursor_meta_pod() -> Vec<u8> {
-    const CURSOR_BITMAP_SIDE: usize = 384;
-    let size = std::mem::size_of::<spa_sys::spa_meta_cursor>()
+/// Bytes a cursor meta needs for a `side` x `side` RGBA bitmap.
+fn cursor_meta_size(side: usize) -> i32 {
+    (std::mem::size_of::<spa_sys::spa_meta_cursor>()
         + std::mem::size_of::<spa_sys::spa_meta_bitmap>()
-        + CURSOR_BITMAP_SIDE * CURSOR_BITMAP_SIDE * 4;
-    build_frame_meta_pod(SPA_META_CURSOR, size)
+        + side * side * 4) as i32
+}
+
+/// Ask for cursor metadata as a size range, not one size.
+///
+/// The compositor allocates the meta and offers its own size: KWin offers a
+/// fixed 256x256 bitmap, other compositors offer a range. A single fixed size
+/// here only intersects an offer of exactly that size, so a mismatch leaves
+/// every buffer without cursor metadata. A range from a bare position up to
+/// a 1024x1024 bitmap accepts any of them.
+fn build_cursor_meta_pod() -> Vec<u8> {
+    use pw::spa::pod::{ChoiceValue, Object, Property, Value};
+    use pw::spa::utils::{Choice, ChoiceEnum, ChoiceFlags, Id, SpaTypes};
+
+    let object = Object {
+        type_: SpaTypes::ObjectParamMeta.as_raw(),
+        id: spa::param::ParamType::Meta.as_raw(),
+        properties: vec![
+            Property::new(spa_sys::SPA_PARAM_META_type, Value::Id(Id(SPA_META_CURSOR))),
+            Property::new(
+                spa_sys::SPA_PARAM_META_size,
+                Value::Choice(ChoiceValue::Int(Choice::<i32>(
+                    ChoiceFlags::empty(),
+                    ChoiceEnum::<i32>::Range {
+                        default: cursor_meta_size(256),
+                        min: cursor_meta_size(0),
+                        max: cursor_meta_size(1024),
+                    },
+                ))),
+            ),
+        ],
+    };
+    pw::spa::pod::serialize::PodSerializer::serialize(
+        std::io::Cursor::new(Vec::with_capacity(128)),
+        &Value::Object(object),
+    )
+    .unwrap()
+    .0
+    .into_inner()
 }
 
 fn build_frame_meta_pod(meta_type: u32, size: usize) -> Vec<u8> {
