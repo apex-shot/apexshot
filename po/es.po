@@ -5281,3 +5281,27 @@ msgstr "Recorte de cámara"
 
 msgid "Cut yourself out of the camera and set yourself on the screen."
 msgstr "Recórtate de la cámara y colócate sobre la pantalla."
+
+msgid "Microphone unavailable"
+msgstr "Micrófono no disponible"
+
+msgid "Recording continues without the microphone."
+msgstr "La grabación continúa sin el micrófono."
+
+msgid "System audio unavailable"
+msgstr "Audio del sistema no disponible"
+
+msgid "Recording continues without system audio."
+msgstr "La grabación continúa sin el audio del sistema."
+
+msgid "Pause Recording"
+msgstr "Pausar grabación"
+
+msgid "Resume Recording"
+msgstr "Reanudar grabación"
+
+msgid "Restart Recording"
+msgstr "Reiniciar grabación"
+
+msgid "Discard Recording"
+msgstr "Descartar grabación"

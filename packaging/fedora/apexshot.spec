@@ -39,6 +39,8 @@ Requires:       gstreamer1-plugin-libav
 Recommends:     gstreamer1-plugin-openh264
 Requires:       pipewire
 Requires:       pipewire-pulseaudio
+# pactl lists and picks the audio sources a recording captures.
+Requires:       pulseaudio-utils
 Requires:       tesseract
 Requires:       unzip
 Requires:       wget

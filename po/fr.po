@@ -5293,3 +5293,27 @@ msgstr "Détourage de la caméra"
 
 msgid "Cut yourself out of the camera and set yourself on the screen."
 msgstr "Détourez-vous de la caméra et placez-vous sur l’écran."
+
+msgid "Microphone unavailable"
+msgstr "Microphone indisponible"
+
+msgid "Recording continues without the microphone."
+msgstr "L'enregistrement continue sans le microphone."
+
+msgid "System audio unavailable"
+msgstr "Audio du système indisponible"
+
+msgid "Recording continues without system audio."
+msgstr "L'enregistrement continue sans l'audio du système."
+
+msgid "Pause Recording"
+msgstr "Mettre l'enregistrement en pause"
+
+msgid "Resume Recording"
+msgstr "Reprendre l'enregistrement"
+
+msgid "Restart Recording"
+msgstr "Redémarrer l'enregistrement"
+
+msgid "Discard Recording"
+msgstr "Abandonner l'enregistrement"

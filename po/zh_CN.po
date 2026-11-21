@@ -5171,3 +5171,27 @@ msgstr "摄像头抠像"
 
 msgid "Cut yourself out of the camera and set yourself on the screen."
 msgstr "将你从摄像头画面中抠出并放到屏幕上。"
+
+msgid "Microphone unavailable"
+msgstr "麦克风不可用"
+
+msgid "Recording continues without the microphone."
+msgstr "将继续录制，但不包含麦克风。"
+
+msgid "System audio unavailable"
+msgstr "系统音频不可用"
+
+msgid "Recording continues without system audio."
+msgstr "将继续录制，但不包含系统音频。"
+
+msgid "Pause Recording"
+msgstr "暂停录制"
+
+msgid "Resume Recording"
+msgstr "继续录制"
+
+msgid "Restart Recording"
+msgstr "重新开始录制"
+
+msgid "Discard Recording"
+msgstr "放弃录制"

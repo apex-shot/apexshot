@@ -5263,3 +5263,27 @@ msgstr "Вырезание из камеры"
 
 msgid "Cut yourself out of the camera and set yourself on the screen."
 msgstr "Вырежьте себя из изображения камеры и разместите поверх экрана."
+
+msgid "Microphone unavailable"
+msgstr "Микрофон недоступен"
+
+msgid "Recording continues without the microphone."
+msgstr "Запись продолжится без микрофона."
+
+msgid "System audio unavailable"
+msgstr "Системный звук недоступен"
+
+msgid "Recording continues without system audio."
+msgstr "Запись продолжится без системного звука."
+
+msgid "Pause Recording"
+msgstr "Пауза записи"
+
+msgid "Resume Recording"
+msgstr "Продолжить запись"
+
+msgid "Restart Recording"
+msgstr "Перезапустить запись"
+
+msgid "Discard Recording"
+msgstr "Удалить запись"

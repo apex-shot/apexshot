@@ -5180,3 +5180,27 @@ msgstr "カメラの切り抜き"
 
 msgid "Cut yourself out of the camera and set yourself on the screen."
 msgstr "カメラ映像から自分を切り抜いて画面上に配置します。"
+
+msgid "Microphone unavailable"
+msgstr "マイクを利用できません"
+
+msgid "Recording continues without the microphone."
+msgstr "マイクなしで録画を続行します。"
+
+msgid "System audio unavailable"
+msgstr "システム音声を利用できません"
+
+msgid "Recording continues without system audio."
+msgstr "システム音声なしで録画を続行します。"
+
+msgid "Pause Recording"
+msgstr "録画を一時停止"
+
+msgid "Resume Recording"
+msgstr "録画を再開"
+
+msgid "Restart Recording"
+msgstr "録画をやり直す"
+
+msgid "Discard Recording"
+msgstr "録画を破棄"

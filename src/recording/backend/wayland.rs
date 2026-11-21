@@ -10,10 +10,11 @@ use gstreamer::glib;
 fn start_gst_audio_or_fallback(
     config: &super::RecordingConfig,
     muxer: &str,
+    inputs: super::audio::AudioInputs,
 ) -> Option<super::gst_audio::ActiveGstAudio> {
     use super::gst_audio::{audio_available, ActiveGstAudio, AudioTermination, GstAudioSetup};
 
-    let setup = GstAudioSetup::from_recording(config)?;
+    let setup = GstAudioSetup::from_recording(config, inputs)?;
     if !audio_available(muxer, AudioTermination::AppSink, setup.noise_suppression) {
         eprintln!("[recording] GStreamer audio unavailable; using ffmpeg pulse inputs");
         return None;
@@ -40,6 +41,20 @@ fn start_gst_audio_or_fallback(
             }
         }
     }
+}
+
+/// Failure text for an encoder that exited before the recording finished.
+/// Carries ffmpeg's own diagnostics so a dead input never surfaces as a bare
+/// "Broken pipe".
+fn ffmpeg_encoding_failure(
+    encoder_name: &str,
+    status: &std::process::ExitStatus,
+    stderr: &str,
+) -> String {
+    format!(
+        "ffmpeg failed to encode the recording with {encoder_name} (exit {status}).{}",
+        ffmpeg_error_detail(stderr)
+    )
 }
 
 fn first_valid_window_frame(
@@ -107,12 +122,18 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
     // audio run while the portal/PipeWire stream is still negotiating, which
     // makes the saved audio track longer than the actual video timeline.
     let _ = super::gst_audio::ensure_gst_initialized();
-    let mut audio_exclusive = Some(RecordingAudioExclusiveGuard::acquire(
-        config.mic_enabled || config.speaker_enabled,
-    ));
     if config.mic_enabled || config.speaker_enabled {
         super::audio::ensure_pipewire_pulse_running();
     }
+    // Check the requested devices exist before either audio path references
+    // them: a missing mic or monitor must cost only its own track, not the
+    // recording. ffmpeg otherwise exits when it cannot open the pulse input.
+    let audio_inputs = if config.mic_enabled || config.speaker_enabled {
+        super::audio::resolve_available_audio_inputs(config)
+    } else {
+        super::audio::AudioInputs::default()
+    };
+    let mut audio_exclusive = Some(RecordingAudioExclusiveGuard::acquire(audio_inputs.any()));
 
     // Open PipeWire capture stream (continuous).
     // Portal path: connect via the remote FD from OpenPipeWireRemote.
@@ -216,8 +237,8 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
 
     // Start audio only after the video capture stream is negotiated. This
     // keeps the encoded audio timeline aligned with the first video frame.
-    let mut active_audio = if config.mic_enabled || config.speaker_enabled {
-        start_gst_audio_or_fallback(config, audio_muxer)
+    let mut active_audio = if audio_inputs.any() {
+        start_gst_audio_or_fallback(config, audio_muxer, audio_inputs)
     } else {
         None
     };
@@ -252,8 +273,10 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
         ffmpeg_cmd.arg("-f").arg(format);
         ffmpeg_cmd.arg("-i").arg("pipe:3");
         attach_audio_pipe_as_fd3(&mut ffmpeg_cmd, read_fd);
-    } else if config.mic_enabled || config.speaker_enabled {
-        if config.mic_enabled {
+    } else if audio_inputs.any() {
+        // Only sources that were checked above reach ffmpeg; a missing one
+        // would make ffmpeg exit on its input and kill the whole recording.
+        if audio_inputs.mic {
             let mic_dev = config
                 .mic_source
                 .clone()
@@ -263,7 +286,7 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
             ffmpeg_cmd.arg("-i").arg(&mic_dev);
         }
 
-        if config.speaker_enabled {
+        if audio_inputs.speaker {
             let spk_dev = config
                 .speaker_source
                 .clone()
@@ -427,7 +450,7 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
     }
 
     // Map audio after all inputs have been declared.
-    if config.mic_enabled || config.speaker_enabled {
+    if audio_inputs.any() {
         if active_audio.is_some() {
             // Encoded audio is muxed as-is; mono is handled by the GStreamer
             // branch caps, so no channel conversion happens here.
@@ -447,7 +470,7 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
         } else {
             // Legacy pulse inputs: ffmpeg captures from PulseAudio directly;
             // on modern GNOME this is provided by pipewire-pulse.
-            if config.mic_enabled && config.speaker_enabled {
+            if audio_inputs.mic && audio_inputs.speaker {
                 ffmpeg_cmd.arg("-filter_complex");
                 ffmpeg_cmd.arg("[1:a][2:a]amix=inputs=2:duration=first[aout]");
                 ffmpeg_cmd.arg("-map").arg("0:v");
@@ -567,12 +590,15 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
             timeline.record_window_cursor(captured_at_us, cursor);
         }
     }
-    if active_audio.is_none() && (config.mic_enabled || config.speaker_enabled) {
+    if active_audio.is_none() && audio_inputs.any() {
         timeline.retain_live_audio_pauses();
         eprintln!("[recording] Live Pulse audio fallback retains frozen pause intervals on the media clock");
     }
     let mut last_frame_at_us = None;
     let first_frame_deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    // A failed write means ffmpeg stopped reading; teardown below reports its
+    // stderr instead of returning the bare pipe error.
+    let mut ffmpeg_write_error: Option<std::io::Error> = None;
 
     loop {
         // Check for control commands
@@ -863,6 +889,7 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
                 } else {
                     eprintln!("Failed to write to ffmpeg: {e}");
                 }
+                ffmpeg_write_error = Some(e);
                 break;
             }
         }
@@ -912,7 +939,7 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
     }
     drop(audio_exclusive.take());
 
-    if stop_action == super::RecordingTerminalAction::Save {
+    if stop_action == super::RecordingTerminalAction::Save && ffmpeg_write_error.is_none() {
         if let (Some(pixels), Some(last_frame_at_us)) = (&last_encoded_pixels, last_frame_at_us) {
             let end_pts = timeline.frame_time_us(stopped_at_us);
             let tail_pts = end_pts.saturating_sub(1_000_000 / u64::from(fps));
@@ -932,11 +959,10 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
                         disk_guard: &mut disk_guard,
                     },
                 ) {
-                    drop(stdin);
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    let _ = stderr_reader.join();
-                    return Err(err.into());
+                    // Fall through to the shared teardown so the failure is
+                    // reported with ffmpeg's own stderr, not a bare pipe error.
+                    eprintln!("Failed to write the final frame to ffmpeg: {err}");
+                    ffmpeg_write_error = Some(err);
                 }
             }
         }
@@ -971,6 +997,24 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
         });
     }
 
+    // ffmpeg stopped reading the video pipe. ffmpeg has now exited and its
+    // stderr is joined, so report the real cause (a missing pulse input, an
+    // encoder error, ...) instead of just "Broken pipe".
+    if let Some(write_error) = ffmpeg_write_error {
+        eprintln!("[recording] ffmpeg input pipe failed: {write_error}");
+        let keep_output = std::fs::metadata(&final_path)
+            .map(|metadata| metadata.len() > 0)
+            .unwrap_or(false);
+        if !keep_output {
+            let _ = std::fs::remove_file(&final_path);
+        }
+        return Err(RecordError::GStreamerError(ffmpeg_encoding_failure(
+            encoder_name,
+            &status,
+            &ffmpeg_stderr,
+        )));
+    }
+
     if frames_written == 0 {
         let _ = std::fs::remove_file(&final_path);
         return Err(RecordError::GStreamerError(
@@ -984,9 +1028,10 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
             .unwrap_or(false);
         if !keep_output {
             let _ = std::fs::remove_file(&final_path);
-            let detail = ffmpeg_error_detail(&ffmpeg_stderr);
-            return Err(RecordError::GStreamerError(format!(
-                "ffmpeg failed to encode the recording with {encoder_name} (exit {status}).{detail}"
+            return Err(RecordError::GStreamerError(ffmpeg_encoding_failure(
+                encoder_name,
+                &status,
+                &ffmpeg_stderr,
             )));
         }
         eprintln!("[recording] ffmpeg exited {status}; keeping output because it already has data");
@@ -1132,5 +1177,22 @@ mod tests {
             reanchor > write,
             "the re-anchor must follow the frame write it belongs to",
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_early_ffmpeg_exit_reports_ffmpeg_stderr() {
+        use std::os::unix::process::ExitStatusExt;
+
+        let status = std::process::ExitStatus::from_raw(1 << 8);
+        let message = ffmpeg_encoding_failure(
+            "libopenh264",
+            &status,
+            "[pulse @ 0x1] Error opening input file default.\nInput/output error\n",
+        );
+        assert!(message.contains("libopenh264"));
+        assert!(message.contains("exit status: 1"));
+        assert!(message.contains("Error opening input file default."));
+        assert!(message.contains("Input/output error"));
     }
 }
