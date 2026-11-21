@@ -1,6 +1,6 @@
 use std::sync::mpsc::Sender;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TrayAction {
     OpenUpdate,
     QuickCapture,
@@ -13,6 +13,10 @@ pub enum TrayAction {
     RecordScreen,
     RecordWindow,
     StopRecordingSave,
+    PauseRecording,
+    ResumeRecording,
+    RestartRecording,
+    DiscardRecording,
     ShowLastPreview,
     OpenLastCapture,
     OpenHistory,
@@ -23,6 +27,7 @@ pub enum TrayAction {
 pub struct ApexShotTray {
     tx: Sender<TrayAction>,
     recording: bool,
+    paused: bool,
     update: Option<crate::update::UpdateInfo>,
 }
 
@@ -31,6 +36,7 @@ impl ApexShotTray {
         Self {
             tx,
             recording: false,
+            paused: false,
             update: None,
         }
     }
@@ -41,6 +47,15 @@ impl ApexShotTray {
 
     pub fn set_recording(&mut self, recording: bool) {
         self.recording = recording;
+        if !recording {
+            self.paused = false;
+        }
+    }
+
+    /// Whether the active recording is paused. Only meaningful while
+    /// `recording` is true; the daemon clears it when the session ends.
+    pub fn set_paused(&mut self, paused: bool) {
+        self.paused = paused;
     }
 
     pub fn set_update_available(&mut self, update: crate::update::UpdateInfo) {
@@ -247,11 +262,34 @@ impl ksni::Tray for ApexShotTray {
                 TrayAction::RecordWindow
             ),
         ]);
+        menu.push(item!(
+            &crate::i18n::t("Stop Recording"),
+            self.recording,
+            TrayAction::StopRecordingSave
+        ));
+        if self.paused {
+            menu.push(item!(
+                &crate::i18n::t("Resume Recording"),
+                self.recording,
+                TrayAction::ResumeRecording
+            ));
+        } else {
+            menu.push(item!(
+                &crate::i18n::t("Pause Recording"),
+                self.recording,
+                TrayAction::PauseRecording
+            ));
+        }
         menu.extend([
             item!(
-                &crate::i18n::t("Stop Recording"),
+                &crate::i18n::t("Restart Recording"),
                 self.recording,
-                TrayAction::StopRecordingSave
+                TrayAction::RestartRecording
+            ),
+            item!(
+                &crate::i18n::t("Discard Recording"),
+                self.recording,
+                TrayAction::DiscardRecording
             ),
             item!(
                 &crate::i18n::t("Video Editor"),
@@ -387,5 +425,76 @@ mod tests {
         // every package installs cannot drift away from this name.
         let svg = include_str!("../../packaging/apexshot-recording.svg");
         assert!(svg.contains("#e81123"));
+    }
+
+    #[test]
+    fn the_tray_offers_pause_restart_and_discard_while_recording() {
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut tray = ApexShotTray::new(tx);
+
+        let idle = tray_standard_items(&tray);
+        assert!(!item_enabled(&idle, &crate::i18n::t("Pause Recording")));
+        assert!(!item_enabled(&idle, &crate::i18n::t("Restart Recording")));
+        assert!(!item_enabled(&idle, &crate::i18n::t("Discard Recording")));
+
+        tray.set_recording(true);
+        let active = tray_standard_items(&tray);
+        assert!(item_enabled(&active, &crate::i18n::t("Pause Recording")));
+        assert!(item_enabled(&active, &crate::i18n::t("Restart Recording")));
+        assert!(item_enabled(&active, &crate::i18n::t("Discard Recording")));
+
+        tray.set_paused(true);
+        let paused = tray_standard_items(&tray);
+        assert!(!paused
+            .iter()
+            .any(|(label, _)| label == &crate::i18n::t("Pause Recording")));
+        assert!(item_enabled(&paused, &crate::i18n::t("Resume Recording")));
+
+        tray.set_recording(false);
+        let idle = tray_standard_items(&tray);
+        assert!(!item_enabled(&idle, &crate::i18n::t("Pause Recording")));
+        assert!(!idle
+            .iter()
+            .any(|(label, _)| label == &crate::i18n::t("Resume Recording")));
+    }
+
+    #[test]
+    fn the_pause_menu_item_sends_the_matching_action() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut tray = ApexShotTray::new(tx);
+        tray.set_recording(true);
+
+        let pause = ksni::Tray::menu(&tray)
+            .into_iter()
+            .find_map(|item| match item {
+                ksni::menu::MenuItem::Standard(item)
+                    if item.label == crate::i18n::t("Pause Recording") =>
+                {
+                    Some(item)
+                }
+                _ => None,
+            })
+            .expect("the pause item is shown while recording");
+        (pause.activate)(&mut tray);
+
+        assert_eq!(rx.try_recv().unwrap(), TrayAction::PauseRecording);
+    }
+
+    fn tray_standard_items(tray: &ApexShotTray) -> Vec<(String, bool)> {
+        ksni::Tray::menu(tray)
+            .into_iter()
+            .filter_map(|item| match item {
+                ksni::menu::MenuItem::Standard(item) => Some((item.label, item.enabled)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn item_enabled(items: &[(String, bool)], label: &str) -> bool {
+        items
+            .iter()
+            .find(|(item_label, _)| item_label == label)
+            .map(|(_, enabled)| *enabled)
+            .unwrap_or(false)
     }
 }

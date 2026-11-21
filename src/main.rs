@@ -328,14 +328,25 @@ async fn async_main(args: Vec<String>) {
                 std::process::exit(1);
             }
 
-            match args[2].as_str() {
-                "stop-save" => {
-                    trigger_daemon_action("recording_stop_save").await;
+            // The documented verbs are `stop-save`, `pause-resume`,
+            // `restart`, and `discard`; accept the `record` spellings too.
+            let record_type = match args[2].as_str() {
+                "stop-save" => "stop",
+                "pause-resume" => "toggle-pause",
+                other => other,
+            };
+            if !cli::handlers::is_record_control_action(record_type) {
+                eprintln!("Error: unknown recording control action '{}'", args[2]);
+                std::process::exit(1);
+            }
+            if let Some(action) = cli::handlers::record_daemon_action(record_type) {
+                if trigger_daemon_action(action).await {
+                    return;
                 }
-                _ => {
-                    eprintln!("Error: unknown recording control action '{}'", args[2]);
-                    std::process::exit(1);
-                }
+            }
+            if !cli::handlers::send_external_record_control(record_type) {
+                eprintln!("Error: no active recording");
+                std::process::exit(1);
             }
         }
 
@@ -365,18 +376,21 @@ async fn async_main(args: Vec<String>) {
                 std::process::exit(1);
             }
             let record_type = args[2].as_str();
+            let control = cli::handlers::is_record_control_action(record_type);
             // Try to delegate to the running daemon first.
             if let Some(action) = cli::handlers::record_daemon_action(record_type) {
                 if trigger_daemon_action(action).await {
                     return;
                 }
-                // Control actions only work through the daemon.
-                if cli::handlers::is_record_control_action(record_type) {
-                    eprintln!(
-                        "Error: 'record {record_type}' requires a running ApexShot daemon (apexshot daemon)."
-                    );
+            }
+            if control {
+                // No daemon: the recording process still owns its control
+                // service, so control verbs work for a standalone recording.
+                if !cli::handlers::send_external_record_control(record_type) {
+                    eprintln!("Error: no active recording");
                     std::process::exit(1);
                 }
+                return;
             }
             if let Err(e) = cli::handlers::run_record(&args).await {
                 eprintln!("Recording failed: {}", e);
@@ -729,14 +743,23 @@ pub(crate) fn print_usage() {
     println!("Recording types:");
     println!("  screen            Record the full screen");
     println!("  window            Record a portal-selected window");
-    println!("  stop              Stop and save the active recording (requires daemon)");
     println!();
     println!("Recording options:");
     println!("  --output <path>   Save to specific path (default: ~/Videos/output.mp4)");
     println!("  --overlay-stop    Show a small window to stop recording (Esc/Stop button)");
     println!();
-    println!("Recording control (requires daemon):");
-    println!("  recording-control stop-save");
+    println!("Recording control:");
+    println!("  stop              Stop and save the active recording");
+    println!("  pause             Pause the active recording");
+    println!("  resume            Resume a paused recording");
+    println!("  toggle-pause      Pause or resume the active recording");
+    println!("  restart           Discard the current take and start a new one");
+    println!("  discard           Stop and discard the active recording");
+    println!("  Control verbs use the daemon when it runs, otherwise the recording");
+    println!("  process's own control service.");
+    println!();
+    println!("Legacy control spelling:");
+    println!("  recording-control stop-save|pause-resume|pause|resume|restart|discard");
     println!();
     println!("Install options:");
     println!("  --no-autostart            Skip autostart desktop file");
@@ -864,12 +887,35 @@ mod tests {
         assert_eq!(record_daemon_action("area"), None);
         // Control actions must use the daemon Trigger names (not legacy aliases).
         assert_eq!(record_daemon_action("stop"), Some("recording_stop_save"));
+        assert_eq!(record_daemon_action("pause"), Some("recording_pause"));
+        assert_eq!(record_daemon_action("resume"), Some("recording_resume"));
+        assert_eq!(
+            record_daemon_action("toggle-pause"),
+            Some("recording_toggle_pause")
+        );
+        assert_eq!(record_daemon_action("restart"), Some("recording_restart"));
+        assert_eq!(record_daemon_action("discard"), Some("recording_discard"));
         assert_eq!(record_daemon_action("unknown"), None);
     }
 
     #[test]
-    fn record_control_actions_require_daemon() {
-        assert!(is_record_control_action("stop"));
+    fn record_control_actions_are_recognized() {
+        for action in [
+            "stop",
+            "pause",
+            "resume",
+            "toggle-pause",
+            "toggle_pause",
+            "pause-resume",
+            "restart",
+            "discard",
+        ] {
+            assert!(is_record_control_action(action), "{action}");
+            assert!(
+                record_daemon_action(action).is_some(),
+                "{action} needs a daemon trigger"
+            );
+        }
         assert!(!is_record_control_action("screen"));
         assert!(!is_record_control_action("window"));
         assert!(!is_record_control_action("area"));

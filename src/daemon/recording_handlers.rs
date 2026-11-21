@@ -3,18 +3,30 @@ use crate::{config::load_config, tray::ApexShotTray};
 use super::*;
 
 #[derive(Debug, Clone)]
-pub(super) struct RecordingTrayState;
+pub(super) struct RecordingTrayState {
+    paused: bool,
+}
 
 impl RecordingTrayState {
     pub(super) fn started() -> Self {
-        Self
+        Self { paused: false }
     }
 
-    pub(super) fn pause(&mut self) {}
+    pub(super) fn pause(&mut self) {
+        self.paused = true;
+    }
 
-    pub(super) fn resume(&mut self) {}
+    pub(super) fn resume(&mut self) {
+        self.paused = false;
+    }
 
-    pub(super) fn restart(&mut self) {}
+    pub(super) fn restart(&mut self) {
+        self.paused = false;
+    }
+
+    pub(super) fn is_paused(&self) -> bool {
+        self.paused
+    }
 }
 
 pub fn notify_daemon_recording_started() -> bool {
@@ -41,8 +53,18 @@ pub(super) fn update_tray_recording_state(
     tray: &Option<ksni::Handle<ApexShotTray>>,
     recording_state: Option<&RecordingTrayState>,
 ) {
-    if let Some(handle) = tray {
-        handle.update(|tray| tray.set_recording(recording_state.is_some()));
+    let Some(handle) = tray else {
+        return;
+    };
+    match recording_state {
+        Some(state) => handle.update(|tray| {
+            tray.set_recording(true);
+            tray.set_paused(state.is_paused());
+        }),
+        None => handle.update(|tray| {
+            tray.set_recording(false);
+            tray.set_paused(false);
+        }),
     }
 }
 

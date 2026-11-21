@@ -547,6 +547,8 @@ mod tests {
             shortcut_open_recording_ui: String::new(),
             shortcut_record_screen: String::new(),
             shortcut_recording_stop_save: String::new(),
+            shortcut_recording_pause: String::new(),
+            shortcut_recording_restart: String::new(),
             ..Default::default()
         };
         assert!(!screenshot_or_general_shortcuts_configured(&config));

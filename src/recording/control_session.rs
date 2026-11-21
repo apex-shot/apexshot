@@ -112,6 +112,19 @@ fn apply_command_side_effects(command: RecordingControlCommand, paused: &AtomicB
     }
 }
 
+/// Turn a known paused state into the command that flips it.
+///
+/// Used by the in-process toggle and by the control service's
+/// `TogglePauseActive` method, which lets an external process toggle without
+/// knowing the current state.
+fn toggle_pause_command(paused: bool) -> RecordingControlCommand {
+    if paused {
+        RecordingControlCommand::Resume
+    } else {
+        RecordingControlCommand::Pause
+    }
+}
+
 fn register_active_recording_control(
     command_tx: Arc<Mutex<Option<mpsc::UnboundedSender<RecordingControlCommand>>>>,
     paused: Arc<AtomicBool>,
@@ -161,6 +174,19 @@ pub fn send_active_recording_command(command: RecordingControlCommand) -> bool {
 }
 
 pub fn send_external_recording_command(command: RecordingControlCommand) -> bool {
+    call_external_recording_method(command.dbus_method())
+}
+
+/// Flip the pause state of a recording owned by another ApexShot process.
+///
+/// The recording process answers `TogglePauseActive` by turning the call into
+/// a concrete `Pause` or `Resume`, so the caller does not need to know the
+/// remote state.
+pub fn send_external_toggle_pause() -> bool {
+    call_external_recording_method("TogglePauseActive")
+}
+
+fn call_external_recording_method(method: &'static str) -> bool {
     crate::utils::run_off_tokio(move || {
         let Ok(connection) = zbus::blocking::Connection::session() else {
             return false;
@@ -186,7 +212,7 @@ pub fn send_external_recording_command(command: RecordingControlCommand) -> bool
                     Some(name.as_str()),
                     RECORDING_CONTROL_OBJECT_PATH,
                     Some(RECORDING_CONTROL_INTERFACE),
-                    command.dbus_method(),
+                    method,
                     &(),
                 ) else {
                     return false;
@@ -205,11 +231,7 @@ pub fn toggle_active_recording_pause() -> bool {
         return false;
     };
 
-    let command = if active.paused.load(Ordering::Relaxed) {
-        RecordingControlCommand::Resume
-    } else {
-        RecordingControlCommand::Pause
-    };
+    let command = toggle_pause_command(active.paused.load(Ordering::Relaxed));
     send_active_recording_command(command)
 }
 
@@ -278,6 +300,12 @@ impl RecordingControlIface {
 
     async fn restart_active(&self) -> zbus::fdo::Result<bool> {
         self.send(&self.session_id, RecordingControlCommand::Restart)
+    }
+
+    /// Toggle without the caller knowing whether the recording is paused.
+    async fn toggle_pause_active(&self) -> zbus::fdo::Result<bool> {
+        let command = toggle_pause_command(self.paused.load(Ordering::Relaxed));
+        self.send(&self.session_id, command)
     }
 }
 
@@ -353,8 +381,8 @@ impl Drop for RecordingControlServer {
 mod tests {
     use super::{
         end_recording_busy, has_active_recording_control, release_recording_busy,
-        send_active_recording_command, RecordingBusyGuard, RecordingControlCommand,
-        RecordingControlServer,
+        send_active_recording_command, toggle_pause_command, RecordingBusyGuard,
+        RecordingControlCommand, RecordingControlServer,
     };
     use std::sync::{Mutex, OnceLock};
     use tokio::sync::mpsc;
@@ -420,6 +448,12 @@ mod tests {
             RecordingControlCommand::Restart.dbus_method(),
             "RestartActive"
         );
+    }
+
+    #[test]
+    fn toggle_pause_flips_between_pause_and_resume() {
+        assert_eq!(toggle_pause_command(false), RecordingControlCommand::Pause);
+        assert_eq!(toggle_pause_command(true), RecordingControlCommand::Resume);
     }
 
     #[test]
