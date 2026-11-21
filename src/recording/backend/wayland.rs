@@ -1,5 +1,6 @@
 use super::crop::{
-    normalize_window_frame, stream_cursor_update, window_cursor_update, window_frame_crop,
+    normalize_window_frame, stream_cursor_from_metadata, stream_cursor_update,
+    window_cursor_from_metadata, window_cursor_update, window_frame_crop,
 };
 use super::*;
 use crate::pipewire_engine::{FrameCrop, PipeWireFrame};
@@ -189,8 +190,12 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
     let mut first_window_frame = None;
     let mut first_window_cursor = None;
     let mut window_output_size = None;
+    // Crop of the newest window pixel frame. Pointer-only updates carry no
+    // pixels, so they map through this crop instead of recomputing bounds.
+    let mut last_window_crop = None;
     let crop = if window_target {
         let (frame, crop) = first_valid_window_frame(&capture)?;
+        last_window_crop = Some(crop);
         let width = crop.width;
         let height = crop.height;
         first_window_cursor = window_cursor_update(&frame, crop, width, height)
@@ -684,6 +689,38 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
             continue;
         }
 
+        // Pointer-only buffers arrive between pixel frames, so drain them on
+        // every tick rather than on the frame cadence below. They go straight
+        // into the cursor track and never reach ffmpeg or the frame counter.
+        while let Some(update) = capture.try_recv_cursor_update() {
+            if !cursor_metadata_enabled {
+                continue;
+            }
+            // Positions captured before the first encoded frame have no place
+            // in the sidecar; rebasing would drop them anyway.
+            let Some(origin_us) = timeline.origin_us() else {
+                continue;
+            };
+            if update.captured_at_us < origin_us {
+                continue;
+            }
+            let cursor = if window_target {
+                last_window_crop.and_then(|window_crop| {
+                    window_cursor_from_metadata(
+                        update.cursor_metadata,
+                        window_crop,
+                        input_width,
+                        input_height,
+                    )
+                })
+            } else {
+                stream_cursor_from_metadata(update.cursor_metadata, crop, input_width, input_height)
+            };
+            if let Some(cursor) = cursor {
+                timeline.record_stream_cursor(update.captured_at_us, cursor);
+            }
+        }
+
         // Gate acquisition on cadence (one frame per tick): acquiring
         // and converting a full RGBA frame on every 1ms spin burns hundreds
         // of MiB/s of copies for frames that are overwritten before use.
@@ -702,6 +739,7 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
                 let mut cursor_update = None;
                 let pixels = if window_target {
                     window_frame_crop(&frame).and_then(|crop| {
+                        last_window_crop = Some(crop);
                         if cursor_metadata_enabled {
                             cursor_update =
                                 window_cursor_update(&frame, crop, input_width, input_height);
@@ -728,9 +766,6 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
                 };
                 match pixels {
                     Some(pixels) if pixels.len() == expected => {
-                        if let Some(cursor) = cursor_update {
-                            timeline.record_stream_cursor(captured_at_us, cursor);
-                        }
                         update_pending_video_frame(
                             &mut last_pixels,
                             &mut pending_frame_at_us,
@@ -748,6 +783,11 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
                             "[recording] Skipping frame with invalid crop, format, or dimensions"
                         );
                     }
+                }
+                // A pixel buffer's cursor metadata is valid even when its
+                // pixels cannot be encoded, so record it independently.
+                if let Some(cursor) = cursor_update {
+                    timeline.record_stream_cursor(captured_at_us, cursor);
                 }
                 if next_frame_at.is_none() {
                     next_frame_at = Some(std::time::Instant::now());
@@ -912,6 +952,27 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
         audio.set_end_now();
     }
     timeline.finish(stopped_at_us);
+
+    // One line per recording that shows exactly what the compositor sent.
+    // A cursorless video caused by pointer-only buffers being dropped looks
+    // identical to a compositor that never granted metadata without it.
+    let buffer_stats = capture.buffer_stats();
+    let stream_cursor_samples = timeline.stream_cursor_sample_count();
+    eprintln!(
+        "[recording] pipewire buffers: pixel_frames={} cursor_only={} corrupted={} empty={} cursor_present={} cursor_hidden={} cursor_missing={} stream_cursor_samples={stream_cursor_samples}",
+        buffer_stats.pixel_frames,
+        buffer_stats.cursor_only,
+        buffer_stats.corrupted,
+        buffer_stats.empty,
+        buffer_stats.cursor_present,
+        buffer_stats.cursor_hidden,
+        buffer_stats.cursor_missing,
+    );
+    if cursor_metadata_enabled && stream_cursor_samples == 0 {
+        eprintln!(
+            "[recording] cursor metadata granted but no cursor positions arrived; the video has no cursor"
+        );
+    }
 
     if disk_guard.tripped() && stop_action == super::RecordingTerminalAction::Save {
         crate::utils::notify::desktop_notification(

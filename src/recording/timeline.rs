@@ -181,6 +181,16 @@ impl RecordingTimeline {
             .map_or_else(Vec::new, |track| track.positions_at(at_us))
     }
 
+    /// How many cursor positions the stream track holds.
+    ///
+    /// Used by the recording diagnostics to tell a compositor's cursor stream
+    /// that never arrived from one that did.
+    pub(super) fn stream_cursor_sample_count(&self) -> usize {
+        self.stream_cursor
+            .as_ref()
+            .map_or(0, |track| track.pointer.len())
+    }
+
     pub(super) fn add_stream_cursor_to_sidecar(
         &self,
         sidecar: &mut PointerSidecar,

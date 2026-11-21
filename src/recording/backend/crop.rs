@@ -314,7 +314,19 @@ pub(super) fn window_cursor_update(
     output_width: u32,
     output_height: u32,
 ) -> Option<Option<(f64, f64)>> {
-    match frame.cursor_metadata {
+    window_cursor_from_metadata(frame.cursor_metadata, crop, output_width, output_height)
+}
+
+/// Window-stream cursor position from metadata alone, for pointer-only
+/// updates that carry no pixels; the caller supplies the window crop from the
+/// last pixel frame.
+pub(super) fn window_cursor_from_metadata(
+    cursor_metadata: CursorMetadataState,
+    crop: FrameCrop,
+    output_width: u32,
+    output_height: u32,
+) -> Option<Option<(f64, f64)>> {
+    match cursor_metadata {
         CursorMetadataState::Missing
         | CursorMetadataState::Invalid
         | CursorMetadataState::Hidden => Some(None),
@@ -363,7 +375,18 @@ pub(super) fn stream_cursor_update(
     output_width: u32,
     output_height: u32,
 ) -> Option<Option<(f64, f64)>> {
-    match frame.cursor_metadata {
+    stream_cursor_from_metadata(frame.cursor_metadata, crop, output_width, output_height)
+}
+
+/// Monitor/area cursor position from metadata alone, for pointer-only updates
+/// that carry no pixels.
+pub(super) fn stream_cursor_from_metadata(
+    cursor_metadata: CursorMetadataState,
+    crop: Option<CropMargins>,
+    output_width: u32,
+    output_height: u32,
+) -> Option<Option<(f64, f64)>> {
+    match cursor_metadata {
         CursorMetadataState::Missing
         | CursorMetadataState::Invalid
         | CursorMetadataState::Hidden => Some(None),
@@ -866,6 +889,45 @@ mod tests {
         assert_eq!(stream_cursor_update(&frame, None, 320, 200), Some(None));
         frame.cursor_metadata = CursorMetadataState::Missing;
         assert_eq!(stream_cursor_update(&frame, None, 320, 200), Some(None));
+    }
+
+    #[test]
+    fn cursor_only_update_lands_in_the_stream_track_with_area_crop_conversion() {
+        let metadata = CursorMetadataState::Present(crate::pipewire_engine::CursorPosition {
+            x: 150,
+            y: 120,
+            hotspot_x: 0,
+            hotspot_y: 0,
+        });
+        let area = Some(CropMargins {
+            left: 100,
+            right: 20,
+            top: 50,
+            bottom: 10,
+        });
+        let position = stream_cursor_from_metadata(metadata, area, 200, 140);
+        assert_eq!(position, Some(Some((50.0, 70.0))));
+
+        let mut timeline = crate::recording::timeline::RecordingTimeline::default();
+        timeline.enable_stream_cursor(200, 140);
+        timeline.record_stream_cursor(2_000_000, position.unwrap());
+        assert_eq!(
+            timeline.stream_cursor_positions_at(2_000_000),
+            vec![(50.0, 70.0, 2_000_000)]
+        );
+        assert_eq!(timeline.stream_cursor_sample_count(), 1);
+
+        // A window stream applies the crop from its last pixel frame instead.
+        let window_crop = FrameCrop {
+            x: 100,
+            y: 50,
+            width: 200,
+            height: 140,
+        };
+        assert_eq!(
+            window_cursor_from_metadata(metadata, window_crop, 200, 140),
+            Some(Some((50.0, 70.0)))
+        );
     }
 
     #[test]
