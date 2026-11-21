@@ -5204,3 +5204,9 @@ msgstr "録画をやり直す"
 
 msgid "Discard Recording"
 msgstr "録画を破棄"
+
+msgid "Choose your screen"
+msgstr "画面を選択してください"
+
+msgid "A virtual screen records an empty display. Pick your screen in the sharing dialog."
+msgstr "仮想画面には何も表示されず、空の映像が録画されます。共有ダイアログで画面を選択してください。"

@@ -5195,3 +5195,9 @@ msgstr "重新开始录制"
 
 msgid "Discard Recording"
 msgstr "放弃录制"
+
+msgid "Choose your screen"
+msgstr "选择屏幕"
+
+msgid "A virtual screen records an empty display. Pick your screen in the sharing dialog."
+msgstr "虚拟屏幕录制的是空白画面。请在共享对话框中选择屏幕。"

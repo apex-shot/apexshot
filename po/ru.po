@@ -5287,3 +5287,9 @@ msgstr "Перезапустить запись"
 
 msgid "Discard Recording"
 msgstr "Удалить запись"
+
+msgid "Choose your screen"
+msgstr "Выберите экран"
+
+msgid "A virtual screen records an empty display. Pick your screen in the sharing dialog."
+msgstr "Виртуальный экран записывает пустое изображение. Выберите свой экран в диалоге общего доступа."

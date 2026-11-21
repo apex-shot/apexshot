@@ -92,13 +92,60 @@ fn validate_portal_sources(
     Ok(())
 }
 
+/// How one share-dialog result should be handled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScreenPickOutcome {
+    /// The stream matches the recording target.
+    Accept,
+    /// A virtual display was shared for a screen/area recording. Close the
+    /// session and ask again instead of recording a display that stays empty.
+    ReAsk,
+    /// The stream is the wrong kind for this recording; report it.
+    Reject,
+}
+
+/// Ask this many times after a virtual display was picked, then give up.
+const MAX_SCREEN_REASKS: u8 = 2;
+
+/// Some portals (Plasma's share dialog, for one) always offer a "virtual
+/// screen" entry beside the monitors ApexShot requested. A virtual display is
+/// created empty, and its stream is not a monitor. Decide from the returned
+/// stream type alone so the choice stays testable without a portal.
+fn screen_pick_outcome(
+    target: RecordingTarget,
+    source_type: Option<ashpd::desktop::screencast::SourceType>,
+) -> ScreenPickOutcome {
+    use ashpd::desktop::screencast::SourceType;
+
+    match (target, source_type) {
+        (_, None) => ScreenPickOutcome::Accept,
+        (RecordingTarget::Window, Some(SourceType::Window)) => ScreenPickOutcome::Accept,
+        (RecordingTarget::Window, Some(_)) => ScreenPickOutcome::Reject,
+        (_, Some(SourceType::Monitor)) => ScreenPickOutcome::Accept,
+        (_, Some(SourceType::Virtual)) => ScreenPickOutcome::ReAsk,
+        (_, Some(SourceType::Window)) => ScreenPickOutcome::Reject,
+    }
+}
+
+/// One share-dialog round-trip.
+enum ScreenCastAttempt {
+    Started {
+        response: ashpd::desktop::screencast::Streams,
+        session: OwnedPortalSession,
+        pipewire_fd: OwnedFd,
+        cursor_mode: ashpd::desktop::screencast::CursorMode,
+    },
+    /// A virtual display was shared. The session is already closed so the
+    /// compositor tears the virtual output down; the caller decides whether
+    /// to ask again.
+    NeedsAnotherPick,
+}
+
 fn validate_portal_stream(
     target: RecordingTarget,
     stream_count: usize,
     source_type: Option<ashpd::desktop::screencast::SourceType>,
 ) -> RecordResult<()> {
-    use ashpd::desktop::screencast::SourceType;
-
     if stream_count != 1 {
         if target != RecordingTarget::Window && stream_count == 0 {
             return Err(RecordError::PortalError("No streams returned".into()));
@@ -113,21 +160,19 @@ fn validate_portal_stream(
         ));
     }
 
-    let requested = match target {
-        RecordingTarget::Window => SourceType::Window,
-        RecordingTarget::Screen | RecordingTarget::Area => SourceType::Monitor,
-    };
-    if source_type.is_some_and(|source| source != requested) {
-        if target != RecordingTarget::Window {
-            return Err(RecordError::UnsupportedBackend(
-                "The ScreenCast portal returned a window instead of a monitor".into(),
-            ));
+    match screen_pick_outcome(target, source_type) {
+        ScreenPickOutcome::Accept => Ok(()),
+        // A virtual display is handled by the dialog loop; reaching here means
+        // the caller cannot ask again.
+        ScreenPickOutcome::ReAsk | ScreenPickOutcome::Reject => {
+            let message = if target == RecordingTarget::Window {
+                "The sharing dialog returned a screen, but this recording needs a window"
+            } else {
+                "The sharing dialog returned a window, but this recording needs a screen"
+            };
+            Err(RecordError::UnsupportedBackend(message.into()))
         }
-        return Err(RecordError::UnsupportedBackend(
-            "The ScreenCast portal returned a monitor instead of a window".into(),
-        ));
     }
-    Ok(())
 }
 
 fn select_portal_cursor_mode(
@@ -205,12 +250,7 @@ pub(in crate::recording) async fn get_wayland_source(
         cursor_mode: CursorMode,
         wants_area_crop: bool,
         target: RecordingTarget,
-    ) -> RecordResult<(
-        ashpd::desktop::screencast::Streams,
-        OwnedPortalSession,
-        OwnedFd,
-        CursorMode,
-    )> {
+    ) -> RecordResult<ScreenCastAttempt> {
         let _portal_identity = crate::utils::desktop_env::scoped_portal_capture_identity();
 
         // Recording-private portal connection: a Session.Close wedges the
@@ -301,14 +341,24 @@ pub(in crate::recording) async fn get_wayland_source(
             .response()
             .map_err(portal_err)?;
 
-        validate_portal_stream(
-            target,
-            response.streams().len(),
-            response
-                .streams()
-                .first()
-                .and_then(|stream| stream.source_type()),
-        )?;
+        let stream_count = response.streams().len();
+        let source_type = response
+            .streams()
+            .first()
+            .and_then(|stream| stream.source_type());
+
+        if stream_count == 1 && screen_pick_outcome(target, source_type) == ScreenPickOutcome::ReAsk
+        {
+            eprintln!(
+                "[recording] The sharing dialog returned a virtual screen; closing it and asking for a real screen."
+            );
+            // Close the session before asking again so the compositor removes
+            // the virtual display it created for this stream.
+            drop(setup_guard);
+            return Ok(ScreenCastAttempt::NeedsAnotherPick);
+        }
+
+        validate_portal_stream(target, stream_count, source_type)?;
 
         let pipewire_fd = proxy
             .open_pipe_wire_remote(
@@ -318,14 +368,45 @@ pub(in crate::recording) async fn get_wayland_source(
             .await
             .map_err(|e| RecordError::PortalError(e.to_string()))?;
 
-        Ok((response, setup_guard, pipewire_fd, cursor_mode))
+        Ok(ScreenCastAttempt::Started {
+            response,
+            session: setup_guard,
+            pipewire_fd,
+            cursor_mode,
+        })
     }
 
     if config.target != RecordingTarget::Window {
         discard_stale_recording_restore_tokens();
     }
-    let (response, portal_session, pipewire_fd, cursor_mode) =
-        request_screencast(cursor_mode, wants_area_crop, config.target).await?;
+    let mut screen_reasks = 0u8;
+    let (response, portal_session, pipewire_fd, cursor_mode) = loop {
+        match request_screencast(cursor_mode, wants_area_crop, config.target).await? {
+            ScreenCastAttempt::Started {
+                response,
+                session,
+                pipewire_fd,
+                cursor_mode,
+            } => break (response, session, pipewire_fd, cursor_mode),
+            ScreenCastAttempt::NeedsAnotherPick => {
+                crate::utils::notify::desktop_notification(
+                    &crate::i18n::t("Choose your screen"),
+                    &crate::i18n::t(
+                        "A virtual screen records an empty display. Pick your screen in the sharing dialog.",
+                    ),
+                );
+                // Two re-asks are allowed; a third virtual pick gives up.
+                if screen_reasks >= MAX_SCREEN_REASKS {
+                    return Err(RecordError::UnsupportedBackend(
+                        "Recording needs a real screen. Pick your screen in the sharing dialog."
+                            .into(),
+                    ));
+                }
+                screen_reasks += 1;
+                println!("Pick a real screen in the sharing dialog...");
+            }
+        }
+    };
 
     let stream = response.streams().first().ok_or_else(|| {
         RecordError::UnsupportedBackend(
@@ -485,6 +566,72 @@ mod tests {
             assert!(validate_portal_stream(target, 1, Some(SourceType::Monitor)).is_ok());
             assert!(validate_portal_stream(target, 1, None).is_ok());
         }
+    }
+
+    #[test]
+    fn virtual_screen_asks_again_for_screen_and_area() {
+        use ashpd::desktop::screencast::SourceType;
+
+        for target in [RecordingTarget::Screen, RecordingTarget::Area] {
+            assert_eq!(
+                screen_pick_outcome(target, Some(SourceType::Monitor)),
+                ScreenPickOutcome::Accept
+            );
+            assert_eq!(
+                screen_pick_outcome(target, Some(SourceType::Virtual)),
+                ScreenPickOutcome::ReAsk
+            );
+            assert_eq!(
+                screen_pick_outcome(target, Some(SourceType::Window)),
+                ScreenPickOutcome::Reject
+            );
+            assert_eq!(screen_pick_outcome(target, None), ScreenPickOutcome::Accept);
+        }
+    }
+
+    #[test]
+    fn window_recording_pick_decisions_stay_unchanged() {
+        use ashpd::desktop::screencast::SourceType;
+
+        assert_eq!(
+            screen_pick_outcome(RecordingTarget::Window, Some(SourceType::Window)),
+            ScreenPickOutcome::Accept
+        );
+        assert_eq!(
+            screen_pick_outcome(RecordingTarget::Window, Some(SourceType::Monitor)),
+            ScreenPickOutcome::Reject
+        );
+        assert_eq!(
+            screen_pick_outcome(RecordingTarget::Window, Some(SourceType::Virtual)),
+            ScreenPickOutcome::Reject
+        );
+        assert_eq!(
+            screen_pick_outcome(RecordingTarget::Window, None),
+            ScreenPickOutcome::Accept
+        );
+    }
+
+    #[test]
+    fn mismatched_streams_name_the_sharing_dialog_choice() {
+        use ashpd::desktop::screencast::SourceType;
+
+        let screen_error =
+            validate_portal_stream(RecordingTarget::Screen, 1, Some(SourceType::Window))
+                .expect_err("a window stream cannot record a screen");
+        assert!(matches!(
+            screen_error,
+            RecordError::UnsupportedBackend(ref message)
+                if message == "The sharing dialog returned a window, but this recording needs a screen"
+        ));
+
+        let window_error =
+            validate_portal_stream(RecordingTarget::Window, 1, Some(SourceType::Monitor))
+                .expect_err("a screen stream cannot record a window");
+        assert!(matches!(
+            window_error,
+            RecordError::UnsupportedBackend(ref message)
+                if message == "The sharing dialog returned a screen, but this recording needs a window"
+        ));
     }
 
     #[test]

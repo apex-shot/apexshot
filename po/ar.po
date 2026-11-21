@@ -5230,3 +5230,9 @@ msgstr "إعادة بدء التسجيل"
 
 msgid "Discard Recording"
 msgstr "تجاهل التسجيل"
+
+msgid "Choose your screen"
+msgstr "اختر شاشتك"
+
+msgid "A virtual screen records an empty display. Pick your screen in the sharing dialog."
+msgstr "الشاشة الافتراضية تسجّل شاشة فارغة. اختر شاشتك في مربع حوار المشاركة."

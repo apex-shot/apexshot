@@ -5297,3 +5297,9 @@ msgstr "Reiniciar gravação"
 
 msgid "Discard Recording"
 msgstr "Descartar gravação"
+
+msgid "Choose your screen"
+msgstr "Escolha sua tela"
+
+msgid "A virtual screen records an empty display. Pick your screen in the sharing dialog."
+msgstr "Uma tela virtual grava uma tela vazia. Escolha sua tela na caixa de diálogo de compartilhamento."
