@@ -1813,9 +1813,6 @@ msgstr "Запись окна недоступна"
 msgid "Recording not saved"
 msgstr "Запись не сохранена"
 
-msgid "Recording not supported"
-msgstr "Запись не поддерживается"
-
 msgid "Recording path copied"
 msgstr "Путь к записи скопирован"
 
@@ -2165,11 +2162,6 @@ msgstr "Очень толстый"
 
 msgid "Video"
 msgstr "Видео"
-
-msgid ""
-"Video recording is not supported on Fedora. Screenshots still work. For screen recording, use Spectacle or Kooha."
-msgstr ""
-"В Fedora не поддерживается запись видео. Снимки экрана по-прежнему доступны. Для записи экрана используйте Spectacle или Kooha."
 
 msgid "Videos"
 msgstr "Видео"

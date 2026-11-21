@@ -50,10 +50,6 @@ impl Default for CaptureMenuResult {
 
 #[derive(Clone, Copy)]
 struct MenuState {
-    /// False where the platform refuses video recording (Fedora): the Video
-    /// slot stays visible but disabled instead of accepting a click that the
-    /// recorder will reject.
-    recording_available: bool,
     recording: bool,
     ocr: bool,
     timer_seconds: u8,
@@ -123,8 +119,7 @@ fn item_at(x: f64, y: f64) -> Option<usize> {
 }
 
 fn item_is_disabled(index: usize, state: MenuState) -> bool {
-    (!state.recording_available && index == 1)
-        || (state.recording && index == 4)
+    (state.recording && index == 4)
         || (!state.recording && index == 2 && state.ocr)
         || (!state.recording && index == 3 && (state.timer_seconds > 0 || state.ocr))
         || (!state.recording && index == 4 && state.timer_seconds > 0)
@@ -520,25 +515,19 @@ fn install_transparent_window_css(display: &gdk::Display) {
 }
 
 /// Shows a pixel-controlled port of the C++ capture toolbar on the selected display.
-///
-/// `recording_available` mirrors the platform gate in
-/// [`crate::recording::recording_supported`]; when false the Video slot is
-/// drawn disabled and hovering it explains why.
-pub fn choose_capture_mode(target: &MonitorChoice, recording_available: bool) -> CaptureMenuResult {
-    choose_capture_mode_internal(target, recording_available, None, false).unwrap_or_default()
+pub fn choose_capture_mode(target: &MonitorChoice) -> CaptureMenuResult {
+    choose_capture_mode_internal(target, None, false).unwrap_or_default()
 }
 
 pub(crate) fn choose_capture_mode_on_layer_shell(
     target: &MonitorChoice,
-    recording_available: bool,
     control_receiver: std::sync::mpsc::Receiver<crate::capture_overlay::CaptureMenuControlRequest>,
 ) -> Option<CaptureMenuResult> {
-    choose_capture_mode_internal(target, recording_available, Some(control_receiver), true)
+    choose_capture_mode_internal(target, Some(control_receiver), true)
 }
 
 fn choose_capture_mode_internal(
     target: &MonitorChoice,
-    recording_available: bool,
     control_receiver: Option<
         std::sync::mpsc::Receiver<crate::capture_overlay::CaptureMenuControlRequest>,
     >,
@@ -573,7 +562,6 @@ fn choose_capture_mode_internal(
         window.set_namespace(Some("apexshot-capture-menu"));
     }
     let state = Rc::new(RefCell::new(MenuState {
-        recording_available,
         recording: false,
         ocr: false,
         timer_seconds: 0,
@@ -594,29 +582,16 @@ fn choose_capture_mode_internal(
         });
     }
     let motion = EventControllerMotion::new();
-    // Tooltip state is tracked so `set_tooltip_text` runs only on crossings.
-    let tooltip_shown = Rc::new(Cell::new(false));
     {
         let state = state.clone();
         let hovered = hovered.clone();
         let drawing = drawing.clone();
-        let tooltip_shown = tooltip_shown.clone();
         motion.connect_motion(move |_, x, y| {
             let menu = *state.borrow();
             let next = item_at(x, y)
                 .filter(|&i| !item_is_disabled(i, menu))
                 .map(|i| i as i32)
                 .unwrap_or(-1);
-            // A disabled slot never hovers, so the greyed Video item has to
-            // explain itself from here.
-            if item_at(x, y) == Some(1) && !menu.recording_available {
-                if !tooltip_shown.replace(true) {
-                    let reason = crate::i18n::t(crate::recording::FEDORA_RECORDING_UNSUPPORTED_MSG);
-                    drawing.set_tooltip_text(Some(reason.as_str()));
-                }
-            } else if tooltip_shown.replace(false) {
-                drawing.set_tooltip_text(None);
-            }
             if hovered.replace(next) != next {
                 drawing.queue_draw();
             }
@@ -625,11 +600,7 @@ fn choose_capture_mode_internal(
     {
         let hovered = hovered.clone();
         let drawing = drawing.clone();
-        let tooltip_shown = tooltip_shown.clone();
         motion.connect_leave(move |_| {
-            if tooltip_shown.replace(false) {
-                drawing.set_tooltip_text(None);
-            }
             if hovered.replace(-1) != -1 {
                 drawing.queue_draw();
             }
@@ -770,7 +741,6 @@ mod tests {
     #[test]
     fn menu_state_matches_the_qt_toolbar_constraints() {
         let shot = MenuState {
-            recording_available: true,
             recording: false,
             ocr: false,
             timer_seconds: 0,
@@ -792,21 +762,11 @@ mod tests {
         assert!(item_is_active(1, video));
         assert!(!item_is_disabled(3, video));
         assert!(item_is_disabled(4, video));
-        // Platforms that refuse recording (Fedora) keep the Video slot visible
-        // but disabled, so it can never become the active mode.
-        let unavailable = MenuState {
-            recording_available: false,
-            ..shot
-        };
-        assert!(item_is_disabled(1, unavailable));
-        assert!(!item_is_active(1, unavailable));
-        assert!(!item_is_disabled(2, unavailable));
     }
 
     #[test]
     fn shot_ocr_disables_display_and_timer_but_allows_area() {
         let shot = MenuState {
-            recording_available: true,
             recording: false,
             ocr: true,
             timer_seconds: 0,
@@ -822,7 +782,6 @@ mod tests {
     #[test]
     fn video_audio_toggles_survive_shot_selection_for_area_capture() {
         let shot = MenuState {
-            recording_available: true,
             recording: false,
             ocr: false,
             timer_seconds: 0,

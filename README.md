@@ -43,7 +43,8 @@ curl -fsSL https://apexshot.org/install | sh
 
 Update later with `apexshot update`. Known-good desktops are Ubuntu GNOME
 Wayland, Arch Linux GNOME Wayland, Hyprland Wayland, and Fedora KDE Plasma
-Wayland (screenshots). Video recording is not supported on Fedora.
+Wayland. Video recording is supported on Fedora like other Linux distros;
+recording on Fedora was newly enabled and runtime validation is in progress.
 
 Per-distro installs, NixOS, the GNOME Shell extension, building from source, and
 the full desktop support table are in the [install guide](docs/INSTALL.md).

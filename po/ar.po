@@ -1792,9 +1792,6 @@ msgstr "تسجيل النافذة غير متاح"
 msgid "Recording not saved"
 msgstr "لم يتم حفظ التسجيل"
 
-msgid "Recording not supported"
-msgstr "التسجيل غير مدعوم"
-
 msgid "Recording path copied"
 msgstr "تم نسخ مسار التسجيل"
 
@@ -2144,11 +2141,6 @@ msgstr "سميك جدًّا"
 
 msgid "Video"
 msgstr "فيديو"
-
-msgid ""
-"Video recording is not supported on Fedora. Screenshots still work. For screen recording, use Spectacle or Kooha."
-msgstr ""
-"لا يدعم نظام Fedora تسجيل الفيديو. أما لقطات الشاشة فلا تزال تعمل. لتسجيل الشاشة، استخدم برنامج Spectacle أو Kooha."
 
 msgid "Videos"
 msgstr "مقاطع الفيديو"

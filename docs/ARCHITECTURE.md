@@ -362,12 +362,11 @@ ApexShot supports two distinct recording paths: the **native Rust path** used on
 non-GNOME compositors (Hyprland, Sway, KDE, X11) and the **Qt overlay + GNOME
 extension path** used on GNOME Wayland.
 
-**Exception — Fedora:** video recording is not supported. All recording entry
-points call `refuse_fedora_recording()` and return before any portal/encode
-session is created. Screenshots on Fedora remain supported.
-`recording::recording_supported()` also drives the UI there: the tray record
-entries, the Video item in both capture toolbars, and the Recording settings
-page render disabled so nothing invites a click that would be refused.
+**Fedora:** video recording runs through the same portal/PipeWire/GStreamer
+path as other distros, on Fedora GNOME and KDE Plasma Wayland. Recording on
+Fedora was newly enabled; runtime validation is in progress. Fedora's
+`ffmpeg-free`/`openh264` codec packaging is handled by the existing encoder
+probe.
 
 #### Native Rust recording path (non-GNOME): daemon → portal → native PipeWire + ffmpeg
 
@@ -529,14 +528,14 @@ Configuration stored in `~/.config/apexshot/config.yml`:
 - Fedora/RHEL, openSUSE, NixOS, Alpine, Gentoo, and Void distro-family metadata.
   openSUSE and several of these remain development-stage for full install/runtime
   coverage.
-- **Fedora video recording is intentionally unsupported.** Screenshot capture on
-  Fedora (especially KDE Plasma Wayland) is supported; recording hotkeys/CLI
-  refuse with a user notification. Prefer Spectacle or Kooha for Fedora screen
-  recording. See the Fedora section of [INSTALL.md](INSTALL.md#fedora-workstation--kde-plasma--spins).
+- Fedora video recording now uses the same portal/PipeWire/GStreamer path as
+  other distros (GNOME and KDE Plasma Wayland). Recording on Fedora was newly
+  enabled; runtime validation is in progress. See the Fedora section of
+  [INSTALL.md](INSTALL.md#fedora-workstation--kde-plasma--spins).
 
 **Priority manual validation targets:**
-- Fedora GNOME Wayland (screenshots only — recording is disabled by product decision)
-- Fedora KDE Plasma Wayland (screenshots validated; recording unsupported)
+- Fedora GNOME Wayland (recording newly enabled; runtime validation in progress)
+- Fedora KDE Plasma Wayland (screenshots validated; recording newly enabled, runtime validation in progress)
 - openSUSE Tumbleweed or Leap KDE Plasma Wayland
 - Sway Wayland
 - NixOS GNOME or KDE Wayland

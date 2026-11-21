@@ -226,7 +226,6 @@ pub fn open_quick_capture_via_layer_shell_menu_on_main_thread(
         };
         let Some(menu) = crate::overlay::choose_capture_mode_on_layer_shell(
             &menu_target,
-            crate::recording::recording_supported(),
             control_receiver,
         ) else {
             return Ok(None);

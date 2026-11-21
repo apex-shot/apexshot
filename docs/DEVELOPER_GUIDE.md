@@ -470,15 +470,16 @@ path.
 
 For distro/compositor expansion work, also verify the shared capture path on at
 least one non-GNOME portal backend:
-- [ ] Fedora GNOME Wayland — screenshots only (recording unsupported by design)
+- [ ] Fedora GNOME Wayland — screenshots and recording (recording newly enabled)
 - [ ] Fedora or openSUSE KDE Plasma Wayland for `xdg-desktop-portal-kde` screenshots
-- [ ] On Fedora: `apexshot record screen` (or record hotkey) shows “Recording not supported” and does not start a session
+- [ ] On Fedora: `apexshot record screen` (or record hotkey) starts a session through the portal/PipeWire path
 - [ ] Sway Wayland for additional wlroots coverage beyond Hyprland
 - [ ] NixOS GNOME or KDE Wayland for non-FHS/runtime dependency coverage
 
-**Fedora:** screenshots are supported; **video recording is not**. openSUSE and
-other RPM-family targets remain development-stage for full install/runtime
-coverage.
+**Fedora:** screenshots and video recording are supported through the same
+portal/PipeWire/GStreamer path as other distros. Recording on Fedora was newly
+enabled; runtime validation is in progress. openSUSE and other RPM-family
+targets remain development-stage for full install/runtime coverage.
 
 See `CONTRIBUTING.md` for more detailed manual testing guidelines.
 

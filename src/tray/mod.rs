@@ -23,7 +23,6 @@ pub enum TrayAction {
 pub struct ApexShotTray {
     tx: Sender<TrayAction>,
     recording: bool,
-    recording_supported: bool,
     update: Option<crate::update::UpdateInfo>,
 }
 
@@ -32,7 +31,6 @@ impl ApexShotTray {
         Self {
             tx,
             recording: false,
-            recording_supported: crate::recording::recording_supported(),
             update: None,
         }
     }
@@ -186,11 +184,8 @@ impl ksni::Tray for ApexShotTray {
     }
 
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
-        use ksni::menu::{Disposition, MenuItem, StandardItem};
+        use ksni::menu::{MenuItem, StandardItem};
         let idle = !self.recording;
-        // Recording is refused outright on Fedora, so its entries stay visible
-        // but disabled rather than accepting a click that cannot succeed.
-        let record_enabled = idle && self.recording_supported;
         macro_rules! item {
             ($label:expr, $enabled:expr, $action:expr) => {
                 StandardItem {
@@ -243,28 +238,15 @@ impl ksni::Tray for ApexShotTray {
             MenuItem::Separator,
             item!(
                 &crate::i18n::t("Record Screen"),
-                record_enabled,
+                idle,
                 TrayAction::RecordScreen
             ),
             item!(
                 &crate::i18n::t("Record Window"),
-                record_enabled,
+                idle,
                 TrayAction::RecordWindow
             ),
         ]);
-        if !self.recording_supported {
-            // Fedora: recording stays visible but disabled, and the menu states
-            // the reason instead of refusing only after the user clicks.
-            menu.push(
-                StandardItem {
-                    label: crate::i18n::t("Recording not supported"),
-                    enabled: false,
-                    disposition: Disposition::Informative,
-                    ..Default::default()
-                }
-                .into(),
-            );
-        }
         menu.extend([
             item!(
                 &crate::i18n::t("Stop Recording"),

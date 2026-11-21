@@ -433,67 +433,6 @@ pub fn copy_to_clipboard(path: &Path) -> RecordResult<()> {
     Ok(())
 }
 
-/// User-facing copy when recording is attempted on Fedora.
-pub const FEDORA_RECORDING_UNSUPPORTED_MSG: &str = "Video recording is not supported on Fedora. \
-Screenshots still work. For screen recording, use Spectacle or Kooha.";
-
-/// Video recording is intentionally **unsupported** on Fedora.
-///
-/// Screenshots, preview, settings, tray, and shortcuts for capture remain
-/// supported. Other distros keep their full recording UX unchanged.
-pub fn is_fedora_recording_unsupported() -> bool {
-    crate::distro::DistroInfo::detect()
-        .map(|d| d.is_fedora())
-        .unwrap_or(false)
-}
-
-/// Backward-compatible alias used by older call sites.
-#[inline]
-pub fn is_fedora_portal_only_recording() -> bool {
-    is_fedora_recording_unsupported()
-}
-
-/// Whether video recording is offered on this platform.
-///
-/// Fedora is the only exception; screenshots and the rest of the app stay
-/// available there. UI that advertises recording asks this before drawing a
-/// record affordance, so Fedora never invites a click it will refuse.
-pub fn recording_supported() -> bool {
-    !is_fedora_recording_unsupported()
-}
-
-/// Refusal returned by [`refuse_fedora_recording`].
-///
-/// Typed so callers can tell the refusal, which already notified the user,
-/// apart from a genuine recording failure and avoid stacking a second
-/// notification on top of it.
-#[derive(Debug, Error)]
-#[error("{}", FEDORA_RECORDING_UNSUPPORTED_MSG)]
-pub struct FedoraRecordingUnsupported;
-
-/// Notify the user and fail. Never starts a recording session on Fedora.
-pub fn refuse_fedora_recording() -> Result<(), FedoraRecordingUnsupported> {
-    if recording_supported() {
-        return Ok(());
-    }
-    eprintln!("[recording] {FEDORA_RECORDING_UNSUPPORTED_MSG}");
-    // Notify on a plain OS thread so zbus blocking does not nest inside Tokio
-    // (daemon hotkeys run on the async runtime).
-    let summary = crate::i18n::t("Recording not supported");
-    let body = crate::i18n::t(FEDORA_RECORDING_UNSUPPORTED_MSG);
-    let _ = std::thread::spawn(move || {
-        crate::utils::notify::desktop_notification(&summary, &body);
-    })
-    .join();
-    Err(FedoraRecordingUnsupported)
-}
-
-/// Former Fedora portal entry — now always refuses.
-pub async fn run_fedora_portal_recording() -> anyhow::Result<(PathBuf, StopAction)> {
-    refuse_fedora_recording()?;
-    unreachable!("refuse_fedora_recording always errors on Fedora")
-}
-
 #[cfg(test)]
 fn reap_child_if_exited(child: &mut Option<std::process::Child>) -> bool {
     if let Some(c) = child {

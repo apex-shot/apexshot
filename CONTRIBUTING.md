@@ -313,15 +313,16 @@ elsewhere when they touch a related code path. As of today:
 | Display server              | Wayland                      | X11                        | XWayland edge cases   |
 | Compositor                  | GNOME Shell 47–50, Hyprland  | Sway / wlroots-like        | KDE Plasma, Niri, river |
 | Distro                      | Ubuntu 24.04 / 25.10, Arch Linux | Debian / Pop!_OS through Ubuntu-compatible packaging; Fedora screenshots (KDE validated) | openSUSE, NixOS; full Fedora GNOME matrix |
-| Recording codecs            | VP9, H.264 (Ubuntu/Arch and similar) | VP8, H.265, Theora | **Fedora: recording unsupported** |
+| Recording codecs            | VP9, H.264 (Ubuntu/Arch and similar) | VP8, H.265, Theora | Fedora: same portal/PipeWire path as other distros (newly enabled) |
 | Capture portal flow         | xdg-desktop-portal-gnome, Hyprland/wlroots native capture | xdg-desktop-portal-gtk, xdg-desktop-portal-kde (screenshots) | — |
 
-**Fedora product limit:** ApexShot does **not** support video recording on
-Fedora. Recording entry points refuse with a desktop notification; screenshots
-and related tools still work. Prefer Spectacle or Kooha for Fedora screen
-recording. openSUSE and other RPM-family targets remain development-stage for
-full install/runtime coverage. If your PR exercises an *Untested* square,
-mention that in the PR description.
+**Fedora recording:** ApexShot supports video recording on Fedora through the
+same ScreenCast portal, PipeWire, and GStreamer path as other distros, on
+Fedora GNOME and KDE Plasma Wayland. Recording on Fedora was newly enabled;
+runtime validation is in progress. Fedora's `ffmpeg-free`/`openh264` codec
+packaging is handled by the existing encoder probe. openSUSE and other
+RPM-family targets remain development-stage for full install/runtime coverage.
+If your PR exercises an *Untested* square, mention that in the PR description.
 
 ## Submitting Changes
 

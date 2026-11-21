@@ -223,8 +223,7 @@ fn open_quick_capture_via_gtk_layer_shell_wlroots() -> Result<AreaCapturePathRes
     }
 
     let menu_target = crate::overlay::default_target_monitor_choice()?;
-    let menu =
-        crate::overlay::choose_capture_mode(&menu_target, crate::recording::recording_supported());
+    let menu = crate::overlay::choose_capture_mode(&menu_target);
     if menu.action == crate::overlay::CaptureMenuAction::Cancel {
         return Ok(AreaCapturePathResult::Cancelled);
     }

@@ -57,7 +57,7 @@ Works best today on:
 | GNOME Shell 46 (Wayland) | Supported by the extension; GNOME integration tested on Ubuntu 24.04, not an actual Zorin installation |
 | Sway / wlroots-like compositors (Wayland) | Implementation exists through GTK4 layer-shell, `wlr-screencopy`, and `wf-recorder`, but needs more manual validation |
 | KDE Plasma 6 / Niri / other Wayland desktops | ScreenCast portal + PipeWire path implemented, not yet personally tested |
-| Fedora / RHEL (Wayland) | Screenshots supported (Fedora KDE validated). **Video recording is not supported**; use Spectacle or Kooha for screen recording |
+| Fedora / RHEL (Wayland) | Screenshots supported (Fedora KDE validated). Video recording uses the same portal/PipeWire/GStreamer path as other distros; newly enabled on Fedora, runtime validation in progress |
 | openSUSE Tumbleweed / Leap (Wayland) | Development stage: RPM spec + `scripts/build-opensuse-rpm.sh` exist; **no published binary** yet (generic installer will refuse) |
 | NixOS (x86_64 Linux) | Source package provided through the repository flake; desktop capture, recording, and hotkeys still need runtime validation |
 | Alpine / Gentoo / Void (Wayland) | Development stage: distro-family metadata only; native packaging/testing pending |
@@ -71,8 +71,9 @@ triage stays fast.
 ### Quick install (recommended)
 
 Run the interactive installer. The production-tested paths are Ubuntu/Debian
-and Arch Linux; Fedora is usable for **screenshots** (video recording is not
-supported). openSUSE remains development-stage for full runtime validation:
+and Arch Linux; Fedora supports screenshots and video recording like other
+distros (recording on Fedora was newly enabled; runtime validation is in
+progress). openSUSE remains development-stage for full runtime validation:
 
 ```bash
 curl -fsSL https://apexshot.org/install | sh
@@ -128,15 +129,14 @@ AUR publishing notes for maintainers live in
 ### Fedora Workstation / KDE Plasma / Spins
 
 Fedora is supported for **screenshots** (area / screen / window), preview,
-settings, tray, and hotkeys. Fedora KDE Plasma Wayland has been runtime-validated
-for the capture path.
+settings, tray, hotkeys, and **video recording**. Fedora KDE Plasma Wayland has
+been runtime-validated for the capture path.
 
-> **Video recording is not supported on Fedora.**  
-> The tray record entries, the Video item in both capture menus, and the
-> Recording settings page are disabled there. Hotkeys and CLI `apexshot record …`
-> show a desktop notification and exit without starting a session. For screen
-> recording on Fedora, use **Spectacle** or **Kooha**. Screenshots in ApexShot
-> continue to work normally.
+> **Video recording on Fedora** uses the same ScreenCast portal, PipeWire, and
+> GStreamer path as other Linux distros, on both Fedora GNOME and KDE Plasma
+> Wayland. Recording on Fedora was newly enabled; runtime validation is in
+> progress. Fedora's `ffmpeg-free`/`openh264` codec packaging is handled by the
+> existing encoder probe.
 
 The generic installer selects the Fedora path automatically when `dnf` is
 available. Direct command:
@@ -464,12 +464,12 @@ apexshot --version               # Print version
 
 #### Recording on non-GNOME systems (Hyprland, Sway, KDE, X11)
 
-> **Fedora:** Video recording is **not supported**. Recording actions show a
-> notification and exit. Use Spectacle or Kooha for screen recording on Fedora.
-> Screenshots still work. See the [Fedora install section](#fedora-workstation--kde-plasma--spins).
+> **Fedora:** Video recording uses the same portal/PipeWire/GStreamer path as
+> other distros. Recording on Fedora was newly enabled; runtime validation is
+> in progress. See the [Fedora install section](#fedora-workstation--kde-plasma--spins).
 
 ApexShot uses a fully self-contained Rust stack for recording on systems
-without GNOME Shell (except Fedora, above). No Qt overlay, no shell extension:
+without GNOME Shell. No Qt overlay, no shell extension:
 the daemon, the GTK4 overlay, and native PipeWire handle everything.
 
 **How it works:**

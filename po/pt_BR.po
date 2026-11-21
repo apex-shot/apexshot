@@ -1813,9 +1813,6 @@ msgstr "Gravação de janela indisponível"
 msgid "Recording not saved"
 msgstr "A gravação não foi salva"
 
-msgid "Recording not supported"
-msgstr "Gravação não suportada"
-
 msgid "Recording path copied"
 msgstr "Caminho de gravação copiado"
 
@@ -2166,11 +2163,6 @@ msgstr "Muito espesso"
 
 msgid "Video"
 msgstr "Vídeo"
-
-msgid ""
-"Video recording is not supported on Fedora. Screenshots still work. For screen recording, use Spectacle or Kooha."
-msgstr ""
-"A gravação de vídeo não é compatível com o Fedora. As capturas de tela continuam funcionando. Para gravar a tela, use o Spectacle ou o Kooha."
 
 msgid "Videos"
 msgstr "Vídeos"

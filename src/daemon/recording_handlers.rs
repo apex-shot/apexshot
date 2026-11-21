@@ -66,12 +66,6 @@ async fn handle_recording_target(target: crate::recording::RecordingTarget) {
         run_recording_with_controls, RecordingConfig, RecordingControlsParams, StopAction,
     };
 
-    // Fedora: video recording intentionally unsupported.
-    if crate::recording::is_fedora_recording_unsupported() {
-        let _ = crate::recording::refuse_fedora_recording();
-        return;
-    }
-
     let label = match target {
         crate::recording::RecordingTarget::Window => "window",
         crate::recording::RecordingTarget::Screen => "screen",

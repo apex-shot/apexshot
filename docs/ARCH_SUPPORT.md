@@ -115,9 +115,11 @@ Arch package dependencies intentionally include both Wayland and X11 clipboard h
 
 ## Fedora note
 
-**Video recording is not supported on Fedora** (`DistroInfo::is_fedora()`). All
-recording entry points refuse with a desktop notification; screenshots remain
-supported. Details:
+Video recording on Fedora uses the same ScreenCast portal, PipeWire, and
+GStreamer path as other distros, on Fedora GNOME and KDE Plasma Wayland.
+Recording on Fedora was newly enabled; runtime validation is in progress.
+Fedora's `ffmpeg-free`/`openh264` codec packaging is handled by the existing
+encoder probe. Details:
 [the Fedora install notes](INSTALL.md#fedora-workstation--kde-plasma--spins).
 
 ## Related docs

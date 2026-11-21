@@ -1818,9 +1818,6 @@ msgstr "Enregistrement de fenêtre indisponible"
 msgid "Recording not saved"
 msgstr "L'enregistrement n'a pas été sauvegardé"
 
-msgid "Recording not supported"
-msgstr "Enregistrement non pris en charge"
-
 msgid "Recording path copied"
 msgstr "Chemin d'accès à l'enregistrement copié"
 
@@ -2174,11 +2171,6 @@ msgstr "Très épais"
 
 msgid "Video"
 msgstr "Vidéo"
-
-msgid ""
-"Video recording is not supported on Fedora. Screenshots still work. For screen recording, use Spectacle or Kooha."
-msgstr ""
-"L'enregistrement vidéo n'est pas pris en charge sous Fedora. Les captures d'écran fonctionnent toujours. Pour enregistrer votre écran, utilisez Spectacle ou Kooha."
 
 msgid "Videos"
 msgstr "Vidéos"
