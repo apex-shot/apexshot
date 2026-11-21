@@ -17,7 +17,8 @@ gnome-extensions pack gnome-extension --force \
   --extra-source=shell-overlay.js \
   --extra-source=window-list.js \
   --extra-source=preview-stacking.js \
-  --extra-source=daemon-ownership.js
+  --extra-source=daemon-ownership.js \
+  --extra-source=capture-menu-placement.js
 gnome-extensions install --force \
   apexshot-gnome-integration@apexshot.github.io.shell-extension.zip
 gnome-extensions enable apexshot-gnome-integration@apexshot.github.io

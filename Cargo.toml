@@ -215,5 +215,6 @@ assets = [
     ["gnome-extension/window-list.js", "usr/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io/", "644"],
     ["gnome-extension/preview-stacking.js", "usr/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io/", "644"],
     ["gnome-extension/daemon-ownership.js", "usr/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io/", "644"],
+    ["gnome-extension/capture-menu-placement.js", "usr/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io/", "644"],
 ]
 maintainer-scripts = "packaging/debian"

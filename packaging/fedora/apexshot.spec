@@ -90,6 +90,7 @@ install -Dm0644 gnome-extension/shell-overlay.js "${extension_dir}/shell-overlay
 install -Dm0644 gnome-extension/window-list.js "${extension_dir}/window-list.js"
 install -Dm0644 gnome-extension/preview-stacking.js "${extension_dir}/preview-stacking.js"
 install -Dm0644 gnome-extension/daemon-ownership.js "${extension_dir}/daemon-ownership.js"
+install -Dm0644 gnome-extension/capture-menu-placement.js "${extension_dir}/capture-menu-placement.js"
 
 for img in src/capture/editor/background-images/*.jpg; do
     install -Dm0644 "${img}" "%{buildroot}%{_datadir}/apexshot/background-images/$(basename "${img}")"

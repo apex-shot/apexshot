@@ -411,7 +411,7 @@ jobs:
           cd gnome-extension
           zip apexshot-gnome-integration.zip \
             extension.js metadata.json \
-            cursor-classifier.js press-tracker.js shell-overlay.js window-list.js preview-stacking.js daemon-ownership.js
+            cursor-classifier.js press-tracker.js shell-overlay.js window-list.js preview-stacking.js daemon-ownership.js capture-menu-placement.js
 
       - name: Upload Debian and GNOME build artifacts
         uses: actions/upload-artifact@v4
