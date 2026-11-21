@@ -349,6 +349,44 @@ pub(super) fn window_cursor_update(
     }
 }
 
+/// Cursor position for a monitor/area stream in the encoded frame's pixels.
+///
+/// Monitor streams report the cursor in the compositor's frame coordinates;
+/// an area recording crops that frame, so the position is moved into the
+/// cropped image and treated as hidden outside it. A stream recorded whole
+/// (`crop` absent) keeps the position unchanged. Positions outside the
+/// encoded frame (including the odd trailing row or column dropped for the
+/// encoder) are not visible.
+pub(super) fn stream_cursor_update(
+    frame: &PipeWireFrame,
+    crop: Option<CropMargins>,
+    output_width: u32,
+    output_height: u32,
+) -> Option<Option<(f64, f64)>> {
+    match frame.cursor_metadata {
+        CursorMetadataState::Missing
+        | CursorMetadataState::Invalid
+        | CursorMetadataState::Hidden => Some(None),
+        CursorMetadataState::Present(position) => {
+            if output_width < 2 || output_height < 2 {
+                return Some(None);
+            }
+            let origin_x = crop.map_or(0, |crop| i64::from(crop.left));
+            let origin_y = crop.map_or(0, |crop| i64::from(crop.top));
+            let local_x = i64::from(position.x) - origin_x;
+            let local_y = i64::from(position.y) - origin_y;
+            if local_x < 0
+                || local_y < 0
+                || local_x >= i64::from(output_width)
+                || local_y >= i64::from(output_height)
+            {
+                return Some(None);
+            }
+            Some(Some((local_x as f64, local_y as f64)))
+        }
+    }
+}
+
 pub(super) fn normalize_window_frame(
     frame: &PipeWireFrame,
     crop: FrameCrop,
@@ -740,6 +778,94 @@ mod tests {
             window_cursor_update(&frame, window_frame_crop(&frame).unwrap(), 4, 2,),
             Some(None)
         );
+    }
+
+    #[test]
+    fn stream_cursor_moves_area_positions_into_the_cropped_frame() {
+        let mut frame = frame(
+            320,
+            200,
+            pipewire::spa::param::video::VideoFormat::RGBA,
+            FrameCropMetadata::Missing,
+            [10, 20, 30, 255],
+        );
+        let crop = Some(CropMargins {
+            left: 100,
+            right: 20,
+            top: 50,
+            bottom: 10,
+        });
+        let cursor = |x, y| {
+            CursorMetadataState::Present(crate::pipewire_engine::CursorPosition {
+                x,
+                y,
+                hotspot_x: 0,
+                hotspot_y: 0,
+            })
+        };
+
+        frame.cursor_metadata = cursor(150, 120);
+        assert_eq!(
+            stream_cursor_update(&frame, crop, 200, 140),
+            Some(Some((50.0, 70.0))),
+            "a position inside the crop keeps its offset"
+        );
+
+        frame.cursor_metadata = cursor(100, 50);
+        assert_eq!(
+            stream_cursor_update(&frame, crop, 200, 140),
+            Some(Some((0.0, 0.0))),
+            "the crop's top-left pixel is the encoded frame's origin"
+        );
+
+        frame.cursor_metadata = cursor(299, 189);
+        assert_eq!(
+            stream_cursor_update(&frame, crop, 200, 140),
+            Some(Some((199.0, 139.0))),
+            "the crop's last visible pixel maps to the last encoded pixel"
+        );
+
+        for (x, y) in [(99, 120), (150, 49), (300, 120), (150, 190)] {
+            frame.cursor_metadata = cursor(x, y);
+            assert_eq!(
+                stream_cursor_update(&frame, crop, 200, 140),
+                Some(None),
+                "positions outside the crop are not visible ({x},{y})"
+            );
+        }
+    }
+
+    #[test]
+    fn stream_cursor_without_an_area_crop_uses_frame_pixels() {
+        let mut frame = frame(
+            320,
+            200,
+            pipewire::spa::param::video::VideoFormat::RGBA,
+            FrameCropMetadata::Missing,
+            [10, 20, 30, 255],
+        );
+        let cursor = |x, y| {
+            CursorMetadataState::Present(crate::pipewire_engine::CursorPosition {
+                x,
+                y,
+                hotspot_x: 0,
+                hotspot_y: 0,
+            })
+        };
+
+        frame.cursor_metadata = cursor(10, 20);
+        assert_eq!(
+            stream_cursor_update(&frame, None, 320, 200),
+            Some(Some((10.0, 20.0)))
+        );
+
+        frame.cursor_metadata = cursor(320, 20);
+        assert_eq!(stream_cursor_update(&frame, None, 320, 200), Some(None));
+
+        frame.cursor_metadata = CursorMetadataState::Hidden;
+        assert_eq!(stream_cursor_update(&frame, None, 320, 200), Some(None));
+        frame.cursor_metadata = CursorMetadataState::Missing;
+        assert_eq!(stream_cursor_update(&frame, None, 320, 200), Some(None));
     }
 
     #[test]

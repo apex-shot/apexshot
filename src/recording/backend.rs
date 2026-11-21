@@ -132,7 +132,7 @@ pub(super) struct BuiltPipeline {
 }
 
 impl BuiltPipeline {
-    pub(super) fn window_cursor_metadata_enabled(&self) -> bool {
+    pub(super) fn stream_cursor_metadata_enabled(&self) -> bool {
         self.wayland_source
             .as_ref()
             .is_some_and(|source| source.cursor_metadata_enabled)

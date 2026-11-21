@@ -420,8 +420,26 @@ async fn start_recording_with_commands(
         ));
     }
 
-    let built = backend::prepare_recording_backend(config).await?;
-    backend::start_recording_with_prepared_backend(built, command_rx).await
+    let built = backend::prepare_recording_backend(config.clone()).await?;
+    let stream_cursor_metadata = built.stream_cursor_metadata_enabled();
+    let target = config.target;
+    let fps = config.fps;
+    let session = backend::start_recording_with_prepared_backend(built, command_rx).await?;
+    // Paths without recording controls (CLI screen recordings, API callers)
+    // still have to leave the sidecar the editor reads. Without it a
+    // metadata-mode capture has no cursor at all, because the compositor left
+    // it out of the video.
+    if stream_cursor_metadata && session.action == RecordingTerminalAction::Save {
+        if let Some(timeline) = session.timeline.as_ref() {
+            controls::write_stream_cursor_metadata_sidecar(
+                &session.path,
+                target,
+                timeline,
+                f64::from(fps),
+            );
+        }
+    }
+    Ok(session)
 }
 
 pub fn copy_to_clipboard(path: &Path) -> RecordResult<()> {

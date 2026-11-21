@@ -1,4 +1,6 @@
-use super::crop::{normalize_window_frame, window_cursor_update, window_frame_crop};
+use super::crop::{
+    normalize_window_frame, stream_cursor_update, window_cursor_update, window_frame_crop,
+};
 use super::*;
 use crate::pipewire_engine::{FrameCrop, PipeWireFrame};
 use gstreamer::glib;
@@ -154,12 +156,13 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
             hint_h,
             cursor_metadata_enabled,
         ),
-        Some(fd) => crate::pipewire_engine::PipeWireCapture::connect(
+        Some(fd) => crate::pipewire_engine::PipeWireCapture::connect_with_cursor_metadata(
             fd,
             wayland_source.node_id,
             None, // continuous — no max frame limit
             hint_w,
             hint_h,
+            cursor_metadata_enabled,
         ),
         None => crate::pipewire_engine::PipeWireCapture::connect_default(
             wayland_source.node_id,
@@ -583,11 +586,15 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
     let mut last_encoded_pixels = None;
     let mut paused = false;
     let mut timeline = super::timeline::RecordingTimeline::default();
-    if window_target && cursor_metadata_enabled {
-        let (width, height) = window_output_size.expect("window target has an initial frame");
-        timeline.enable_window_cursor(width, height);
+    if cursor_metadata_enabled {
+        let (width, height) = if window_target {
+            window_output_size.expect("window target has an initial frame")
+        } else {
+            (input_width, input_height)
+        };
+        timeline.enable_stream_cursor(width, height);
         if let Some((captured_at_us, cursor)) = first_window_cursor {
-            timeline.record_window_cursor(captured_at_us, cursor);
+            timeline.record_stream_cursor(captured_at_us, cursor);
         }
     }
     if active_audio.is_none() && audio_inputs.any() {
@@ -705,6 +712,10 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
                     && frame.width == format.width
                     && frame.height == format.height
                 {
+                    if cursor_metadata_enabled {
+                        cursor_update =
+                            stream_cursor_update(&frame, crop, input_width, input_height);
+                    }
                     if let Some(crop) = crop {
                         crop_rgba_frame(&frame, crop, input_width, input_height).ok()
                     } else if frame.pixels.len() == expected {
@@ -718,7 +729,7 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
                 match pixels {
                     Some(pixels) if pixels.len() == expected => {
                         if let Some(cursor) = cursor_update {
-                            timeline.record_window_cursor(captured_at_us, cursor);
+                            timeline.record_stream_cursor(captured_at_us, cursor);
                         }
                         update_pending_video_frame(
                             &mut last_pixels,

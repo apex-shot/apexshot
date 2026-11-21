@@ -195,6 +195,24 @@ fn select_portal_cursor_mode(
     ))
 }
 
+/// Cursor mode for a portal ScreenCast request.
+///
+/// Metadata is the only mode that keeps the cursor editable: the compositor
+/// leaves it out of the video and reports its position with each buffer. It
+/// applies to windows as well as monitor streams, so screen and area
+/// recordings get the same editable pointer on portals that advertise it.
+/// GNOME's pointer-track path hides the OS cursor instead and draws its own
+/// pointer in the editor, so it must keep `Hidden`.
+fn portal_cursor_mode(config: &RecordingConfig) -> ashpd::desktop::screencast::CursorMode {
+    use ashpd::desktop::screencast::CursorMode;
+
+    if config.cursor && !config.pointer_track_enabled() {
+        CursorMode::Metadata
+    } else {
+        CursorMode::Hidden
+    }
+}
+
 pub(in crate::recording) async fn get_wayland_source(
     config: &RecordingConfig,
 ) -> RecordResult<WaylandSource> {
@@ -229,22 +247,12 @@ pub(in crate::recording) async fn get_wayland_source(
             (config.x, config.y, config.width, config.height),
             (Some(_), Some(_), Some(w), Some(h)) if w > 0 && h > 0
         );
-    let cursor_mode = if config.target == RecordingTarget::Window && config.cursor {
-        CursorMode::Metadata
-    } else if config.pointer_track_enabled() {
-        // GNOME pointer sidecar path: hide the OS cursor and draw ApexShot's
-        // pointer in the editor. Do not switch to Metadata — GNOME ScreenCast
-        // often sends no usable SPA_META_Cursor bitmap.
-        CursorMode::Hidden
-    } else if config.cursor {
-        // Ask the portal/compositor to embed the cursor in the video stream.
-        // Metadata mode is optional and GNOME often does not provide usable
-        // cursor bitmap metadata for ScreenCast streams, which made the
-        // "show cursor" setting appear ignored in PipeWire recordings.
-        CursorMode::Embedded
-    } else {
-        CursorMode::Hidden
-    };
+    // GNOME's pointer-track path hides the OS cursor and draws ApexShot's own
+    // pointer in the editor; GNOME ScreenCast often sends no usable
+    // SPA_META_Cursor bitmap, so it never asks for Metadata. Every other
+    // cursor-on session (window, screen, or area) asks for metadata and lets
+    // `select_portal_cursor_mode` fall back when the portal lacks it.
+    let cursor_mode = portal_cursor_mode(config);
 
     async fn request_screencast(
         cursor_mode: CursorMode,
@@ -281,7 +289,7 @@ pub(in crate::recording) async fn get_wayland_source(
         let cursor_mode = select_portal_cursor_mode(cursor_mode, available_cursor_modes)?;
         if requested_cursor_mode == CursorMode::Metadata && cursor_mode == CursorMode::Embedded {
             eprintln!(
-                "[recording] Portal cursor metadata is unavailable; the window cursor will be embedded and not editable."
+                "[recording] Portal cursor metadata is unavailable; the cursor will be embedded and not editable."
             );
             crate::utils::notify::desktop_notification(
                 &crate::i18n::t("No editable cursor data was found."),
@@ -292,7 +300,7 @@ pub(in crate::recording) async fn get_wayland_source(
         } else if requested_cursor_mode == CursorMode::Metadata && cursor_mode == CursorMode::Hidden
         {
             eprintln!(
-                "[recording] Portal cursor metadata and embedded-cursor modes are unavailable; the window cursor will be hidden and no editable cursor data will be saved."
+                "[recording] Portal cursor metadata and embedded-cursor modes are unavailable; the cursor will be hidden and no editable cursor data will be saved."
             );
         } else if requested_cursor_mode != cursor_mode {
             eprintln!(
@@ -656,5 +664,48 @@ mod tests {
             select_portal_cursor_mode(CursorMode::Metadata, ashpd::enumflags2::BitFlags::empty()),
             Err(RecordError::UnsupportedBackend(_))
         ));
+    }
+
+    #[test]
+    fn screen_and_area_recordings_request_cursor_metadata() {
+        use ashpd::desktop::screencast::CursorMode;
+
+        for target in [RecordingTarget::Screen, RecordingTarget::Area] {
+            let config = RecordingConfig {
+                target,
+                cursor: true,
+                pointer_track: false,
+                ..RecordingConfig::default()
+            };
+            assert_eq!(portal_cursor_mode(&config), CursorMode::Metadata);
+        }
+        let window = RecordingConfig {
+            target: RecordingTarget::Window,
+            cursor: true,
+            pointer_track: false,
+            ..RecordingConfig::default()
+        };
+        assert_eq!(portal_cursor_mode(&window), CursorMode::Metadata);
+    }
+
+    #[test]
+    fn pointer_track_and_disabled_cursor_keep_the_os_cursor_hidden() {
+        use ashpd::desktop::screencast::CursorMode;
+
+        let pointer_track = RecordingConfig {
+            target: RecordingTarget::Area,
+            cursor: true,
+            pointer_track: true,
+            ..RecordingConfig::default()
+        };
+        assert_eq!(portal_cursor_mode(&pointer_track), CursorMode::Hidden);
+
+        let cursor_off = RecordingConfig {
+            target: RecordingTarget::Screen,
+            cursor: false,
+            pointer_track: false,
+            ..RecordingConfig::default()
+        };
+        assert_eq!(portal_cursor_mode(&cursor_off), CursorMode::Hidden);
     }
 }

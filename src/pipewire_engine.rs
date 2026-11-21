@@ -343,6 +343,32 @@ impl PipeWireCapture {
         )
     }
 
+    /// Connect to a portal screen/area stream and optionally request
+    /// per-buffer cursor metadata.
+    ///
+    /// Unlike [`Self::connect_window`] this does not prefer an alpha-bearing
+    /// format: monitor streams stay on the desktop's opaque format, while the
+    /// cursor position still arrives in SPA cursor metadata when the portal
+    /// granted `CursorMode::Metadata`.
+    pub fn connect_with_cursor_metadata(
+        pipewire_fd: OwnedFd,
+        node_id: u32,
+        max_frames: Option<u64>,
+        width_hint: Option<u32>,
+        height_hint: Option<u32>,
+        cursor_metadata: bool,
+    ) -> PipeWireResult<Self> {
+        Self::connect_inner(
+            PipeWireCoreSource::PortalFd(pipewire_fd),
+            node_id,
+            max_frames,
+            width_hint,
+            height_hint,
+            false,
+            cursor_metadata,
+        )
+    }
+
     /// Connect to the default session PipeWire socket.
     ///
     /// Used by KDE-native `zkde_screencast_unstable_v1` streams, which publish
