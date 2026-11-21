@@ -284,14 +284,18 @@ fn write_stream_cursor_sidecar(
 }
 
 /// Write the pointer sidecar for a capture whose cursor positions came from
-/// SPA cursor metadata (window, screen, or area). Clicks and presses stay
-/// empty on this path: it has no click source, and the editor places
-/// automatic zooms from where the cursor settles.
+/// SPA cursor metadata (window, screen, or area).
+///
+/// `clicks` and `presses` carry button events from a compositor-specific
+/// source; a session with no click source passes empty vectors and the editor
+/// places automatic zooms from where the cursor settles.
 pub(super) fn write_stream_cursor_metadata_sidecar(
     output_path: &Path,
     target: super::RecordingTarget,
     timeline: &super::timeline::RecordingTimeline,
     frame_rate: f64,
+    clicks: Vec<ClickSample>,
+    presses: Vec<PressSample>,
 ) -> bool {
     let Some(origin_us) = timeline.origin_us() else {
         PointerSidecar::delete_next_to_video(output_path);
@@ -307,8 +311,8 @@ pub(super) fn write_stream_cursor_metadata_sidecar(
         target,
         timeline,
         origin_us,
-        Vec::new(),
-        Vec::new(),
+        clicks,
+        presses,
         &manifest,
     )
 }
@@ -1021,6 +1025,18 @@ pub async fn run_recording_with_native_controls(
     let stream_cursor_metadata = prepared_backend
         .as_ref()
         .is_some_and(|prepared| prepared.stream_cursor_metadata_enabled());
+    // KDE's compositor gives no global button stream. A temporary script
+    // effect supplies clicks for the sidecar this path writes; it stays `None`
+    // elsewhere and when the compositor refuses script effects.
+    let click_bridge = if config.target == super::RecordingTarget::Window || stream_cursor_metadata
+    {
+        tokio::task::spawn_blocking(super::kwin_clicks::KwinClickBridge::start)
+            .await
+            .ok()
+            .flatten()
+    } else {
+        None
+    };
     let outcome = if let Some(prepared_backend) = prepared_backend {
         super::backend::start_recording_with_prepared_backend(prepared_backend, Some(command_rx))
             .await
@@ -1036,6 +1052,12 @@ pub async fn run_recording_with_native_controls(
             super::notify_recording_session_ended_best_effort();
             return Err(err.into());
         }
+    };
+    let raw_clicks = match click_bridge {
+        Some(bridge) => tokio::task::spawn_blocking(move || bridge.stop())
+            .await
+            .unwrap_or_default(),
+        None => Vec::new(),
     };
 
     match outcome {
@@ -1064,11 +1086,15 @@ pub async fn run_recording_with_native_controls(
             }
             if config.target == super::RecordingTarget::Window || stream_cursor_metadata {
                 if let Some(timeline) = timeline.as_ref() {
+                    let (clicks, presses) =
+                        super::kwin_clicks::clicks_and_presses(&raw_clicks, timeline);
                     write_stream_cursor_metadata_sidecar(
                         &path,
                         config.target,
                         timeline,
                         f64::from(config.fps),
+                        clicks,
+                        presses,
                     );
                 } else {
                     PointerSidecar::delete_next_to_video(&path);

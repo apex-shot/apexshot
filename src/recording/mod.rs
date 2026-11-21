@@ -30,6 +30,7 @@ mod audio;
 mod backend;
 mod controls;
 mod gst_audio;
+mod kwin_clicks;
 mod recording_manifest;
 mod timeline;
 mod wf_recorder;
@@ -424,18 +425,38 @@ async fn start_recording_with_commands(
     let stream_cursor_metadata = built.stream_cursor_metadata_enabled();
     let target = config.target;
     let fps = config.fps;
+    // KDE's compositor gives no global button stream, so a temporary script
+    // effect supplies the clicks the sidecar needs. It stays `None` on every
+    // other session and on compositor failures.
+    let click_bridge = if stream_cursor_metadata {
+        tokio::task::spawn_blocking(kwin_clicks::KwinClickBridge::start)
+            .await
+            .ok()
+            .flatten()
+    } else {
+        None
+    };
     let session = backend::start_recording_with_prepared_backend(built, command_rx).await?;
+    let raw_clicks = match click_bridge {
+        Some(bridge) => tokio::task::spawn_blocking(move || bridge.stop())
+            .await
+            .unwrap_or_default(),
+        None => Vec::new(),
+    };
     // Paths without recording controls (CLI screen recordings, API callers)
     // still have to leave the sidecar the editor reads. Without it a
     // metadata-mode capture has no cursor at all, because the compositor left
     // it out of the video.
     if stream_cursor_metadata && session.action == RecordingTerminalAction::Save {
         if let Some(timeline) = session.timeline.as_ref() {
+            let (clicks, presses) = kwin_clicks::clicks_and_presses(&raw_clicks, timeline);
             controls::write_stream_cursor_metadata_sidecar(
                 &session.path,
                 target,
                 timeline,
                 f64::from(fps),
+                clicks,
+                presses,
             );
         }
     }
