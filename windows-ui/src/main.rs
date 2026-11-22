@@ -11,7 +11,14 @@ fn main() {
     // The tray shell starts this once per run. The shared decision keeps a
     // fresh install quiet and shows an upgrade's highlights once.
     if std::env::args().nth(1).as_deref() == Some("--whats-new") {
-        match app::whats_new_window::show_on_startup() {
+        // `--force` comes from the tray's menu item and always opens the
+        // window; without it this is the once-per-upgrade startup check.
+        let result = if std::env::args().any(|argument| argument == "--force") {
+            app::whats_new_window::show_latest()
+        } else {
+            app::whats_new_window::show_on_startup()
+        };
+        match result {
             Ok(()) => std::process::exit(0),
             Err(error) => {
                 eprintln!("Failed to open the What's new window: {error}");

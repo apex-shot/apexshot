@@ -49,13 +49,20 @@ pub fn show_on_startup() -> anyhow::Result<()> {
     }
 }
 
+/// Open the current release's highlights on request, from the tray menu.
+pub fn show_latest() -> anyhow::Result<()> {
+    match whats_new::notes_for(env!("CARGO_PKG_VERSION")) {
+        Some(notes) => show(notes),
+        None => Ok(()),
+    }
+}
+
 /// Present `notes` and block until the window closes.
 fn show(notes: &'static ReleaseNotes) -> anyhow::Result<()> {
     let app = gtk4::Application::builder()
         // Share the app's id so the dock groups this window under ApexShot;
         // NON_UNIQUE keeps activation from going to another ApexShot window.
         .application_id(crate::app_identity::app_id())
-        .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
         .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
         .build();
 
