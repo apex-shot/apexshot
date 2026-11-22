@@ -5223,3 +5223,27 @@ msgstr "ما الجديد"
 
 msgid "What's new in ApexShot {version}"
 msgstr "ما الجديد في ApexShot {version}"
+
+msgid "Explore Studio"
+msgstr "استكشف Studio"
+
+msgid "Exported with Studio. 1 free Studio export left."
+msgstr "تم التصدير باستخدام Studio. تبقّى تصدير مجاني واحد من Studio."
+
+msgid "Exported with Studio. {count} free Studio exports left."
+msgstr "تم التصدير باستخدام Studio. عدد عمليات تصدير Studio المجانية المتبقية: {count}."
+
+msgid "Studio exports left on the free trial"
+msgstr "عمليات تصدير Studio المتبقية في الفترة التجريبية المجانية"
+
+msgid "Studio · 1 free export left"
+msgstr "Studio · تبقّى تصدير مجاني واحد"
+
+msgid "Studio · {count} free exports left"
+msgstr "Studio · عمليات التصدير المجانية المتبقية: {count}"
+
+msgid "That was your last free Studio export. Get Studio to keep these styles."
+msgstr "كان هذا آخر تصدير مجاني لك من Studio. احصل على Studio للاحتفاظ بهذه الأنماط."
+
+msgid "You've used your 3 free Studio exports"
+msgstr "لقد استخدمت عمليات تصدير Studio المجانية الثلاث"

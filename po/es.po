@@ -5298,3 +5298,27 @@ msgstr "Novedades"
 
 msgid "What's new in ApexShot {version}"
 msgstr "Novedades de ApexShot {version}"
+
+msgid "Explore Studio"
+msgstr "Descubrir Studio"
+
+msgid "Exported with Studio. 1 free Studio export left."
+msgstr "Exportado con Studio. Te queda 1 exportación gratuita de Studio."
+
+msgid "Exported with Studio. {count} free Studio exports left."
+msgstr "Exportado con Studio. Te quedan {count} exportaciones gratuitas de Studio."
+
+msgid "Studio exports left on the free trial"
+msgstr "Exportaciones de Studio restantes en la prueba gratuita"
+
+msgid "Studio · 1 free export left"
+msgstr "Studio · queda 1 exportación gratuita"
+
+msgid "Studio · {count} free exports left"
+msgstr "Studio · quedan {count} exportaciones gratuitas"
+
+msgid "That was your last free Studio export. Get Studio to keep these styles."
+msgstr "Esa fue tu última exportación gratuita de Studio. Consigue Studio para conservar estos estilos."
+
+msgid "You've used your 3 free Studio exports"
+msgstr "Has usado tus 3 exportaciones gratuitas de Studio"

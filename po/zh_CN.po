@@ -5187,3 +5187,27 @@ msgstr "新功能"
 
 msgid "What's new in ApexShot {version}"
 msgstr "ApexShot {version} 新功能"
+
+msgid "Explore Studio"
+msgstr "了解 Studio"
+
+msgid "Exported with Studio. 1 free Studio export left."
+msgstr "已使用 Studio 导出。还剩 1 次免费 Studio 导出。"
+
+msgid "Exported with Studio. {count} free Studio exports left."
+msgstr "已使用 Studio 导出。还剩 {count} 次免费 Studio 导出。"
+
+msgid "Studio exports left on the free trial"
+msgstr "免费试用中剩余的 Studio 导出次数"
+
+msgid "Studio · 1 free export left"
+msgstr "Studio · 还剩 1 次免费导出"
+
+msgid "Studio · {count} free exports left"
+msgstr "Studio · 还剩 {count} 次免费导出"
+
+msgid "That was your last free Studio export. Get Studio to keep these styles."
+msgstr "这是你最后一次免费 Studio 导出。获取 Studio 以继续使用这些样式。"
+
+msgid "You've used your 3 free Studio exports"
+msgstr "你已用完 3 次免费 Studio 导出"
