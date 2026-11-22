@@ -849,7 +849,6 @@ msgstr "Detener y guardar grabación:"
 msgid "Only during recording"
 msgstr "Solo durante la grabación"
 
-
 msgid "+ Add current color"
 msgstr "+ Añadir el color actual"
 
@@ -1375,7 +1374,6 @@ msgid "Focused"
 msgstr "Centrado"
 msgid "Follow"
 msgstr "Follow"
-
 
 msgid "Font"
 msgstr "Fuente"
@@ -2640,7 +2638,7 @@ msgstr "{count} ediciones de movimiento"
 
 msgid "{count} video edits"
 msgstr "{count} ediciones de vídeo"
- 
+
 msgid "Freeze"
 msgstr "Congelar"
 
@@ -4883,7 +4881,6 @@ msgstr "Exportando {percent} %"
 msgid "Export cancelled"
 msgstr "Exportación cancelada"
 
-
 msgid "Could not render the image."
 msgstr "No se pudo renderizar la imagen."
 
@@ -5290,7 +5287,6 @@ msgstr "Recorte de cámara"
 msgid "Cut yourself out of the camera and set yourself on the screen."
 msgstr "Recórtate de la cámara y colócate sobre la pantalla."
 
-<<<<<<< HEAD
 msgid "Almost out of free uploads"
 msgstr "Casi sin subidas gratuitas"
 
@@ -5299,7 +5295,7 @@ msgstr "No se pudo abrir el panel"
 
 msgid "Delete old uploads, or Go Pro for 50 GB."
 msgstr "Elimina subidas antiguas o pasa a Pro para tener 50 GB."
-=======
+
 msgid "See Studio"
 msgstr "Ver Studio"
 
@@ -5308,7 +5304,6 @@ msgstr "Novedades"
 
 msgid "What's new in ApexShot {version}"
 msgstr "Novedades de ApexShot {version}"
->>>>>>> feat/studio-free-exports
 
 msgid "Explore Studio"
 msgstr "Descubrir Studio"
@@ -5319,7 +5314,6 @@ msgstr "Exportado con Studio. Te queda 1 exportación gratuita de Studio."
 msgid "Exported with Studio. {count} free Studio exports left."
 msgstr "Exportado con Studio. Te quedan {count} exportaciones gratuitas de Studio."
 
-<<<<<<< HEAD
 msgid "Go Pro for 50 GB."
 msgstr "Pasa a Pro para tener 50 GB."
 
@@ -5332,8 +5326,6 @@ msgstr "Administrar subidas"
 msgid "Not uploaded"
 msgstr "No se subió"
 
-=======
->>>>>>> feat/studio-free-exports
 msgid "Studio exports left on the free trial"
 msgstr "Exportaciones de Studio restantes en la prueba gratuita"
 
@@ -5346,18 +5338,11 @@ msgstr "Studio · quedan {count} exportaciones gratuitas"
 msgid "That was your last free Studio export. Get Studio to keep these styles."
 msgstr "Esa fue tu última exportación gratuita de Studio. Consigue Studio para conservar estos estilos."
 
-<<<<<<< HEAD
 msgid "Uploads come back next month."
 msgstr "Las subidas vuelven el próximo mes."
 
 msgid "Uploads come back on {date}."
 msgstr "Las subidas vuelven el {date}."
-
-msgid "What's new"
-msgstr "Novedades"
-
-msgid "What's new in ApexShot {version}"
-msgstr "Novedades de ApexShot {version}"
 
 msgid "You've used this month's free uploads"
 msgstr "Has usado las subidas gratuitas de este mes"
@@ -5409,7 +5394,3 @@ msgstr "Studio está activo en este dispositivo"
 
 msgid "Studio activation failed"
 msgstr "No se pudo activar Studio"
-=======
-msgid "You've used your 3 free Studio exports"
-msgstr "Has usado tus 3 exportaciones gratuitas de Studio"
->>>>>>> feat/studio-free-exports
