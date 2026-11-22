@@ -78,14 +78,11 @@ pub fn show_prompt(window: &impl IsA<Window>, message: &str) {
     go_pro.connect_clicked({
         let modal = modal.downgrade();
         move |_| {
-            std::thread::spawn(|| {
-                if let Err(error) = crate::utils::open::open_url(BILLING_URL) {
-                    crate::utils::notify::desktop_notification(
-                        &t("Could not open billing"),
-                        &error,
-                    );
-                }
-            });
+            // Open before closing: a standalone card's process ends with its
+            // window, which would take a background thread with it.
+            if let Err(error) = crate::utils::open::open_url(BILLING_URL) {
+                crate::utils::notify::desktop_notification(&t("Could not open billing"), &error);
+            }
             if let Some(modal) = modal.upgrade() {
                 modal.close();
             }

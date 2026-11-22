@@ -5358,3 +5358,18 @@ msgstr "Obtenez Studio pour conserver ces styles."
 
 msgid "Get Studio"
 msgstr "Obtenir Studio"
+
+msgid "Try Studio free"
+msgstr "Essayez Studio gratuitement"
+
+msgid "Your next 3 Studio exports are on us. After each one, ApexShot shows how many are left."
+msgstr "Vos 3 prochains exports Studio sont offerts. Après chacun, ApexShot indique combien il en reste."
+
+msgid "Buying Studio takes one step"
+msgstr "Acheter Studio en une seule étape"
+
+msgid "Choose Studio in ApexShot, sign in, and pay. ApexShot turns Studio on for you, with no licence file to copy or import."
+msgstr "Choisissez Studio dans ApexShot, connectez-vous et payez. ApexShot active Studio pour vous, sans fichier de licence à copier ni à importer."
+
+msgid "Capture, annotation, recording, and the editors' core tools stay free."
+msgstr "La capture, l'annotation, l'enregistrement et les outils essentiels des éditeurs restent gratuits."

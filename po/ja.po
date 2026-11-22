@@ -5245,3 +5245,18 @@ msgstr "これらのスタイルを続けるには Studio を入手してくだ�
 
 msgid "Get Studio"
 msgstr "Studio を入手"
+
+msgid "Try Studio free"
+msgstr "Studio を無料で試す"
+
+msgid "Your next 3 Studio exports are on us. After each one, ApexShot shows how many are left."
+msgstr "次の 3 回の Studio 書き出しは無料です。書き出すたびに ApexShot が残り回数を表示します。"
+
+msgid "Buying Studio takes one step"
+msgstr "Studio の購入はワンステップ"
+
+msgid "Choose Studio in ApexShot, sign in, and pay. ApexShot turns Studio on for you, with no licence file to copy or import."
+msgstr "ApexShot で Studio を選び、サインインして支払うだけ。ApexShot が Studio を有効にするので、ライセンスファイルのコピーやインポートは不要です。"
+
+msgid "Capture, annotation, recording, and the editors' core tools stay free."
+msgstr "キャプチャ、注釈、録画、エディターの基本ツールは引き続き無料です。"
