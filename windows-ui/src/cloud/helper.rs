@@ -58,6 +58,23 @@ pub fn command_from_args(args: impl IntoIterator<Item = OsString>) -> Option<Upl
     None
 }
 
+/// Read the standalone-card arguments the notification helper starts.
+///
+/// The tray shell only knows how to start this executable, so a limit card is
+/// another argument mode of the same binary, mirroring Linux's `cloud-limit`.
+pub fn cloud_limit_from_args(
+    args: impl IntoIterator<Item = OsString>,
+) -> Option<(crate::cloud::upload::CloudLimit, bool)> {
+    let args: Vec<String> = args
+        .into_iter()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect();
+    let position = args
+        .iter()
+        .position(|argument| argument == "--cloud-limit")?;
+    crate::cloud::upgrade::parse_cli_limit(&args[position + 1..]).ok()
+}
+
 /// Run one upload; the exit code is 0 when nothing needed to happen or the
 /// upload completed, and 1 when a requested upload failed.
 pub fn run(command: UploadCommand) -> i32 {
@@ -105,17 +122,49 @@ fn upload_now(path: &Path, automatic: bool, report_progress: bool) -> i32 {
                 eprintln!("[cloud] Failed to copy the share link: {error}");
             }
             if report_progress {
+                // The result card reads this line and takes over immediately;
+                // the account read for the heads-up must not delay it.
                 let mut out = std::io::stdout().lock();
                 let _ = writeln!(out, "done");
                 let _ = out.flush();
+                if let Some(heads_up) = crate::cloud::limit_prompt::usage_heads_up(&config) {
+                    for limit in &heads_up.cards {
+                        crate::cloud::limit_prompt::spawn_card(limit, true);
+                    }
+                }
                 return 0;
             }
-            let body = match copied {
+            let heads_up = crate::cloud::limit_prompt::usage_heads_up(&config);
+            let mut body = match copied {
                 Ok(()) => tfmt("Copied to clipboard\n{url}", &[("url", &result.share_url)]),
                 Err(_) => result.share_url.clone(),
             };
+            if let Some(heads_up) = &heads_up {
+                body = heads_up.append_to(&body);
+            }
             notify::desktop_notification_and_wait(&t("Upload complete"), &body, false);
+            if let Some(heads_up) = &heads_up {
+                for limit in &heads_up.cards {
+                    crate::cloud::limit_prompt::spawn_card(limit, true);
+                }
+            }
             0
+        }
+        Err(UploadError::UpgradeRequired(limit)) => {
+            eprintln!("[cloud] Upload failed: {limit}");
+            let opened = crate::cloud::limit_prompt::allow_upgrade_prompt(limit.kind)
+                && crate::cloud::limit_prompt::spawn_card(&limit, false);
+            // The result card draws its own failure state; the notification is
+            // the fallback when the limit card was already shown recently or
+            // could not open at all.
+            if !report_progress || !opened {
+                notify::desktop_notification_and_wait(
+                    &t("Not uploaded"),
+                    &crate::cloud::upgrade::headline(&limit),
+                    true,
+                );
+            }
+            1
         }
         Err(error) => {
             eprintln!("[cloud] Upload failed: {error}");
@@ -178,6 +227,33 @@ mod tests {
             Some(UploadCommand::UploadWithProgress(PathBuf::from(
                 r"C:\Shots\shot.png"
             )))
+        );
+    }
+
+    #[test]
+    fn the_cloud_limit_arguments_build_a_storage_card() {
+        let (limit, almost) = cloud_limit_from_args(args(&[
+            "--cloud-limit",
+            "storage",
+            "--used",
+            "2147483648",
+            "--max",
+            "2147483648",
+            "--almost",
+        ]))
+        .expect("a storage limit");
+
+        assert!(almost);
+        assert_eq!(limit.kind, crate::cloud::upload::CloudLimitKind::Storage);
+        assert_eq!(limit.used, Some(2 * 1024 * 1024 * 1024));
+        assert_eq!(limit.max, Some(2 * 1024 * 1024 * 1024));
+    }
+
+    #[test]
+    fn an_upload_command_does_not_also_read_as_a_cloud_limit() {
+        assert_eq!(
+            cloud_limit_from_args(args(&["--upload", r"C:\Shots\shot.png"])),
+            None
         );
     }
 }

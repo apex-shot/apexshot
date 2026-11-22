@@ -161,6 +161,7 @@ pub(super) fn wire_output_lifecycle(
     let (upload_done_tx, upload_done_rx) = std::sync::mpsc::channel::<(
         Result<String, crate::cloud::upload::UploadError>,
         crate::studio_entitlement::StudioAccess,
+        Option<crate::cloud::limit_prompt::UploadHeadsUp>,
     )>();
     let upload_btn_poll = upload_btn.clone();
     let uploading_poll = uploading.clone();
@@ -169,7 +170,7 @@ pub(super) fn wire_output_lifecycle(
     let toast_anchor_upload = trial_toast_anchor.clone();
     glib::timeout_add_local(Duration::from_millis(50), move || {
         match upload_done_rx.try_recv() {
-            Ok((result, trial_access)) => {
+            Ok((result, trial_access, heads_up)) => {
                 uploading_poll.set(false);
                 upload_lock_poll.release();
                 upload_btn_poll.set_sensitive(true);
@@ -196,17 +197,29 @@ pub(super) fn wire_output_lifecycle(
                                 )
                             });
                         if !shown {
-                            if let Some(text) = crate::studio_trial::finished_feedback(was_trial) {
+                            if let Some(mut text) =
+                                crate::studio_trial::finished_feedback(was_trial)
+                            {
+                                if let Some(heads_up) = &heads_up {
+                                    text = heads_up.append_to(&text);
+                                }
                                 crate::utils::notify::desktop_notification(
                                     &crate::i18n::t("Upload complete"),
                                     &text,
                                 );
                             }
                         }
-                    }
-                    Err(crate::cloud::upload::UploadError::UpgradeRequired(message)) => {
                         if let Some(window) = window_upload.upgrade() {
-                            crate::cloud::upgrade::show_prompt(&window, &message);
+                            if let Some(heads_up) = &heads_up {
+                                for limit in &heads_up.cards {
+                                    crate::cloud::upgrade::show_prompt_almost(&window, limit);
+                                }
+                            }
+                        }
+                    }
+                    Err(crate::cloud::upload::UploadError::UpgradeRequired(limit)) => {
+                        if let Some(window) = window_upload.upgrade() {
+                            crate::cloud::upgrade::show_prompt(&window, &limit);
                         }
                     }
                     Err(crate::cloud::upload::UploadError::Server(message))
@@ -280,64 +293,77 @@ pub(super) fn wire_output_lifecycle(
         let path = path_upload.clone();
         let upload_done_tx = upload_done_tx.clone();
         std::thread::spawn(move || {
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let (result, heads_up) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let state = snapshot();
                 let final_image = match state.to_final_image() {
                     Ok(image) => image,
                     Err(error) => {
                         eprintln!("[editor] Failed to save edits before upload: {error}");
-                        return Err(crate::cloud::upload::UploadError::Server(format!(
-                            "Could not save edits: {error}"
-                        )));
+                        return (
+                            Err(crate::cloud::upload::UploadError::Server(format!(
+                                "Could not save edits: {error}"
+                            ))),
+                            None,
+                        );
                     }
                 };
-            let stamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|duration| duration.as_nanos())
-                .unwrap_or_default();
-            let snapshot_dir = dirs::cache_dir()
-                .unwrap_or_else(std::env::temp_dir)
-                .join("apexshot")
-                .join("upload-snapshots")
-                .join(format!("{}-{stamp}", std::process::id()));
-            let snapshot_root = snapshot_dir.parent().unwrap_or(&snapshot_dir);
-            match std::fs::create_dir_all(snapshot_root)
-                .and_then(|()| std::fs::create_dir(&snapshot_dir))
-            {
-                Err(error) => Err(crate::cloud::upload::UploadError::Server(format!(
-                    "Could not save edits: {error}"
-                ))),
-                Ok(()) => {
-                    let filename = path
-                        .file_name()
-                        .unwrap_or_else(|| std::ffi::OsStr::new("upload.png"));
-                    let snapshot_path = snapshot_dir.join(filename);
-                    let result = match crate::capture::editor::io_ops::save_edited_image_snapshot(
-                        &snapshot_path,
-                        final_image,
-                    ) {
-                        Err(error) => Err(crate::cloud::upload::UploadError::Server(format!(
+                let stamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|duration| duration.as_nanos())
+                    .unwrap_or_default();
+                let snapshot_dir = dirs::cache_dir()
+                    .unwrap_or_else(std::env::temp_dir)
+                    .join("apexshot")
+                    .join("upload-snapshots")
+                    .join(format!("{}-{stamp}", std::process::id()));
+                let snapshot_root = snapshot_dir.parent().unwrap_or(&snapshot_dir);
+                match std::fs::create_dir_all(snapshot_root)
+                    .and_then(|()| std::fs::create_dir(&snapshot_dir))
+                {
+                    Err(error) => (
+                        Err(crate::cloud::upload::UploadError::Server(format!(
                             "Could not save edits: {error}"
                         ))),
-                        Ok(()) => {
-                            crate::cloud::upload::upload_file_with_notifications_without_clipboard(
-                                &config,
+                        None,
+                    ),
+                    Ok(()) => {
+                        let filename = path
+                            .file_name()
+                            .unwrap_or_else(|| std::ffi::OsStr::new("upload.png"));
+                        let snapshot_path = snapshot_dir.join(filename);
+                        let (result, heads_up) =
+                            match crate::capture::editor::io_ops::save_edited_image_snapshot(
                                 &snapshot_path,
-                            )
-                            .map(|result| result.share_url)
-                        }
-                    };
-                    let _ = std::fs::remove_dir_all(&snapshot_dir);
-                    result
+                                final_image,
+                            ) {
+                                Err(error) => (
+                                    Err(crate::cloud::upload::UploadError::Server(format!(
+                                        "Could not save edits: {error}"
+                                    ))),
+                                    None,
+                                ),
+                                Ok(()) => {
+                                    let outcome = crate::cloud::upload::upload_file_with_notifications_without_clipboard(
+                                        &config,
+                                        &snapshot_path,
+                                    );
+                                    (outcome.result.map(|result| result.share_url), outcome.heads_up)
+                                }
+                            };
+                        let _ = std::fs::remove_dir_all(&snapshot_dir);
+                        (result, heads_up)
+                    }
                 }
-            }
             }))
             .unwrap_or_else(|_| {
-                Err(crate::cloud::upload::UploadError::Server(
-                    "Could not save edits: the upload worker stopped unexpectedly.".into(),
-                ))
+                (
+                    Err(crate::cloud::upload::UploadError::Server(
+                        "Could not save edits: the upload worker stopped unexpectedly.".into(),
+                    )),
+                    None,
+                )
             });
-            let _ = upload_done_tx.send((result, trial_access));
+            let _ = upload_done_tx.send((result, trial_access, heads_up));
         });
     });
 
@@ -1168,7 +1194,7 @@ mod tests {
         assert!(on_gtk_thread.contains("upload_btn_click.set_sensitive(false)"));
         assert!(worker.contains("catch_unwind"));
         assert!(worker.contains("state.to_final_image()"));
-        assert!(worker.contains("upload_done_tx.send((result, trial_access))"));
+        assert!(worker.contains("upload_done_tx.send((result, trial_access, heads_up))"));
     }
 
     #[test]

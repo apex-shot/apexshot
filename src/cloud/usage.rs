@@ -20,6 +20,9 @@ pub struct UsageSnapshot {
 pub struct Usage {
     pub uploads: i64,
     pub storage_bytes: i64,
+    /// When the monthly upload allowance returns. Older servers omit it.
+    #[serde(default)]
+    pub month_resets_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -51,6 +54,40 @@ pub fn fetch(config: &mut AppConfig) -> Result<UsageSnapshot, UsageError> {
         }
         result => result,
     }
+}
+
+/// A short, best-effort account read for the post-upload heads-up.
+///
+/// The upload notification has already been shown, so a slow or failing
+/// account endpoint only loses the extra usage line. No token refresh here:
+/// the upload that just succeeded proved the token works.
+pub fn fetch_for_heads_up(config: &AppConfig) -> Option<UsageSnapshot> {
+    if !is_cloud_logged_in(config) {
+        return None;
+    }
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(2))
+        .timeout(Duration::from_secs(2))
+        .build();
+    let snapshot: UsageSnapshot = agent
+        .get(&format!("{}/v1/account", resolve_cloud_backend_url(config)))
+        .set(
+            "Authorization",
+            &format!("Bearer {}", config.cloud_api_token),
+        )
+        .set("Accept", "application/json")
+        .call()
+        .ok()?
+        .into_json()
+        .ok()?;
+    if snapshot.usage.uploads < 0
+        || snapshot.usage.storage_bytes < 0
+        || snapshot.limits.max_uploads < -1
+        || snapshot.limits.max_storage_bytes < 0
+    {
+        return None;
+    }
+    Some(snapshot)
 }
 
 fn request(config: &AppConfig) -> Result<UsageSnapshot, UsageError> {
@@ -141,11 +178,15 @@ mod tests {
     #[test]
     fn parses_cloud_account_usage_and_unlimited_uploads() {
         let snapshot: UsageSnapshot = serde_json::from_str(
-            r#"{"email":"a@example.com","tier":"pro","usage":{"uploads":7,"storage_bytes":100},"limits":{"max_uploads":-1,"max_storage_bytes":1000,"retention_days":90}}"#,
+            r#"{"email":"a@example.com","tier":"pro","usage":{"uploads":7,"storage_bytes":100,"month_resets_at":"2026-12-01T00:00:00Z"},"limits":{"max_uploads":-1,"max_storage_bytes":1000,"retention_days":90}}"#,
         )
         .unwrap();
         assert_eq!(snapshot.usage.uploads, 7);
         assert_eq!(snapshot.usage.storage_bytes, 100);
+        assert_eq!(
+            snapshot.usage.month_resets_at.as_deref(),
+            Some("2026-12-01T00:00:00Z")
+        );
         assert_eq!(snapshot.limits.max_uploads, -1);
         assert_eq!(snapshot.limits.max_storage_bytes, 1000);
     }

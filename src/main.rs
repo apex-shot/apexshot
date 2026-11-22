@@ -166,6 +166,20 @@ fn main() {
             }
             return;
         }
+        "cloud-limit" => {
+            let (limit, almost) = match apexshot::cloud::upgrade::parse_cli_limit(&args[2..]) {
+                Ok(parsed) => parsed,
+                Err(error) => {
+                    eprintln!("{error}");
+                    std::process::exit(1);
+                }
+            };
+            if let Err(error) = apexshot::cloud::upgrade::show_standalone(limit, almost) {
+                eprintln!("Failed to open the Cloud limit card: {error}");
+                std::process::exit(1);
+            }
+            return;
+        }
         "history-internal" => {
             if let Err(e) = apexshot::history::show_history_window() {
                 eprintln!("Failed to open history window: {e}");
@@ -267,13 +281,16 @@ fn main() {
 fn activate_studio_from_url(url: &str) -> ! {
     match apexshot::activate_from_url(url) {
         Ok(()) => {
-            apexshot::utils::notify::desktop_notification("Studio is active on this device", "");
+            apexshot::utils::notify::desktop_notification(
+                &apexshot::i18n::t("Studio is active on this device"),
+                "",
+            );
             std::process::exit(0);
         }
         Err(error) => {
             eprintln!("{error}");
             apexshot::utils::notify::desktop_notification_important(
-                "Studio activation failed",
+                &apexshot::i18n::t("Studio activation failed"),
                 &error.to_string(),
             );
             std::process::exit(1);
@@ -745,6 +762,8 @@ pub(crate) fn print_usage() {
     println!("  update            Update ApexShot to the latest published release");
     println!("  update-window     Open the standalone update window (--force ignores snooze)");
     println!("  whats-new         Open the latest release's highlights");
+    println!("  cloud-limit <kind> [--used N] [--max N] [--resets-at RFC3339] [--message TEXT]");
+    println!("                    Open the standalone Cloud limit card (--almost for near-limit)");
     println!("  --version / -V    Print version");
     println!("  uninstall         Remove local install, autostart, and native host manifests");
     println!();

@@ -1509,16 +1509,20 @@ fn upload_path(
 ) {
     uploading.set(true);
     button.set_sensitive(false);
-    let (sender, receiver) =
-        std::sync::mpsc::channel::<Result<String, crate::cloud::upload::UploadError>>();
+    let (sender, receiver) = std::sync::mpsc::channel::<(
+        Result<String, crate::cloud::upload::UploadError>,
+        Option<crate::cloud::limit_prompt::UploadHeadsUp>,
+    )>();
     std::thread::spawn(move || {
-        let result =
-            crate::cloud::upload::upload_file_with_notifications_without_clipboard(&config, &path)
-                .map(|result| result.share_url);
+        let outcome =
+            crate::cloud::upload::upload_file_with_notifications_without_clipboard(&config, &path);
         if let Some(directory) = cleanup {
             let _ = std::fs::remove_dir_all(directory);
         }
-        let _ = sender.send(result);
+        let _ = sender.send((
+            outcome.result.map(|result| result.share_url),
+            outcome.heads_up,
+        ));
     });
     poll_upload(
         window, button, uploading, receiver, on_finish, lock, trial, None,
@@ -1530,7 +1534,10 @@ fn poll_upload(
     window: &ApplicationWindow,
     button: &gtk4::Button,
     uploading: &Rc<Cell<bool>>,
-    receiver: std::sync::mpsc::Receiver<Result<String, crate::cloud::upload::UploadError>>,
+    receiver: std::sync::mpsc::Receiver<(
+        Result<String, crate::cloud::upload::UploadError>,
+        Option<crate::cloud::limit_prompt::UploadHeadsUp>,
+    )>,
     on_finish: Option<Rc<dyn Fn()>>,
     lock: Option<Rc<EditingLock>>,
     trial: bool,
@@ -1541,7 +1548,7 @@ fn poll_upload(
     let uploading = uploading.clone();
     gtk4::glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
         match receiver.try_recv() {
-            Ok(result) => {
+            Ok((result, heads_up)) => {
                 uploading.set(false);
                 if let Some(lock) = &lock {
                     lock.release();
@@ -1574,17 +1581,27 @@ fn poll_upload(
                                 )
                             });
                         if !shown {
-                            if let Some(text) = crate::studio_trial::finished_feedback(trial) {
+                            if let Some(mut text) = crate::studio_trial::finished_feedback(trial) {
+                                if let Some(heads_up) = &heads_up {
+                                    text = heads_up.append_to(&text);
+                                }
                                 crate::utils::notify::desktop_notification(
                                     &crate::i18n::t("Upload complete"),
                                     &text,
                                 );
                             }
                         }
-                    }
-                    Err(crate::cloud::upload::UploadError::UpgradeRequired(message)) => {
                         if let Some(window) = window.upgrade() {
-                            crate::cloud::upgrade::show_prompt(&window, &message);
+                            if let Some(heads_up) = &heads_up {
+                                for limit in &heads_up.cards {
+                                    crate::cloud::upgrade::show_prompt_almost(&window, limit);
+                                }
+                            }
+                        }
+                    }
+                    Err(crate::cloud::upload::UploadError::UpgradeRequired(limit)) => {
+                        if let Some(window) = window.upgrade() {
+                            crate::cloud::upgrade::show_prompt(&window, &limit);
                         }
                     }
                     // The upload helper already reported the failure.
@@ -1629,10 +1646,12 @@ fn upload_rendered_image(
     lock.acquire();
     sync_all();
     let directory = upload_temp_dir();
-    let (sender, receiver) =
-        std::sync::mpsc::channel::<Result<String, crate::cloud::upload::UploadError>>();
+    let (sender, receiver) = std::sync::mpsc::channel::<(
+        Result<String, crate::cloud::upload::UploadError>,
+        Option<crate::cloud::limit_prompt::UploadHeadsUp>,
+    )>();
     std::thread::spawn(move || {
-        let result = std::fs::create_dir_all(&directory)
+        let outcome = std::fs::create_dir_all(&directory)
             .map_err(|error| {
                 crate::cloud::upload::UploadError::Server(format!("Could not save edits: {error}"))
             })
@@ -1644,13 +1663,21 @@ fn upload_rendered_image(
                             "Could not save edits: {error}"
                         ))
                     })?;
-                crate::cloud::upload::upload_file_with_notifications_without_clipboard(
-                    &config, &path,
+                Ok(
+                    crate::cloud::upload::upload_file_with_notifications_without_clipboard(
+                        &config, &path,
+                    ),
                 )
-                .map(|result| result.share_url)
             });
+        let (result, heads_up) = match outcome {
+            Ok(outcome) => (
+                outcome.result.map(|result| result.share_url),
+                outcome.heads_up,
+            ),
+            Err(error) => (Err(error), None),
+        };
         let _ = std::fs::remove_dir_all(&directory);
-        let _ = sender.send(result);
+        let _ = sender.send((result, heads_up));
     });
     poll_upload(
         window,

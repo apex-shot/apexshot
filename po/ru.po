@@ -844,7 +844,6 @@ msgstr "Остановить и сохранить запись:"
 msgid "Only during recording"
 msgstr "Только во время записи"
 
-
 msgid "+ Add current color"
 msgstr "+ Добавить текущий цвет"
 
@@ -1370,7 +1369,6 @@ msgid "Focused"
 msgstr "Целенаправленный"
 msgid "Follow"
 msgstr "Follow"
-
 
 msgid "Font"
 msgstr "Шрифт"
@@ -2634,7 +2632,7 @@ msgstr "{count} правок Motion"
 
 msgid "{count} video edits"
 msgstr "{count} правок видео"
- 
+
 msgid "Freeze"
 msgstr "Заморозка"
 
@@ -4865,7 +4863,6 @@ msgstr "Экспорт {percent} %"
 msgid "Export cancelled"
 msgstr "Экспорт отменён"
 
-
 msgid "Could not render the image."
 msgstr "Не удалось отрисовать изображение."
 
@@ -5272,6 +5269,15 @@ msgstr "Вырезание из камеры"
 msgid "Cut yourself out of the camera and set yourself on the screen."
 msgstr "Вырежьте себя из изображения камеры и разместите поверх экрана."
 
+msgid "Almost out of free uploads"
+msgstr "Бесплатные загрузки почти закончились"
+
+msgid "Could not open the dashboard"
+msgstr "Не удалось открыть панель управления"
+
+msgid "Delete old uploads, or Go Pro for 50 GB."
+msgstr "Удалите старые загрузки или перейдите на Pro, чтобы получить 50 ГБ."
+
 msgid "See Studio"
 msgstr "Подробнее о Studio"
 
@@ -5290,6 +5296,18 @@ msgstr "Экспортировано со Studio. Остался 1 беспла�
 msgid "Exported with Studio. {count} free Studio exports left."
 msgstr "Экспортировано со Studio. Осталось бесплатных экспортов Studio: {count}."
 
+msgid "Go Pro for 50 GB."
+msgstr "Перейдите на Pro, чтобы получить 50 ГБ."
+
+msgid "Go Pro for unlimited uploads."
+msgstr "Перейдите на Pro для неограниченных загрузок."
+
+msgid "Manage uploads"
+msgstr "Управление загрузками"
+
+msgid "Not uploaded"
+msgstr "Не загружено"
+
 msgid "Studio exports left on the free trial"
 msgstr "Оставшиеся экспорты Studio в бесплатной пробной версии"
 
@@ -5302,8 +5320,58 @@ msgstr "Studio · бесплатных экспортов: {count}"
 msgid "That was your last free Studio export. Get Studio to keep these styles."
 msgstr "Это был ваш последний бесплатный экспорт Studio. Приобретите Studio, чтобы сохранить эти стили."
 
+msgid "Uploads come back next month."
+msgstr "Загрузки снова станут доступны в следующем месяце."
+
+msgid "Uploads come back on {date}."
+msgstr "Загрузки снова станут доступны {date}."
+
+msgid "You've used this month's free uploads"
+msgstr "Вы израсходовали бесплатные загрузки этого месяца"
+
 msgid "You've used your 3 free Studio exports"
 msgstr "Вы использовали 3 бесплатных экспорта Studio"
+
+msgid "Your capture is saved on this computer."
+msgstr "Ваш снимок сохранён на этом компьютере."
+
+msgid "Your free Cloud storage is almost full"
+msgstr "Ваше бесплатное облачное хранилище почти заполнено"
+
+msgid "Your free Cloud storage is full"
+msgstr "Ваше бесплатное облачное хранилище заполнено"
+
+msgid "{used} of {max} free Cloud storage used."
+msgstr "Использовано {used} из {max} бесплатного облачного хранилища."
+
+msgid "{used} of {max} free uploads used this month."
+msgstr "Использовано {used} из {max} бесплатных загрузок в этом месяце."
+
+msgid "{used} of {max} free uploads used."
+msgstr "Использовано {used} из {max} бесплатных загрузок."
+
+msgid "{used} of {max} used this month."
+msgstr "Использовано {used} из {max} в этом месяце."
+
+msgid "{used} of {max} used."
+msgstr "Использовано {used} из {max}."
+
+msgid "Try Studio free"
+msgstr "Попробуйте Studio бесплатно"
+
+
+msgid "Buying Studio takes one step"
+msgstr "Купить Studio — один шаг"
+
+
+msgid "Capture, annotation, recording, and the editors' core tools stay free."
+msgstr "Захват, аннотации, запись и основные инструменты редакторов остаются бесплатными."
+
+msgid "Studio is active on this device"
+msgstr "Studio активна на этом устройстве"
+
+msgid "Studio activation failed"
+msgstr "Не удалось активировать Studio"
 
 msgid "Uses Studio · 1 free export left"
 msgstr "Использует Studio · остался 1 бесплатный экспорт"

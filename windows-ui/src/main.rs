@@ -36,7 +36,7 @@ fn main() {
         match app::studio_entitlement::activate_from_url(&url) {
             Ok(()) => {
                 app::utils::notify::desktop_notification_and_wait(
-                    "Studio is active on this device",
+                    &app::i18n::t("Studio is active on this device"),
                     "",
                     false,
                 );
@@ -45,10 +45,24 @@ fn main() {
             Err(error) => {
                 eprintln!("{error}");
                 app::utils::notify::desktop_notification_and_wait(
-                    "Studio activation failed",
+                    &app::i18n::t("Studio activation failed"),
                     &error.to_string(),
                     true,
                 );
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // A Cloud limit is another argument mode of this binary: the upload helper
+    // cannot draw the card itself, so it starts this one and leaves.
+    if let Some((limit, almost)) =
+        app::cloud::helper::cloud_limit_from_args(std::env::args_os().skip(1))
+    {
+        match app::cloud::upgrade::show_standalone(limit, almost) {
+            Ok(()) => std::process::exit(0),
+            Err(error) => {
+                eprintln!("Failed to open the Cloud limit card: {error}");
                 std::process::exit(1);
             }
         }
