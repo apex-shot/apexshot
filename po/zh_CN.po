@@ -5178,3 +5178,12 @@ msgstr "摄像头抠像"
 
 msgid "Cut yourself out of the camera and set yourself on the screen."
 msgstr "将你从摄像头画面中抠出并放到屏幕上。"
+
+msgid "See Studio"
+msgstr "查看 Studio"
+
+msgid "What's new"
+msgstr "新功能"
+
+msgid "What's new in ApexShot {version}"
+msgstr "ApexShot {version} 新功能"
