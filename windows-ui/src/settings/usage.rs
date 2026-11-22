@@ -764,6 +764,7 @@ mod tests {
             usage: usage::Usage {
                 uploads,
                 storage_bytes: used,
+                month_resets_at: None,
             },
             limits: usage::Limits {
                 max_uploads,
@@ -956,6 +957,7 @@ mod tests {
                 usage: usage::Usage {
                     uploads: 7,
                     storage_bytes: 95_500_000,
+                    month_resets_at: None,
                 },
                 limits: usage::Limits {
                     max_uploads: -1,

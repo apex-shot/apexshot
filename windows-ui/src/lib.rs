@@ -34,6 +34,8 @@ pub mod cloud;
 pub mod config;
 pub mod css_scale;
 pub mod daemon;
+#[path = "../../src/dither_field.rs"]
+pub(crate) mod dither_field;
 pub mod history;
 pub mod i18n;
 pub mod icons;
@@ -43,6 +45,10 @@ pub mod platform;
 pub mod recording;
 pub mod settings;
 pub mod studio_entitlement;
+#[path = "../../src/studio_trial.rs"]
+pub mod studio_trial;
+#[path = "../../src/studio_trial_toast.rs"]
+pub(crate) mod studio_trial_toast;
 #[path = "../../src/studio_upsell.rs"]
 pub(crate) mod studio_upsell;
 #[cfg(test)]
@@ -56,3 +62,5 @@ pub mod update_ui;
 mod usage_telemetry;
 pub mod utils;
 pub mod video_editor;
+pub mod whats_new;
+pub mod whats_new_window;

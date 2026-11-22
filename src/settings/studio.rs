@@ -4,7 +4,7 @@ use crate::studio_entitlement::{
 };
 use gtk4::prelude::*;
 use gtk4::{
-    Align, Box as GtkBox, Button, Entry, Image, Label, Orientation, Revealer,
+    Align, Box as GtkBox, Button, Entry, Image, Label, Orientation, Overlay, Revealer,
     RevealerTransitionType,
 };
 
@@ -73,13 +73,11 @@ struct HeroParts {
 
 /// The card at the top of the page: the product name with its current
 /// state, one sentence about that state, and the action that belongs with it.
-fn build_hero(status: StudioStatus) -> (GtkBox, HeroParts) {
+fn build_hero(status: StudioStatus) -> (Overlay, HeroParts) {
     let hero = GtkBox::new(Orientation::Horizontal, 14);
     hero.add_css_class("studio-hero");
     hero.set_halign(Align::Fill);
     hero.set_valign(Align::Start);
-    hero.set_margin_start(4);
-    hero.set_margin_end(4);
 
     let text = GtkBox::new(Orientation::Vertical, 4);
     text.set_hexpand(true);
@@ -102,6 +100,7 @@ fn build_hero(status: StudioStatus) -> (GtkBox, HeroParts) {
 
     let message = Label::new(Some(&short_message(status)));
     message.add_css_class("settings-sub-option");
+    message.add_css_class("studio-hero-message");
     message.set_wrap(true);
     message.set_xalign(0.0);
     message.set_halign(Align::Fill);
@@ -120,18 +119,43 @@ fn build_hero(status: StudioStatus) -> (GtkBox, HeroParts) {
         action.add_css_class("settings-primary-btn");
     }
     action.connect_clicked(|_| {
-        let _ = crate::utils::open::open_url("https://apexshot.org/studio");
+        let _ = crate::utils::open::open_url(&crate::studio_entitlement::studio_page_url());
     });
     hero.append(&action);
 
     (
-        hero,
+        with_dither_field(hero),
         HeroParts {
             message,
             pill,
             action,
         },
     )
+}
+
+/// Put the dither field behind the hero without letting the field take part
+/// in the hero's size or intercept its clicks.
+fn with_dither_field(hero: GtkBox) -> Overlay {
+    let field =
+        crate::dither_field::dither_field(super::windowing::prefers_dark_glass_theme(), 0.0);
+    // The overlay sizes the field to the hero, so drop the standalone height
+    // request that would otherwise enlarge the card.
+    field.set_size_request(-1, -1);
+    field.set_halign(Align::Fill);
+    field.set_valign(Align::Fill);
+    field.set_hexpand(true);
+    field.set_vexpand(true);
+
+    let overlay = Overlay::new();
+    overlay.set_halign(Align::Fill);
+    overlay.set_valign(Align::Start);
+    overlay.set_hexpand(true);
+    overlay.set_margin_start(4);
+    overlay.set_margin_end(4);
+    overlay.set_child(Some(&field));
+    overlay.add_overlay(&hero);
+    overlay.set_measure_overlay(&hero, true);
+    overlay
 }
 
 /// The purchase terms, quiet and inline: the long version that used to be the
@@ -273,7 +297,10 @@ fn build_activation_controls(
             Err(error) => {
                 status.set_text(&short_message(current_status()));
                 feedback.set_text(&match error {
-                    StudioEntitlementError::DeviceMismatch => StudioStatus::DeviceMismatch.message(),
+                    StudioEntitlementError::DeviceMismatch
+                    | StudioEntitlementError::UnboundLicenceRetired => {
+                        StudioStatus::DeviceMismatch.message()
+                    }
                     error => error.to_string(),
                 });
                 feedback.set_visible(true);

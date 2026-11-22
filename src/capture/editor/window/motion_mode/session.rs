@@ -552,10 +552,11 @@ impl MotionSession {
         let prefers_dark = self.prefers_dark;
         let destination = destination.to_path_buf();
         let worker = gtk4::gio::spawn_blocking(move || {
-            crate::studio_entitlement::ensure_export_allowed(
-                crate::studio_entitlement::capabilities_for_motion_export(),
-            )
-            .map_err(|error| error.to_string())?;
+            let capabilities = crate::studio_entitlement::capabilities_for_motion_export();
+            crate::studio_entitlement::ensure_export_allowed(capabilities)
+                .map_err(|error| error.to_string())?;
+            // Captured before rendering: only a finished MP4 consumes one.
+            let trial_access = crate::studio_entitlement::studio_access(capabilities);
             let source = source.ok_or_else(|| "Motion has no still to export".to_string())?;
             let mode = motion.appearance.source_upscale;
             let mut state = source();
@@ -563,13 +564,18 @@ impl MotionSession {
             let card = state
                 .to_motion_export_card()
                 .map_err(|error| error.to_string())?;
-            super::super::motion_render::export_motion_card_mp4(
+            let result = super::super::motion_render::export_motion_card_mp4(
                 &card,
                 f64::from(mode.factor()),
                 &motion,
                 prefers_dark,
                 &destination,
-            )
+            );
+            if result.is_ok() {
+                // The finished MP4 is this export's one trial output.
+                crate::studio_entitlement::finish_trial_export(trial_access);
+            }
+            result
         });
         async move {
             worker

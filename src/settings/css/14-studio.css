@@ -17,6 +17,17 @@
                 font-size: 15px;
                 font-weight: 600;
                 letter-spacing: -0.1px;
+                /* A soft glow in the card's colour quiets the dots behind the words. */
+                text-shadow: 0 0 12px #141414, 0 0 4px #141414;
+            }
+
+            .studio-hero-message {
+                text-shadow: 0 0 12px #141414, 0 0 4px #141414;
+            }
+
+            .editor-root.editor-theme-light .studio-hero-title,
+            .editor-root.editor-theme-light .studio-hero-message {
+                text-shadow: 0 0 12px #f6f7fb, 0 0 4px #f6f7fb;
             }
 
             /* One pill shape, one tint per licence state. */

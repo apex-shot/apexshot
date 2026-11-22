@@ -57,6 +57,17 @@ fn main() {
     }
 
     apexshot::i18n::init_from_config();
+
+    // The desktop file hands the app an `apexshot://` URL when the Studio page
+    // sends a licence back after a purchase or recovery. Handle it before any
+    // subcommand dispatch, so the link can never be mistaken for one.
+    if let Some(url) = args
+        .get(1)
+        .filter(|argument| argument.starts_with("apexshot://"))
+    {
+        activate_studio_from_url(url);
+    }
+
     apexshot::recording::dnd::recover_stale_gnome_dnd();
 
     if args.len() < 2 {
@@ -86,6 +97,13 @@ fn main() {
         "portal-window-still-internal" => {
             if let Err(error) = apexshot::backend::portal_still::run_window_internal_helper(&args) {
                 eprintln!("Portal window still capture failed: {error}");
+                std::process::exit(1);
+            }
+            return;
+        }
+        "x11-pick-window-internal" => {
+            if let Err(error) = apexshot::backend::x11_window_pick::run_internal_helper() {
+                eprintln!("X11 window pick failed: {error}");
                 std::process::exit(1);
             }
             return;
@@ -148,6 +166,27 @@ fn main() {
             }
             return;
         }
+        "whats-new" => {
+            if let Err(error) = apexshot::whats_new_window::show_latest() {
+                eprintln!("Failed to open the What's new window: {error}");
+                std::process::exit(1);
+            }
+            return;
+        }
+        "cloud-limit" => {
+            let (limit, almost) = match apexshot::cloud::upgrade::parse_cli_limit(&args[2..]) {
+                Ok(parsed) => parsed,
+                Err(error) => {
+                    eprintln!("{error}");
+                    std::process::exit(1);
+                }
+            };
+            if let Err(error) = apexshot::cloud::upgrade::show_standalone(limit, almost) {
+                eprintln!("Failed to open the Cloud limit card: {error}");
+                std::process::exit(1);
+            }
+            return;
+        }
         "history-internal" => {
             if let Err(e) = apexshot::history::show_history_window() {
                 eprintln!("Failed to open history window: {e}");
@@ -177,6 +216,18 @@ fn main() {
             // without the customer pasting a credential.
             println!("{}", apexshot::studio_status_line());
             return;
+        }
+        "studio-activate" => {
+            let url = match args.get(2) {
+                Some(url) => url,
+                None => {
+                    eprintln!(
+                        "Error: studio-activate requires an apexshot:// Studio activation link"
+                    );
+                    std::process::exit(1);
+                }
+            };
+            activate_studio_from_url(url);
         }
         "video-editor" => {
             let result = if args.len() < 3 {
@@ -230,6 +281,28 @@ fn main() {
     tokio::runtime::Runtime::new()
         .expect("Failed to create tokio runtime")
         .block_on(async_main(args));
+}
+
+/// Activates the Studio licence carried by an `apexshot://studio/activate`
+/// link and reports the result through a desktop notification, then exits.
+fn activate_studio_from_url(url: &str) -> ! {
+    match apexshot::activate_from_url(url) {
+        Ok(()) => {
+            apexshot::utils::notify::desktop_notification(
+                &apexshot::i18n::t("Studio is active on this device"),
+                "",
+            );
+            std::process::exit(0);
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            apexshot::utils::notify::desktop_notification_important(
+                &apexshot::i18n::t("Studio activation failed"),
+                &error.to_string(),
+            );
+            std::process::exit(1);
+        }
+    }
 }
 
 async fn async_main(args: Vec<String>) {
@@ -697,6 +770,7 @@ pub(crate) fn print_usage() {
     println!("  show-last-preview Reopen the last capture preview via daemon");
     println!("  settings          Open settings window");
     println!("  studio-status     Print this build's Studio licence state");
+    println!("  studio-activate <url> Activate Studio from an apexshot:// link");
     println!("  studio-device-id  Print this machine's Studio device ID");
     println!("  history           Open capture history window");
     println!("  login             Sign in to ApexShot Cloud (device authorization)");
@@ -708,6 +782,9 @@ pub(crate) fn print_usage() {
     println!("  install           Install local binary and set up autostart");
     println!("  update            Update ApexShot to the latest published release");
     println!("  update-window     Open the standalone update window (--force ignores snooze)");
+    println!("  whats-new         Open the latest release's highlights");
+    println!("  cloud-limit <kind> [--used N] [--max N] [--resets-at RFC3339] [--message TEXT]");
+    println!("                    Open the standalone Cloud limit card (--almost for near-limit)");
     println!("  --version / -V    Print version");
     println!("  uninstall         Remove local install, autostart, and native host manifests");
     println!();

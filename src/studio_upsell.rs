@@ -3,7 +3,8 @@
 use crate::capture::editor::window::icon_names::custom;
 use crate::i18n::{t, tfmt};
 use crate::studio_entitlement::{
-    activate_token, ensure_export_allowed, StudioCapabilities, StudioEntitlementError, StudioStatus,
+    activate_token, ensure_export_allowed, studio_page_url, StudioCapabilities,
+    StudioEntitlementError, StudioStatus,
 };
 use gtk4::{
     glib, prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, CssProvider, Entry,
@@ -13,31 +14,33 @@ use gtk4::{
 use std::cell::Cell;
 use std::rc::Rc;
 
+#[cfg(test)]
 const STUDIO_URL: &str = "https://apexshot.org/studio";
 const SCRIM_CLASS: &str = "apexshot-studio-scrim";
-const LIGHT_CLASS: &str = "apexshot-studio-light";
+pub(crate) const LIGHT_CLASS: &str = "apexshot-studio-light";
 const CARD_WIDTH: f64 = 600.0;
 const NATURAL_WIDTH_CHARS: i32 = 20;
-const SHOT_WIDTH: f64 = 520.0;
-const SHOT_HEIGHT: f64 = 320.0;
-const FADE_HEIGHT: f64 = 170.0;
+const HERO_HEIGHT: f64 = 190.0;
 const CTA_WIDTH: f64 = 320.0;
 const HEADLINE_WIDTH_CHARS: i32 = 26;
-/// Placeholder product shot until the final hero art lands.
-const HERO_SHOT: &[u8] = include_bytes!("../media/image-editor.png");
 
-/// Logical size to device pixels, the way the editor's own widgets do it. GDK
-/// already reports a scaled display on Linux, so only Windows needs the
-/// conversion.
-fn px(value: f64) -> i32 {
+/// The scale the sheet is authored against. GDK already reports a scaled
+/// display on Linux, so only Windows needs the conversion.
+fn ui_scale() -> f64 {
     #[cfg(target_os = "windows")]
     {
-        (value * crate::platform::ui_scale()).round() as i32
+        crate::platform::ui_scale()
     }
     #[cfg(not(target_os = "windows"))]
     {
-        value.round() as i32
+        1.0
     }
+}
+
+/// Logical size to device pixels, the way the editor's own widgets do it.
+/// Shared with the cloud upgrade card so both cards keep the same metrics.
+pub(crate) fn px(value: f64) -> i32 {
+    (value * ui_scale()).round() as i32
 }
 
 const CSS: &str = r#"
@@ -45,6 +48,7 @@ const CSS: &str = r#"
        14-upscale-preview.css): a #141414 sheet, hairline rims, 7-14px radii,
        muted secondary copy and the flat #ff670d action. No glow, no
        gradients, no drop shadows over the canvas. */
+    window.apexshot-studio-prompt { background: transparent; }
     .apexshot-studio-scrim {
         background: rgba(0, 0, 0, 0.55);
         border-radius: 12px;
@@ -60,14 +64,34 @@ const CSS: &str = r#"
     .apexshot-studio-body { padding: 18px; }
     .apexshot-studio-body.apexshot-studio-body-offer { padding: 0 28px 22px 28px; }
 
-    .apexshot-studio-shot {
-        border: 1px solid rgba(255, 255, 255, 0.10);
-        border-bottom-width: 0;
-        border-radius: 10px 10px 0 0;
-        background: #0d0d0d;
+    /* The release highlights in a Studio card: the card surface sized to its
+       content, a quiet list under the hero, and the Studio pill for the
+       features that need a license. */
+    window.apexshot-whats-new { background: transparent; }
+    .apexshot-whats-new-body { padding: 0 28px 24px 28px; }
+    .apexshot-whats-new-row { padding: 14px 0; }
+    .apexshot-whats-new-divider {
+        min-height: 1px;
+        background: rgba(255, 255, 255, 0.10);
     }
-    .apexshot-studio-fade {
-        background-image: linear-gradient(180deg, rgba(20, 20, 20, 0), rgba(20, 20, 20, 0.92) 55%, #141414);
+    .apexshot-whats-new-title {
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: -0.1px;
+        color: #f1f1f3;
+    }
+    .apexshot-whats-new-copy {
+        margin-top: 4px;
+        font-size: 13px;
+        color: rgba(255, 255, 255, 0.55);
+    }
+    .apexshot-whats-new-pill {
+        padding: 2px 9px;
+        border-radius: 999px;
+        background: alpha(#ff670d, 0.14);
+        color: #ff670d;
+        font-size: 11px;
+        font-weight: 600;
     }
 
     .apexshot-studio-title {
@@ -85,10 +109,14 @@ const CSS: &str = r#"
         font-weight: 400;
         letter-spacing: -1.4px;
         color: #f1f1f3;
+        /* A soft glow in the card's colour quiets the dots behind the words. */
+        text-shadow: 0 0 22px #141414, 0 0 10px #141414, 0 0 4px #141414;
     }
+    .apexshot-studio-headline-compact { font-size: 30px; }
     .apexshot-studio-lede {
         font-size: 13px;
         color: rgba(255, 255, 255, 0.55);
+        text-shadow: 0 0 12px #141414, 0 0 4px #141414;
     }
     .apexshot-studio-meta {
         font-size: 13px;
@@ -130,6 +158,12 @@ const CSS: &str = r#"
     button.apexshot-studio-activate:hover { background: #ff792b; }
     button.apexshot-studio-primary:active,
     button.apexshot-studio-activate:active { background: #e65c0a; }
+    button.apexshot-studio-primary.apexshot-whats-new-action {
+        min-height: 30px;
+        padding: 0 18px;
+        border-radius: 8px;
+        font-size: 13px;
+    }
     button.apexshot-studio-primary.apexshot-studio-cta {
         min-height: 40px;
         border-radius: 8px;
@@ -178,20 +212,20 @@ const CSS: &str = r#"
 
     /* Light theme, mirroring the editor's palette. */
     .apexshot-studio-light.apexshot-studio-scrim { background: rgba(17, 24, 39, 0.28); }
-    .apexshot-studio-light .apexshot-studio-card {
+    .apexshot-studio-light .apexshot-studio-card,
+    .apexshot-studio-light.apexshot-studio-card {
         background: #f6f7fb;
         color: #1d2129;
         border-color: alpha(#111827, 0.10);
     }
-    .apexshot-studio-light .apexshot-studio-shot {
-        border-color: alpha(#111827, 0.10);
-        background: #eef0f5;
-    }
-    .apexshot-studio-light .apexshot-studio-fade {
-        background-image: linear-gradient(180deg, rgba(246, 247, 251, 0), rgba(246, 247, 251, 0.92) 55%, #f6f7fb);
-    }
     .apexshot-studio-light .apexshot-studio-title,
     .apexshot-studio-light .apexshot-studio-headline { color: #1d2129; }
+    .apexshot-studio-light .apexshot-studio-headline {
+        text-shadow: 0 0 22px #f6f7fb, 0 0 10px #f6f7fb, 0 0 4px #f6f7fb;
+    }
+    .apexshot-studio-light .apexshot-studio-lede {
+        text-shadow: 0 0 12px #f6f7fb, 0 0 4px #f6f7fb;
+    }
     .apexshot-studio-light .apexshot-studio-subtitle,
     .apexshot-studio-light .apexshot-studio-lede,
     .apexshot-studio-light .apexshot-studio-meta { color: rgba(29, 33, 41, 0.58); }
@@ -203,6 +237,13 @@ const CSS: &str = r#"
     .apexshot-studio-light .apexshot-studio-fineprint { color: rgba(29, 33, 41, 0.45); }
     .apexshot-studio-light .apexshot-studio-separator { color: rgba(29, 33, 41, 0.25); }
     .apexshot-studio-light .apexshot-studio-feedback { color: #b42318; }
+    .apexshot-studio-light .apexshot-whats-new-divider { background: alpha(#111827, 0.10); }
+    .apexshot-studio-light .apexshot-whats-new-title { color: #1d2129; }
+    .apexshot-studio-light .apexshot-whats-new-copy { color: rgba(29, 33, 41, 0.58); }
+    .apexshot-studio-light .apexshot-whats-new-pill {
+        background: alpha(#d15b12, 0.12);
+        color: #d15b12;
+    }
     .apexshot-studio-light button.apexshot-studio-ghost,
     .apexshot-studio-light button.apexshot-studio-link,
     .apexshot-studio-light button.apexshot-studio-close { color: rgba(29, 33, 41, 0.62); }
@@ -223,6 +264,41 @@ const CSS: &str = r#"
         color: #1d2129;
     }
     .apexshot-studio-light entry.apexshot-studio-entry:focus-within { border-color: alpha(#111827, 0.30); }
+
+    /* The trial toast floats over the canvas, so it borrows the sheet's
+       surface but not its size or its focus behaviour. */
+    .apexshot-studio-toast {
+        font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
+        background: #141414;
+        color: #f1f1f3;
+        border: 1px solid rgba(255, 255, 255, 0.10);
+        border-radius: 14px;
+        box-shadow: none;
+    }
+    .apexshot-studio-toast-row { padding: 12px 16px; }
+    .apexshot-studio-toast-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: #f1f1f3;
+    }
+    .apexshot-studio-toast-subtitle {
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.55);
+    }
+    button.apexshot-studio-primary.apexshot-studio-toast-action {
+        min-height: 28px;
+        padding: 0 12px;
+        border-radius: 8px;
+        font-size: 12px;
+        font-weight: 600;
+    }
+    .apexshot-studio-toast.apexshot-studio-light {
+        background: #f6f7fb;
+        color: #1d2129;
+        border-color: alpha(#111827, 0.12);
+    }
+    .apexshot-studio-light .apexshot-studio-toast-title { color: #1d2129; }
+    .apexshot-studio-light .apexshot-studio-toast-subtitle { color: rgba(29, 33, 41, 0.58); }
 "#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -240,7 +316,9 @@ fn kind_for(error: &StudioEntitlementError) -> Kind {
         StudioEntitlementError::NotActivated => Kind::Purchase,
         StudioEntitlementError::InvalidEntitlement => Kind::InvalidLicense,
         StudioEntitlementError::UpdateAccessEnded => Kind::UpdatesEnded,
-        StudioEntitlementError::DeviceMismatch => Kind::DeviceMismatch,
+        StudioEntitlementError::DeviceMismatch | StudioEntitlementError::UnboundLicenceRetired => {
+            Kind::DeviceMismatch
+        }
         StudioEntitlementError::ConfigurationUnavailable => Kind::ConfigurationUnavailable,
         StudioEntitlementError::Storage(_) => Kind::StorageUnavailable,
     }
@@ -266,12 +344,12 @@ impl PrimaryAction {
         }
     }
 
-    fn url(self) -> Option<&'static str> {
+    fn url(self) -> Option<String> {
         match self {
             Self::Upgrade
             | Self::GetStudioReadyBuild
             | Self::RecoverLicense
-            | Self::ManageLicense => Some(STUDIO_URL),
+            | Self::ManageLicense => Some(studio_page_url()),
             Self::KeepEditing => None,
         }
     }
@@ -290,10 +368,19 @@ fn primary_action(error: &StudioEntitlementError) -> PrimaryAction {
 
 fn card_copy(error: &StudioEntitlementError) -> (String, String) {
     match (kind_for(error), error) {
-        (Kind::Purchase, _) => (
-            t("Unlock ApexShot Studio"),
-            t("Professional tools for presenting your captures."),
-        ),
+        (Kind::Purchase, _) => {
+            // The card only reaches the not-activated case once the free
+            // trial is spent; the copy says so instead of offering a first try.
+            let title = if crate::studio_trial::trial_remaining() == 0 {
+                t("You've used your 3 free Studio exports")
+            } else {
+                t("Unlock ApexShot Studio")
+            };
+            (
+                title,
+                t("Professional tools for presenting your captures."),
+            )
+        }
         (Kind::InvalidLicense, _) => (
             t("Studio license couldn't be verified"),
             t("The license saved on this device couldn't be checked. Paste a valid license to unlock Studio."),
@@ -355,6 +442,12 @@ fn features_for(capabilities: StudioCapabilities) -> Vec<(Feature, bool)> {
     features
 }
 
+/// Whether a card hosted in `widget` should use its dark palette, judged by
+/// the same theme class the editor windows carry.
+pub(crate) fn theme_is_dark(widget: &impl IsA<gtk4::Widget>) -> bool {
+    !has_descendant_with_class(widget.upcast_ref(), "editor-theme-light")
+}
+
 /// Returns whether the export may proceed. When Studio blocks it, the card is
 /// raised over the editor instead, and `retry` re-runs the export once a
 /// license is activated from inside the card.
@@ -366,7 +459,7 @@ pub(crate) fn gate(
     let Err(error) = ensure_export_allowed(capabilities) else {
         return true;
     };
-    let dark = !has_descendant_with_class(window.upcast_ref(), "editor-theme-light");
+    let dark = theme_is_dark(window);
     let Some(overlay) = overlay_for(window) else {
         crate::utils::notify::desktop_notification_important(
             &t("Studio export unavailable"),
@@ -381,15 +474,19 @@ pub(crate) fn gate(
 /// The overlay a card can be raised into. The image editor's window child is
 /// one, while the video editor keeps its overlay under the window's root box,
 /// so a direct-child cast would miss it there.
-fn overlay_for(window: &ApplicationWindow) -> Option<Overlay> {
-    let child = window.child()?;
+pub(crate) fn overlay_for(window: &impl IsA<gtk4::Window>) -> Option<Overlay> {
+    let window = window.upcast_ref::<gtk4::Window>();
+    let child = match gtk4::Window::clone(window).downcast::<gtk4::ApplicationWindow>() {
+        Ok(application) => application.child()?,
+        Err(window) => window.first_child()?,
+    };
     if let Ok(overlay) = child.clone().downcast::<Overlay>() {
         return Some(overlay);
     }
     first_overlay(&child)
 }
 
-fn first_overlay(root: &gtk4::Widget) -> Option<Overlay> {
+pub(crate) fn first_overlay(root: &gtk4::Widget) -> Option<Overlay> {
     if let Ok(overlay) = root.clone().downcast::<Overlay>() {
         return Some(overlay);
     }
@@ -606,7 +703,6 @@ fn build_card(
 /// Opens the action's page, or closes the card when the action has none.
 fn connect_primary(primary: &Button, action: PrimaryAction, dismiss: &Rc<dyn Fn()>) {
     if let Some(url) = action.url() {
-        let url = url.to_string();
         primary.connect_clicked(move |_| {
             let _ = crate::utils::open::open_url(&url);
         });
@@ -631,7 +727,7 @@ fn build_offer(
     entry: &Entry,
 ) -> gtk4::Widget {
     let (title, subtitle) = card_copy(error);
-    card.append(&hero(&title, &subtitle, dismiss));
+    card.append(&hero(&title, &subtitle, dark, dismiss));
     card.append(body);
     body.append(&offer_meta(capabilities, dark));
 
@@ -752,38 +848,18 @@ fn offer_meta(capabilities: StudioCapabilities, dark: bool) -> GtkBox {
     row
 }
 
-/// The top of the purchase card, after the reference: a product shot that
-/// fades into the sheet, with the headline set over the fade.
-fn hero(title: &str, subtitle: &str, dismiss: &Rc<dyn Fn()>) -> Overlay {
-    let base = GtkBox::new(Orientation::Vertical, 0);
-    base.add_css_class("apexshot-studio-hero");
-    let screen = GtkBox::new(Orientation::Vertical, 0);
-    screen.add_css_class("apexshot-studio-shot");
-    screen.set_overflow(gtk4::Overflow::Hidden);
-    screen.set_halign(Align::Center);
-    screen.set_margin_top(px(36.0));
-    screen.set_size_request(px(SHOT_WIDTH), px(SHOT_HEIGHT));
-    if let Some(texture) = hero_shot() {
-        let picture = gtk4::Picture::for_paintable(&texture);
-        picture.set_can_shrink(false);
-        screen.append(&picture);
-    }
-    base.append(&screen);
-
+/// The top of the purchase card: an ordered-dither field in the accent that
+/// is densest at the top and dissolves into the sheet, with the headline set
+/// over its quiet lower edge.
+fn hero(title: &str, subtitle: &str, dark: bool, dismiss: &Rc<dyn Fn()>) -> Overlay {
     let overlay = Overlay::new();
-    overlay.set_child(Some(&base));
-
-    let fade = GtkBox::new(Orientation::Vertical, 0);
-    fade.add_css_class("apexshot-studio-fade");
-    fade.set_valign(Align::End);
-    fade.set_size_request(-1, px(FADE_HEIGHT));
-    fade.set_can_target(false);
-    overlay.add_overlay(&fade);
+    overlay.set_child(Some(&crate::dither_field::dither_field(dark, HERO_HEIGHT)));
 
     let words = GtkBox::new(Orientation::Vertical, px(8.0));
     words.set_valign(Align::End);
     words.set_margin_start(px(28.0));
     words.set_margin_end(px(28.0));
+    words.set_margin_bottom(px(4.0));
     let headline = centered_label(title, "apexshot-studio-headline");
     headline.set_max_width_chars(HEADLINE_WIDTH_CHARS);
     let lede = centered_label(subtitle, "apexshot-studio-lede");
@@ -803,37 +879,6 @@ fn hero(title: &str, subtitle: &str, dismiss: &Rc<dyn Fn()>) -> Overlay {
     });
     overlay.add_overlay(&close);
     overlay
-}
-
-/// The product shot at exactly the size it is shown, filled from the top so
-/// the editor's toolbar stays in view. Pre-scaling keeps the source's own
-/// pixel size from setting the card's width the way a `Picture` would.
-fn hero_shot() -> Option<gtk4::gdk::Texture> {
-    let source = image::load_from_memory(HERO_SHOT).ok()?.to_rgba8();
-    let width = px(SHOT_WIDTH).max(1) as u32;
-    let height = px(SHOT_HEIGHT).max(1) as u32;
-    let by_width = width as f64 / source.width() as f64;
-    let by_height = height as f64 / source.height() as f64;
-    let scale = by_width.max(by_height);
-    let scaled_width = ((source.width() as f64 * scale).ceil() as u32).max(width);
-    let scaled_height = ((source.height() as f64 * scale).ceil() as u32).max(height);
-    let resized = image::imageops::resize(
-        &source,
-        scaled_width,
-        scaled_height,
-        image::imageops::FilterType::Triangle,
-    );
-    let left = (scaled_width - width) / 2;
-    let cropped = image::imageops::crop_imm(&resized, left, 0, width, height).to_image();
-    let bytes = glib::Bytes::from_owned(cropped.into_raw());
-    let texture = gtk4::gdk::MemoryTexture::new(
-        width as i32,
-        height as i32,
-        gtk4::gdk::MemoryFormat::R8g8b8a8,
-        &bytes,
-        width as usize * 4,
-    );
-    Some(texture.upcast())
 }
 
 /// Settings pairs every icon with a light-theme drawing; the card reads the
@@ -981,14 +1026,14 @@ fn text_label(text: &str, class: &str) -> Label {
     label
 }
 
-fn centered_label(text: &str, class: &str) -> Label {
+pub(crate) fn centered_label(text: &str, class: &str) -> Label {
     let label = text_label(text, class);
     label.set_xalign(0.5);
     label.set_justify(gtk4::Justification::Center);
     label
 }
 
-fn primary_button(text: &str) -> Button {
+pub(crate) fn primary_button(text: &str) -> Button {
     let button = Button::with_label(text);
     button.add_css_class("apexshot-studio-primary");
     button.set_has_frame(false);
@@ -1002,7 +1047,7 @@ fn ghost_button(text: &str) -> Button {
     button
 }
 
-fn link_button(text: &str) -> Button {
+pub(crate) fn link_button(text: &str) -> Button {
     let button = Button::with_label(text);
     button.add_css_class("apexshot-studio-link");
     button.set_has_frame(false);
@@ -1010,7 +1055,7 @@ fn link_button(text: &str) -> Button {
 }
 
 /// The top-right dismiss. It closes the card the same way Escape does.
-fn close_button() -> Button {
+pub(crate) fn close_button() -> Button {
     let tooltip = t("Close");
     let button = Button::builder()
         .has_frame(false)
@@ -1035,7 +1080,7 @@ fn scaled_css() -> String {
     }
 }
 
-fn install_css() {
+pub(crate) fn install_css() {
     thread_local! {
         static INSTALLED: Cell<bool> = const { Cell::new(false) };
     }
@@ -1111,43 +1156,62 @@ mod tests {
 
     #[test]
     fn primary_actions_match_license_state_and_use_the_official_studio_route() {
-        for (error, expected, label, url) in [
+        for (error, expected, label, offers_studio) in [
             (
                 StudioEntitlementError::NotActivated,
                 PrimaryAction::Upgrade,
                 t("Upgrade to Studio"),
-                Some(STUDIO_URL),
+                true,
             ),
             (
                 StudioEntitlementError::InvalidEntitlement,
                 PrimaryAction::RecoverLicense,
                 t("Recover license"),
-                Some(STUDIO_URL),
+                true,
             ),
             (
                 StudioEntitlementError::UpdateAccessEnded,
                 PrimaryAction::ManageLicense,
                 t("Manage license"),
-                Some(STUDIO_URL),
+                true,
             ),
             (
                 StudioEntitlementError::ConfigurationUnavailable,
                 PrimaryAction::GetStudioReadyBuild,
                 t("Check Studio availability"),
-                Some(STUDIO_URL),
+                true,
             ),
             (
                 StudioEntitlementError::Storage("disk full".into()),
                 PrimaryAction::KeepEditing,
                 t("Keep editing"),
-                None,
+                false,
             ),
         ] {
             let action = primary_action(&error);
             assert_eq!(action, expected);
             assert_eq!(action.label(), label);
-            assert_eq!(action.url(), url);
+            if offers_studio {
+                let url = action.url().expect("Studio action opens a page");
+                assert!(url.starts_with(STUDIO_URL), "{url}");
+            } else {
+                assert_eq!(action.url(), None);
+            }
         }
+    }
+
+    #[test]
+    fn the_purchase_card_names_the_used_up_trial() {
+        let _trial = crate::studio_trial::test_trial_used_up();
+        let (title, _) = card_copy(&StudioEntitlementError::NotActivated);
+        assert_eq!(title, t("You've used your 3 free Studio exports"));
+    }
+
+    #[test]
+    fn the_purchase_card_offers_a_first_try_while_the_trial_remains() {
+        let _trial = crate::studio_trial::test_trial_path_scope();
+        let (title, _) = card_copy(&StudioEntitlementError::NotActivated);
+        assert_eq!(title, t("Unlock ApexShot Studio"));
     }
 
     #[test]

@@ -41,6 +41,14 @@ use a Studio capability require an eligible entitlement. Missing official
 verification configuration blocks those outputs but does not affect free
 capture, editing, recording, project access, or clean exports.
 
+Each computer can make three free Studio outputs before activation. The count
+is stored locally beside the entitlement with private permissions, and only a
+finished output consumes one: cancelled or failed outputs never count, and a
+build with a covering licence never touches the counter. The editors show the
+remaining count beside Export, and the upgrade card appears only once the free
+outputs are used. The trial does not apply when a build cannot verify licences
+or read its storage, because activation could not end it there.
+
 The existing GPL grant cannot be withdrawn from copies already released. Before
 sales begin, review prior public statements about upcoming features; if a
 specific Studio capability was explicitly promised as free, provide an
@@ -48,8 +56,8 @@ appropriate transition entitlement rather than silently changing that promise.
 This repository change does not inspect or revise the separate website or
 payment service.
 
-The proposed refund window is 14 days on the first Studio purchase. Publish it
-only with consistent checkout terms. An offline entitlement has no live
+The refund window is 14 days on the first Studio purchase, published on the
+website's refund page and in the checkout terms. An offline entitlement has no live
 revocation channel: a refund cannot immediately disable a token already stored
 on a disconnected device, and a covered build remains usable. Do not promise
 instant revocation.

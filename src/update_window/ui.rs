@@ -2,7 +2,7 @@
 //!
 //! Everything here is authored at 100% scale, matching the onboarding sheet:
 //! the brand mark over a centred headline, a quiet fact card, and one action
-//! row whose quiet choice sits on the left.
+//! row whose secondary choice sits on the left.
 
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
@@ -143,12 +143,12 @@ impl InstallUi {
 }
 
 /// The brand mark above a centred headline, shared by every state.
-pub(super) fn header(dark: bool, title: &str, copy: &str) -> GtkBox {
+pub(crate) fn header(dark: bool, title: &str, copy: &str) -> GtkBox {
     header_parts(dark, title, copy).0
 }
 
 /// The same block with its supporting copy exposed for a later text change.
-pub(super) fn header_parts(dark: bool, title: &str, copy: &str) -> (GtkBox, Label) {
+pub(crate) fn header_parts(dark: bool, title: &str, copy: &str) -> (GtkBox, Label) {
     let block = GtkBox::new(Orientation::Vertical, 0);
     let mark = crate::onboarding::showcase::brand_mark(dark);
     mark.set_margin_bottom(18);
@@ -158,7 +158,7 @@ pub(super) fn header_parts(dark: bool, title: &str, copy: &str) -> (GtkBox, Labe
     (block, parts.copy)
 }
 
-pub(super) fn page() -> GtkBox {
+pub(crate) fn page() -> GtkBox {
     let page = GtkBox::new(Orientation::Vertical, 0);
     page.add_css_class("update-page");
     page.set_halign(Align::Fill);
@@ -174,7 +174,7 @@ pub(super) fn page() -> GtkBox {
 }
 
 /// The reading column above the actions.
-pub(super) fn body() -> GtkBox {
+pub(crate) fn body() -> GtkBox {
     let body = GtkBox::new(Orientation::Vertical, 0);
     body.set_halign(Align::Fill);
     body
@@ -182,7 +182,7 @@ pub(super) fn body() -> GtkBox {
 
 /// Stack the reading column and the bottom action row, centring the column in
 /// the space the actions leave.
-pub(super) fn page_body(page: &GtkBox, body: &GtkBox, actions: &GtkBox) {
+pub(crate) fn page_body(page: &GtkBox, body: &GtkBox, actions: &GtkBox) {
     let top = GtkBox::new(Orientation::Vertical, 0);
     top.set_vexpand(true);
     page.append(&top);
@@ -193,9 +193,9 @@ pub(super) fn page_body(page: &GtkBox, body: &GtkBox, actions: &GtkBox) {
     page.append(actions);
 }
 
-/// One action at each edge of the row: the quiet choice on the left, the
+/// One action at each edge of the row: the secondary choice on the left, the
 /// primary action on the right. A lone action sits in the middle.
-pub(super) fn action_row(left: Option<&Button>, right: &Button) -> GtkBox {
+pub(crate) fn action_row(left: Option<&Button>, right: &Button) -> GtkBox {
     let actions = GtkBox::new(Orientation::Horizontal, 12);
     actions.add_css_class("onboarding-actions");
     actions.add_css_class("update-actions");
@@ -228,7 +228,7 @@ pub(super) fn action_row(left: Option<&Button>, right: &Button) -> GtkBox {
     actions
 }
 
-pub(super) fn card() -> GtkBox {
+pub(crate) fn card() -> GtkBox {
     let card = GtkBox::new(Orientation::Vertical, 0);
     card.add_css_class("update-card");
     card.set_margin_top(22);
@@ -276,14 +276,14 @@ pub(super) fn fact_line(text: &str) -> GtkBox {
     row
 }
 
-pub(super) fn primary_button(label: &str) -> Button {
+pub(crate) fn primary_button(label: &str) -> Button {
     let button = Button::with_label(label);
     button.add_css_class("settings-primary-btn");
     button.set_halign(Align::Fill);
     button
 }
 
-pub(super) fn quiet_button(label: &str) -> Button {
+pub(crate) fn quiet_button(label: &str) -> Button {
     let button = Button::with_label(label);
     button.add_css_class("onboarding-text-button");
     button.set_halign(Align::Center);
@@ -292,7 +292,7 @@ pub(super) fn quiet_button(label: &str) -> Button {
 
 /// The same minimize and close controls as onboarding, so the two windows of
 /// the first-run family match.
-pub(super) fn window_controls(window: &ApplicationWindow) -> GtkBox {
+pub(crate) fn window_controls(window: &ApplicationWindow) -> GtkBox {
     crate::onboarding::window_controls(window)
 }
 
@@ -308,7 +308,7 @@ pub(super) fn file_size(path: &Path) -> u64 {
 }
 
 /// Load the update-specific surfaces after the onboarding sheet.
-pub(super) fn install_css() {
+pub(crate) fn install_css() {
     let Some(display) = gtk4::gdk::Display::default() else {
         return;
     };

@@ -109,6 +109,21 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     // project file and restores it on load, through this one shared cell.
     timeline.set_quality_handle(stage.quality.clone());
     super::presets_popover::attach(&stage.presets_button, &timeline, scale);
+    // The Export tooltip carries the free-trial count and follows the
+    // document as zooms, captions and the camera change; the export model
+    // already answers which Studio features are in use.
+    {
+        let stage = stage.clone();
+        let tooltip_button = stage.export_button.clone();
+        let timeline = timeline.clone();
+        crate::studio_trial::attach_export_tooltip(&tooltip_button, move || {
+            studio_model(&stage, &timeline)
+                .map(|model| {
+                    super::studio::capabilities_at(&model, timeline.composition_duration())
+                })
+                .unwrap_or_default()
+        });
+    }
 
     let tools_column = super::side_panel::build_tools_column(
         scale,
@@ -2323,6 +2338,24 @@ fn export_model(
     stage: &Stage,
     timeline: &super::timeline::Timeline,
 ) -> Option<super::export::ExportModel> {
+    export_model_inner(stage, timeline, true)
+}
+
+/// The model behind the Studio badges beside Export. The canvas is the
+/// expensive part of a model and no Studio requirement reads it, so the
+/// frequent trial refresh builds the model without one.
+fn studio_model(
+    stage: &Stage,
+    timeline: &super::timeline::Timeline,
+) -> Option<super::export::ExportModel> {
+    export_model_inner(stage, timeline, false)
+}
+
+fn export_model_inner(
+    stage: &Stage,
+    timeline: &super::timeline::Timeline,
+    with_canvas: bool,
+) -> Option<super::export::ExportModel> {
     let footage = timeline.export_footage()?;
     let source_size = stage.source_size.get()?;
     let sidecar = stage.cursor.sidecar();
@@ -2360,7 +2393,11 @@ fn export_model(
             .0;
             (widened != source_size).then_some(widened)
         },
-        canvas: export_canvas(stage, source_size),
+        canvas: if with_canvas {
+            export_canvas(stage, source_size)
+        } else {
+            None
+        },
         crf: stage.quality.get().crf(),
         audio,
     })
@@ -2626,6 +2663,7 @@ fn start_gated_video_export(
     ) {
         super::export_card::show(
             shell,
+            window,
             model,
             request.output,
             request.settings,

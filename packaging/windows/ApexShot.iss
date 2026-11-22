@@ -80,6 +80,15 @@ Name: "{group}\{#AppName}"; Filename: "{app}\bin\apexshot-settings.exe"; Working
 Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\bin\apexshot-settings.exe"; WorkingDir: "{app}\bin"; IconFilename: "{app}\bin\apexshot-capture.exe"; Tasks: desktopicon
 
+[Registry]
+; Register apexshot:// for the signed-in user, matching the per-user install.
+; The Studio page opens this link after a purchase or recovery so the app can
+; activate the device-bound licence without a file to download and import.
+Root: HKCU; Subkey: "Software\Classes\apexshot"; ValueType: string; ValueName: ""; ValueData: "URL:ApexShot"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\apexshot"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKCU; Subkey: "Software\Classes\apexshot\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\bin\apexshot-capture.exe"",0"
+Root: HKCU; Subkey: "Software\Classes\apexshot\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\bin\apexshot-settings.exe"" ""%1"""
+
 [Run]
 ; The settings binary owns the first-run flow and hands over to the tray shell
 ; when setup finishes, so it is the right entry point for a fresh install.

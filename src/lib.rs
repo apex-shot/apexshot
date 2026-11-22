@@ -21,6 +21,7 @@ pub mod compositor;
 pub mod config;
 pub mod daemon;
 pub mod distro;
+pub(crate) mod dither_field;
 pub mod gnome_extension;
 pub mod gnome_integration;
 pub mod gnome_shell;
@@ -37,11 +38,13 @@ pub mod qr;
 pub mod recording;
 pub mod settings;
 pub(crate) mod studio_entitlement;
+pub(crate) mod studio_trial;
+pub(crate) mod studio_trial_toast;
 pub(crate) mod studio_upsell;
 
-/// The CLI needs this machine's Studio Device ID and status line; nothing else
-/// about entitlements is exported.
-pub use studio_entitlement::{device_id, studio_status_line};
+/// The CLI needs this machine's Studio Device ID, status line, and the entry
+/// point for an activation link; nothing else about entitlements is exported.
+pub use studio_entitlement::{activate_from_url, device_id, studio_status_line};
 #[cfg(test)]
 mod test_support;
 mod typography;
@@ -50,6 +53,8 @@ pub mod update_ui;
 pub mod update_window;
 pub mod usage_telemetry;
 pub mod utils;
+pub mod whats_new;
+pub mod whats_new_window;
 
 // Re-export commonly used types
 pub use backend::{CaptureData, DisplayBackend, DisplayError, DisplayResult, PixelFormat};

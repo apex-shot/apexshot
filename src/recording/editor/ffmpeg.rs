@@ -831,6 +831,10 @@ pub(crate) fn export_edited_to_cancellable(
     cancellation: Option<&AtomicBool>,
 ) -> anyhow::Result<PathBuf> {
     ensure_studio_export_allowed(state)?;
+    // Captured before encoding: only a completed file consumes a free export.
+    let trial_access = crate::studio_entitlement::studio_access(
+        crate::studio_entitlement::capabilities_for_video(state),
+    );
     if cancellation_requested(cancellation) {
         anyhow::bail!("export cancelled");
     }
@@ -879,6 +883,9 @@ pub(crate) fn export_edited_to_cancellable(
     if let Some(progress) = state.export_progress.as_ref() {
         progress.set_phase(ExportPhase::Finished);
     }
+    // The output is on disk and no cancellation came in: one finished Studio
+    // export now leaves the free trial. Cancelled and failed runs never here.
+    crate::studio_entitlement::finish_trial_export(trial_access);
     Ok(path)
 }
 

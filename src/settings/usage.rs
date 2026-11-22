@@ -650,6 +650,7 @@ mod tests {
             usage: usage::Usage {
                 uploads: 0,
                 storage_bytes: 0,
+                month_resets_at: None,
             },
             limits: usage::Limits {
                 max_uploads: 0,

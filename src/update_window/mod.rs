@@ -10,7 +10,7 @@ mod download;
 mod install;
 mod release;
 mod running;
-mod ui;
+pub(crate) mod ui;
 mod window;
 
 use std::cell::RefCell;

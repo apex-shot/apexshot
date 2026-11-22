@@ -11,7 +11,7 @@ use crate::{
     },
 };
 use std::path::{Path, PathBuf};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 static HARVESTED_POINTER_TRACK: std::sync::Mutex<Option<crate::gnome_shell::PointerTrackResult>> =
     std::sync::Mutex::new(None);
@@ -27,15 +27,15 @@ fn preserve_first_pointer_track(
     true
 }
 
-/// Stop GNOME pointer tracking as soon as capture ends so hotkeys work while
+/// Stop pointer tracking as soon as capture ends so hotkeys work while
 /// the file is still being muxed. `finish_save` writes the stashed samples.
 pub(super) fn harvest_pointer_track_on_session_end() {
-    if !crate::gnome_shell::is_shell_overlay_service_available() {
+    if !super::pointer_track::service_available() {
         return;
     }
 
     // Capture end and outer recording cleanup can both emit session_ended.
-    // StopPointerTrack is destructive: the first call returns the recording,
+    // Stopping is destructive: the first call returns the recording,
     // while a second returns an empty t0=0 payload. Never let that duplicate
     // notification erase samples that are waiting for finish_save.
     if HARVESTED_POINTER_TRACK
@@ -46,7 +46,7 @@ pub(super) fn harvest_pointer_track_on_session_end() {
         return;
     }
 
-    if let Ok(result) = crate::gnome_shell::stop_pointer_track() {
+    if let Ok(result) = super::pointer_track::stop() {
         if let Ok(mut guard) = HARVESTED_POINTER_TRACK.lock() {
             let _ = preserve_first_pointer_track(&mut guard, result);
         }
@@ -362,13 +362,29 @@ impl PointerTrackSession {
         region: CaptureRegion,
         stream_cursor_metadata: bool,
     ) -> Self {
-        // GNOME pointer tracking supplies the pointer-track sidecar and, for a
-        // window metadata capture, the clicks Auto Zoom uses. Screen and area
-        // metadata streams need no shell tracking: their positions already
-        // arrive with the video frames.
-        let track_shell = config.pointer_track_enabled()
-            || (config.target == super::RecordingTarget::Window && stream_cursor_metadata);
-        let manifest = if track_shell || stream_cursor_metadata {
+        // Pointer tracking supplies the pointer-track sidecar and, for a
+        // window metadata capture, the clicks Auto Zoom uses. It comes from
+        // the shell on GNOME and from the X11 tracker elsewhere; screen and
+        // area metadata streams need no tracking, because their positions
+        // already arrive with the video frames.
+        let should_track = config.pointer_track_enabled()
+            || (config.target == super::RecordingTarget::Window
+                && stream_cursor_metadata
+                && !super::pointer_track::uses_x11_tracker());
+        let manifest = if super::pointer_track::uses_x11_tracker() {
+            // X11 samples are already in video pixels, so the ratio is 1; only
+            // an area capture folds the Settings cap into its recorded size.
+            let size = region.is_area().then(|| {
+                super::backend::fit_within_max_resolution(region.w, region.h, config.max_resolution)
+            });
+            RecordingManifest {
+                frame_rate: Some(f64::from(config.fps)),
+                target: Some(recording_target_name(config.target).into()),
+                width: size.map(|size| size.0),
+                height: size.map(|size| size.1),
+                ..RecordingManifest::new(1.0)
+            }
+        } else if should_track || stream_cursor_metadata {
             let (device_pixel_ratio, recorded_size) =
                 recording_pixel_geometry(config, region, stream_cursor_metadata);
             RecordingManifest {
@@ -381,7 +397,7 @@ impl PointerTrackSession {
         } else {
             RecordingManifest::new(1.0)
         };
-        if !track_shell {
+        if !should_track {
             if config.target == super::RecordingTarget::Window {
                 let _ = take_harvested_pointer_track();
             }
@@ -394,7 +410,7 @@ impl PointerTrackSession {
             };
         }
         let _ = take_harvested_pointer_track();
-        match crate::gnome_shell::start_pointer_track() {
+        match super::pointer_track::start(config.x11_window) {
             Ok(()) => {
                 if config.target == super::RecordingTarget::Window && stream_cursor_metadata {
                     eprintln!("[recording] window pointer and click tracking started");
@@ -412,6 +428,10 @@ impl PointerTrackSession {
             Err(err) => {
                 if stream_cursor_metadata {
                     eprintln!("[recording] StartPointerTrack failed ({err}); stream cursor will remain editable without Auto Zoom click data");
+                } else if super::pointer_track::uses_x11_tracker() {
+                    eprintln!(
+                        "[recording] X11 pointer track failed ({err}); continuing without sidecar"
+                    );
                 } else {
                     eprintln!(
                         "[recording] StartPointerTrack failed ({err}); continuing without sidecar"
@@ -464,7 +484,7 @@ impl PointerTrackSession {
                     &self.manifest,
                 );
             }
-            None => crate::gnome_shell::stop_pointer_track(),
+            None => super::pointer_track::stop(),
         };
         match result {
             Ok(result) => {
@@ -497,7 +517,7 @@ impl PointerTrackSession {
                     );
                 }
                 if result.samples.is_empty() {
-                    eprintln!("[recording] StopPointerTrack returned no pointer samples");
+                    eprintln!("[recording] pointer track returned no pointer samples");
                     crate::utils::notify::desktop_notification(
                         &crate::i18n::t("Pointer track missing"),
                         &crate::i18n::t("No cursor samples were captured. Zoom centers will use the frame center."),
@@ -564,7 +584,9 @@ impl PointerTrackSession {
                 }
             }
             Err(err) => {
-                eprintln!("[recording] StopPointerTrack failed ({err}); deleting partial sidecar");
+                eprintln!(
+                    "[recording] pointer track stop failed ({err}); deleting partial sidecar"
+                );
                 PointerSidecar::delete_next_to_video(output_path);
                 false
             }
@@ -575,8 +597,8 @@ impl PointerTrackSession {
         let was_started = self.started;
         self.started = false;
         if take_harvested_pointer_track().is_none() && was_started {
-            if let Err(err) = crate::gnome_shell::stop_pointer_track() {
-                eprintln!("[recording] StopPointerTrack on discard failed: {err}");
+            if let Err(err) = super::pointer_track::stop() {
+                eprintln!("[recording] pointer track stop on discard failed: {err}");
             }
         }
         delete_recording_outputs(output_path);
@@ -592,8 +614,8 @@ impl Drop for PointerTrackSession {
         if take_harvested_pointer_track().is_some() {
             return;
         }
-        if let Err(err) = crate::gnome_shell::stop_pointer_track() {
-            eprintln!("[recording] StopPointerTrack during cleanup failed: {err}");
+        if let Err(err) = super::pointer_track::stop() {
+            eprintln!("[recording] pointer track stop during cleanup failed: {err}");
         }
     }
 }
@@ -607,6 +629,19 @@ fn maybe_prompt_gnome_extension() {
             "Pointer tracking and area dim need the ApexShot GNOME extension.",
         );
     }
+}
+
+/// The user-facing body for a failed recording: the underlying cause without
+/// the internal context prefixes that only belong in the log.
+fn recording_failure_body(err: &anyhow::Error) -> String {
+    let mut body = err.to_string();
+    while let Some(rest) = body
+        .strip_prefix("failed to run recording controls: ")
+        .or_else(|| body.strip_prefix("Recording failed: "))
+    {
+        body = rest.to_string();
+    }
+    body
 }
 
 fn should_open_recording_editor(open_editor: bool) -> bool {
@@ -799,7 +834,8 @@ pub fn prepare_overlay_recording_request(
         x: capture_x,
         y: capture_y,
         cursor: true,
-        pointer_track: !request.window && crate::gnome_shell::should_use_pointer_track(),
+        pointer_track: !request.window && super::pointer_track::should_use(),
+        x11_window: None,
         hidpi: request.hidpi,
         max_resolution,
         fps,
@@ -839,14 +875,16 @@ pub fn prepare_overlay_recording_request(
 pub async fn run_recording_with_controls(
     config: super::RecordingConfig,
     params: RecordingControlsParams,
+    show_controls: bool,
 ) -> anyhow::Result<(PathBuf, StopAction)> {
     let _busy = super::control_session::RecordingBusyGuard::acquire()?;
-    run_recording_with_controls_locked(config, params).await
+    run_recording_with_controls_locked(config, params, show_controls).await
 }
 
 async fn run_recording_with_controls_locked(
     config: super::RecordingConfig,
     params: RecordingControlsParams,
+    show_controls: bool,
 ) -> anyhow::Result<(PathBuf, StopAction)> {
     // On GNOME the shell extension dims the area outside the capture rect.
     if crate::gnome_shell::current_session_supports_gnome_shell_overlay() {
@@ -854,11 +892,12 @@ async fn run_recording_with_controls_locked(
     }
 
     // Fallback for non-GNOME (Fedora KDE, Hyprland, Sway, Niri, River, etc.).
-    // No floating control bar — shortcuts, tray, and desktop notifications only.
+    // X11 desktops float the controls bar; Wayland ones keep shortcuts, tray,
+    // and desktop notifications.
     eprintln!(
-        "[recording] GNOME Shell not detected; using native recording path (shortcuts + notifications)."
+        "[recording] GNOME Shell not detected; using native recording path (controls, shortcuts, notifications)."
     );
-    run_recording_with_native_controls(config, params).await
+    run_recording_with_native_controls(config, params, show_controls).await
 }
 
 /// Standalone countdown window for entry points without a controls deck
@@ -956,15 +995,296 @@ async fn start_shell_recording(
     }
 }
 
+/// How long the X11 control bar gets to report its window before the
+/// recording starts without it, so a missing bar can never leak into frames.
+const X11_CONTROLS_START_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// The control bar's stdin. The command forwarder shares it so a pause or
+/// resume started by a shortcut or the tray is mirrored on the bar.
+type X11ControlsStdin = std::sync::Arc<std::sync::Mutex<Option<std::process::ChildStdin>>>;
+
+fn clear_x11_controls_stdin(stdin: &X11ControlsStdin) {
+    if let Ok(mut guard) = stdin.lock() {
+        guard.take();
+    }
+}
+
+/// Owns the X11 control bar process for the length of one recording.
+struct X11ControlsBar {
+    child: std::process::Child,
+    xid: u32,
+    stdin: X11ControlsStdin,
+}
+
+impl Drop for X11ControlsBar {
+    fn drop(&mut self) {
+        // Let the Qt bar close its window before the process goes away.
+        if let Ok(mut guard) = self.stdin.lock() {
+            if let Some(mut stdin) = guard.take() {
+                use std::io::Write;
+                let _ = stdin.write_all(b"end\n");
+                let _ = stdin.flush();
+            }
+        }
+        super::x11_controls_mask::clear_controls_window_if(self.xid);
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// Turn the bar's stdout into mask updates and recording commands.
+///
+/// Every bar prints its X11 window id and the commands it issues on stdout.
+/// The commands go through the same recording control server the shortcuts and
+/// tray use, and the id lets the recording mask the bar out of the frames.
+fn read_x11_controls_stdout(
+    stdout: std::process::ChildStdout,
+    xid_tx: oneshot::Sender<u32>,
+) -> std::io::Result<()> {
+    std::thread::Builder::new()
+        .name("apexshot-x11-controls".into())
+        .spawn(move || {
+            use std::io::BufRead;
+            let mut xid_tx = Some(xid_tx);
+            let mut reported = 0u32;
+            let lines = std::io::BufReader::new(stdout)
+                .lines()
+                .map_while(|line| line.ok());
+            for line in lines {
+                if let Some(xid) = line.strip_prefix("xid ") {
+                    if let Ok(xid) = xid.trim().parse::<u32>() {
+                        if xid == 0 {
+                            super::x11_controls_mask::clear_controls_window_if(reported);
+                        } else {
+                            reported = xid;
+                            super::x11_controls_mask::set_controls_window(xid);
+                            if let Some(tx) = xid_tx.take() {
+                                let _ = tx.send(xid);
+                            }
+                        }
+                    }
+                    continue;
+                }
+                let command = match line.as_str() {
+                    "pause" => super::RecordingControlCommand::Pause,
+                    "resume" => super::RecordingControlCommand::Resume,
+                    "restart" => super::RecordingControlCommand::Restart,
+                    "stop" => super::RecordingControlCommand::StopSave,
+                    "discard" => super::RecordingControlCommand::StopDiscard,
+                    _ => continue,
+                };
+                let _ = super::send_active_recording_command(command);
+            }
+            super::x11_controls_mask::clear_controls_window_if(reported);
+            if let Some(tx) = xid_tx.take() {
+                let _ = tx.send(0);
+            }
+        })
+        .map(|_| ())
+}
+
+/// Run the shared Qt control bar in the capture helper.
+///
+/// The bar is the same painted widget the Windows shell uses, so both
+/// platforms show one design. The helper mirrors the Rust-owned recording:
+/// bar commands arrive on its stdout, pause and resume come back on stdin.
+fn spawn_x11_qt_controls_bar(
+    params: &RecordingControlsParams,
+    session_id: &str,
+    stdin: &X11ControlsStdin,
+) -> Option<(std::process::Child, oneshot::Receiver<u32>)> {
+    let helper = crate::capture_overlay::find_capture_binary()?;
+    let mut bar_params = params.clone();
+    bar_params.session_id = Some(session_id.to_string());
+    bar_params.dim_screen = false;
+    bar_params.use_shell_mask = false;
+    bar_params.countdown_enabled = false;
+    let params_json = serde_json::to_string(&bar_params).ok()?;
+    let mut child = match std::process::Command::new(&helper)
+        .arg("--recording-controls")
+        .arg(&params_json)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::inherit())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(err) => {
+            eprintln!(
+                "[recording] Qt controls bar failed to launch ({}): {err}",
+                helper.display()
+            );
+            return None;
+        }
+    };
+
+    let Some(child_stdin) = child.stdin.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return None;
+    };
+    match stdin.lock() {
+        Ok(mut guard) => *guard = Some(child_stdin),
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+    }
+
+    let Some(stdout) = child.stdout.take() else {
+        clear_x11_controls_stdin(stdin);
+        let _ = child.kill();
+        let _ = child.wait();
+        return None;
+    };
+    let (xid_tx, xid_rx) = oneshot::channel();
+    if let Err(err) = read_x11_controls_stdout(stdout, xid_tx) {
+        eprintln!("[recording] X11 controls bar reader failed: {err}");
+        clear_x11_controls_stdin(stdin);
+        let _ = child.kill();
+        let _ = child.wait();
+        return None;
+    }
+    Some((child, xid_rx))
+}
+
+/// Run the GTK control bar in its own process.
+///
+/// The bar shares `recording-countdown-internal` because the main-binary
+/// dispatch lives in main.rs; a session id and zero seconds select the
+/// controls window instead of a countdown. This is the fallback used when the
+/// capture helper cannot run the shared bar.
+fn spawn_x11_gtk_controls_bar(
+    params: &RecordingControlsParams,
+    session_id: &str,
+) -> Option<(std::process::Child, oneshot::Receiver<u32>)> {
+    let exe = std::env::current_exe().ok()?;
+    let mut bar_params = params.clone();
+    bar_params.session_id = Some(session_id.to_string());
+    bar_params.dim_screen = false;
+    bar_params.use_shell_mask = false;
+    bar_params.countdown_enabled = false;
+    let params_json = serde_json::to_string(&bar_params).ok()?;
+    let mut child = std::process::Command::new(exe)
+        .arg("recording-countdown-internal")
+        .arg(params_json)
+        .arg("0")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::inherit())
+        .spawn()
+        .map_err(|err| eprintln!("[recording] X11 controls bar failed to launch: {err}"))
+        .ok()?;
+    let stdout = child.stdout.take()?;
+    let (xid_tx, xid_rx) = oneshot::channel();
+    if let Err(err) = read_x11_controls_stdout(stdout, xid_tx) {
+        eprintln!("[recording] X11 controls bar reader failed: {err}");
+        let _ = child.kill();
+        let _ = child.wait();
+        return None;
+    }
+    Some((child, xid_rx))
+}
+
+fn spawn_x11_controls_bar(
+    params: &RecordingControlsParams,
+    session_id: &str,
+    stdin: &X11ControlsStdin,
+) -> Option<(std::process::Child, oneshot::Receiver<u32>, bool)> {
+    if let Some((child, xid_rx)) = spawn_x11_qt_controls_bar(params, session_id, stdin) {
+        return Some((child, xid_rx, true));
+    }
+    spawn_x11_gtk_controls_bar(params, session_id).map(|(child, xid_rx)| (child, xid_rx, false))
+}
+
+async fn await_x11_controls_xid(
+    child: &mut std::process::Child,
+    xid_rx: oneshot::Receiver<u32>,
+) -> Option<u32> {
+    match tokio::time::timeout(X11_CONTROLS_START_TIMEOUT, xid_rx).await {
+        Ok(Ok(xid)) if xid != 0 => Some(xid),
+        _ => {
+            // A process that already exited could not open its window; the
+            // caller decides whether a fallback bar is worth starting.
+            if !matches!(child.try_wait(), Ok(Some(_))) {
+                eprintln!(
+                    "[recording] X11 controls bar did not report a window; recording without it"
+                );
+            }
+            None
+        }
+    }
+}
+
+async fn start_x11_controls_bar(
+    params: &RecordingControlsParams,
+    session_id: &str,
+    stdin: &X11ControlsStdin,
+) -> Option<X11ControlsBar> {
+    let (mut child, xid_rx, using_qt_bar) = spawn_x11_controls_bar(params, session_id, stdin)?;
+    if let Some(xid) = await_x11_controls_xid(&mut child, xid_rx).await {
+        return Some(X11ControlsBar {
+            child,
+            xid,
+            stdin: stdin.clone(),
+        });
+    }
+
+    let exited_early = matches!(child.try_wait(), Ok(Some(_)));
+    clear_x11_controls_stdin(stdin);
+    let _ = child.kill();
+    let _ = child.wait();
+
+    // The helper could not open its window, so the installed capture binary
+    // may predate this mode. Keep the GTK bar working as before.
+    if using_qt_bar && exited_early {
+        eprintln!("[recording] Qt controls bar exited early; using the GTK bar");
+        let (mut child, xid_rx) = spawn_x11_gtk_controls_bar(params, session_id)?;
+        if let Some(xid) = await_x11_controls_xid(&mut child, xid_rx).await {
+            return Some(X11ControlsBar {
+                child,
+                xid,
+                stdin: stdin.clone(),
+            });
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    None
+}
+
 /// Non-GNOME recording path (Fedora KDE, wlroots, etc.).
 ///
-/// No floating control bar — users control the session with configured
-/// global shortcuts and the tray. Lifecycle feedback is via desktop
+/// X11 desktops float the control bar outside the capture rectangle; Wayland
+/// ones keep the configured global shortcuts, the tray, and desktop
 /// notifications.
 pub async fn run_recording_with_native_controls(
     config: super::RecordingConfig,
-    params: RecordingControlsParams,
+    mut params: RecordingControlsParams,
+    show_controls: bool,
 ) -> anyhow::Result<(PathBuf, StopAction)> {
+    // X11 desktops without a ScreenCast portal pick the window here, before the
+    // backend is prepared, so the crosshair appears before the countdown.
+    let output_path = config.output_path.clone();
+    let window_target = config.target == super::RecordingTarget::Window;
+    let config = match super::x11_window_target::resolve_x11_window_target(config).await {
+        Ok(Some(config)) => config,
+        Ok(None) => {
+            super::notify_recording_session_ended_best_effort();
+            return Ok((output_path, StopAction::Discard));
+        }
+        Err(err) => return Err(err.into()),
+    };
+    if window_target && config.target == super::RecordingTarget::Area {
+        // Window requests carry zeroed geometry until the picker resolves it.
+        params.capture_x = config.x.unwrap_or(0);
+        params.capture_y = config.y.unwrap_or(0);
+        params.capture_w = config.width.map_or(0, |w| i32::try_from(w).unwrap_or(0));
+        params.capture_h = config.height.map_or(0, |h| i32::try_from(h).unwrap_or(0));
+        params.is_fullscreen = false;
+    }
+
     // Prepare the capture backend *before* countdown so any portal / permission
     // UI appears first. Countdown then leads straight into recording without a
     // second chooser after "3-2-1".
@@ -987,9 +1307,9 @@ pub async fn run_recording_with_native_controls(
         std::process::id(),
         chrono::Utc::now().timestamp_millis()
     );
-    let control_server = RecordingControlServer::start(session_id).await?;
+    let control_server = RecordingControlServer::start(session_id.clone()).await?;
 
-    // Optional pre-roll — never spawn the floating controls UI on native path.
+    // Optional pre-roll; the controls bar appears with the capture below.
     if params.countdown_enabled {
         match run_recording_countdown_subprocess(params.clone()).await {
             Ok(true) => {}
@@ -1008,9 +1328,28 @@ pub async fn run_recording_with_native_controls(
     let (control_command_tx, mut control_command_rx) =
         mpsc::unbounded_channel::<RecordingControlCommand>();
 
+    // Every command reaches the recorder through this forwarder, whether the
+    // bar, a shortcut, or the tray sent it, so it is also the one place that
+    // can keep the bar's pause state in step.
+    let controls_stdin: X11ControlsStdin = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let bar_stdin = controls_stdin.clone();
     let dbus_tx = recording_command_tx.clone();
     let dbus_forward = tokio::spawn(async move {
         while let Some(cmd) = control_command_rx.recv().await {
+            let state_line: &[u8] = match cmd {
+                RecordingControlCommand::Pause => b"paused\n",
+                RecordingControlCommand::Resume => b"resumed\n",
+                _ => b"",
+            };
+            if !state_line.is_empty() {
+                if let Ok(mut guard) = bar_stdin.lock() {
+                    if let Some(stdin) = guard.as_mut() {
+                        use std::io::Write;
+                        let _ = stdin.write_all(state_line);
+                        let _ = stdin.flush();
+                    }
+                }
+            }
             if dbus_tx.send(cmd).is_err() {
                 break;
             }
@@ -1018,6 +1357,26 @@ pub async fn run_recording_with_native_controls(
     });
 
     control_server.set_command_sender(control_command_tx);
+    let mut controls_bar = if show_controls && crate::backend::is_x11_session() {
+        start_x11_controls_bar(&params, &session_id, &controls_stdin).await
+    } else {
+        None
+    };
+    let mut pointer_track = if config.pointer_track_enabled() {
+        let fullscreen_monitor = if params.is_fullscreen && super::pointer_track::uses_x11_tracker()
+        {
+            super::x11_pointer_track::screen_region()
+        } else {
+            None
+        };
+        Some(PointerTrackSession::start(
+            &config,
+            pointer_capture_region(&config, fullscreen_monitor),
+            false,
+        ))
+    } else {
+        None
+    };
     super::notify_daemon_event("recording_session_started");
     // The backend reports whether the portal actually granted CursorMode::
     // Metadata. Screen and area streams then carry editable cursor positions
@@ -1049,6 +1408,9 @@ pub async fn run_recording_with_native_controls(
     let outcome = match outcome {
         Ok(outcome) => outcome,
         Err(err) => {
+            if let Some(pointer_track) = pointer_track.take() {
+                pointer_track.finish_discard(&config.output_path);
+            }
             super::notify_recording_session_ended_best_effort();
             return Err(err.into());
         }
@@ -1059,6 +1421,8 @@ pub async fn run_recording_with_native_controls(
             .unwrap_or_default(),
         None => Vec::new(),
     };
+    // Capture has stopped, so the bar has done its job.
+    drop(controls_bar.take());
 
     match outcome {
         super::RecordedSession {
@@ -1071,8 +1435,16 @@ pub async fn run_recording_with_native_controls(
             {
                 super::notify_daemon_event(event);
             }
+            if let Some(pointer_track) = pointer_track.take() {
+                pointer_track.finish_discard(&path);
+            }
             delete_recording_outputs(&path);
-            Box::pin(run_recording_with_native_controls(config, params)).await
+            Box::pin(run_recording_with_native_controls(
+                config,
+                params,
+                show_controls,
+            ))
+            .await
         }
         super::RecordedSession {
             path,
@@ -1083,6 +1455,9 @@ pub async fn run_recording_with_native_controls(
                 super::daemon_event_for_terminal_action(super::RecordingTerminalAction::Save)
             {
                 super::notify_daemon_event(event);
+            }
+            if let Some(pointer_track) = pointer_track.take() {
+                pointer_track.finish_save(&path, timeline.as_ref());
             }
             if config.target == super::RecordingTarget::Window || stream_cursor_metadata {
                 if let Some(timeline) = timeline.as_ref() {
@@ -1111,6 +1486,9 @@ pub async fn run_recording_with_native_controls(
                 super::daemon_event_for_terminal_action(super::RecordingTerminalAction::Discard)
             {
                 super::notify_daemon_event(event);
+            }
+            if let Some(pointer_track) = pointer_track.take() {
+                pointer_track.finish_discard(&path);
             }
             Ok((path, StopAction::Discard))
         }
@@ -1315,11 +1693,16 @@ pub fn run_overlay_recording_request_with_gtk(
     let open_editor = prepared.open_editor;
     let recording_config = prepared.recording_config.clone();
     let controls_params = prepared.controls_params.clone();
+    let show_controls = prepared.updated_app_config.rec_controls;
     let outcome = match std::thread::spawn(move || -> anyhow::Result<(PathBuf, StopAction)> {
         let runtime = tokio::runtime::Runtime::new()?;
         if let Some(params) = controls_params {
             runtime
-                .block_on(run_recording_with_controls_locked(recording_config, params))
+                .block_on(run_recording_with_controls_locked(
+                    recording_config,
+                    params,
+                    show_controls,
+                ))
                 .map_err(|err| {
                     if err
                         .downcast_ref::<super::RecordError>()
@@ -1416,11 +1799,17 @@ pub fn run_overlay_recording_request_with_gtk(
             }
             crate::gnome_shell::hide_recording_mask_best_effort();
             super::notify_recording_session_ended_best_effort();
-            crate::utils::notify::desktop_notification(
-                &crate::i18n::t("Recording failed"),
-                &err.to_string(),
-            );
-            Err(anyhow::anyhow!("Recording failed: {err}"))
+            eprintln!("[recording] Recording failed: {err}");
+            let body = recording_failure_body(&err);
+            // A missing shell extension has its own, more helpful
+            // notification in the daemon; leave that case to it.
+            if !body.contains("GNOME Shell extension is not installed") {
+                crate::utils::notify::desktop_notification(
+                    &crate::i18n::t("Recording failed"),
+                    &body,
+                );
+            }
+            Err(anyhow::Error::new(super::RecordingFailureNotified(err)))
         }
     }
 }
@@ -1869,7 +2258,7 @@ mod tests {
         assert_eq!(prepared.recording_config.cursor, true);
         assert_eq!(
             prepared.recording_config.pointer_track,
-            crate::gnome_shell::should_use_pointer_track()
+            crate::recording::pointer_track::should_use()
         );
         assert_eq!(prepared.recording_config.hidpi, true);
         assert_eq!(prepared.recording_config.max_resolution, Some((854, 480)));
@@ -2300,5 +2689,29 @@ mod tests {
         );
 
         assert!(prepared.controls_params.is_some());
+    }
+
+    #[test]
+    fn recording_failure_body_drops_the_internal_prefixes() {
+        let controls =
+            anyhow::anyhow!("failed to run recording controls: Wayland portal error: monitor lost");
+        assert_eq!(
+            recording_failure_body(&controls),
+            "Wayland portal error: monitor lost"
+        );
+
+        let double = anyhow::anyhow!(
+            "Recording failed: failed to run recording controls: GStreamer error: no encoder"
+        );
+        assert_eq!(
+            recording_failure_body(&double),
+            "GStreamer error: no encoder"
+        );
+
+        let plain = anyhow::anyhow!("GStreamer error: no encoder");
+        assert_eq!(
+            recording_failure_body(&plain),
+            "GStreamer error: no encoder"
+        );
     }
 }

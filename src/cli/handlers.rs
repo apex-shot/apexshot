@@ -737,18 +737,19 @@ pub(crate) async fn run_record(args: &[String]) -> Result<(), Box<dyn std::error
             session_id: None,
         };
 
-        let controls_outcome = match run_recording_with_controls(config, params).await {
-            Err(e)
-                if e.downcast_ref::<RecordError>()
-                    .is_some_and(|e| matches!(e, RecordError::Cancelled)) =>
-            {
-                eprintln!("Recording cancelled.");
-                return Ok(());
-            }
-            other => other.map_err(|e| {
-                Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
-            })?,
-        };
+        let controls_outcome =
+            match run_recording_with_controls(config, params, app_config.rec_controls).await {
+                Err(e)
+                    if e.downcast_ref::<RecordError>()
+                        .is_some_and(|e| matches!(e, RecordError::Cancelled)) =>
+                {
+                    eprintln!("Recording cancelled.");
+                    return Ok(());
+                }
+                other => other.map_err(|e| {
+                    Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
+                })?,
+            };
 
         match controls_outcome {
             (path, StopAction::Discard) => {

@@ -228,6 +228,10 @@ fn wire_upload_button(
         ) {
             return;
         }
+        let was_trial = crate::studio_entitlement::studio_access(
+            crate::studio_entitlement::capabilities_for_video(&state_snapshot),
+        )
+        .is_trial();
 
         let config = crate::config::load_config();
         if !crate::cloud::upload::is_configured(&config) {
@@ -246,9 +250,13 @@ fn wire_upload_button(
 
         // Export with current editor settings first, then upload the result.
         let cancellation_worker = export_cancellation.clone();
-        let (sender, receiver) =
-            std::sync::mpsc::channel::<Result<String, crate::cloud::upload::UploadError>>();
+        let (sender, receiver) = std::sync::mpsc::channel::<(
+            Result<String, crate::cloud::upload::UploadError>,
+            bool,
+            Option<crate::cloud::limit_prompt::UploadHeadsUp>,
+        )>();
         std::thread::spawn(move || {
+            let mut rendered = false;
             let result = (|| {
                 if cancellation_worker.load(Ordering::Acquire) {
                     return Err(crate::cloud::upload::UploadError::Server(
@@ -277,6 +285,7 @@ fn wire_upload_button(
                 let path = if let Some(path) = cached_path {
                     path
                 } else {
+                    rendered = true;
                     ffmpeg::export_edited_to_cancellable(
                         &state_snapshot,
                         state_snapshot.export_path(),
@@ -295,7 +304,12 @@ fn wire_upload_button(
                 }
                 crate::cloud::upload::upload_file(&config, &path).map(|result| result.share_url)
             })();
-            let _ = sender.send(result);
+            let heads_up = if result.is_ok() {
+                crate::cloud::limit_prompt::usage_heads_up(&config)
+            } else {
+                None
+            };
+            let _ = sender.send((result, rendered, heads_up));
         });
 
         let controls = controls.clone();
@@ -305,7 +319,7 @@ fn wire_upload_button(
         let export_cancellation = export_cancellation.clone();
         glib::timeout_add_local(Duration::from_millis(100), move || {
             match receiver.try_recv() {
-                Ok(result) => {
+                Ok((result, rendered, heads_up)) => {
                     exporting.set(false);
                     spinner.stop();
                     spinner.set_visible(false);
@@ -323,27 +337,60 @@ fn wire_upload_button(
                                         window.upcast_ref(),
                                         &share_url,
                                     );
-                                let body = if copied_now {
+                                let mut body = if copied_now {
                                     t("Share link copied to clipboard")
                                 } else {
                                     t("Switch back to the editor to copy the link")
                                 };
+                                // A fresh export inside this upload already
+                                // consumed one finished Studio output; a cached
+                                // export was consumed when it was first written.
+                                // The floating toast carries the trial count,
+                                // so the notification only keeps it as a
+                                // fallback when no overlay could host the card.
+                                if rendered {
+                                    let shown = was_trial
+                                        && crate::studio_trial_toast::show(
+                                            &window,
+                                            crate::studio_trial::trial_remaining(),
+                                        );
+                                    if !shown {
+                                        if let Some(text) =
+                                            crate::studio_trial::finished_feedback(was_trial)
+                                        {
+                                            body = format!("{body}\n\n{text}");
+                                        }
+                                    }
+                                }
+                                if let Some(heads_up) = &heads_up {
+                                    body = heads_up.append_to(&body);
+                                }
+                                crate::utils::notify::desktop_notification(
+                                    &t("Upload complete"),
+                                    &body,
+                                );
+                                if let Some(heads_up) = &heads_up {
+                                    for limit in &heads_up.cards {
+                                        crate::cloud::upgrade::show_prompt_almost(&window, limit);
+                                    }
+                                }
+                            }
+                            None => {
+                                let mut body = tfmt("Share link: {url}", &[("url", &share_url)]);
+                                if let Some(heads_up) = &heads_up {
+                                    body = heads_up.append_to(&body);
+                                }
                                 crate::utils::notify::desktop_notification(
                                     &t("Upload complete"),
                                     &body,
                                 );
                             }
-                            None => crate::utils::notify::desktop_notification(
-                                &t("Upload complete"),
-                                &tfmt("Share link: {url}", &[("url", &share_url)]),
-                            ),
                         },
                         Err(err) => {
-                            if let crate::cloud::upload::UploadError::UpgradeRequired(message) =
-                                &err
+                            if let crate::cloud::upload::UploadError::UpgradeRequired(limit) = &err
                             {
                                 if let Some(window) = window.upgrade() {
-                                    crate::cloud::upgrade::show_prompt(&window, message);
+                                    crate::cloud::upgrade::show_prompt(&window, limit);
                                 }
                             } else {
                                 crate::utils::notify::desktop_notification(

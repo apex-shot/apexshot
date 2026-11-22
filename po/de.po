@@ -853,7 +853,6 @@ msgstr "Aufnahme stoppen und speichern:"
 msgid "Only during recording"
 msgstr "Nur während der Aufnahme"
 
-
 msgid "+ Add current color"
 msgstr "+ Aktuelle Farbe hinzufügen"
 
@@ -1377,7 +1376,6 @@ msgid "Focused"
 msgstr "Konzentriert"
 msgid "Follow"
 msgstr "Follow"
-
 
 msgid "Font"
 msgstr "Schriftart"
@@ -2638,7 +2636,7 @@ msgstr "{count} Motion-Bearbeitungen"
 
 msgid "{count} video edits"
 msgstr "{count} Video-Bearbeitungen"
- 
+
 msgid "Freeze"
 msgstr "Einfrieren"
 
@@ -4877,7 +4875,6 @@ msgstr "Exportiere {percent} %"
 msgid "Export cancelled"
 msgstr "Export abgebrochen"
 
-
 msgid "Could not render the image."
 msgstr "Das Bild konnte nicht gerendert werden."
 
@@ -5313,3 +5310,135 @@ msgstr "Bildschirm auswählen"
 
 msgid "A virtual screen records an empty display. Pick your screen in the sharing dialog."
 msgstr "Ein virtueller Bildschirm nimmt eine leere Anzeige auf. Wähle deinen Bildschirm im Freigabedialog."
+
+msgid "Almost out of free uploads"
+msgstr "Fast keine kostenlosen Uploads mehr"
+
+msgid "Could not open the dashboard"
+msgstr "Das Dashboard konnte nicht geöffnet werden"
+
+msgid "Delete old uploads, or Go Pro for 50 GB."
+msgstr "Lösche alte Uploads oder hol dir Pro für 50 GB."
+
+msgid "See Studio"
+msgstr "Studio ansehen"
+
+msgid "What's new"
+msgstr "Neuigkeiten"
+
+msgid "What's new in ApexShot {version}"
+msgstr "Neu in ApexShot {version}"
+
+msgid "Explore Studio"
+msgstr "Studio entdecken"
+
+msgid "Exported with Studio. 1 free Studio export left."
+msgstr "Mit Studio exportiert. Noch 1 kostenloser Studio-Export."
+
+msgid "Exported with Studio. {count} free Studio exports left."
+msgstr "Mit Studio exportiert. Noch {count} kostenlose Studio-Exporte."
+
+msgid "Go Pro for 50 GB."
+msgstr "Hol dir Pro für 50 GB."
+
+msgid "Go Pro for unlimited uploads."
+msgstr "Hol dir Pro für unbegrenzte Uploads."
+
+msgid "Manage uploads"
+msgstr "Uploads verwalten"
+
+msgid "Not uploaded"
+msgstr "Nicht hochgeladen"
+
+msgid "Studio exports left on the free trial"
+msgstr "Verbleibende Studio-Exporte im kostenlosen Test"
+
+msgid "Studio · 1 free export left"
+msgstr "Studio · noch 1 kostenloser Export"
+
+msgid "Studio · {count} free exports left"
+msgstr "Studio · noch {count} kostenlose Exporte"
+
+msgid "That was your last free Studio export. Get Studio to keep these styles."
+msgstr "Das war dein letzter kostenloser Studio-Export. Hol dir Studio, um diese Stile zu behalten."
+
+msgid "Uploads come back next month."
+msgstr "Uploads sind nächsten Monat wieder verfügbar."
+
+msgid "Uploads come back on {date}."
+msgstr "Uploads sind am {date} wieder verfügbar."
+
+msgid "You've used this month's free uploads"
+msgstr "Du hast die kostenlosen Uploads dieses Monats aufgebraucht"
+
+msgid "You've used your 3 free Studio exports"
+msgstr "Du hast deine 3 kostenlosen Studio-Exporte genutzt"
+
+msgid "Your capture is saved on this computer."
+msgstr "Deine Aufnahme ist auf diesem Computer gespeichert."
+
+msgid "Your free Cloud storage is almost full"
+msgstr "Dein kostenloser Cloud-Speicher ist fast voll"
+
+msgid "Your free Cloud storage is full"
+msgstr "Dein kostenloser Cloud-Speicher ist voll"
+
+msgid "{used} of {max} free Cloud storage used."
+msgstr "{used} von {max} kostenlosem Cloud-Speicher belegt."
+
+msgid "{used} of {max} free uploads used this month."
+msgstr "{used} von {max} kostenlosen Uploads in diesem Monat genutzt."
+
+msgid "{used} of {max} free uploads used."
+msgstr "{used} von {max} kostenlosen Uploads genutzt."
+
+msgid "{used} of {max} used this month."
+msgstr "{used} von {max} in diesem Monat genutzt."
+
+msgid "{used} of {max} used."
+msgstr "{used} von {max} belegt."
+
+msgid "Try Studio free"
+msgstr "Studio kostenlos testen"
+
+msgid "Buying Studio takes one step"
+msgstr "Studio kaufen in einem Schritt"
+
+msgid "Capture, annotation, recording, and the editors' core tools stay free."
+msgstr "Aufnahme, Anmerkungen, Bildschirmaufnahme und die Kernwerkzeuge der Editoren bleiben kostenlos."
+
+msgid "Studio is active on this device"
+msgstr "Studio ist auf diesem Gerät aktiv"
+
+msgid "Studio activation failed"
+msgstr "Studio-Aktivierung fehlgeschlagen"
+
+msgid "Uses Studio · 1 free export left"
+msgstr "Nutzt Studio · noch 1 kostenloser Export"
+
+msgid "Uses Studio · {count} free exports left"
+msgstr "Nutzt Studio · noch {count} kostenlose Exporte"
+
+msgid "Exported with Studio."
+msgstr "Mit Studio exportiert."
+
+msgid "1 free Studio export left."
+msgstr "Noch 1 kostenloser Studio-Export."
+
+msgid "{count} free Studio exports left."
+msgstr "Noch {count} kostenlose Studio-Exporte."
+
+msgid "That was your last free Studio export."
+msgstr "Das war dein letzter kostenloser Studio-Export."
+
+msgid "Get Studio to keep these styles."
+msgstr "Hol dir Studio, um diese Stile zu behalten."
+
+msgid "Get Studio"
+msgstr "Studio holen"
+
+msgid "Your next 3 Studio exports are on us. After each one, ApexShot shows how many are left."
+msgstr "Deine nächsten 3 Studio-Exporte gehen auf uns. Nach jedem zeigt ApexShot, wie viele noch übrig sind."
+
+msgid "Choose Studio in ApexShot, sign in, and pay. ApexShot turns Studio on for you, with no licence file to copy or import."
+msgstr "Wähle Studio in ApexShot, melde dich an und bezahle. ApexShot schaltet Studio für dich frei, ohne Lizenzdatei zum Kopieren oder Importieren."

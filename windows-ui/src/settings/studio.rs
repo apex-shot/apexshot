@@ -9,11 +9,9 @@ use crate::studio_entitlement::{
     activate_token, current_status, StudioEntitlementError, StudioStatus,
 };
 use gtk4::prelude::*;
-use gtk4::{glib, Align, Box as GtkBox, Button, Entry, Label, Orientation, Revealer};
+use gtk4::{glib, Align, Box as GtkBox, Button, Entry, Label, Orientation, Overlay, Revealer};
 use std::cell::Cell;
 use std::rc::Rc;
-
-const STUDIO_URL: &str = "https://apexshot.org/studio";
 
 pub fn build_studio_section() -> GtkBox {
     install_css();
@@ -125,7 +123,7 @@ fn row_text(title: &str, hint: Option<&str>) -> GtkBox {
 
 /// "ApexShot Studio" with its state pill, one short sentence, and the one
 /// action that fits the state.
-fn status_row(status: StudioStatus, flash: Option<String>) -> GtkBox {
+fn status_row(status: StudioStatus, flash: Option<String>) -> Overlay {
     let row = table_row();
     let text = GtkBox::new(Orientation::Vertical, 3);
     text.set_hexpand(true);
@@ -133,6 +131,7 @@ fn status_row(status: StudioStatus, flash: Option<String>) -> GtkBox {
 
     let title_line = GtkBox::new(Orientation::Horizontal, 8);
     let name = Label::new(Some(&t("ApexShot Studio")));
+    name.add_css_class("studio-hero-title");
     name.set_xalign(0.0);
     title_line.append(&name);
     let (pill_text, pill_class) = status_pill(status);
@@ -145,6 +144,7 @@ fn status_row(status: StudioStatus, flash: Option<String>) -> GtkBox {
 
     let message = Label::new(Some(&short_message(status)));
     message.add_css_class("settings-sub-option-hint");
+    message.add_css_class("studio-hero-message");
     message.set_wrap(true);
     message.set_xalign(0.0);
     text.append(&message);
@@ -171,13 +171,38 @@ fn status_row(status: StudioStatus, flash: Option<String>) -> GtkBox {
     }
     action.connect_clicked(|_| {
         std::thread::spawn(|| {
-            if let Err(error) = crate::utils::open::open_url(STUDIO_URL) {
+            if let Err(error) =
+                crate::utils::open::open_url(&crate::studio_entitlement::studio_page_url())
+            {
                 eprintln!("[studio] Could not open the Studio page: {error}");
             }
         });
     });
     row.append(&action);
-    row
+    with_dither_field(row)
+}
+
+/// Put the dither field behind the status card without letting the field take
+/// part in the row's size or intercept its clicks.
+fn with_dither_field(row: GtkBox) -> Overlay {
+    let field =
+        crate::dither_field::dither_field(super::windowing::prefers_dark_glass_theme(), 0.0);
+    // The overlay sizes the field to the row, so drop the standalone height
+    // request that would otherwise enlarge the card.
+    field.set_size_request(-1, -1);
+    field.set_halign(Align::Fill);
+    field.set_valign(Align::Fill);
+    field.set_hexpand(true);
+    field.set_vexpand(true);
+
+    let overlay = Overlay::new();
+    overlay.set_halign(Align::Fill);
+    overlay.set_valign(Align::Fill);
+    overlay.set_hexpand(true);
+    overlay.set_child(Some(&field));
+    overlay.add_overlay(&row);
+    overlay.set_measure_overlay(&row, true);
+    overlay
 }
 
 /// The key field with its Activate button on one line, and the result of

@@ -20,6 +20,7 @@ pub enum TrayAction {
     ShowLastPreview,
     OpenLastCapture,
     OpenHistory,
+    WhatsNew,
     OpenSettings,
     Quit,
 }
@@ -308,6 +309,7 @@ impl ksni::Tray for ApexShotTray {
                 TrayAction::OpenLastCapture
             ),
             item!(&crate::i18n::t("History"), idle, TrayAction::OpenHistory),
+            item!(&crate::i18n::t("What's new"), idle, TrayAction::WhatsNew),
             item!(&crate::i18n::t("Settings"), idle, TrayAction::OpenSettings),
             MenuItem::Separator,
             item!(&crate::i18n::t("Quit"), true, TrayAction::Quit),

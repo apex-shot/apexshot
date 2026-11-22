@@ -76,10 +76,10 @@ public:
     // panel selects the region, so the toolbar's Area slot stays a screenshot
     // action there.
     // `enableScrollCapture` adds a Scroll mode that combines with Window or
-    // Area. It is opt-in so the Linux overlay keeps its existing toolbar. A
-    // host that enables it also gets a Webcam item while recording, which
-    // takes the Scroll slot, so window recordings can turn the camera on
-    // before they start.
+    // Area. It is opt-in because only an unsandboxed X11 session can drive the
+    // wheel. On Windows, a host that enables it also gets a Webcam item while
+    // recording, which takes the Scroll slot, so window recordings can turn
+    // the camera on before they start.
     static Result choose(QLocalServer* controlServer = nullptr,
                          QScreen* targetScreen = nullptr,
                          bool recordingAvailable = true,
@@ -128,6 +128,10 @@ private:
     int itemCount() const;
     int itemWidth(int index) const;
     int preferredWidth() const;
+    /// Whether the Scroll item exists in the current mode. Scrolling capture
+    /// is a screenshot feature, so the slot is dropped while Video is
+    /// selected where no webcam toggle takes it over.
+    bool scrollSlotVisible() const;
     QString labelFor(int index) const;
     QString displayedLabel(int index, const QFont& font) const;
     QRectF itemRect(int index) const;

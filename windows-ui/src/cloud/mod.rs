@@ -21,6 +21,10 @@ pub mod destination;
 
 pub mod helper;
 
+#[path = "../../../src/cloud/limit_prompt.rs"]
+#[rustfmt::skip]
+pub mod limit_prompt;
+
 #[path = "../../../src/cloud/listing.rs"]
 #[rustfmt::skip]
 pub mod listing;

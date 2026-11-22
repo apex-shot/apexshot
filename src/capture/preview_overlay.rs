@@ -27,7 +27,8 @@ enum UploadUiEvent {
     Finished {
         dismiss: bool,
         share_url: Option<String>,
-        upgrade_message: Option<String>,
+        upgrade_message: Option<crate::cloud::upload::CloudLimit>,
+        heads_up: Option<crate::cloud::limit_prompt::UploadHeadsUp>,
     },
 }
 
@@ -867,6 +868,7 @@ fn setup_preview_window(
                     dismiss,
                     share_url,
                     upgrade_message,
+                    heads_up,
                 }) => {
                     uploading_poll.set(false);
                     upload_btn_poll.set_sensitive(true);
@@ -882,9 +884,16 @@ fn setup_preview_window(
                             dismiss_preview_window(&window, dismiss_action_upload_poll);
                         }
                     }
-                    if let Some(message) = upgrade_message {
+                    if let Some(limit) = upgrade_message {
                         if let Some(window) = window_weak_upload_poll.upgrade() {
-                            crate::cloud::upgrade::show_prompt(&window, &message);
+                            crate::cloud::upgrade::show_prompt(&window, &limit);
+                        }
+                    }
+                    if let Some(heads_up) = heads_up {
+                        if let Some(window) = window_weak_upload_poll.upgrade() {
+                            for limit in &heads_up.cards {
+                                crate::cloud::upgrade::show_prompt_almost(&window, limit);
+                            }
                         }
                     }
                     // Keep listening so a later upload (after a failure) can still finish/dismiss.
@@ -919,28 +928,30 @@ fn setup_preview_window(
             std::thread::spawn(move || {
                 // Shared upload path (logs + notifications). Auto-upload after
                 // capture uses the same helper so behavior stays consistent.
-                let (dismiss, share_url, upgrade_message) =
-                    match crate::cloud::upload::upload_file_with_notifications_without_clipboard(
+                let outcome =
+                    crate::cloud::upload::upload_file_with_notifications_without_clipboard(
                         &config, &path,
-                    ) {
-                        Ok(result) => {
-                            // Honor Quick Access "Close window after uploading".
-                            // Failed uploads never dismiss the preview.
-                            (
-                                should_close_preview_after_upload(close_after_upload),
-                                Some(result.share_url),
-                                None,
-                            )
-                        }
-                        Err(crate::cloud::upload::UploadError::UpgradeRequired(message)) => {
-                            (false, None, Some(message))
-                        }
-                        Err(_) => (false, None, None),
-                    };
+                    );
+                let (dismiss, share_url, upgrade_message) = match outcome.result {
+                    Ok(result) => {
+                        // Honor Quick Access "Close window after uploading".
+                        // Failed uploads never dismiss the preview.
+                        (
+                            should_close_preview_after_upload(close_after_upload),
+                            Some(result.share_url),
+                            None,
+                        )
+                    }
+                    Err(crate::cloud::upload::UploadError::UpgradeRequired(limit)) => {
+                        (false, None, Some(limit))
+                    }
+                    Err(_) => (false, None, None),
+                };
                 let _ = upload_ui_tx.send(UploadUiEvent::Finished {
                     dismiss,
                     share_url,
                     upgrade_message,
+                    heads_up: outcome.heads_up,
                 });
             });
         });
@@ -1134,11 +1145,10 @@ fn register_gnome_preview(display: Option<CaptureDisplay>) {
 
 /// On X11, set `_NET_WM_WINDOW_TYPE_NOTIFICATION` so the preview card:
 ///  - does **not** appear in the taskbar / dock
-///  - is **not** animated by the compositor (no slide-in / scale-up)
 ///  - stays above other windows without needing always-on-top tricks
 ///
-/// Called from `connect_realize` so the hints are in place before the
-/// first MapNotify — the compositor therefore never starts an animation.
+/// Called from `connect_realize` so the hints are in place before the first
+/// MapNotify.
 fn suppress_x11_preview_window_type(window: &Window) {
     let Some(surface) = window.surface() else {
         return;
@@ -1153,6 +1163,9 @@ fn suppress_x11_preview_window_type(window: &Window) {
         return;
     };
 
+    // Transparent windows must stay composited on X11: bypassing the
+    // compositor paints their transparent areas black.
+
     // _NET_WM_WINDOW_TYPE = _NET_WM_WINDOW_TYPE_NOTIFICATION
     // Notification windows skip the taskbar and compositor open/close animations.
     if let (Ok(type_cookie), Ok(notif_cookie)) = (
@@ -1166,20 +1179,6 @@ fn suppress_x11_preview_window_type(window: &Window) {
                 type_reply.atom,
                 xproto::AtomEnum::ATOM,
                 &[notif_reply.atom],
-            );
-        }
-    }
-
-    // _NET_WM_BYPASS_COMPOSITOR = 1 — ask the compositor to skip compositing
-    // this window so it appears without any fade / scale animation.
-    if let Ok(cookie) = conn.intern_atom(false, b"_NET_WM_BYPASS_COMPOSITOR") {
-        if let Ok(reply) = cookie.reply() {
-            let _ = conn.change_property32(
-                xproto::PropMode::REPLACE,
-                xid,
-                reply.atom,
-                xproto::AtomEnum::CARDINAL,
-                &[1u32],
             );
         }
     }

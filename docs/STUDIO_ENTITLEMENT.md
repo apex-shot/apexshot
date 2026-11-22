@@ -93,20 +93,36 @@ redistributing the source.
 
 ## Local activation and recovery
 
-Open **Settings → Studio**, paste the signed entitlement, and select **Activate**.
-The token is verified locally and stored at
+The **Purchase or recover Studio** link opens the official Studio page with
+this machine's Device ID already in the URL:
+`https://apexshot.org/studio?device=<device_id>&from=app&platform=<linux|windows>`.
+The page binds the purchase to that ID, so the customer no longer copies and
+pastes a Device ID by hand. If the app cannot read a Device ID, the link falls
+back to plain `https://apexshot.org/studio`.
+
+After a purchase or recovery, the website opens
+`apexshot://studio/activate?token=<unpadded base64url envelope>`. Both desktop
+packages register the `apexshot` URL scheme: the Linux desktop entry declares
+an `x-scheme-handler`, and the Windows installer registers it under the
+per-user `Software\Classes` key. The app receives the link, decodes the token,
+and verifies it offline exactly as if it had been pasted, including the
+signature, the schema 2 device binding, and the token size limit. A link from
+any other website therefore cannot install a licence that this build accepts.
+
+Manual activation stays available as the fallback. Open **Settings → Studio**,
+paste the signed entitlement, and select **Activate**. In both paths the token
+is verified locally and stored at
 `${XDG_CONFIG_HOME:-~/.config}/apexshot/studio/entitlement.json` with private
 directory/file permissions and atomic replacement. A malformed or invalid
 replacement does not overwrite a previously valid token. The app reloads and
 verifies the token from disk when checking access, so activation survives
 restart and works offline.
 
-Use the **Purchase or recover Studio** link to open `https://apexshot.org/studio`
-in a browser. The desktop does not call a purchase, account, or recovery API;
-the person providing the token must verify purchase ownership before issuing
-one. The desktop repository contains no production signing key or issuance
-service, so official sales and automated recovery are not ready until those
-separate operations are configured.
+The desktop does not call a purchase, account, or recovery API; the person
+providing the token must verify purchase ownership before issuing one.
+Purchases, token issuance, and recovery run in the separate Cloud service,
+with Polar as the merchant of record; the desktop repository contains no
+production signing key or issuance service.
 
 When an export, copy, or upload would use a Studio capability without an
 eligible token, the editor raises an in-window card instead of a desktop
@@ -125,10 +141,34 @@ trigger the gate. Legacy zoom easing, classic animation, shared rendering
 improvements, normal image backgrounds, and default zoom-camera settings stay
 free.
 
+## Free trial
+
+Every computer can make three Studio outputs before activation. The count is
+stored at
+`${XDG_CONFIG_HOME:-~/.config}/apexshot/studio/trial.json` beside the
+entitlement, with the same private directory and file permissions and the same
+atomic replacement. A missing or unreadable file means nothing has been used,
+and the stored count saturates at three so a duplicated or edited file cannot
+grant more free outputs.
+
+The trial applies to a refusal that activation could fix: a missing, invalid,
+mismatched, or uncovered licence. A build that cannot verify licences, or
+cannot read its storage, never falls back to the trial, because buying Studio
+alone could not end it.
+
+A trial output must finish to count. A cancelled or failed render, copy, or
+upload never consumes one, and a build with a covering licence never touches
+the counter. While the trial is active, the editors show
+`Studio · N free exports left` beside Export and refresh it as the document's
+Studio usage changes. After the last free output finishes, the not-activated
+upgrade card appears with the title "You've used your 3 free Studio exports".
+Successful trial outputs also say how many remain (or that it was the last
+one) in the editor's normal completion feedback.
+
 ## Refunds and offline limits
 
-The proposed policy is a 14-day refund window on the first Studio purchase and
-must be stated consistently in the checkout terms before sale. This offline
+The published policy is a 14-day refund window on the first Studio purchase,
+stated on the website's refund page and in the checkout terms. This offline
 token has no online revocation list or device binding. If a refund is processed
 while a device is offline, the stored token cannot be immediately revoked
 there, and a previously covered build remains usable. Do not promise immediate

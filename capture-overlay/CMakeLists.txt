@@ -359,11 +359,38 @@ else()
         src/RecordingControlsWindow.h
         src/ScrollControlPanel.cpp
         src/ScrollControlPanel.h
+        # Scrolling capture: the X11 session and the portable control bar.
+        src/platform/x11/scroll_capture_x11.cpp
+        src/platform/x11/scroll_capture_x11.h
+        src/platform/x11/scroll_stitcher.cpp
+        src/platform/x11/scroll_stitcher.h
+        src/platform/windows/scroll_capture.h
+        src/platform/windows/scroll_controls.cpp
+        src/platform/windows/scroll_controls.h
+        # The recording bar is the same painted widget as the Windows shell;
+        # the X11 file behind it mirrors a recording owned by the Rust process.
+        src/platform/recording.h
+        src/platform/windows/recording_controls.cpp
+        src/platform/windows/recording_controls.h
+        src/platform/x11/remote_recording_session.cpp
     )
+
+    target_include_directories(apexshot-capture PRIVATE src ${X11_INCLUDE_DIR})
 
     target_link_libraries(apexshot-capture
         PRIVATE Qt5::Widgets Qt5::DBus Qt5::X11Extras Qt5::Network ${X11_LIBRARIES} ${X11_Xtst_LIB}
     )
+
+    option(APEXSHOT_BUILD_SCROLL_TOOL "Build the offline scroll stitching tool" OFF)
+    if(APEXSHOT_BUILD_SCROLL_TOOL)
+        add_executable(apexshot-scroll-stitch
+            src/platform/x11/scroll_stitch_tool.cpp
+            src/platform/x11/scroll_stitcher.cpp
+            src/platform/x11/scroll_stitcher.h
+        )
+        target_include_directories(apexshot-scroll-stitch PRIVATE src)
+        target_link_libraries(apexshot-scroll-stitch PRIVATE Qt5::Gui)
+    endif()
 
     option(APEXSHOT_CAPTURE_BUILD_TESTS "Build the capture helper unit tests" OFF)
     if(APEXSHOT_CAPTURE_BUILD_TESTS)

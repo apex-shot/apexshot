@@ -2,6 +2,17 @@
    the display's UI scale before the sheet reaches GTK. Everything else comes
    from the shared Settings rows. */
 
+/* A soft glow in the page's colour quiets the dots behind the status row. */
+.studio-hero-title,
+.studio-hero-message {
+    text-shadow: 0 0 12px #0f0f0f, 0 0 4px #0f0f0f;
+}
+
+.editor-root.editor-theme-light .studio-hero-title,
+.editor-root.editor-theme-light .studio-hero-message {
+    text-shadow: 0 0 12px #ffffff, 0 0 4px #ffffff;
+}
+
 .settings-table-row label.studio-pill {
     padding: 1px 8px;
     border-radius: 999px;

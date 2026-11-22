@@ -20,6 +20,22 @@ namespace ScreenCapture {
 
 enum class CaptureStatus { Ok, Cancelled, Failed };
 
+/// True when the session renders through Wayland, including XWayland.
+bool isWaylandSession();
+
+/// Outcome of the X11 root-window picker.
+enum class WindowPickStatus { Picked, Cancelled, Failed };
+
+struct X11WindowPick {
+    QRect rect;
+    quintptr windowId = 0;
+};
+
+/// Pick a window through the X11 root-window crosshair. The helper is the
+/// same binary that supplies the portal stills, run with its internal X11
+/// picker command.
+WindowPickStatus pickX11Window(X11WindowPick& out, QString& outError);
+
 struct HelperMessage {
     enum class Kind { Invalid, Ready, Error, Frame };
 

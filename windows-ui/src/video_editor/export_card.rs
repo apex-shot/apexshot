@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 /// cannot be started until this card is dismissed.
 pub(super) fn show(
     shell: &Overlay,
+    window: &gtk4::ApplicationWindow,
     model: ExportModel,
     output: PathBuf,
     settings: ExportSettings,
@@ -86,6 +87,10 @@ pub(super) fn show(
     // The update window reads this flag before it closes any window, so an
     // install waits for the export instead of ending it.
     crate::update::open_windows::set_busy(true);
+    // Captured before encoding: the renderer consumes the trial on success and
+    // this drives the completion copy.
+    let was_trial =
+        crate::studio_entitlement::studio_access(super::studio::capabilities(&model)).is_trial();
     let handle = Rc::new(start_export_with_settings(model, output, settings));
     let cancelling = Rc::new(Cell::new(false));
     stop.connect_clicked({
@@ -158,9 +163,11 @@ pub(super) fn show(
     let started = Instant::now();
     let mut eta = Eta::default();
     let mut fraction = 0.0_f64;
+    let toast_window = window.downgrade();
     glib::timeout_add_local(Duration::from_millis(100), {
         let shell = shell.downgrade();
         let screen = screen.downgrade();
+        let toast_window = toast_window.clone();
         move || {
             let (Some(shell), Some(screen)) = (shell.upgrade(), screen.upgrade()) else {
                 crate::update::open_windows::set_busy(false);
@@ -218,9 +225,27 @@ pub(super) fn show(
                 Ok(ExportUpdate::Finished(path, sound)) => {
                     crate::update::open_windows::set_busy(false);
                     title.set_text(&t("Exported successfully"));
+                    // The renderer consumed the trial; the floating toast now
+                    // carries the count on screen.
+                    let shown = was_trial
+                        && toast_window.upgrade().is_some_and(|window| {
+                            crate::studio_trial_toast::show(
+                                &window,
+                                crate::studio_trial::trial_remaining(),
+                            )
+                        });
+                    let feedback = if shown {
+                        None
+                    } else {
+                        crate::studio_trial::finished_feedback(was_trial)
+                    };
+                    let notification = match &feedback {
+                        Some(text) => format!("{}\n\n{text}", path.display()),
+                        None => path.display().to_string(),
+                    };
                     crate::utils::notify::desktop_notification(
                         &t("Export complete"),
-                        &path.display().to_string(),
+                        &notification,
                     );
                     timing.set_text(&format!(
                         "{} · {}",
@@ -244,6 +269,11 @@ pub(super) fn show(
                             "{} {error}",
                             t("Exported, but the sound could not be added:")
                         ));
+                    }
+                    // A finished trial export says how many remain, and when
+                    // the last one is gone.
+                    if let Some(text) = feedback {
+                        notes.push(text);
                     }
                     if !notes.is_empty() {
                         detail.set_text(&notes.join("\n"));
@@ -316,8 +346,14 @@ enum UploadPhase {
 }
 
 enum UploadEvent {
-    Progress { sent: u64, total: u64 },
-    Done(Result<String, crate::cloud::upload::UploadError>),
+    Progress {
+        sent: u64,
+        total: u64,
+    },
+    Done {
+        result: Result<String, crate::cloud::upload::UploadError>,
+        heads_up: Option<crate::cloud::limit_prompt::UploadHeadsUp>,
+    },
 }
 
 /// The export screen widgets an upload rewrites: the screen turns into the
@@ -401,7 +437,11 @@ impl UploadUi {
         self.show_progress(0, total);
     }
 
-    fn show_complete(&self, url: String) {
+    fn show_complete(
+        &self,
+        url: String,
+        heads_up: Option<&crate::cloud::limit_prompt::UploadHeadsUp>,
+    ) {
         self.phase.set(UploadPhase::Complete);
         *self.share_url.borrow_mut() = Some(url.clone());
         self.title.set_text(&t("Upload complete"));
@@ -411,10 +451,11 @@ impl UploadUi {
         self.destination.set_tooltip_text(Some(&url));
         self.copy_share_link();
         if !self.window_is_active() {
-            crate::utils::notify::desktop_notification(
-                &t("Upload complete"),
-                &tfmt("Copied to clipboard\n{url}", &[("url", &url)]),
-            );
+            let mut body = tfmt("Copied to clipboard\n{url}", &[("url", &url)]);
+            if let Some(heads_up) = heads_up {
+                body = heads_up.append_to(&body);
+            }
+            crate::utils::notify::desktop_notification(&t("Upload complete"), &body);
         }
         self.upload.set_label(&t("Copy link"));
         self.upload.add_css_class("video-export-primary");
@@ -488,16 +529,21 @@ fn start_upload(ui: &UploadUi, config: crate::config::AppConfig) {
     std::thread::spawn(move || {
         let progress = sender.clone();
         let last_percent = Cell::new(None::<u32>);
-        let result =
-            crate::cloud::upload::upload_file_with_progress(&config, &path, &move |sent, total| {
+        let outcome = crate::cloud::upload::upload_file_with_progress_and_heads_up(
+            &config,
+            &path,
+            &move |sent, total| {
                 let percent = upload_percent(sent, total);
                 if last_percent.get() != Some(percent) {
                     last_percent.set(Some(percent));
                     let _ = progress.send(UploadEvent::Progress { sent, total });
                 }
-            })
-            .map(|result| result.share_url);
-        let _ = sender.send(UploadEvent::Done(result));
+            },
+        );
+        let _ = sender.send(UploadEvent::Done {
+            result: outcome.result.map(|result| result.share_url),
+            heads_up: outcome.heads_up,
+        });
     });
 
     let ui = ui.clone();
@@ -506,23 +552,34 @@ fn start_upload(ui: &UploadUi, config: crate::config::AppConfig) {
         let outcome = loop {
             match receiver.try_recv() {
                 Ok(UploadEvent::Progress { sent, total }) => latest = Some((sent, total)),
-                Ok(UploadEvent::Done(result)) => break Some(result.map_err(Some)),
+                Ok(UploadEvent::Done { result, heads_up }) => {
+                    break Some((result.map_err(Some), heads_up))
+                }
                 Err(TryRecvError::Empty) => break None,
-                Err(TryRecvError::Disconnected) => break Some(Err(None)),
+                Err(TryRecvError::Disconnected) => break Some((Err(None), None)),
             }
         };
         if let Some((sent, total)) = latest {
             ui.show_progress(sent, total);
         }
-        let Some(result) = outcome else {
+        let Some((result, heads_up)) = outcome else {
             return glib::ControlFlow::Continue;
         };
         match result {
-            Ok(url) => ui.show_complete(url),
-            Err(Some(crate::cloud::upload::UploadError::UpgradeRequired(message))) => {
+            Ok(url) => {
+                ui.show_complete(url, heads_up.as_ref());
+                if let Some(window) = ui.window() {
+                    if let Some(heads_up) = &heads_up {
+                        for limit in &heads_up.cards {
+                            crate::cloud::upgrade::show_prompt_almost(&window, limit);
+                        }
+                    }
+                }
+            }
+            Err(Some(crate::cloud::upload::UploadError::UpgradeRequired(limit))) => {
                 ui.show_export_complete();
                 if let Some(window) = ui.window() {
-                    crate::cloud::upgrade::show_prompt(&window, &message);
+                    crate::cloud::upgrade::show_prompt(&window, &limit);
                 }
             }
             Err(error) => {

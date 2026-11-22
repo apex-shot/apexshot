@@ -10,12 +10,69 @@ pub struct UploadResult {
     pub share_url: String,
 }
 
+/// Which free-tier limit stopped an upload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloudLimitKind {
+    MonthlyUploads,
+    Storage,
+    Other,
+}
+
+impl CloudLimitKind {
+    /// The spelling the `cloud-limit` command line takes.
+    pub fn as_arg(self) -> &'static str {
+        match self {
+            CloudLimitKind::MonthlyUploads => "monthly_uploads",
+            CloudLimitKind::Storage => "storage",
+            CloudLimitKind::Other => "other",
+        }
+    }
+
+    /// Parse the spelling `cloud-limit` accepts, including the short aliases.
+    pub fn from_arg(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "monthly_uploads" | "monthly" => Some(CloudLimitKind::MonthlyUploads),
+            "storage" | "storage_full" => Some(CloudLimitKind::Storage),
+            "other" => Some(CloudLimitKind::Other),
+            _ => None,
+        }
+    }
+}
+
+/// A structured Cloud limit failure, as the account server describes it.
+///
+/// Older servers only send a message, so `kind` is inferred from the words in
+/// it and the numbers stay absent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CloudLimit {
+    pub kind: CloudLimitKind,
+    pub message: String,
+    pub used: Option<u64>,
+    pub max: Option<u64>,
+    pub resets_at: Option<String>,
+}
+
+impl std::fmt::Display for CloudLimit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+/// The outcome of an upload that may also carry a near-limit heads-up.
+///
+/// UI callers use `heads_up` to raise the card beside the editor window after
+/// the shared notification has already shown the usage lines.
+pub struct UploadOutcome {
+    pub result: Result<UploadResult, UploadError>,
+    pub heads_up: Option<super::limit_prompt::UploadHeadsUp>,
+}
+
 #[derive(Debug)]
 pub enum UploadError {
     NotConfigured(String),
     FileRead(String),
     HttpRequest(String),
-    UpgradeRequired(String),
+    UpgradeRequired(CloudLimit),
     Server(String),
     AuthExpired(String),
 }
@@ -26,7 +83,7 @@ impl std::fmt::Display for UploadError {
             UploadError::NotConfigured(msg) => write!(f, "{msg}"),
             UploadError::FileRead(msg) => write!(f, "Failed to read file: {msg}"),
             UploadError::HttpRequest(msg) => write!(f, "Upload request failed: {msg}"),
-            UploadError::UpgradeRequired(msg) => write!(f, "Upload request failed: {msg}"),
+            UploadError::UpgradeRequired(limit) => write!(f, "Upload request failed: {limit}"),
             UploadError::Server(msg) => write!(f, "Server error: {msg}"),
             UploadError::AuthExpired(msg) => write!(f, "{msg}"),
         }
@@ -104,26 +161,45 @@ pub fn upload_file_with_notifications(
     config: &AppConfig,
     path: &Path,
 ) -> Result<UploadResult, UploadError> {
-    upload_file_with_notifications_replacing(config, path, 0, true)
+    upload_and_notify(config, path, 0, true, true).result
 }
 
 /// Run an upload and notify, leaving clipboard ownership to a GTK UI caller.
 ///
 /// Quick Access and the editors receive the result on GTK's main thread and
-/// copy there, avoiding command-line clipboard helper notifications.
+/// copy there, avoiding command-line clipboard helper notifications. The
+/// returned heads-up lets that caller raise the card over its own window.
 pub fn upload_file_with_notifications_without_clipboard(
     config: &AppConfig,
     path: &Path,
-) -> Result<UploadResult, UploadError> {
-    upload_file_with_notifications_replacing(config, path, 0, false)
+) -> UploadOutcome {
+    upload_and_notify(config, path, 0, false, false)
 }
 
-fn upload_file_with_notifications_replacing(
+/// Upload and compute the near-limit heads-up, without sending notifications.
+///
+/// The editors that own their own progress screen and result card use this so
+/// the usage lines land in their copy and the card can sit on their window.
+pub fn upload_file_with_progress_and_heads_up(
+    config: &AppConfig,
+    path: &Path,
+    progress: UploadProgress<'_>,
+) -> UploadOutcome {
+    let result = upload_file_with_progress(config, path, progress);
+    let heads_up = match &result {
+        Ok(_) => super::limit_prompt::usage_heads_up(config),
+        Err(_) => None,
+    };
+    UploadOutcome { result, heads_up }
+}
+
+fn upload_and_notify(
     config: &AppConfig,
     path: &Path,
     replaces_notification_id: u32,
     copy_share_link: bool,
-) -> Result<UploadResult, UploadError> {
+    standalone_limit_card: bool,
+) -> UploadOutcome {
     let dest = Destination::from_config(config);
     let dest_label = match dest {
         Destination::ApexShot => "ApexShot Cloud",
@@ -147,21 +223,65 @@ fn upload_file_with_notifications_replacing(
             }
             // Always include the URL in the body so the toast is useful even if
             // the user misses the clipboard.
-            let _ = crate::utils::notify::desktop_notification_replace(
+            let notification_id = crate::utils::notify::desktop_notification_replace(
                 replaces_notification_id,
                 &crate::i18n::t("Upload complete"),
                 &body,
             );
-            Ok(result)
+
+            // The notification is already up; this fetch is capped at two
+            // seconds and a slow account endpoint only skips the extra line.
+            let heads_up = super::limit_prompt::usage_heads_up(config);
+            if let Some(heads_up) = &heads_up {
+                if !heads_up.lines.is_empty() {
+                    let _ = crate::utils::notify::desktop_notification_replace(
+                        notification_id,
+                        &crate::i18n::t("Upload complete"),
+                        &heads_up.append_to(&body),
+                    );
+                }
+                if standalone_limit_card {
+                    for limit in &heads_up.cards {
+                        super::limit_prompt::spawn_card(limit, true);
+                    }
+                }
+            }
+
+            UploadOutcome {
+                result: Ok(result),
+                heads_up,
+            }
         }
-        Err(e) => {
-            eprintln!("[cloud] Upload failed: {e}");
-            let _ = crate::utils::notify::desktop_notification_replace(
-                replaces_notification_id,
-                &crate::i18n::t("Upload failed"),
-                &e.to_string(),
-            );
-            Err(e)
+        Err(error) => {
+            eprintln!("[cloud] Upload failed: {error}");
+            match &error {
+                UploadError::UpgradeRequired(limit) => {
+                    // A limit is expected account state, not a transport fault:
+                    // the toast says what happened in the card's own words and
+                    // the card carries the numbers and the way forward.
+                    let _ = crate::utils::notify::desktop_notification_replace(
+                        replaces_notification_id,
+                        &crate::i18n::t("Not uploaded"),
+                        &super::upgrade::headline(limit),
+                    );
+                    if standalone_limit_card
+                        && super::limit_prompt::allow_upgrade_prompt(limit.kind)
+                    {
+                        super::limit_prompt::spawn_card(limit, false);
+                    }
+                }
+                _ => {
+                    let _ = crate::utils::notify::desktop_notification_replace(
+                        replaces_notification_id,
+                        &crate::i18n::t("Upload failed"),
+                        &error.to_string(),
+                    );
+                }
+            }
+            UploadOutcome {
+                result: Err(error),
+                heads_up: None,
+            }
         }
     }
 }
@@ -186,7 +306,7 @@ pub fn spawn_auto_upload_after_capture(path: PathBuf) {
         path.display()
     );
     std::thread::spawn(move || {
-        let _ = upload_file_with_notifications_replacing(&config, &path, 0, true);
+        let _ = upload_and_notify(&config, &path, 0, true, true);
     });
 }
 

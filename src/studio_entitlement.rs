@@ -16,6 +16,11 @@ use crate::recording::editor::model::{VideoEditState, ZoomCameraSettings, ZoomCl
 const KEY_ID: &str = "studio-v1";
 const PRODUCT: &str = "apexshot-studio";
 const MAX_TOKEN_BYTES: usize = 16 * 1024;
+/// Schema 1 licences carry no device binding. Those issued before this
+/// instant (2026-11-23T00:00:00Z) stay valid everywhere; the service issues
+/// only device-bound schema 2 licences from then on, so a later schema 1
+/// token is refused.
+const UNBOUND_SCHEMA_ISSUED_BEFORE: i64 = 1_795_392_000;
 #[cfg(not(target_os = "windows"))]
 const IDENTITY_EPSILON: f64 = 1e-7;
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -56,7 +61,8 @@ pub enum StudioStatus {
     ConfigurationUnavailable,
     NotActivated,
     InvalidEntitlement,
-    /// Schema 2 licence issued to a different machine.
+    /// A schema 2 licence issued to a different machine, or a schema 1 licence
+    /// issued after device binding became mandatory.
     DeviceMismatch,
     Active {
         updates_until: i64,
@@ -93,7 +99,7 @@ impl StudioStatus {
     }
 }
 
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum StudioEntitlementError {
     #[error("Studio activation is unavailable in this build configuration")]
     ConfigurationUnavailable,
@@ -103,6 +109,8 @@ pub enum StudioEntitlementError {
     InvalidEntitlement,
     #[error("This Studio licence is bound to a different device")]
     DeviceMismatch,
+    #[error("This licence needs to be claimed for this device. Copy the Device ID from Studio settings and claim the licence at apexshot.org/studio.")]
+    UnboundLicenceRetired,
     #[error("This build is outside the entitlement's included update period")]
     UpdateAccessEnded,
     #[error("Studio entitlement storage failed: {0}")]
@@ -161,7 +169,8 @@ pub fn current_status() -> StudioStatus {
             updates_until: entitlement.updates_until,
         },
         Ok(None) => StudioStatus::NotActivated,
-        Err(StudioEntitlementError::DeviceMismatch) => StudioStatus::DeviceMismatch,
+        Err(StudioEntitlementError::DeviceMismatch)
+        | Err(StudioEntitlementError::UnboundLicenceRetired) => StudioStatus::DeviceMismatch,
         Err(_) => StudioStatus::InvalidEntitlement,
     }
 }
@@ -177,6 +186,82 @@ pub fn activate_token(token: &str) -> Result<(), StudioEntitlementError> {
     let configuration = build_configuration()?;
     let path = entitlement_path()?;
     activate_token_at_path(&path, token, &configuration)
+}
+
+/// Activates the licence carried by an `apexshot://studio/activate` link.
+///
+/// The purchase page hands a device-bound licence back through this link, with
+/// the signed token envelope as unpadded base64url in its `token` parameter.
+/// The token is verified exactly like a pasted one, so a link from any page can
+/// only install a licence signed by the official key and bound to this device.
+pub fn activate_from_url(url: &str) -> Result<(), StudioEntitlementError> {
+    let token = decode_activation_url(url)?;
+    activate_token(&token)
+}
+
+fn decode_activation_url(url: &str) -> Result<String, StudioEntitlementError> {
+    let query = url
+        .strip_prefix("apexshot://studio/activate?")
+        .or_else(|| url.strip_prefix("apexshot://studio/activate/?"))
+        .ok_or(StudioEntitlementError::InvalidEntitlement)?;
+    if query.is_empty() || query.contains('#') {
+        return Err(StudioEntitlementError::InvalidEntitlement);
+    }
+
+    // The link carries exactly one parameter; anything else is malformed.
+    if query.contains('&') {
+        return Err(StudioEntitlementError::InvalidEntitlement);
+    }
+    let token = query
+        .strip_prefix("token=")
+        .ok_or(StudioEntitlementError::InvalidEntitlement)?;
+
+    let decoded = percent_decode(token)?;
+    if decoded.len() > MAX_TOKEN_BYTES {
+        return Err(StudioEntitlementError::InvalidEntitlement);
+    }
+    let token =
+        String::from_utf8(decoded).map_err(|_| StudioEntitlementError::InvalidEntitlement)?;
+    let bytes = decode_base64url(token.trim_end_matches('='))?;
+    if bytes.len() > MAX_TOKEN_BYTES {
+        return Err(StudioEntitlementError::InvalidEntitlement);
+    }
+    String::from_utf8(bytes).map_err(|_| StudioEntitlementError::InvalidEntitlement)
+}
+
+fn percent_decode(value: &str) -> Result<Vec<u8>, StudioEntitlementError> {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let high = bytes
+                .get(index + 1)
+                .copied()
+                .and_then(hex_value)
+                .ok_or(StudioEntitlementError::InvalidEntitlement)?;
+            let low = bytes
+                .get(index + 2)
+                .copied()
+                .and_then(hex_value)
+                .ok_or(StudioEntitlementError::InvalidEntitlement)?;
+            decoded.push((high << 4) | low);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    Ok(decoded)
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 /// The entitlement text saved on this device, exactly as it was accepted.
@@ -216,12 +301,50 @@ fn activate_token_at_path(
     write_token_atomically(path, token)
 }
 
-pub fn ensure_export_allowed(
-    capabilities: StudioCapabilities,
-) -> Result<(), StudioEntitlementError> {
-    if !capabilities.requires_studio() {
-        return Ok(());
+/// How this build may treat one output's Studio capabilities.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StudioAccess {
+    /// The output needs no Studio capability and is always free.
+    NotNeeded,
+    /// A verified licence covers this build.
+    Licensed,
+    /// No licence covers this build, but free trial exports remain.
+    Trial { remaining: u32 },
+    /// The output needs Studio and neither a licence nor the trial allows it.
+    Blocked(StudioEntitlementError),
+}
+
+impl StudioAccess {
+    pub fn is_trial(&self) -> bool {
+        matches!(self, Self::Trial { .. })
     }
+}
+
+/// Decide what an output with `capabilities` may do right now.
+///
+/// The free trial applies to every refusal that activation could fix: a
+/// missing, invalid, mismatched, or uncovered licence. A build that cannot
+/// verify licences, or cannot read its storage, never falls back to the
+/// trial, because the user could not end the trial by buying Studio anyway.
+pub fn studio_access(capabilities: StudioCapabilities) -> StudioAccess {
+    if !capabilities.requires_studio() {
+        return StudioAccess::NotNeeded;
+    }
+    match licence_allows_studio() {
+        Ok(()) => StudioAccess::Licensed,
+        Err(error) => {
+            let remaining = match &error {
+                StudioEntitlementError::ConfigurationUnavailable
+                | StudioEntitlementError::Storage(_) => 0,
+                _ => crate::studio_trial::trial_remaining(),
+            };
+            access_for_licence_result(Err(error), remaining)
+        }
+    }
+}
+
+/// The licence check `studio_access` starts from: a valid, covering token.
+fn licence_allows_studio() -> Result<(), StudioEntitlementError> {
     let configuration = build_configuration()?;
     let path = entitlement_path()?;
     let entitlement =
@@ -230,6 +353,49 @@ pub fn ensure_export_allowed(
         return Err(StudioEntitlementError::UpdateAccessEnded);
     }
     Ok(())
+}
+
+fn access_for_licence_result(
+    licence: Result<(), StudioEntitlementError>,
+    remaining: u32,
+) -> StudioAccess {
+    match licence {
+        Ok(()) => StudioAccess::Licensed,
+        Err(error) => {
+            let trial_applies = remaining > 0
+                && !matches!(
+                    &error,
+                    StudioEntitlementError::ConfigurationUnavailable
+                        | StudioEntitlementError::Storage(_)
+                );
+            if trial_applies {
+                StudioAccess::Trial { remaining }
+            } else {
+                StudioAccess::Blocked(error)
+            }
+        }
+    }
+}
+
+/// Consume one free export when `access` started as a trial.
+///
+/// Every layer of one export shares the same check, so only the output's own
+/// completion calls this. A licensed or free output leaves the counter alone.
+pub fn finish_trial_export(access: StudioAccess) -> Option<u32> {
+    access
+        .is_trial()
+        .then(crate::studio_trial::record_trial_export)
+}
+
+/// Whether the output may proceed. A trial allows it without consuming
+/// anything; only the finished output calls [`finish_trial_export`].
+pub fn ensure_export_allowed(
+    capabilities: StudioCapabilities,
+) -> Result<(), StudioEntitlementError> {
+    match studio_access(capabilities) {
+        StudioAccess::Blocked(error) => Err(error),
+        _ => Ok(()),
+    }
 }
 
 pub fn update_coverage_for_release(
@@ -491,13 +657,17 @@ fn verify_token(
         return Err(StudioEntitlementError::InvalidEntitlement);
     }
     match entitlement.schema_version {
-        // Schema 1 predates device binding; those licences stay valid everywhere.
+        // Schema 1 predates device binding; only licences issued before the
+        // device-binding cutoff stay valid everywhere.
         1 => {
             if entitlement.install_id.is_some()
                 || entitlement.licensee.is_some()
                 || entitlement.devices_max.is_some()
             {
                 return Err(StudioEntitlementError::InvalidEntitlement);
+            }
+            if entitlement.issued_at >= UNBOUND_SCHEMA_ISSUED_BEFORE {
+                return Err(StudioEntitlementError::UnboundLicenceRetired);
             }
         }
         2 => {
@@ -528,6 +698,26 @@ fn verify_token(
 /// offers it for copying, so it has to be readable without an entitlement.
 pub fn device_id() -> Option<String> {
     crate::usage_telemetry::ensure_install_id()
+}
+
+/// The official Studio page, carrying this machine's Device ID so a purchase
+/// can be bound to it without the customer copying anything.
+///
+/// Falls back to the plain page when no id is available; the customer can then
+/// still copy the Device ID from Settings and claim the licence by hand.
+pub fn studio_page_url() -> String {
+    let Some(device_id) = device_id() else {
+        return "https://apexshot.org/studio".to_string();
+    };
+    if !is_uuid(&device_id) {
+        return "https://apexshot.org/studio".to_string();
+    }
+    let platform = if cfg!(target_os = "windows") {
+        "windows"
+    } else {
+        "linux"
+    };
+    format!("https://apexshot.org/studio?device={device_id}&from=app&platform={platform}")
 }
 
 /// One line a customer can paste into a support request: the licence state and
@@ -809,6 +999,8 @@ mod windows_tests {
         let path = new_test_entitlement_path();
         let mut scope = test_entitlement_path_scope(path.clone());
         scope.cleanup_directory = path.parent().map(Path::to_path_buf);
+        // This test is about the licence states themselves, not the trial.
+        let _trial = crate::studio_trial::test_trial_used_up();
         let capabilities = StudioCapabilities {
             static_presentation: true,
             ..Default::default()
@@ -865,6 +1057,8 @@ mod tests {
         assert!(capabilities.requires_studio());
         let path = scratch_path();
         let _path = test_entitlement_path_scope(path);
+        // The free trial would otherwise let this output through.
+        let _trial = crate::studio_trial::test_trial_used_up();
         assert_eq!(
             ensure_export_allowed(capabilities),
             Err(StudioEntitlementError::NotActivated)
@@ -1158,6 +1352,8 @@ mod tests {
     fn export_guard_distinguishes_missing_invalid_and_uncovered_tokens() {
         let path = scratch_path();
         let _path = test_entitlement_path_scope(path.clone());
+        // No free trial here: this test is about licence failures.
+        let _trial = crate::studio_trial::test_trial_used_up();
         let capabilities = StudioCapabilities {
             advanced_zoom: true,
             ..StudioCapabilities::default()
@@ -1181,6 +1377,99 @@ mod tests {
             Err(StudioEntitlementError::UpdateAccessEnded)
         );
         let _ = fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn access_decision_distinguishes_free_licensed_trial_and_blocked() {
+        let path = scratch_path();
+        let _path = test_entitlement_path_scope(path.clone());
+        let _trial = crate::studio_trial::test_trial_path_scope();
+
+        assert_eq!(
+            studio_access(StudioCapabilities::default()),
+            StudioAccess::NotNeeded
+        );
+
+        let needed = StudioCapabilities {
+            advanced_zoom: true,
+            ..StudioCapabilities::default()
+        };
+        assert_eq!(studio_access(needed), StudioAccess::Trial { remaining: 3 });
+
+        let signing_key = synthetic_signing_key();
+        write_token_atomically(&path, &signed_token(&signing_key, &valid_payload(300))).unwrap();
+        assert_eq!(studio_access(needed), StudioAccess::Licensed);
+        assert_eq!(
+            crate::studio_trial::trial_remaining(),
+            crate::studio_trial::STUDIO_FREE_EXPORTS,
+            "a licence never consumes the trial"
+        );
+
+        fs::remove_file(&path).unwrap();
+        for _ in 0..crate::studio_trial::STUDIO_FREE_EXPORTS {
+            crate::studio_trial::record_trial_export();
+        }
+        assert_eq!(
+            studio_access(needed),
+            StudioAccess::Blocked(StudioEntitlementError::NotActivated)
+        );
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn configuration_and_storage_failures_never_become_a_trial() {
+        assert_eq!(
+            access_for_licence_result(
+                Err(StudioEntitlementError::ConfigurationUnavailable),
+                crate::studio_trial::STUDIO_FREE_EXPORTS
+            ),
+            StudioAccess::Blocked(StudioEntitlementError::ConfigurationUnavailable)
+        );
+        assert_eq!(
+            access_for_licence_result(
+                Err(StudioEntitlementError::Storage("disk full".into())),
+                crate::studio_trial::STUDIO_FREE_EXPORTS
+            ),
+            StudioAccess::Blocked(StudioEntitlementError::Storage("disk full".into()))
+        );
+        assert_eq!(
+            access_for_licence_result(
+                Err(StudioEntitlementError::NotActivated),
+                crate::studio_trial::STUDIO_FREE_EXPORTS
+            ),
+            StudioAccess::Trial { remaining: 3 }
+        );
+        assert_eq!(access_for_licence_result(Ok(()), 0), StudioAccess::Licensed);
+    }
+
+    #[test]
+    fn a_trial_export_passes_without_consuming_a_free_export() {
+        let path = scratch_path();
+        let _path = test_entitlement_path_scope(path);
+        let _trial = crate::studio_trial::test_trial_path_scope();
+        let capabilities = StudioCapabilities {
+            advanced_zoom: true,
+            ..StudioCapabilities::default()
+        };
+
+        assert_eq!(
+            crate::studio_trial::trial_remaining(),
+            crate::studio_trial::STUDIO_FREE_EXPORTS
+        );
+        assert_eq!(ensure_export_allowed(capabilities), Ok(()));
+        assert_eq!(
+            crate::studio_trial::trial_remaining(),
+            crate::studio_trial::STUDIO_FREE_EXPORTS
+        );
+
+        assert_eq!(finish_trial_export(studio_access(capabilities)), Some(2));
+        assert_eq!(crate::studio_trial::trial_remaining(), 2);
+        assert_eq!(
+            finish_trial_export(StudioAccess::Licensed),
+            None,
+            "a licensed output never consumes the trial"
+        );
+        assert_eq!(crate::studio_trial::trial_remaining(), 2);
     }
 
     #[test]
@@ -1458,6 +1747,65 @@ mod tests {
     }
 
     #[test]
+    fn schema1_licences_issued_before_the_device_binding_cutoff_stay_valid() {
+        let mut payload = schema1_payload();
+        payload["issued_at"] = serde_json::json!(UNBOUND_SCHEMA_ISSUED_BEFORE - 1);
+        let entitlement =
+            verify_synthetic(payload).expect("licences issued before the cutoff stay valid");
+        assert_eq!(entitlement.schema_version, 1);
+    }
+
+    #[test]
+    fn schema1_licences_issued_at_or_after_the_cutoff_are_retired() {
+        for issued_at in [
+            UNBOUND_SCHEMA_ISSUED_BEFORE,
+            UNBOUND_SCHEMA_ISSUED_BEFORE + 86_400 * 30,
+        ] {
+            let mut payload = schema1_payload();
+            payload["issued_at"] = serde_json::json!(issued_at);
+            assert_eq!(
+                verify_synthetic(payload),
+                Err(StudioEntitlementError::UnboundLicenceRetired)
+            );
+        }
+    }
+
+    #[test]
+    fn a_stored_retired_unbound_licence_reports_a_device_mismatch() {
+        let path = scratch_path();
+        let _scope = test_entitlement_path_scope(path.clone());
+        let mut payload = schema1_payload();
+        payload["issued_at"] = serde_json::json!(UNBOUND_SCHEMA_ISSUED_BEFORE);
+        let token = signed_token_for_test(&synthetic_signing_key(), payload.to_string().as_bytes());
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, token).unwrap();
+        assert_eq!(current_status(), StudioStatus::DeviceMismatch);
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_retired_unbound_licence_is_never_saved() {
+        let path = scratch_path();
+        let configuration = build_configuration().expect("test build config");
+        let mut payload = schema1_payload();
+        payload["issued_at"] = serde_json::json!(UNBOUND_SCHEMA_ISSUED_BEFORE);
+        let token = signed_token_for_test(&synthetic_signing_key(), payload.to_string().as_bytes());
+        let result = activate_token_at_path(&path, &token, &configuration);
+        assert_eq!(result, Err(StudioEntitlementError::UnboundLicenceRetired));
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn schema2_licences_issued_after_the_cutoff_still_verify_for_their_device() {
+        let device = "8f14e45f-ceea-467f-a1b2-3c5d6e7f8a9b";
+        let mut payload = schema2_payload(device);
+        payload["issued_at"] = serde_json::json!(UNBOUND_SCHEMA_ISSUED_BEFORE + 86_400);
+        let entitlement = verify_synthetic(payload).expect("schema 2 verifies after the cutoff");
+        assert_eq!(entitlement.schema_version, 2);
+        assert!(!bound_to_other_device(&entitlement, Some(device)));
+    }
+
+    #[test]
     fn schema2_licence_matches_only_the_device_it_was_issued_to() {
         let device = "8f14e45f-ceea-467f-a1b2-3c5d6e7f8a9b";
         let entitlement = verify_synthetic(schema2_payload(device)).expect("v2 verifies");
@@ -1540,5 +1888,63 @@ mod tests {
         // both must leave nothing on disk.
         assert_eq!(result, Err(StudioEntitlementError::DeviceMismatch));
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn an_activation_link_saves_a_device_bound_licence() {
+        let device = device_id().expect("test device id");
+        let token = signed_token_for_test(
+            &synthetic_signing_key(),
+            schema2_payload(&device).to_string().as_bytes(),
+        );
+        let encoded = URL_SAFE_NO_PAD.encode(token.as_bytes());
+        let mut padded = encoded.clone();
+        while !padded.len().is_multiple_of(4) {
+            padded.push('=');
+        }
+
+        for (prefix, value) in [
+            ("apexshot://studio/activate?", encoded),
+            ("apexshot://studio/activate/?", padded.clone()),
+            ("apexshot://studio/activate?", padded.replace('=', "%3D")),
+        ] {
+            let path = scratch_path();
+            let _scope = test_entitlement_path_scope(path.clone());
+            let url = format!("{prefix}token={value}");
+            assert_eq!(activate_from_url(&url), Ok(()));
+            assert_eq!(
+                current_status(),
+                StudioStatus::Active {
+                    updates_until: 3_000_000_000
+                }
+            );
+            let _ = fs::remove_dir_all(path.parent().unwrap());
+        }
+    }
+
+    #[test]
+    fn malformed_activation_links_are_rejected_without_writing() {
+        let path = scratch_path();
+        let _scope = test_entitlement_path_scope(path.clone());
+        let oversized = "A".repeat(MAX_TOKEN_BYTES * 2);
+        for url in [
+            "https://studio/activate?token=e30".to_string(),
+            "apexshot://studio/purchase?token=e30".to_string(),
+            "apexshot://studio/activate".to_string(),
+            "apexshot://studio/activate?from=app".to_string(),
+            "apexshot://studio/activate?token=".to_string(),
+            "apexshot://studio/activate?token=not*base64".to_string(),
+            "apexshot://studio/activate?token=e30&from=app".to_string(),
+            "apexshot://studio/activate?token=e30#fragment".to_string(),
+            "apexshot://studio/activate?token=%ZZ".to_string(),
+            format!("apexshot://studio/activate?token={oversized}"),
+        ] {
+            assert_eq!(
+                activate_from_url(&url),
+                Err(StudioEntitlementError::InvalidEntitlement),
+                "{url}"
+            );
+            assert!(!path.exists());
+        }
     }
 }

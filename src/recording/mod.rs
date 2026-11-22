@@ -8,7 +8,7 @@ use crate::config::AppConfig;
 mod control_session;
 pub mod editor;
 mod indicator_notify;
-// ponytail: controls are removed; this module still owns the countdown overlay.
+// The countdown overlay and the X11 recording controls bar share this module.
 #[allow(dead_code)]
 mod stop_overlay;
 #[cfg(test)]
@@ -31,9 +31,13 @@ mod backend;
 mod controls;
 mod gst_audio;
 mod kwin_clicks;
+mod pointer_track;
 mod recording_manifest;
 mod timeline;
 mod wf_recorder;
+mod x11_controls_mask;
+mod x11_pointer_track;
+mod x11_window_target;
 
 pub(crate) use backend::normalize_window_still_frame;
 
@@ -60,6 +64,13 @@ pub enum RecordError {
     #[error("No suitable video encoder found. Please install gst-plugins-good/ugly/bad.")]
     NoEncoderFound,
 }
+
+/// A recording failure that the controls outcome handler already reported to
+/// the user. Callers can tell it apart from a failure they still need to
+/// notify about.
+#[derive(Debug, Error)]
+#[error("{0}")]
+pub struct RecordingFailureNotified(pub anyhow::Error);
 
 pub use audio::{list_audio_inputs, list_audio_outputs};
 
@@ -153,6 +164,10 @@ pub struct RecordingConfig {
     pub y: Option<i32>,
     pub cursor: bool,
     pub pointer_track: bool,
+    /// The window the recording follows on X11, when the target was picked
+    /// outside GNOME. The source captures the screen and crops it to the
+    /// window's current visible rectangle.
+    pub x11_window: Option<crate::backend::x11_window_pick::X11WindowSource>,
     pub hidpi: bool,
     // Video tab settings
     pub max_resolution: Option<(u32, u32)>,
@@ -237,6 +252,7 @@ impl Default for RecordingConfig {
             y: None,
             cursor: true,
             pointer_track: false,
+            x11_window: None,
             hidpi: true,
             max_resolution: None,
             fps: 30,
@@ -289,7 +305,8 @@ impl RecordingConfig {
             x: None,
             y: None,
             cursor: app_config.rec_cursor,
-            pointer_track: crate::gnome_shell::should_use_pointer_track(),
+            pointer_track: self::pointer_track::should_use(),
+            x11_window: None,
             hidpi: app_config.rec_hidpi,
             max_resolution,
             fps,
