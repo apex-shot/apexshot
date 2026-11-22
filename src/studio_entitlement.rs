@@ -16,6 +16,11 @@ use crate::recording::editor::model::{VideoEditState, ZoomCameraSettings, ZoomCl
 const KEY_ID: &str = "studio-v1";
 const PRODUCT: &str = "apexshot-studio";
 const MAX_TOKEN_BYTES: usize = 16 * 1024;
+/// Schema 1 licences carry no device binding. Those issued before this
+/// instant (2026-11-23T00:00:00Z) stay valid everywhere; the service issues
+/// only device-bound schema 2 licences from then on, so a later schema 1
+/// token is refused.
+const UNBOUND_SCHEMA_ISSUED_BEFORE: i64 = 1_795_392_000;
 #[cfg(not(target_os = "windows"))]
 const IDENTITY_EPSILON: f64 = 1e-7;
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -56,7 +61,8 @@ pub enum StudioStatus {
     ConfigurationUnavailable,
     NotActivated,
     InvalidEntitlement,
-    /// Schema 2 licence issued to a different machine.
+    /// A schema 2 licence issued to a different machine, or a schema 1 licence
+    /// issued after device binding became mandatory.
     DeviceMismatch,
     Active {
         updates_until: i64,
@@ -103,6 +109,8 @@ pub enum StudioEntitlementError {
     InvalidEntitlement,
     #[error("This Studio licence is bound to a different device")]
     DeviceMismatch,
+    #[error("This licence needs to be claimed for this device. Copy the Device ID from Studio settings and claim the licence at apexshot.org/studio.")]
+    UnboundLicenceRetired,
     #[error("This build is outside the entitlement's included update period")]
     UpdateAccessEnded,
     #[error("Studio entitlement storage failed: {0}")]
@@ -161,7 +169,8 @@ pub fn current_status() -> StudioStatus {
             updates_until: entitlement.updates_until,
         },
         Ok(None) => StudioStatus::NotActivated,
-        Err(StudioEntitlementError::DeviceMismatch) => StudioStatus::DeviceMismatch,
+        Err(StudioEntitlementError::DeviceMismatch)
+        | Err(StudioEntitlementError::UnboundLicenceRetired) => StudioStatus::DeviceMismatch,
         Err(_) => StudioStatus::InvalidEntitlement,
     }
 }
@@ -491,13 +500,17 @@ fn verify_token(
         return Err(StudioEntitlementError::InvalidEntitlement);
     }
     match entitlement.schema_version {
-        // Schema 1 predates device binding; those licences stay valid everywhere.
+        // Schema 1 predates device binding; only licences issued before the
+        // device-binding cutoff stay valid everywhere.
         1 => {
             if entitlement.install_id.is_some()
                 || entitlement.licensee.is_some()
                 || entitlement.devices_max.is_some()
             {
                 return Err(StudioEntitlementError::InvalidEntitlement);
+            }
+            if entitlement.issued_at >= UNBOUND_SCHEMA_ISSUED_BEFORE {
+                return Err(StudioEntitlementError::UnboundLicenceRetired);
             }
         }
         2 => {
@@ -1455,6 +1468,65 @@ mod tests {
         assert_eq!(entitlement.schema_version, 1);
         assert!(!bound_to_other_device(&entitlement, Some("any-device")));
         assert!(!bound_to_other_device(&entitlement, None));
+    }
+
+    #[test]
+    fn schema1_licences_issued_before_the_device_binding_cutoff_stay_valid() {
+        let mut payload = schema1_payload();
+        payload["issued_at"] = serde_json::json!(UNBOUND_SCHEMA_ISSUED_BEFORE - 1);
+        let entitlement =
+            verify_synthetic(payload).expect("licences issued before the cutoff stay valid");
+        assert_eq!(entitlement.schema_version, 1);
+    }
+
+    #[test]
+    fn schema1_licences_issued_at_or_after_the_cutoff_are_retired() {
+        for issued_at in [
+            UNBOUND_SCHEMA_ISSUED_BEFORE,
+            UNBOUND_SCHEMA_ISSUED_BEFORE + 86_400 * 30,
+        ] {
+            let mut payload = schema1_payload();
+            payload["issued_at"] = serde_json::json!(issued_at);
+            assert_eq!(
+                verify_synthetic(payload),
+                Err(StudioEntitlementError::UnboundLicenceRetired)
+            );
+        }
+    }
+
+    #[test]
+    fn a_stored_retired_unbound_licence_reports_a_device_mismatch() {
+        let path = scratch_path();
+        let _scope = test_entitlement_path_scope(path.clone());
+        let mut payload = schema1_payload();
+        payload["issued_at"] = serde_json::json!(UNBOUND_SCHEMA_ISSUED_BEFORE);
+        let token = signed_token_for_test(&synthetic_signing_key(), payload.to_string().as_bytes());
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, token).unwrap();
+        assert_eq!(current_status(), StudioStatus::DeviceMismatch);
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_retired_unbound_licence_is_never_saved() {
+        let path = scratch_path();
+        let configuration = build_configuration().expect("test build config");
+        let mut payload = schema1_payload();
+        payload["issued_at"] = serde_json::json!(UNBOUND_SCHEMA_ISSUED_BEFORE);
+        let token = signed_token_for_test(&synthetic_signing_key(), payload.to_string().as_bytes());
+        let result = activate_token_at_path(&path, &token, &configuration);
+        assert_eq!(result, Err(StudioEntitlementError::UnboundLicenceRetired));
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn schema2_licences_issued_after_the_cutoff_still_verify_for_their_device() {
+        let device = "8f14e45f-ceea-467f-a1b2-3c5d6e7f8a9b";
+        let mut payload = schema2_payload(device);
+        payload["issued_at"] = serde_json::json!(UNBOUND_SCHEMA_ISSUED_BEFORE + 86_400);
+        let entitlement = verify_synthetic(payload).expect("schema 2 verifies after the cutoff");
+        assert_eq!(entitlement.schema_version, 2);
+        assert!(!bound_to_other_device(&entitlement, Some(device)));
     }
 
     #[test]
