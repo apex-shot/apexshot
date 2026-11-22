@@ -273,7 +273,10 @@ fn build_activation_controls(
             Err(error) => {
                 status.set_text(&short_message(current_status()));
                 feedback.set_text(&match error {
-                    StudioEntitlementError::DeviceMismatch => StudioStatus::DeviceMismatch.message(),
+                    StudioEntitlementError::DeviceMismatch
+                    | StudioEntitlementError::UnboundLicenceRetired => {
+                        StudioStatus::DeviceMismatch.message()
+                    }
                     error => error.to_string(),
                 });
                 feedback.set_visible(true);

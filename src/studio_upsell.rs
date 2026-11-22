@@ -240,7 +240,9 @@ fn kind_for(error: &StudioEntitlementError) -> Kind {
         StudioEntitlementError::NotActivated => Kind::Purchase,
         StudioEntitlementError::InvalidEntitlement => Kind::InvalidLicense,
         StudioEntitlementError::UpdateAccessEnded => Kind::UpdatesEnded,
-        StudioEntitlementError::DeviceMismatch => Kind::DeviceMismatch,
+        StudioEntitlementError::DeviceMismatch | StudioEntitlementError::UnboundLicenceRetired => {
+            Kind::DeviceMismatch
+        }
         StudioEntitlementError::ConfigurationUnavailable => Kind::ConfigurationUnavailable,
         StudioEntitlementError::Storage(_) => Kind::StorageUnavailable,
     }
