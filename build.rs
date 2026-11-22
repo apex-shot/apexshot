@@ -116,6 +116,16 @@ fn build_capture_overlay() {
     #[rustfmt::skip]
     println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/scroll_controls.h");
     #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/x11/scroll_capture_x11.cpp");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/x11/scroll_capture_x11.h");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/x11/scroll_stitcher.cpp");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/x11/scroll_stitcher.h");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/x11/scroll_stitch_tool.cpp");
+    #[rustfmt::skip]
     println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/screen_capture.cpp");
     #[rustfmt::skip]
     println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/hdr_capture.cpp");

@@ -28,6 +28,8 @@ constexpr int kStartTimeoutMs = 5000;
 constexpr int kReadyTimeoutMs = 180000;
 constexpr int kCaptureTimeoutMs = 30000;
 constexpr int kShutdownTimeoutMs = 2000;
+// The picker waits for a click, so the timeout only guards a wedged grab.
+constexpr int kPickTimeoutMs = 600000;
 constexpr double kAspectTolerance = 0.01;
 
 // QImageWriter::setCompression() takes a 0-100 ratio, not a zlib level: Qt maps
@@ -37,7 +39,7 @@ constexpr double kAspectTolerance = 0.01;
 // level 6, the default libpng and the desktop's own screenshot tool use.
 constexpr int kPngCompressionRatio = 61;
 
-bool isWaylandSession()
+bool detectWaylandSession()
 {
     const QString sessionType = qEnvironmentVariable("XDG_SESSION_TYPE");
     if (sessionType.compare(QStringLiteral("wayland"), Qt::CaseInsensitive) == 0) {
@@ -152,6 +154,82 @@ CaptureStatus statusForFailure(const HelperMessage& message)
     return message.cancelled ? CaptureStatus::Cancelled : CaptureStatus::Failed;
 }
 
+}
+
+bool isWaylandSession()
+{
+    return detectWaylandSession();
+}
+
+WindowPickStatus pickX11Window(X11WindowPick& out, QString& outError)
+{
+    out = X11WindowPick();
+    outError.clear();
+
+    QString pathError;
+    const QString program = portalHelperPath(pathError);
+    if (program.isEmpty()) {
+        outError = pathError;
+        return WindowPickStatus::Failed;
+    }
+
+    QProcess helper;
+    helper.setProcessChannelMode(QProcess::SeparateChannels);
+    helper.start(program,
+                 QStringList{QStringLiteral("x11-pick-window-internal")});
+    if (!helper.waitForStarted(kStartTimeoutMs)) {
+        outError = QStringLiteral("Failed to start the window picker: %1")
+                     .arg(helper.errorString());
+        return WindowPickStatus::Failed;
+    }
+    if (!helper.waitForFinished(kPickTimeoutMs)) {
+        helper.kill();
+        helper.waitForFinished(kShutdownTimeoutMs);
+        outError = QStringLiteral("The window picker did not finish.");
+        return WindowPickStatus::Failed;
+    }
+
+    const QByteArray line = helper.readAllStandardOutput().trimmed();
+    const QString helperError =
+      QString::fromLocal8Bit(helper.readAllStandardError()).trimmed();
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(line, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        outError = helperError.isEmpty()
+          ? QStringLiteral("The window picker sent an unexpected reply.")
+          : helperError;
+        return WindowPickStatus::Failed;
+    }
+
+    const QJsonObject object = document.object();
+    if (object.value(QStringLiteral("cancelled")).toBool())
+        return WindowPickStatus::Cancelled;
+    if (object.contains(QStringLiteral("error"))) {
+        outError = object.value(QStringLiteral("error")).toString();
+        return WindowPickStatus::Failed;
+    }
+
+    const QJsonValue xValue = object.value(QStringLiteral("x"));
+    const QJsonValue yValue = object.value(QStringLiteral("y"));
+    const QJsonValue widthValue = object.value(QStringLiteral("width"));
+    const QJsonValue heightValue = object.value(QStringLiteral("height"));
+    const QJsonValue windowValue = object.value(QStringLiteral("window"));
+    if (!xValue.isDouble() || !yValue.isDouble() || !widthValue.isDouble()
+        || !heightValue.isDouble() || !windowValue.isDouble()) {
+        outError = QStringLiteral("The window picker sent an unexpected reply.");
+        return WindowPickStatus::Failed;
+    }
+
+    const int width = widthValue.toInt();
+    const int height = heightValue.toInt();
+    if (width <= 0 || height <= 0 || windowValue.toDouble() <= 0) {
+        outError = QStringLiteral("The window picker did not report a usable window.");
+        return WindowPickStatus::Failed;
+    }
+
+    out.rect = QRect(xValue.toInt(), yValue.toInt(), width, height);
+    out.windowId = static_cast<quintptr>(windowValue.toDouble());
+    return WindowPickStatus::Picked;
 }
 
 HelperMessage parseHelperMessage(const QByteArray& line)

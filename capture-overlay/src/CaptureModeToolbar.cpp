@@ -373,7 +373,19 @@ void CaptureModeToolbar::focusAndRaise()
 
 int CaptureModeToolbar::itemCount() const
 {
-    return m_enableScrollCapture ? 9 : 8;
+    return scrollSlotVisible() ? 9 : 8;
+}
+
+/// Scrolling capture is a screenshot feature. On Windows a recording turns the
+/// slot into the webcam toggle; elsewhere recording has no camera source, so
+/// the slot is dropped instead of showing a mode that cannot be used.
+bool CaptureModeToolbar::scrollSlotVisible() const
+{
+#ifdef Q_OS_WIN
+    return m_enableScrollCapture;
+#else
+    return m_enableScrollCapture && !m_recording;
+#endif
 }
 
 int CaptureModeToolbar::itemWidth(int index) const
@@ -452,7 +464,7 @@ QString CaptureModeToolbar::labelFor(int index) const
 #endif
     if (cameraSlot(index))
         return QStringLiteral("Webcam");
-    if (m_enableScrollCapture && index == 7)
+    if (scrollSlotVisible() && index == 7)
         return QStringLiteral("Scroll");
     return QString::fromLatin1(kLabels[index]);
 }
@@ -466,14 +478,15 @@ QString CaptureModeToolbar::displayedLabel(int index, const QFont& font) const
 
 void CaptureModeToolbar::resizeForMode()
 {
-#ifdef Q_OS_WIN
     if (!m_enableScrollCapture)
         return;
+#ifdef Q_OS_WIN
     if (m_recording && m_screen) {
         const int fixedWidth = preferredWidth() - 3 * m_deviceItemWidth;
         m_deviceItemWidth = std::clamp((m_screen->availableGeometry().width() - 24 - fixedWidth) / 3,
                                        74, 160);
     }
+#endif
     const int center = x() + width() / 2;
     setFixedSize(preferredWidth(), kPanelHeight);
     const QRect available = m_screen ? m_screen->availableGeometry() : QRect();
@@ -481,14 +494,20 @@ void CaptureModeToolbar::resizeForMode()
     if (!available.isNull() && width() <= available.width())
         left = std::clamp(left, available.left(), available.right() - width() + 1);
     move(left, y());
-#endif
 }
 
 /// While recording, the Scroll slot carries the Webcam toggle instead. Scroll
 /// is a capture mode and has no meaning once a recording is being set up.
 bool CaptureModeToolbar::cameraSlot(int index) const
 {
+#ifdef Q_OS_WIN
     return m_enableScrollCapture && m_recording && index == 7;
+#else
+    // Recording has no camera source outside Windows, so the Scroll slot is
+    // dropped from the recording layout rather than becoming a dead item.
+    Q_UNUSED(index);
+    return false;
+#endif
 }
 
 QRectF CaptureModeToolbar::itemRect(int index) const
@@ -504,7 +523,7 @@ QRectF CaptureModeToolbar::itemRect(int index) const
 
 bool CaptureModeToolbar::separatorAfter(int index) const
 {
-    return index == 1 || index == 4 || (m_enableScrollCapture ? index == 7 : index == 6);
+    return index == 1 || index == 4 || (scrollSlotVisible() ? index == 7 : index == 6);
 }
 
 int CaptureModeToolbar::hitTest(const QPoint& point) const
@@ -587,7 +606,7 @@ void CaptureModeToolbar::paintEvent(QPaintEvent*)
             || (!m_recording && !m_scroll && i == 6 && m_ocr);
         const bool active = (i == 0 && !m_recording && !m_scroll)
             || (i == 1 && m_recording)
-            || (m_enableScrollCapture && i == 7 && m_scroll)
+            || (scrollSlotVisible() && i == 7 && m_scroll)
             || (!m_recording && !m_scroll && i == 5 && m_ocr)
             || (!m_recording && !m_scroll && i == 6 && m_timerSeconds > 0);
         // Mic and Speaker are the recording phase's slots: on the shot side
@@ -721,7 +740,7 @@ void CaptureModeToolbar::drawIcon(QPainter& painter,
     case 7:
         if (cameraSlot(7))
             glyph = 0xE205; // webcam
-        else if (m_enableScrollCapture)
+        else if (scrollSlotVisible())
             glyph = 0xE28E; // mouse
         else
             glyph = 0xE1B2; // x
@@ -843,7 +862,7 @@ void CaptureModeToolbar::drawFallbackIcon(QPainter& painter,
                 painter.drawLine(QPointF(x - 10, y - 10), QPointF(x + 10, y + 11));
             break;
         }
-        if (m_enableScrollCapture) {
+        if (scrollSlotVisible()) {
             // Two downward chevrons, matching the toolbar's line style.
             painter.drawLine(QPointF(x - 7, y - 7), QPointF(x, y));
             painter.drawLine(QPointF(x + 7, y - 7), QPointF(x, y));
@@ -937,7 +956,7 @@ void CaptureModeToolbar::mousePressEvent(QMouseEvent* event)
         return;
     }
 
-    if (m_enableScrollCapture && index == 7) {
+    if (scrollSlotVisible() && index == 7) {
         m_recording = false;
         notifyCameraChanged();
         m_scroll = !m_scroll;
@@ -1002,7 +1021,8 @@ void CaptureModeToolbar::mousePressEvent(QMouseEvent* event)
         break;
     case 4:
         if ((!m_recording && !m_scroll && (m_timerSeconds == 0 || m_timedSelection))
-            || ((m_recording || m_scroll) && m_allowAreaRecording))
+            || ((m_recording || m_scroll) && m_allowAreaRecording)
+            || (m_scroll && m_enableScrollCapture))
             finish(Action::Area);
         break;
     case 5:

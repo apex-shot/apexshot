@@ -101,6 +101,13 @@ fn main() {
             }
             return;
         }
+        "x11-pick-window-internal" => {
+            if let Err(error) = apexshot::backend::x11_window_pick::run_internal_helper() {
+                eprintln!("X11 window pick failed: {error}");
+                std::process::exit(1);
+            }
+            return;
+        }
         "update" => {
             if let Err(error) = cli::update::run_update(&args) {
                 eprintln!("Update failed: {error}");
