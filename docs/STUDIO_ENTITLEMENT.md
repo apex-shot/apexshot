@@ -104,9 +104,9 @@ restart and works offline.
 Use the **Purchase or recover Studio** link to open `https://apexshot.org/studio`
 in a browser. The desktop does not call a purchase, account, or recovery API;
 the person providing the token must verify purchase ownership before issuing
-one. The desktop repository contains no production signing key or issuance
-service, so official sales and automated recovery are not ready until those
-separate operations are configured.
+one. Purchases, token issuance, and recovery run in the separate Cloud
+service, with Polar as the merchant of record; the desktop repository contains
+no production signing key or issuance service.
 
 When an export, copy, or upload would use a Studio capability without an
 eligible token, the editor raises an in-window card instead of a desktop
@@ -127,8 +127,8 @@ free.
 
 ## Refunds and offline limits
 
-The proposed policy is a 14-day refund window on the first Studio purchase and
-must be stated consistently in the checkout terms before sale. This offline
+The published policy is a 14-day refund window on the first Studio purchase,
+stated on the website's refund page and in the checkout terms. This offline
 token has no online revocation list or device binding. If a refund is processed
 while a device is offline, the stored token cannot be immediately revoked
 there, and a previously covered build remains usable. Do not promise immediate
