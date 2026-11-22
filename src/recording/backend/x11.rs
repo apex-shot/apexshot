@@ -221,6 +221,35 @@ pub(super) async fn record_x11_with_gstreamer(
         }
     }
 
+    // The controls bar is on screen over the captured area; the probe rebuilds
+    // the pixels underneath it before the frame is converted, so the bar never
+    // reaches the encoder.
+    if super::super::x11_controls_mask::controls_window() != 0 {
+        let capture_origin = match (config.x, config.y, config.width, config.height) {
+            (Some(x), Some(y), Some(_), Some(_)) if config.x11_window.is_none() => (x, y),
+            _ => (0, 0),
+        };
+        if let Some(masker) =
+            super::super::x11_controls_mask::X11ControlsMasker::connect(capture_origin)
+        {
+            if let Some(source) = pipeline.by_name("vsrc") {
+                if let Some(pad) = source.static_pad("src") {
+                    // Pad probes are `Fn`, so the per-frame state lives behind
+                    // a lock; the probe itself only runs on the streaming thread.
+                    let masker = std::sync::Mutex::new(masker);
+                    pad.add_probe(gst::PadProbeType::BUFFER, move |pad, info| {
+                        if let Ok(mut masker) = masker.lock() {
+                            masker.mask(pad, info);
+                        }
+                        gst::PadProbeReturn::Ok
+                    });
+                }
+            }
+        } else {
+            eprintln!("[recording] X11 controls mask unavailable: no display connection");
+        }
+    }
+
     // Window recordings re-crop the screen as the window moves or resizes.
     // The watcher polls on its own X connection and stops before teardown.
     let mut crop_watcher = config

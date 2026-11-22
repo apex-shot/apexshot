@@ -367,6 +367,12 @@ else()
         src/platform/windows/scroll_capture.h
         src/platform/windows/scroll_controls.cpp
         src/platform/windows/scroll_controls.h
+        # The recording bar is the same painted widget as the Windows shell;
+        # the X11 file behind it mirrors a recording owned by the Rust process.
+        src/platform/recording.h
+        src/platform/windows/recording_controls.cpp
+        src/platform/windows/recording_controls.h
+        src/platform/x11/remote_recording_session.cpp
     )
 
     target_include_directories(apexshot-capture PRIVATE src ${X11_INCLUDE_DIR})

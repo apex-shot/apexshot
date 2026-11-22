@@ -8,7 +8,7 @@ use crate::config::AppConfig;
 mod control_session;
 pub mod editor;
 mod indicator_notify;
-// ponytail: controls are removed; this module still owns the countdown overlay.
+// The countdown overlay and the X11 recording controls bar share this module.
 #[allow(dead_code)]
 mod stop_overlay;
 #[cfg(test)]
@@ -34,6 +34,7 @@ mod pointer_track;
 mod recording_manifest;
 mod timeline;
 mod wf_recorder;
+mod x11_controls_mask;
 mod x11_pointer_track;
 mod x11_window_target;
 

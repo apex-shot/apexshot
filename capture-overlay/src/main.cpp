@@ -6,16 +6,21 @@
 #include "RecordingControlsWindow.h"
 #include "ScreenCapture.h"
 #include "Sandbox.h"
+#include "platform/recording.h"
+#include "platform/windows/recording_controls.h"
 #include "platform/windows/scroll_controls.h"
 #include "platform/x11/scroll_capture_x11.h"
 
 #include <QApplication>
+#include <QCursor>
 #include <QDateTime>
 #include <QFile>
 #include <QIcon>
 #include <QPixmap>
+#include <QPointer>
 #include <QSize>
 #include <QScreen>
+#include <QTimer>
 #include <QDBusConnection>
 #include <QDBusInterface>
 #include <QDBusReply>
@@ -586,6 +591,73 @@ static int runWorkerServer(QApplication& app)
     return 0;
 }
 
+/// Host the shared recording bar for an X11 recording whose recorder lives in
+/// the Rust process. User commands leave on stdout and the recorder's pause or
+/// resume comes back on stdin, so the bar looks and behaves as it does when
+/// the recorder runs in this process.
+int runRecordingControlsMode(QApplication& app, const QByteArray& paramsJson)
+{
+    QJsonObject params;
+    const QJsonDocument document = QJsonDocument::fromJson(paramsJson);
+    if (document.isObject())
+        params = document.object();
+
+    const auto intValue = [&params](const char* key) {
+        return params.value(QString::fromLatin1(key)).toInt();
+    };
+
+    QRect captureRegion(intValue("capture_x"),
+                        intValue("capture_y"),
+                        intValue("capture_w"),
+                        intValue("capture_h"));
+    const bool fullscreen = params.value(QStringLiteral("is_fullscreen")).toBool();
+    // The shared bar always draws its timer, as it does on the other platform.
+    const bool showTimer = params.value(QStringLiteral("show_timer")).toBool(true);
+    Q_UNUSED(showTimer);
+    if (fullscreen || captureRegion.width() <= 0 || captureRegion.height() <= 0) {
+        QScreen* screen = QGuiApplication::screenAt(captureRegion.center());
+        if (!screen)
+            screen = QGuiApplication::primaryScreen();
+        if (screen) {
+            // The bar positions itself in device pixels; a full display is the
+            // screen's geometry at its device pixel ratio.
+            const QRect geometry = screen->geometry();
+            const qreal dpr = screen->devicePixelRatio();
+            captureRegion = QRect(qRound(geometry.x() * dpr),
+                                  qRound(geometry.y() * dpr),
+                                  qRound(geometry.width() * dpr),
+                                  qRound(geometry.height() * dpr));
+        }
+    }
+
+    Platform::RecordingSession session;
+    QPointer<RecordingControls> controls =
+        new RecordingControls(&session, captureRegion);
+    QObject::connect(controls.data(), &RecordingControls::restartRequested, [] {
+        std::fputs("restart\n", stdout);
+        std::fflush(stdout);
+    });
+    QObject::connect(&session,
+                     &Platform::RecordingSession::finished,
+                     &app,
+                     &QCoreApplication::quit,
+                     Qt::QueuedConnection);
+
+    controls->show();
+    // The recorder masks the bar out of the video by window id, so report the
+    // top-level window once it exists.
+    QTimer::singleShot(0, &app, [controls] {
+        if (!controls)
+            return;
+        std::printf("xid %llu\n", static_cast<unsigned long long>(controls->winId()));
+        std::fflush(stdout);
+    });
+
+    const int code = app.exec();
+    delete controls.data();
+    return code;
+}
+
 int main(int argc, char* argv[])
 {
     if (isFlatpakSandboxed()) {
@@ -599,9 +671,15 @@ int main(int argc, char* argv[])
     qputenv("QT_IM_MODULE", "compose");
 
     bool workerMode = false;
+    bool recordingControlsMode = false;
+    QByteArray recordingControlsParams;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--worker") == 0) {
             workerMode = true;
+        } else if (std::strcmp(argv[i], "--recording-controls") == 0 && i + 1 < argc) {
+            recordingControlsMode = true;
+            recordingControlsParams = QByteArray(argv[i + 1]);
+            ++i;
         }
     }
 
@@ -619,6 +697,11 @@ int main(int argc, char* argv[])
         : QStringLiteral("io.github.codegoddy.apexshot");
     app.setDesktopFileName(desktopFileName);
     app.setWindowIcon(QIcon::fromTheme(desktopFileName));
+
+    // The controls bar is a small standalone window: it must not open the
+    // overlay, the worker socket, or ask for the session bus.
+    if (recordingControlsMode)
+        return runRecordingControlsMode(app, recordingControlsParams);
 
     if (!QDBusConnection::sessionBus().isConnected()) {
         std::fprintf(stderr, "apexshot-capture: session bus not connected: %s\n",

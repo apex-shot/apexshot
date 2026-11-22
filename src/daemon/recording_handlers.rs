@@ -100,7 +100,7 @@ async fn handle_recording_target(target: crate::recording::RecordingTarget) {
         session_id: None,
     };
 
-    match run_recording_with_controls(config, params).await {
+    match run_recording_with_controls(config, params, app_config.rec_controls).await {
         Ok((path, StopAction::Discard)) => {
             let _ = std::fs::remove_file(&path);
             eprintln!("[daemon] Recording discarded.");
