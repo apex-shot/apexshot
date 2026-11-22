@@ -1,0 +1,292 @@
+//! Release highlights and the once-per-upgrade decision shared by both apps.
+//!
+//! This module is deliberately free of GTK and platform code so the Linux
+//! binary and the Windows settings binary can compile the same data, the same
+//! version comparison, and the same state file.
+
+use std::cmp::Ordering;
+use std::path::PathBuf;
+
+/// One line of a release's highlights.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Highlight {
+    /// The feature's name, as a gettext message id.
+    pub title: &'static str,
+    /// One sentence describing what the feature adds.
+    pub body: &'static str,
+    /// True when the highlight is a Studio feature; the window marks those.
+    pub studio: bool,
+}
+
+/// The highlights of one release.
+#[derive(Debug, PartialEq, Eq)]
+pub struct ReleaseNotes {
+    pub version: &'static str,
+    pub highlights: &'static [Highlight],
+}
+
+/// Every release with highlights, newest first.
+pub const RELEASES: &[ReleaseNotes] = &[ReleaseNotes {
+    version: "0.3.1",
+    highlights: &[
+        Highlight {
+            title: "Studio turns on by itself",
+            body: "Choose Studio in ApexShot, sign in, and pay. The app activates on this computer with nothing to copy or import.",
+            studio: true,
+        },
+        Highlight {
+            title: "Motion export",
+            body: "Animated titles and timing tools for polished product videos.",
+            studio: true,
+        },
+        Highlight {
+            title: "Advanced zoom camera",
+            body: "Instant zooms and fine camera controls on top of the free auto-zoom.",
+            studio: true,
+        },
+        Highlight {
+            title: "Neural upscaling",
+            body: "Sharpen small captures on export, fully offline.",
+            studio: true,
+        },
+    ],
+}];
+
+/// The supporting line under the window's headline.
+pub const HEADER_COPY: &str = "Here's what this release adds.";
+
+/// The line under the highlight list, so the free tools stay visible.
+pub const FOOTER: &str = "Capture, annotation, recording, and the editors' core tools stay free.";
+
+/// What a fresh start should do with the highlights.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartupDecision {
+    /// The window should present these notes.
+    Show(&'static ReleaseNotes),
+    /// Record the running version as seen without opening a window.
+    MarkSeen,
+    /// Nothing to do.
+    Nothing,
+}
+
+/// Parse the numeric parts of a dotted version, ignoring a `-suffix`.
+fn version_number(version: &str) -> Vec<u64> {
+    version
+        .trim()
+        .trim_start_matches('v')
+        .split('-')
+        .next()
+        .unwrap_or("")
+        .split('.')
+        .map(|part| part.trim().parse::<u64>().unwrap_or(0))
+        .collect()
+}
+
+/// Compare two dotted numeric versions, ignoring any `-suffix` and treating
+/// missing trailing components as zero.
+fn compare_versions(a: &str, b: &str) -> Ordering {
+    let a = version_number(a);
+    let b = version_number(b);
+    for index in 0..a.len().max(b.len()) {
+        let left = a.get(index).copied().unwrap_or(0);
+        let right = b.get(index).copied().unwrap_or(0);
+        match left.cmp(&right) {
+            Ordering::Equal => continue,
+            other => return other,
+        }
+    }
+    Ordering::Equal
+}
+
+/// The newest entry that is newer than `last_seen` and no newer than
+/// `current`.
+///
+/// `None` when there is no `last_seen` version (the caller decides what a
+/// first run means), when the versions are equal, when the running build is
+/// older than the recorded one, or when no entry qualifies.
+pub fn notes_to_show(current: &str, last_seen: Option<&str>) -> Option<&'static ReleaseNotes> {
+    let last_seen = last_seen?;
+    RELEASES.iter().find(|release| {
+        compare_versions(release.version, last_seen) == Ordering::Greater
+            && compare_versions(release.version, current) != Ordering::Greater
+    })
+}
+
+/// The newest entry no newer than `current`, for the manual command.
+pub fn notes_for(current: &str) -> Option<&'static ReleaseNotes> {
+    RELEASES
+        .iter()
+        .find(|release| compare_versions(release.version, current) != Ordering::Greater)
+}
+
+/// Decide what a daemon or shell start should do with the highlights.
+///
+/// An install that has not finished onboarding records the version instead of
+/// showing anything, so a fresh install never meets the window. A finished
+/// install with no recorded version is treated as an upgrade from before this
+/// feature. A downgrade only refreshes the recorded version.
+pub fn decide_on_startup(
+    current: &str,
+    last_seen: Option<&str>,
+    onboarding_complete: bool,
+) -> StartupDecision {
+    if !onboarding_complete {
+        return StartupDecision::MarkSeen;
+    }
+
+    let Some(last_seen) = last_seen else {
+        return match notes_for(current) {
+            Some(notes) => StartupDecision::Show(notes),
+            None => StartupDecision::MarkSeen,
+        };
+    };
+
+    if let Some(notes) = notes_to_show(current, Some(last_seen)) {
+        return StartupDecision::Show(notes);
+    }
+    if last_seen != current {
+        StartupDecision::MarkSeen
+    } else {
+        StartupDecision::Nothing
+    }
+}
+
+/// The file that records the last version whose highlights were handled.
+pub fn last_seen_path() -> Option<PathBuf> {
+    let mut path = dirs::config_dir()?;
+    path.push("apexshot");
+    path.push("whats_new_seen");
+    Some(path)
+}
+
+/// Read the version recorded by [`write_last_seen`].
+pub fn read_last_seen() -> Option<String> {
+    let path = last_seen_path()?;
+    let text = std::fs::read_to_string(path).ok()?;
+    let version = text.trim();
+    (!version.is_empty()).then(|| version.to_string())
+}
+
+/// Record `version` as seen, replacing the file atomically.
+///
+/// Failing to record it only means the window may appear again; no caller has
+/// anything useful to do with the error, so it is ignored.
+pub fn write_last_seen(version: &str) {
+    let Some(path) = last_seen_path() else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let temporary = path.with_file_name(format!(".whats_new_seen.{}.tmp", std::process::id()));
+    if std::fs::write(&temporary, version.trim()).is_ok() {
+        let _ = std::fs::rename(&temporary, &path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn versions_compare_by_their_numeric_parts() {
+        assert_eq!(compare_versions("0.3.0", "0.3.0"), Ordering::Equal);
+        assert_eq!(compare_versions("0.3.1", "0.3.0"), Ordering::Greater);
+        assert_eq!(compare_versions("0.3.0", "0.3.1"), Ordering::Less);
+        assert_eq!(compare_versions("0.10.0", "0.9.9"), Ordering::Greater);
+        assert_eq!(compare_versions("1.0", "1.0.0"), Ordering::Equal);
+        // A suffix is metadata, not part of the ordering.
+        assert_eq!(compare_versions("0.3.1-rc1", "0.3.1"), Ordering::Equal);
+        assert_eq!(compare_versions("v0.3.1", "0.3.1"), Ordering::Equal);
+    }
+
+    #[test]
+    fn notes_to_show_needs_a_previous_version_and_stays_within_the_range() {
+        assert_eq!(notes_to_show("0.3.1", None), None);
+
+        let notes = notes_to_show("0.3.1", Some("0.3.0")).expect("the new release qualifies");
+        assert_eq!(notes.version, "0.3.1");
+
+        // The recorded version already covers the release.
+        assert_eq!(notes_to_show("0.3.1", Some("0.3.1")), None);
+        // A build older than the entry shows nothing.
+        assert_eq!(notes_to_show("0.3.0", Some("0.2.9")), None);
+        // A recorded version newer than the running build is a downgrade.
+        assert_eq!(notes_to_show("0.3.0", Some("0.4.0")), None);
+    }
+
+    #[test]
+    fn the_newest_qualifying_entry_is_the_one_returned() {
+        let notes = notes_to_show("0.3.1", Some("0.1.0")).expect("the release qualifies");
+        assert_eq!(notes.version, RELEASES[0].version);
+    }
+
+    #[test]
+    fn notes_for_returns_the_newest_entry_covered_by_the_build() {
+        assert_eq!(notes_for("0.3.1").map(|notes| notes.version), Some("0.3.1"));
+        assert_eq!(notes_for("0.4.0").map(|notes| notes.version), Some("0.3.1"));
+        assert_eq!(notes_for("0.3.0"), None);
+    }
+
+    #[test]
+    fn a_fresh_install_marks_the_version_without_showing() {
+        assert_eq!(
+            decide_on_startup("0.3.1", None, false),
+            StartupDecision::MarkSeen
+        );
+    }
+
+    #[test]
+    fn a_finished_install_with_no_record_shows_the_current_notes() {
+        assert!(matches!(
+            decide_on_startup("0.3.1", None, true),
+            StartupDecision::Show(notes) if notes.version == "0.3.1"
+        ));
+    }
+
+    #[test]
+    fn a_finished_install_below_every_entry_marks_without_showing() {
+        assert_eq!(
+            decide_on_startup("0.2.0", None, true),
+            StartupDecision::MarkSeen
+        );
+    }
+
+    #[test]
+    fn an_upgrade_shows_the_entries_after_the_recorded_version() {
+        assert!(matches!(
+            decide_on_startup("0.3.1", Some("0.2.0"), true),
+            StartupDecision::Show(notes) if notes.version == "0.3.1"
+        ));
+    }
+
+    #[test]
+    fn the_same_version_does_nothing() {
+        assert_eq!(
+            decide_on_startup("0.3.1", Some("0.3.1"), true),
+            StartupDecision::Nothing
+        );
+    }
+
+    #[test]
+    fn a_downgrade_records_the_running_version() {
+        assert_eq!(
+            decide_on_startup("0.3.0", Some("0.3.1"), true),
+            StartupDecision::MarkSeen
+        );
+    }
+
+    #[test]
+    fn an_upgrade_past_the_newest_entry_records_the_running_version() {
+        assert_eq!(
+            decide_on_startup("0.3.2", Some("0.3.1"), true),
+            StartupDecision::MarkSeen
+        );
+    }
+
+    #[test]
+    fn the_state_file_lives_beside_the_other_config_files() {
+        let path = last_seen_path().expect("a config directory");
+        assert!(path.ends_with("apexshot/whats_new_seen"));
+    }
+}

@@ -50,6 +50,8 @@ pub mod update_ui;
 pub mod update_window;
 pub mod usage_telemetry;
 pub mod utils;
+pub mod whats_new;
+pub mod whats_new_window;
 
 // Re-export commonly used types
 pub use backend::{CaptureData, DisplayBackend, DisplayError, DisplayResult, PixelFormat};

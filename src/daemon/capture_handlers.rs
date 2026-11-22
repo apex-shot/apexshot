@@ -567,6 +567,26 @@ pub(super) fn spawn_update_window_subprocess(force: bool) -> bool {
     }
 }
 
+/// Open the release-highlights window in its own process. The daemon decides
+/// once per version whether it is due; this only starts the window.
+pub(super) fn spawn_whats_new_subprocess() -> bool {
+    let exe = crate::update_window::binary_path();
+    match std::process::Command::new(exe).arg("whats-new").spawn() {
+        Ok(mut child) => {
+            // The daemon outlives the window; reap the child so it does not
+            // leave a zombie behind when the window closes.
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+            true
+        }
+        Err(error) => {
+            eprintln!("[daemon] Failed to spawn the What's new window: {error}");
+            false
+        }
+    }
+}
+
 pub(super) fn spawn_history_subprocess() {
     let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
 

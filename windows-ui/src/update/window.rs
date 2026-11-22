@@ -35,7 +35,7 @@ const PAGE_INSET: f64 = 36.0;
 /// called off.
 const CLOSE_WAIT_TIMEOUT: Duration = Duration::from_secs(8);
 
-fn px(scale: f64, value: f64) -> i32 {
+pub(crate) fn px(scale: f64, value: f64) -> i32 {
     (value * scale).round() as i32
 }
 
@@ -712,7 +712,7 @@ pub(super) fn build_window(app: &Application, release: Release) {
 }
 
 /// The brand mark above a centred headline, shared by every state.
-fn header(scale: f64, dark: bool, title: &str, copy: &str) -> GtkBox {
+pub(crate) fn header(scale: f64, dark: bool, title: &str, copy: &str) -> GtkBox {
     let block = GtkBox::new(Orientation::Vertical, 0);
     let mark = crate::onboarding::showcase::brand_mark(scale, dark);
     mark.set_margin_bottom(px(scale, 18.0));
@@ -721,7 +721,7 @@ fn header(scale: f64, dark: bool, title: &str, copy: &str) -> GtkBox {
     block
 }
 
-fn page(scale: f64) -> GtkBox {
+pub(crate) fn page(scale: f64) -> GtkBox {
     let page = GtkBox::new(Orientation::Vertical, 0);
     page.add_css_class("update-page");
     page.set_halign(Align::Fill);
@@ -737,7 +737,7 @@ fn page(scale: f64) -> GtkBox {
 }
 
 /// The reading column above the actions.
-fn body() -> GtkBox {
+pub(crate) fn body() -> GtkBox {
     let body = GtkBox::new(Orientation::Vertical, 0);
     body.set_halign(Align::Fill);
     body
@@ -745,7 +745,7 @@ fn body() -> GtkBox {
 
 /// Stack the reading column and the bottom action row, centring the column in
 /// the space the actions leave.
-fn page_body(page: &GtkBox, body: &GtkBox, actions: &GtkBox) {
+pub(crate) fn page_body(page: &GtkBox, body: &GtkBox, actions: &GtkBox) {
     let top = GtkBox::new(Orientation::Vertical, 0);
     top.set_vexpand(true);
     page.append(&top);
@@ -758,7 +758,7 @@ fn page_body(page: &GtkBox, body: &GtkBox, actions: &GtkBox) {
 
 /// One action at each edge of the row: the quiet choice on the left, the
 /// primary action on the right. A lone action sits in the middle.
-fn action_row(scale: f64, left: Option<&Button>, right: &Button) -> GtkBox {
+pub(crate) fn action_row(scale: f64, left: Option<&Button>, right: &Button) -> GtkBox {
     let actions = GtkBox::new(Orientation::Horizontal, px(scale, 12.0));
     actions.add_css_class("onboarding-actions");
     actions.add_css_class("update-actions");
@@ -791,7 +791,7 @@ fn action_row(scale: f64, left: Option<&Button>, right: &Button) -> GtkBox {
     actions
 }
 
-fn card(scale: f64) -> GtkBox {
+pub(crate) fn card(scale: f64) -> GtkBox {
     let card = GtkBox::new(Orientation::Vertical, 0);
     card.add_css_class("update-card");
     card.set_margin_top(px(scale, 22.0));
@@ -823,21 +823,21 @@ fn row(scale: f64, key: &str, value: &str) -> (GtkBox, Label) {
     (row, value_label)
 }
 
-fn primary_button(label: &str) -> Button {
+pub(crate) fn primary_button(label: &str) -> Button {
     let button = Button::with_label(label);
     button.add_css_class("settings-primary-btn");
     button.set_halign(Align::Fill);
     button
 }
 
-fn quiet_button(label: &str) -> Button {
+pub(crate) fn quiet_button(label: &str) -> Button {
     let button = Button::with_label(label);
     button.add_css_class("onboarding-text-button");
     button.set_halign(Align::Center);
     button
 }
 
-fn window_controls(window: &ApplicationWindow, scale: f64) -> GtkBox {
+pub(crate) fn window_controls(window: &ApplicationWindow, scale: f64) -> GtkBox {
     let minimize = window_control_button(WindowControl::Minimize, &t("Minimize"), scale);
     minimize.connect_clicked({
         let window = window.clone();
@@ -895,7 +895,7 @@ fn launch_installer(path: &Path) -> std::io::Result<u32> {
 
 /// Load the update-specific surfaces after the onboarding sheet, at the same
 /// display scale.
-fn install_css(scale: f64) {
+pub(crate) fn install_css(scale: f64) {
     let Some(display) = gtk4::gdk::Display::default() else {
         return;
     };

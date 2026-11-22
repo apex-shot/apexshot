@@ -56,3 +56,5 @@ pub mod update_ui;
 mod usage_telemetry;
 pub mod utils;
 pub mod video_editor;
+pub mod whats_new;
+pub mod whats_new_window;

@@ -20,7 +20,11 @@ pub(super) fn dispatch_daemon_action(
             }
             // The window owns the prompt and its snooze. When it cannot start
             // at all, the desktop notification remains the quiet fallback.
-            if !capture_handlers::spawn_update_window_subprocess(false) {
+            if capture_handlers::spawn_update_window_subprocess(false) {
+                // A release-highlights window due in this same start stays out
+                // of the way of the update prompt.
+                super::note_update_window_opened();
+            } else {
                 crate::utils::notify::desktop_notification(
                     &crate::i18n::t("ApexShot update available"),
                     &crate::i18n::tfmt(
@@ -31,7 +35,9 @@ pub(super) fn dispatch_daemon_action(
             }
         }
         DaemonAction::OpenUpdate => {
-            if !capture_handlers::spawn_update_window_subprocess(true) {
+            if capture_handlers::spawn_update_window_subprocess(true) {
+                super::note_update_window_opened();
+            } else {
                 eprintln!("[update] Could not open the update window");
             }
         }
@@ -180,6 +186,11 @@ pub(super) fn dispatch_daemon_action(
         }
         DaemonAction::OpenHistory => {
             tokio::task::spawn_blocking(capture_handlers::spawn_history_subprocess);
+        }
+        DaemonAction::WhatsNew => {
+            tokio::task::spawn_blocking(|| {
+                let _ = capture_handlers::spawn_whats_new_subprocess();
+            });
         }
         DaemonAction::OpenSettings => {
             tokio::task::spawn_blocking(capture_handlers::show_settings_subprocess);
