@@ -281,13 +281,16 @@ fn main() {
 fn activate_studio_from_url(url: &str) -> ! {
     match apexshot::activate_from_url(url) {
         Ok(()) => {
-            apexshot::utils::notify::desktop_notification("Studio is active on this device", "");
+            apexshot::utils::notify::desktop_notification(
+                &apexshot::i18n::t("Studio is active on this device"),
+                "",
+            );
             std::process::exit(0);
         }
         Err(error) => {
             eprintln!("{error}");
             apexshot::utils::notify::desktop_notification_important(
-                "Studio activation failed",
+                &apexshot::i18n::t("Studio activation failed"),
                 &error.to_string(),
             );
             std::process::exit(1);

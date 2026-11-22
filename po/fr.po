@@ -5301,3 +5301,108 @@ msgstr "Détourage de la caméra"
 
 msgid "Cut yourself out of the camera and set yourself on the screen."
 msgstr "Détourez-vous de la caméra et placez-vous sur l’écran."
+
+msgid "Almost out of free uploads"
+msgstr "Presque plus de téléversements gratuits"
+
+msgid "Could not open the dashboard"
+msgstr "Impossible d'ouvrir le tableau de bord"
+
+msgid "Delete old uploads, or Go Pro for 50 GB."
+msgstr "Supprimez d'anciens téléversements ou passez à Pro pour 50 Go."
+
+msgid "Explore Studio"
+msgstr "Découvrir Studio"
+
+msgid "Exported with Studio. 1 free Studio export left."
+msgstr "Exporté avec Studio. Il vous reste 1 export Studio gratuit."
+
+msgid "Exported with Studio. {count} free Studio exports left."
+msgstr "Exporté avec Studio. Il vous reste {count} exports Studio gratuits."
+
+msgid "Go Pro for 50 GB."
+msgstr "Passez à Pro pour 50 Go."
+
+msgid "Go Pro for unlimited uploads."
+msgstr "Passez à Pro pour des téléversements illimités."
+
+msgid "Manage uploads"
+msgstr "Gérer les téléversements"
+
+msgid "Not uploaded"
+msgstr "Non téléversé"
+
+msgid "Studio exports left on the free trial"
+msgstr "Exports Studio restants dans l'essai gratuit"
+
+msgid "Studio · 1 free export left"
+msgstr "Studio · 1 export gratuit restant"
+
+msgid "Studio · {count} free exports left"
+msgstr "Studio · {count} exports gratuits restants"
+
+msgid "That was your last free Studio export. Get Studio to keep these styles."
+msgstr "C'était votre dernier export Studio gratuit. Obtenez Studio pour conserver ces styles."
+
+msgid "Uploads come back next month."
+msgstr "Les téléversements reviennent le mois prochain."
+
+msgid "Uploads come back on {date}."
+msgstr "Les téléversements reviennent le {date}."
+
+msgid "What's new"
+msgstr "Nouveautés"
+
+msgid "What's new in ApexShot {version}"
+msgstr "Nouveautés d'ApexShot {version}"
+
+msgid "You've used this month's free uploads"
+msgstr "Vous avez utilisé les téléversements gratuits de ce mois-ci"
+
+msgid "You've used your 3 free Studio exports"
+msgstr "Vous avez utilisé vos 3 exports Studio gratuits"
+
+msgid "Your capture is saved on this computer."
+msgstr "Votre capture est enregistrée sur cet ordinateur."
+
+msgid "Your free Cloud storage is almost full"
+msgstr "Votre stockage Cloud gratuit est presque plein"
+
+msgid "Your free Cloud storage is full"
+msgstr "Votre stockage Cloud gratuit est plein"
+
+msgid "{used} of {max} free Cloud storage used."
+msgstr "{used} sur {max} de stockage Cloud gratuit utilisés."
+
+msgid "{used} of {max} free uploads used this month."
+msgstr "{used} sur {max} téléversements gratuits utilisés ce mois-ci."
+
+msgid "{used} of {max} free uploads used."
+msgstr "{used} sur {max} téléversements gratuits utilisés."
+
+msgid "{used} of {max} used this month."
+msgstr "{used} sur {max} utilisés ce mois-ci."
+
+msgid "{used} of {max} used."
+msgstr "{used} sur {max} utilisés."
+
+msgid "Try Studio free"
+msgstr "Essayez Studio gratuitement"
+
+msgid "Your next 3 Studio exports are on us. A label beside Export shows how many are left."
+msgstr "Vos 3 prochains exports Studio sont offerts. Une étiquette à côté d'Exporter indique combien il en reste."
+
+msgid "Buying Studio takes one step"
+msgstr "Acheter Studio en une seule étape"
+
+msgid "Choose Studio in ApexShot, sign in, and pay. The app turns Studio on by itself, with nothing to copy or import."
+msgstr "Choisissez Studio dans ApexShot, connectez-vous et payez. L'application active Studio toute seule, sans rien à copier ni à importer."
+
+msgid "Capture, annotation, recording, and the editors' core tools stay free."
+msgstr "La capture, l'annotation, l'enregistrement et les outils essentiels des éditeurs restent gratuits."
+
+msgid "Studio is active on this device"
+msgstr "Studio est actif sur cet appareil"
+
+msgid "Studio activation failed"
+msgstr "Échec de l'activation de Studio"

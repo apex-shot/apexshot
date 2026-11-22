@@ -29,7 +29,7 @@ fn main() {
         match app::studio_entitlement::activate_from_url(&url) {
             Ok(()) => {
                 app::utils::notify::desktop_notification_and_wait(
-                    "Studio is active on this device",
+                    &app::i18n::t("Studio is active on this device"),
                     "",
                     false,
                 );
@@ -38,7 +38,7 @@ fn main() {
             Err(error) => {
                 eprintln!("{error}");
                 app::utils::notify::desktop_notification_and_wait(
-                    "Studio activation failed",
+                    &app::i18n::t("Studio activation failed"),
                     &error.to_string(),
                     true,
                 );

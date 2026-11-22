@@ -5188,3 +5188,108 @@ msgstr "カメラの切り抜き"
 
 msgid "Cut yourself out of the camera and set yourself on the screen."
 msgstr "カメラ映像から自分を切り抜いて画面上に配置します。"
+
+msgid "Almost out of free uploads"
+msgstr "無料アップロードの残りがわずかです"
+
+msgid "Could not open the dashboard"
+msgstr "ダッシュボードを開けませんでした"
+
+msgid "Delete old uploads, or Go Pro for 50 GB."
+msgstr "古いアップロードを削除するか、Pro にアップグレードして 50 GB を利用しましょう。"
+
+msgid "Explore Studio"
+msgstr "Studio を見る"
+
+msgid "Exported with Studio. 1 free Studio export left."
+msgstr "Studio で書き出しました。残りの無料 Studio 書き出しは 1 回です。"
+
+msgid "Exported with Studio. {count} free Studio exports left."
+msgstr "Studio で書き出しました。残りの無料 Studio 書き出しは {count} 回です。"
+
+msgid "Go Pro for 50 GB."
+msgstr "Pro にアップグレードして 50 GB を利用しましょう。"
+
+msgid "Go Pro for unlimited uploads."
+msgstr "Pro にアップグレードしてアップロードを無制限にしましょう。"
+
+msgid "Manage uploads"
+msgstr "アップロードを管理"
+
+msgid "Not uploaded"
+msgstr "アップロードされませんでした"
+
+msgid "Studio exports left on the free trial"
+msgstr "無料トライアルで残っている Studio 書き出し"
+
+msgid "Studio · 1 free export left"
+msgstr "Studio · 無料書き出し残り 1 回"
+
+msgid "Studio · {count} free exports left"
+msgstr "Studio · 無料書き出し残り {count} 回"
+
+msgid "That was your last free Studio export. Get Studio to keep these styles."
+msgstr "これが最後の無料 Studio 書き出しでした。これらのスタイルを使い続けるには Studio を入手してください。"
+
+msgid "Uploads come back next month."
+msgstr "アップロードは来月また利用できます。"
+
+msgid "Uploads come back on {date}."
+msgstr "アップロードは {date} にまた利用できます。"
+
+msgid "What's new"
+msgstr "新機能"
+
+msgid "What's new in ApexShot {version}"
+msgstr "ApexShot {version} の新機能"
+
+msgid "You've used this month's free uploads"
+msgstr "今月の無料アップロードを使い切りました"
+
+msgid "You've used your 3 free Studio exports"
+msgstr "3 回の無料 Studio 書き出しを使い切りました"
+
+msgid "Your capture is saved on this computer."
+msgstr "キャプチャはこのコンピューターに保存されています。"
+
+msgid "Your free Cloud storage is almost full"
+msgstr "無料のクラウドストレージがほぼいっぱいです"
+
+msgid "Your free Cloud storage is full"
+msgstr "無料のクラウドストレージがいっぱいです"
+
+msgid "{used} of {max} free Cloud storage used."
+msgstr "無料のクラウドストレージを {used} / {max} 使用しています。"
+
+msgid "{used} of {max} free uploads used this month."
+msgstr "今月の無料アップロードを {used} / {max} 回使用しました。"
+
+msgid "{used} of {max} free uploads used."
+msgstr "無料アップロードを {used} / {max} 回使用しました。"
+
+msgid "{used} of {max} used this month."
+msgstr "今月は {used} / {max} を使用しました。"
+
+msgid "{used} of {max} used."
+msgstr "{used} / {max} を使用しています。"
+
+msgid "Try Studio free"
+msgstr "Studio を無料で試す"
+
+msgid "Your next 3 Studio exports are on us. A label beside Export shows how many are left."
+msgstr "次の 3 回の Studio 書き出しは無料です。書き出しボタンの横のラベルに残り回数が表示されます。"
+
+msgid "Buying Studio takes one step"
+msgstr "Studio の購入はワンステップ"
+
+msgid "Choose Studio in ApexShot, sign in, and pay. The app turns Studio on by itself, with nothing to copy or import."
+msgstr "ApexShot で Studio を選び、サインインして支払うだけ。アプリが自動で Studio を有効にするので、コピーやインポートは不要です。"
+
+msgid "Capture, annotation, recording, and the editors' core tools stay free."
+msgstr "キャプチャ、注釈、録画、エディターの基本ツールは引き続き無料です。"
+
+msgid "Studio is active on this device"
+msgstr "このデバイスで Studio が有効になりました"
+
+msgid "Studio activation failed"
+msgstr "Studio を有効にできませんでした"
