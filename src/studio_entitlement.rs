@@ -99,7 +99,7 @@ impl StudioStatus {
     }
 }
 
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum StudioEntitlementError {
     #[error("Studio activation is unavailable in this build configuration")]
     ConfigurationUnavailable,
@@ -301,12 +301,50 @@ fn activate_token_at_path(
     write_token_atomically(path, token)
 }
 
-pub fn ensure_export_allowed(
-    capabilities: StudioCapabilities,
-) -> Result<(), StudioEntitlementError> {
-    if !capabilities.requires_studio() {
-        return Ok(());
+/// How this build may treat one output's Studio capabilities.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StudioAccess {
+    /// The output needs no Studio capability and is always free.
+    NotNeeded,
+    /// A verified licence covers this build.
+    Licensed,
+    /// No licence covers this build, but free trial exports remain.
+    Trial { remaining: u32 },
+    /// The output needs Studio and neither a licence nor the trial allows it.
+    Blocked(StudioEntitlementError),
+}
+
+impl StudioAccess {
+    pub fn is_trial(&self) -> bool {
+        matches!(self, Self::Trial { .. })
     }
+}
+
+/// Decide what an output with `capabilities` may do right now.
+///
+/// The free trial applies to every refusal that activation could fix: a
+/// missing, invalid, mismatched, or uncovered licence. A build that cannot
+/// verify licences, or cannot read its storage, never falls back to the
+/// trial, because the user could not end the trial by buying Studio anyway.
+pub fn studio_access(capabilities: StudioCapabilities) -> StudioAccess {
+    if !capabilities.requires_studio() {
+        return StudioAccess::NotNeeded;
+    }
+    match licence_allows_studio() {
+        Ok(()) => StudioAccess::Licensed,
+        Err(error) => {
+            let remaining = match &error {
+                StudioEntitlementError::ConfigurationUnavailable
+                | StudioEntitlementError::Storage(_) => 0,
+                _ => crate::studio_trial::trial_remaining(),
+            };
+            access_for_licence_result(Err(error), remaining)
+        }
+    }
+}
+
+/// The licence check `studio_access` starts from: a valid, covering token.
+fn licence_allows_studio() -> Result<(), StudioEntitlementError> {
     let configuration = build_configuration()?;
     let path = entitlement_path()?;
     let entitlement =
@@ -315,6 +353,49 @@ pub fn ensure_export_allowed(
         return Err(StudioEntitlementError::UpdateAccessEnded);
     }
     Ok(())
+}
+
+fn access_for_licence_result(
+    licence: Result<(), StudioEntitlementError>,
+    remaining: u32,
+) -> StudioAccess {
+    match licence {
+        Ok(()) => StudioAccess::Licensed,
+        Err(error) => {
+            let trial_applies = remaining > 0
+                && !matches!(
+                    &error,
+                    StudioEntitlementError::ConfigurationUnavailable
+                        | StudioEntitlementError::Storage(_)
+                );
+            if trial_applies {
+                StudioAccess::Trial { remaining }
+            } else {
+                StudioAccess::Blocked(error)
+            }
+        }
+    }
+}
+
+/// Consume one free export when `access` started as a trial.
+///
+/// Every layer of one export shares the same check, so only the output's own
+/// completion calls this. A licensed or free output leaves the counter alone.
+pub fn finish_trial_export(access: StudioAccess) -> Option<u32> {
+    access
+        .is_trial()
+        .then(crate::studio_trial::record_trial_export)
+}
+
+/// Whether the output may proceed. A trial allows it without consuming
+/// anything; only the finished output calls [`finish_trial_export`].
+pub fn ensure_export_allowed(
+    capabilities: StudioCapabilities,
+) -> Result<(), StudioEntitlementError> {
+    match studio_access(capabilities) {
+        StudioAccess::Blocked(error) => Err(error),
+        _ => Ok(()),
+    }
 }
 
 pub fn update_coverage_for_release(
@@ -918,6 +999,8 @@ mod windows_tests {
         let path = new_test_entitlement_path();
         let mut scope = test_entitlement_path_scope(path.clone());
         scope.cleanup_directory = path.parent().map(Path::to_path_buf);
+        // This test is about the licence states themselves, not the trial.
+        let _trial = crate::studio_trial::test_trial_used_up();
         let capabilities = StudioCapabilities {
             static_presentation: true,
             ..Default::default()
@@ -974,6 +1057,8 @@ mod tests {
         assert!(capabilities.requires_studio());
         let path = scratch_path();
         let _path = test_entitlement_path_scope(path);
+        // The free trial would otherwise let this output through.
+        let _trial = crate::studio_trial::test_trial_used_up();
         assert_eq!(
             ensure_export_allowed(capabilities),
             Err(StudioEntitlementError::NotActivated)
@@ -1267,6 +1352,8 @@ mod tests {
     fn export_guard_distinguishes_missing_invalid_and_uncovered_tokens() {
         let path = scratch_path();
         let _path = test_entitlement_path_scope(path.clone());
+        // No free trial here: this test is about licence failures.
+        let _trial = crate::studio_trial::test_trial_used_up();
         let capabilities = StudioCapabilities {
             advanced_zoom: true,
             ..StudioCapabilities::default()
@@ -1290,6 +1377,99 @@ mod tests {
             Err(StudioEntitlementError::UpdateAccessEnded)
         );
         let _ = fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn access_decision_distinguishes_free_licensed_trial_and_blocked() {
+        let path = scratch_path();
+        let _path = test_entitlement_path_scope(path.clone());
+        let _trial = crate::studio_trial::test_trial_path_scope();
+
+        assert_eq!(
+            studio_access(StudioCapabilities::default()),
+            StudioAccess::NotNeeded
+        );
+
+        let needed = StudioCapabilities {
+            advanced_zoom: true,
+            ..StudioCapabilities::default()
+        };
+        assert_eq!(studio_access(needed), StudioAccess::Trial { remaining: 3 });
+
+        let signing_key = synthetic_signing_key();
+        write_token_atomically(&path, &signed_token(&signing_key, &valid_payload(300))).unwrap();
+        assert_eq!(studio_access(needed), StudioAccess::Licensed);
+        assert_eq!(
+            crate::studio_trial::trial_remaining(),
+            crate::studio_trial::STUDIO_FREE_EXPORTS,
+            "a licence never consumes the trial"
+        );
+
+        fs::remove_file(&path).unwrap();
+        for _ in 0..crate::studio_trial::STUDIO_FREE_EXPORTS {
+            crate::studio_trial::record_trial_export();
+        }
+        assert_eq!(
+            studio_access(needed),
+            StudioAccess::Blocked(StudioEntitlementError::NotActivated)
+        );
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn configuration_and_storage_failures_never_become_a_trial() {
+        assert_eq!(
+            access_for_licence_result(
+                Err(StudioEntitlementError::ConfigurationUnavailable),
+                crate::studio_trial::STUDIO_FREE_EXPORTS
+            ),
+            StudioAccess::Blocked(StudioEntitlementError::ConfigurationUnavailable)
+        );
+        assert_eq!(
+            access_for_licence_result(
+                Err(StudioEntitlementError::Storage("disk full".into())),
+                crate::studio_trial::STUDIO_FREE_EXPORTS
+            ),
+            StudioAccess::Blocked(StudioEntitlementError::Storage("disk full".into()))
+        );
+        assert_eq!(
+            access_for_licence_result(
+                Err(StudioEntitlementError::NotActivated),
+                crate::studio_trial::STUDIO_FREE_EXPORTS
+            ),
+            StudioAccess::Trial { remaining: 3 }
+        );
+        assert_eq!(access_for_licence_result(Ok(()), 0), StudioAccess::Licensed);
+    }
+
+    #[test]
+    fn a_trial_export_passes_without_consuming_a_free_export() {
+        let path = scratch_path();
+        let _path = test_entitlement_path_scope(path);
+        let _trial = crate::studio_trial::test_trial_path_scope();
+        let capabilities = StudioCapabilities {
+            advanced_zoom: true,
+            ..StudioCapabilities::default()
+        };
+
+        assert_eq!(
+            crate::studio_trial::trial_remaining(),
+            crate::studio_trial::STUDIO_FREE_EXPORTS
+        );
+        assert_eq!(ensure_export_allowed(capabilities), Ok(()));
+        assert_eq!(
+            crate::studio_trial::trial_remaining(),
+            crate::studio_trial::STUDIO_FREE_EXPORTS
+        );
+
+        assert_eq!(finish_trial_export(studio_access(capabilities)), Some(2));
+        assert_eq!(crate::studio_trial::trial_remaining(), 2);
+        assert_eq!(
+            finish_trial_export(StudioAccess::Licensed),
+            None,
+            "a licensed output never consumes the trial"
+        );
+        assert_eq!(crate::studio_trial::trial_remaining(), 2);
     }
 
     #[test]

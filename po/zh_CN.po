@@ -5187,3 +5187,66 @@ msgstr "新功能"
 
 msgid "What's new in ApexShot {version}"
 msgstr "ApexShot {version} 新功能"
+
+msgid "Explore Studio"
+msgstr "了解 Studio"
+
+msgid "Exported with Studio. 1 free Studio export left."
+msgstr "已使用 Studio 导出。还剩 1 次免费 Studio 导出。"
+
+msgid "Exported with Studio. {count} free Studio exports left."
+msgstr "已使用 Studio 导出。还剩 {count} 次免费 Studio 导出。"
+
+msgid "Studio exports left on the free trial"
+msgstr "免费试用中剩余的 Studio 导出次数"
+
+msgid "Studio · 1 free export left"
+msgstr "Studio · 还剩 1 次免费导出"
+
+msgid "Studio · {count} free exports left"
+msgstr "Studio · 还剩 {count} 次免费导出"
+
+msgid "That was your last free Studio export. Get Studio to keep these styles."
+msgstr "这是你最后一次免费 Studio 导出。获取 Studio 以继续使用这些样式。"
+
+msgid "You've used your 3 free Studio exports"
+msgstr "你已用完 3 次免费 Studio 导出"
+
+msgid "Uses Studio · 1 free export left"
+msgstr "使用 Studio · 剩余 1 次免费导出"
+
+msgid "Uses Studio · {count} free exports left"
+msgstr "使用 Studio · 剩余 {count} 次免费导出"
+
+msgid "Exported with Studio."
+msgstr "已使用 Studio 导出。"
+
+msgid "1 free Studio export left."
+msgstr "剩余 1 次免费 Studio 导出。"
+
+msgid "{count} free Studio exports left."
+msgstr "剩余 {count} 次免费 Studio 导出。"
+
+msgid "That was your last free Studio export."
+msgstr "这是你最后一次免费 Studio 导出。"
+
+msgid "Get Studio to keep these styles."
+msgstr "获取 Studio 以保留这些样式。"
+
+msgid "Get Studio"
+msgstr "获取 Studio"
+
+msgid "Try Studio free"
+msgstr "免费试用 Studio"
+
+msgid "Your next 3 Studio exports are on us. After each one, ApexShot shows how many are left."
+msgstr "接下来的 3 次 Studio 导出免费。每次导出后，ApexShot 会显示剩余次数。"
+
+msgid "Buying Studio takes one step"
+msgstr "购买 Studio 只需一步"
+
+msgid "Choose Studio in ApexShot, sign in, and pay. ApexShot turns Studio on for you, with no licence file to copy or import."
+msgstr "在 ApexShot 中选择 Studio，登录并付款。ApexShot 会为你开启 Studio，无需复制或导入许可证文件。"
+
+msgid "Capture, annotation, recording, and the editors' core tools stay free."
+msgstr "截图、标注、录屏以及编辑器的核心工具仍然免费。"

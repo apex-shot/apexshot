@@ -390,6 +390,12 @@ pub(super) fn start(
     export_cancellation: Arc<AtomicBool>,
 ) {
     exporting.set(true);
+    // Captured before encoding: the finished file consumes the trial inside
+    // the renderer, and this drives the completion copy.
+    let was_trial = crate::studio_entitlement::studio_access(
+        crate::studio_entitlement::capabilities_for_video(&snapshot),
+    )
+    .is_trial();
 
     let progress = Arc::new(ExportProgress::new(0));
     snapshot.export_progress = Some(progress.clone());
@@ -626,8 +632,10 @@ pub(super) fn start(
     });
 
     let started = Instant::now();
+    let toast_window = window.downgrade();
     glib::timeout_add_local(Duration::from_millis(120), {
         let handle = handle.clone();
+        let toast_window = toast_window.clone();
         let progress = progress.clone();
         let restore = restore.clone();
         let exporting = exporting.clone();
@@ -758,9 +766,27 @@ pub(super) fn start(
                             Ok(path) => {
                                 let size =
                                     std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
+                                // The overlay's toast carries the trial count;
+                                // the notification keeps it only when no card
+                                // could be raised.
+                                let shown = was_trial
+                                    && toast_window.upgrade().is_some_and(|window| {
+                                        crate::studio_trial_toast::show(
+                                            &window,
+                                            crate::studio_trial::trial_remaining(),
+                                        )
+                                    });
+                                let mut body = format_size(size);
+                                if !shown {
+                                    if let Some(text) =
+                                        crate::studio_trial::finished_feedback(was_trial)
+                                    {
+                                        body = format!("{body}\n\n{text}");
+                                    }
+                                }
                                 crate::utils::notify::desktop_notification(
                                     &t("Export complete"),
-                                    &format_size(size),
+                                    &body,
                                 );
                             }
                             Err(err) => {
@@ -794,6 +820,23 @@ pub(super) fn start(
                                         "{} {error}",
                                         t("Video exported, but could not copy to clipboard:")
                                     )),
+                                }
+                            }
+                            // A finished trial export says how many remain, and
+                            // when the last one is gone. The toast carries that
+                            // copy, so the card only repeats it as a fallback.
+                            let shown = was_trial
+                                && toast_window.upgrade().is_some_and(|window| {
+                                    crate::studio_trial_toast::show(
+                                        &window,
+                                        crate::studio_trial::trial_remaining(),
+                                    )
+                                });
+                            if !shown {
+                                if let Some(text) =
+                                    crate::studio_trial::finished_feedback(was_trial)
+                                {
+                                    notes.push(text);
                                 }
                             }
                             let notes_text = notes.join("\n");

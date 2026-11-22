@@ -141,6 +141,30 @@ trigger the gate. Legacy zoom easing, classic animation, shared rendering
 improvements, normal image backgrounds, and default zoom-camera settings stay
 free.
 
+## Free trial
+
+Every computer can make three Studio outputs before activation. The count is
+stored at
+`${XDG_CONFIG_HOME:-~/.config}/apexshot/studio/trial.json` beside the
+entitlement, with the same private directory and file permissions and the same
+atomic replacement. A missing or unreadable file means nothing has been used,
+and the stored count saturates at three so a duplicated or edited file cannot
+grant more free outputs.
+
+The trial applies to a refusal that activation could fix: a missing, invalid,
+mismatched, or uncovered licence. A build that cannot verify licences, or
+cannot read its storage, never falls back to the trial, because buying Studio
+alone could not end it.
+
+A trial output must finish to count. A cancelled or failed render, copy, or
+upload never consumes one, and a build with a covering licence never touches
+the counter. While the trial is active, the editors show
+`Studio · N free exports left` beside Export and refresh it as the document's
+Studio usage changes. After the last free output finishes, the not-activated
+upgrade card appears with the title "You've used your 3 free Studio exports".
+Successful trial outputs also say how many remain (or that it was the last
+one) in the editor's normal completion feedback.
+
 ## Refunds and offline limits
 
 The published policy is a 14-day refund window on the first Studio purchase,

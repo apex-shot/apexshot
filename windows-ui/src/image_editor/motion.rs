@@ -127,6 +127,10 @@ impl MotionMode {
         on_progress: impl Fn(usize, usize) + 'static,
         on_done: impl FnOnce(Result<PathBuf, String>) + 'static,
     ) -> Result<Rc<Cell<bool>>, String> {
+        let trial = crate::studio_entitlement::studio_access(
+            crate::studio_entitlement::capabilities_for_motion_export(),
+        )
+        .is_trial();
         let (job, watermark_surface) = self.prepare_video_job(destination, options)?;
         let cancel = Rc::new(Cell::new(false));
         let cancel_tick = cancel.clone();
@@ -152,6 +156,11 @@ impl MotionMode {
                 }
             };
             drop(job);
+            if result.is_ok() && trial {
+                // The MP4 is written and replaced into place: one finished
+                // Studio output leaves the free trial.
+                crate::studio_trial::record_trial_export();
+            }
             if let Some(callback) = done.borrow_mut().take() {
                 callback(result);
             }

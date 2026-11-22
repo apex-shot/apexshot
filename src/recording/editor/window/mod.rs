@@ -220,6 +220,14 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
         export_cancellation.clone(),
         export_flow_active.clone(),
     );
+    // The Export tooltip carries the free-trial count and follows the
+    // counter after an export finishes, which no edit refresh covers.
+    {
+        let state = state.clone();
+        crate::studio_trial::attach_export_tooltip(&export_btn, move || {
+            crate::studio_entitlement::capabilities_for_video(&state.lock().unwrap())
+        });
+    }
     root.append(&title_bar);
 
     let estimate_label = Label::new(None);

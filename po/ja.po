@@ -5197,3 +5197,66 @@ msgstr "新機能"
 
 msgid "What's new in ApexShot {version}"
 msgstr "ApexShot {version} の新機能"
+
+msgid "Explore Studio"
+msgstr "Studio を見る"
+
+msgid "Exported with Studio. 1 free Studio export left."
+msgstr "Studio で書き出しました。残りの無料 Studio 書き出しは 1 回です。"
+
+msgid "Exported with Studio. {count} free Studio exports left."
+msgstr "Studio で書き出しました。残りの無料 Studio 書き出しは {count} 回です。"
+
+msgid "Studio exports left on the free trial"
+msgstr "無料トライアルで残っている Studio 書き出し"
+
+msgid "Studio · 1 free export left"
+msgstr "Studio · 無料書き出し残り 1 回"
+
+msgid "Studio · {count} free exports left"
+msgstr "Studio · 無料書き出し残り {count} 回"
+
+msgid "That was your last free Studio export. Get Studio to keep these styles."
+msgstr "これが最後の無料 Studio 書き出しでした。これらのスタイルを使い続けるには Studio を入手してください。"
+
+msgid "You've used your 3 free Studio exports"
+msgstr "3 回の無料 Studio 書き出しを使い切りました"
+
+msgid "Uses Studio · 1 free export left"
+msgstr "Studio を使用 · 無料エクスポート残り 1 回"
+
+msgid "Uses Studio · {count} free exports left"
+msgstr "Studio を使用 · 無料エクスポート残り {count} 回"
+
+msgid "Exported with Studio."
+msgstr "Studio でエクスポートしました。"
+
+msgid "1 free Studio export left."
+msgstr "無料の Studio エクスポートは残り 1 回です。"
+
+msgid "{count} free Studio exports left."
+msgstr "無料の Studio エクスポートは残り {count} 回です。"
+
+msgid "That was your last free Studio export."
+msgstr "これが最後の無料 Studio エクスポートでした。"
+
+msgid "Get Studio to keep these styles."
+msgstr "これらのスタイルを続けるには Studio を入手してください。"
+
+msgid "Get Studio"
+msgstr "Studio を入手"
+
+msgid "Try Studio free"
+msgstr "Studio を無料で試す"
+
+msgid "Your next 3 Studio exports are on us. After each one, ApexShot shows how many are left."
+msgstr "次の 3 回の Studio 書き出しは無料です。書き出すたびに ApexShot が残り回数を表示します。"
+
+msgid "Buying Studio takes one step"
+msgstr "Studio の購入はワンステップ"
+
+msgid "Choose Studio in ApexShot, sign in, and pay. ApexShot turns Studio on for you, with no licence file to copy or import."
+msgstr "ApexShot で Studio を選び、サインインして支払うだけ。ApexShot が Studio を有効にするので、ライセンスファイルのコピーやインポートは不要です。"
+
+msgid "Capture, annotation, recording, and the editors' core tools stay free."
+msgstr "キャプチャ、注釈、録画、エディターの基本ツールは引き続き無料です。"

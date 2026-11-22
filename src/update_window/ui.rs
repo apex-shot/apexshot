@@ -2,7 +2,7 @@
 //!
 //! Everything here is authored at 100% scale, matching the onboarding sheet:
 //! the brand mark over a centred headline, a quiet fact card, and one action
-//! row whose quiet choice sits on the left.
+//! row whose secondary choice sits on the left.
 
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
@@ -193,7 +193,7 @@ pub(crate) fn page_body(page: &GtkBox, body: &GtkBox, actions: &GtkBox) {
     page.append(actions);
 }
 
-/// One action at each edge of the row: the quiet choice on the left, the
+/// One action at each edge of the row: the secondary choice on the left, the
 /// primary action on the right. A lone action sits in the middle.
 pub(crate) fn action_row(left: Option<&Button>, right: &Button) -> GtkBox {
     let actions = GtkBox::new(Orientation::Horizontal, 12);

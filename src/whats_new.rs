@@ -16,44 +16,52 @@ pub struct Highlight {
     pub body: &'static str,
     /// True when the highlight is a Studio feature; the window marks those.
     pub studio: bool,
+    /// True when the highlight only matters to someone without Studio, such as
+    /// the free trial or how to buy it; Studio owners never see it.
+    pub without_studio_only: bool,
 }
 
 /// The highlights of one release.
 #[derive(Debug, PartialEq, Eq)]
 pub struct ReleaseNotes {
     pub version: &'static str,
+    /// The supporting line under the headline, when this release has one.
+    pub subtitle: Option<&'static str>,
     pub highlights: &'static [Highlight],
 }
 
 /// Every release with highlights, newest first.
+///
+/// Free improvements for a release go first in this list before shipping, so
+/// the window leads with what every copy gains.
 pub const RELEASES: &[ReleaseNotes] = &[ReleaseNotes {
     version: "0.3.1",
+    subtitle: None,
     highlights: &[
         Highlight {
-            title: "Studio turns on by itself",
-            body: "Choose Studio in ApexShot, sign in, and pay. The app activates on this computer with nothing to copy or import.",
+            title: "Try Studio free",
+            body: "Your next 3 Studio exports are on us. After each one, ApexShot shows how many are left.",
             studio: true,
+            without_studio_only: true,
         },
         Highlight {
-            title: "Motion export",
-            body: "Animated titles and timing tools for polished product videos.",
-            studio: true,
-        },
-        Highlight {
-            title: "Advanced zoom camera",
-            body: "Instant zooms and fine camera controls on top of the free auto-zoom.",
-            studio: true,
-        },
-        Highlight {
-            title: "Neural upscaling",
-            body: "Sharpen small captures on export, fully offline.",
-            studio: true,
+            title: "Buying Studio takes one step",
+            body: "Choose Studio in ApexShot, sign in, and pay. ApexShot turns Studio on for you, with no licence file to copy or import.",
+            studio: false,
+            without_studio_only: true,
         },
     ],
 }];
 
-/// The supporting line under the window's headline.
-pub const HEADER_COPY: &str = "Here's what this release adds.";
+/// The highlights this person should see: Studio owners skip the ones that
+/// only matter before buying.
+pub fn visible_highlights(notes: &ReleaseNotes, studio_active: bool) -> Vec<&Highlight> {
+    notes
+        .highlights
+        .iter()
+        .filter(|highlight| !(studio_active && highlight.without_studio_only))
+        .collect()
+}
 
 /// The line under the highlight list, so the free tools stay visible.
 pub const FOOTER: &str = "Capture, annotation, recording, and the editors' core tools stay free.";
@@ -222,6 +230,15 @@ mod tests {
     }
 
     #[test]
+    fn the_current_release_leads_with_the_free_trial_and_has_no_subtitle() {
+        let notes = notes_for("0.3.1").expect("the current release");
+        assert_eq!(notes.subtitle, None);
+        assert_eq!(notes.highlights.len(), 2);
+        assert!(notes.highlights[0].studio);
+        assert!(!notes.highlights[1].studio);
+    }
+
+    #[test]
     fn notes_for_returns_the_newest_entry_covered_by_the_build() {
         assert_eq!(notes_for("0.3.1").map(|notes| notes.version), Some("0.3.1"));
         assert_eq!(notes_for("0.4.0").map(|notes| notes.version), Some("0.3.1"));
@@ -288,5 +305,46 @@ mod tests {
     fn the_state_file_lives_beside_the_other_config_files() {
         let path = last_seen_path().expect("a config directory");
         assert!(path.ends_with("apexshot/whats_new_seen"));
+    }
+
+    #[test]
+    fn studio_owners_skip_highlights_that_only_matter_before_buying() {
+        const NOTES: ReleaseNotes = ReleaseNotes {
+            version: "9.9.9",
+            subtitle: None,
+            highlights: &[
+                Highlight {
+                    title: "Free",
+                    body: "b",
+                    studio: false,
+                    without_studio_only: false,
+                },
+                Highlight {
+                    title: "Trial",
+                    body: "b",
+                    studio: true,
+                    without_studio_only: true,
+                },
+                Highlight {
+                    title: "New Studio tool",
+                    body: "b",
+                    studio: true,
+                    without_studio_only: false,
+                },
+            ],
+        };
+        let titles = |active| -> Vec<&str> {
+            visible_highlights(&NOTES, active)
+                .iter()
+                .map(|h| h.title)
+                .collect()
+        };
+        assert_eq!(titles(false), ["Free", "Trial", "New Studio tool"]);
+        assert_eq!(titles(true), ["Free", "New Studio tool"]);
+    }
+
+    #[test]
+    fn the_current_release_has_nothing_for_studio_owners() {
+        assert!(visible_highlights(&RELEASES[0], true).is_empty());
     }
 }

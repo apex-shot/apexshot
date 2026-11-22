@@ -398,6 +398,9 @@ pub(super) fn start_export_with_settings(
             user_cancel,
         };
     }
+    // Captured before encoding: only a finished file consumes a free export.
+    let trial =
+        crate::studio_entitlement::studio_access(super::studio::capabilities(&model)).is_trial();
     let thread_cancel = cancel.clone();
     let thread_user_cancel = user_cancel.clone();
     std::thread::spawn(move || {
@@ -449,6 +452,11 @@ pub(super) fn start_export_with_settings(
                 } else {
                     if let Some(error) = &sound {
                         eprintln!("[export] the sound was not added: {error}");
+                    }
+                    // The file is written and no Stop came in: one finished
+                    // Studio export leaves the free trial.
+                    if trial {
+                        crate::studio_trial::record_trial_export();
                     }
                     let _ = sender.send(ExportUpdate::Finished(output, sound));
                 }

@@ -5298,3 +5298,66 @@ msgstr "Novedades"
 
 msgid "What's new in ApexShot {version}"
 msgstr "Novedades de ApexShot {version}"
+
+msgid "Explore Studio"
+msgstr "Descubrir Studio"
+
+msgid "Exported with Studio. 1 free Studio export left."
+msgstr "Exportado con Studio. Te queda 1 exportación gratuita de Studio."
+
+msgid "Exported with Studio. {count} free Studio exports left."
+msgstr "Exportado con Studio. Te quedan {count} exportaciones gratuitas de Studio."
+
+msgid "Studio exports left on the free trial"
+msgstr "Exportaciones de Studio restantes en la prueba gratuita"
+
+msgid "Studio · 1 free export left"
+msgstr "Studio · queda 1 exportación gratuita"
+
+msgid "Studio · {count} free exports left"
+msgstr "Studio · quedan {count} exportaciones gratuitas"
+
+msgid "That was your last free Studio export. Get Studio to keep these styles."
+msgstr "Esa fue tu última exportación gratuita de Studio. Consigue Studio para conservar estos estilos."
+
+msgid "You've used your 3 free Studio exports"
+msgstr "Has usado tus 3 exportaciones gratuitas de Studio"
+
+msgid "Uses Studio · 1 free export left"
+msgstr "Usa Studio · queda 1 exportación gratis"
+
+msgid "Uses Studio · {count} free exports left"
+msgstr "Usa Studio · quedan {count} exportaciones gratis"
+
+msgid "Exported with Studio."
+msgstr "Exportado con Studio."
+
+msgid "1 free Studio export left."
+msgstr "Queda 1 exportación Studio gratis."
+
+msgid "{count} free Studio exports left."
+msgstr "Quedan {count} exportaciones Studio gratis."
+
+msgid "That was your last free Studio export."
+msgstr "Era tu última exportación Studio gratis."
+
+msgid "Get Studio to keep these styles."
+msgstr "Consigue Studio para conservar estos estilos."
+
+msgid "Get Studio"
+msgstr "Consigue Studio"
+
+msgid "Try Studio free"
+msgstr "Prueba Studio gratis"
+
+msgid "Your next 3 Studio exports are on us. After each one, ApexShot shows how many are left."
+msgstr "Tus próximas 3 exportaciones de Studio corren por nuestra cuenta. Después de cada una, ApexShot te muestra cuántas te quedan."
+
+msgid "Buying Studio takes one step"
+msgstr "Comprar Studio lleva un solo paso"
+
+msgid "Choose Studio in ApexShot, sign in, and pay. ApexShot turns Studio on for you, with no licence file to copy or import."
+msgstr "Elige Studio en ApexShot, inicia sesión y paga. ApexShot activa Studio por ti, sin archivo de licencia que copiar ni importar."
+
+msgid "Capture, annotation, recording, and the editors' core tools stay free."
+msgstr "La captura, la anotación, la grabación y las herramientas básicas de los editores siguen siendo gratuitas."

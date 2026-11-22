@@ -35,35 +35,6 @@
     color: #f3f0ec;
 }
 
-.update-highlight-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: #f3f0ec;
-}
-
-.update-highlight-body {
-    font-size: 13px;
-    font-weight: 400;
-    color: #a3a09c;
-    margin-top: 2px;
-}
-
-.update-studio-pill {
-    font-size: 11px;
-    font-weight: 600;
-    color: #ff670d;
-    background: alpha(#ff670d, 0.14);
-    border-radius: 999px;
-    padding: 2px 9px;
-}
-
-.update-footer {
-    font-size: 12px;
-    font-weight: 400;
-    color: #a3a09c;
-    margin-top: 18px;
-}
-
 progressbar.update-progress {
     min-width: 0;
     min-height: 8px;
@@ -135,20 +106,6 @@ progressbar.update-progress progress {
 
 .editor-theme-light.onboarding-root .update-row-value {
     color: #25231f;
-}
-
-.editor-theme-light.onboarding-root .update-highlight-title {
-    color: #25231f;
-}
-
-.editor-theme-light.onboarding-root .update-highlight-body,
-.editor-theme-light.onboarding-root .update-footer {
-    color: #6c6861;
-}
-
-.editor-theme-light.onboarding-root .update-studio-pill {
-    color: #cf530b;
-    background: alpha(#cf530b, 0.12);
 }
 
 .editor-theme-light.onboarding-root progressbar.update-progress trough {

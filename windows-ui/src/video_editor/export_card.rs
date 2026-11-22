@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 /// cannot be started until this card is dismissed.
 pub(super) fn show(
     shell: &Overlay,
+    window: &gtk4::ApplicationWindow,
     model: ExportModel,
     output: PathBuf,
     settings: ExportSettings,
@@ -86,6 +87,10 @@ pub(super) fn show(
     // The update window reads this flag before it closes any window, so an
     // install waits for the export instead of ending it.
     crate::update::open_windows::set_busy(true);
+    // Captured before encoding: the renderer consumes the trial on success and
+    // this drives the completion copy.
+    let was_trial =
+        crate::studio_entitlement::studio_access(super::studio::capabilities(&model)).is_trial();
     let handle = Rc::new(start_export_with_settings(model, output, settings));
     let cancelling = Rc::new(Cell::new(false));
     stop.connect_clicked({
@@ -158,9 +163,11 @@ pub(super) fn show(
     let started = Instant::now();
     let mut eta = Eta::default();
     let mut fraction = 0.0_f64;
+    let toast_window = window.downgrade();
     glib::timeout_add_local(Duration::from_millis(100), {
         let shell = shell.downgrade();
         let screen = screen.downgrade();
+        let toast_window = toast_window.clone();
         move || {
             let (Some(shell), Some(screen)) = (shell.upgrade(), screen.upgrade()) else {
                 crate::update::open_windows::set_busy(false);
@@ -218,9 +225,27 @@ pub(super) fn show(
                 Ok(ExportUpdate::Finished(path, sound)) => {
                     crate::update::open_windows::set_busy(false);
                     title.set_text(&t("Exported successfully"));
+                    // The renderer consumed the trial; the floating toast now
+                    // carries the count on screen.
+                    let shown = was_trial
+                        && toast_window.upgrade().is_some_and(|window| {
+                            crate::studio_trial_toast::show(
+                                &window,
+                                crate::studio_trial::trial_remaining(),
+                            )
+                        });
+                    let feedback = if shown {
+                        None
+                    } else {
+                        crate::studio_trial::finished_feedback(was_trial)
+                    };
+                    let notification = match &feedback {
+                        Some(text) => format!("{}\n\n{text}", path.display()),
+                        None => path.display().to_string(),
+                    };
                     crate::utils::notify::desktop_notification(
                         &t("Export complete"),
-                        &path.display().to_string(),
+                        &notification,
                     );
                     timing.set_text(&format!(
                         "{} · {}",
@@ -244,6 +269,11 @@ pub(super) fn show(
                             "{} {error}",
                             t("Exported, but the sound could not be added:")
                         ));
+                    }
+                    // A finished trial export says how many remain, and when
+                    // the last one is gone.
+                    if let Some(text) = feedback {
+                        notes.push(text);
                     }
                     if !notes.is_empty() {
                         detail.set_text(&notes.join("\n"));

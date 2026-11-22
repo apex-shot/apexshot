@@ -21,6 +21,7 @@ pub mod compositor;
 pub mod config;
 pub mod daemon;
 pub mod distro;
+pub(crate) mod dither_field;
 pub mod gnome_extension;
 pub mod gnome_integration;
 pub mod gnome_shell;
@@ -37,6 +38,8 @@ pub mod qr;
 pub mod recording;
 pub mod settings;
 pub(crate) mod studio_entitlement;
+pub(crate) mod studio_trial;
+pub(crate) mod studio_trial_toast;
 pub(crate) mod studio_upsell;
 
 /// The CLI needs this machine's Studio Device ID, status line, and the entry
