@@ -947,8 +947,14 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
             captureMenuResult.microphone = selectedCaptureMenuResult.microphone;
             captureMenuResult.speaker = selectedCaptureMenuResult.speaker;
         } else {
-            captureMenuResult =
-                CaptureModeToolbar::choose(&sessionServer, nullptr, !recordingUnavailable);
+            // Seed the toolbar's Mic and Speaker items from the saved device
+            // choices so the menu matches the last recording.
+            CaptureModeToolbar::DeviceDefaults toolbarDefaults;
+            toolbarDefaults.microphone = initialMic;
+            toolbarDefaults.speaker = initialSpeaker;
+            captureMenuResult = CaptureModeToolbar::choose(
+                &sessionServer, nullptr, !recordingUnavailable, false, false,
+                toolbarDefaults);
             if (captureMenuResult.action == CaptureModeToolbar::Action::Cancel) {
                 sessionServer.close();
                 QLocalServer::removeServer(sessionSocketPath);

@@ -108,19 +108,48 @@ pub(super) fn ffmpeg_encoder_available(name: &str) -> bool {
     ffmpeg_available_encoders().contains(name)
 }
 
+/// Session kind that decides which encoder backend a profile has to satisfy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SessionKind {
+    Wayland,
+    X11,
+}
+
+/// Whether the profile's encoder exists in the backend that serves the session.
+/// The X11 recorder builds a GStreamer pipeline from `profile.encoder`, so an
+/// ffmpeg encoder alone cannot satisfy it.
+fn encoder_present(
+    session: SessionKind,
+    gst_element_present: bool,
+    ffmpeg_encoder_present: bool,
+) -> bool {
+    match session {
+        SessionKind::Wayland => ffmpeg_encoder_present,
+        SessionKind::X11 => gst_element_present,
+    }
+}
+
 /// Whether this profile can be used on the current session.
 /// Wayland recording encodes with ffmpeg; X11 uses GStreamer elements.
 fn encoder_profile_available(profile: &EncoderProfile) -> bool {
     if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-        return ffmpeg_encoder_available(profile.ffmpeg_encoder);
+        // Wayland never touches the GStreamer element.
+        return encoder_present(
+            SessionKind::Wayland,
+            false,
+            ffmpeg_encoder_available(profile.ffmpeg_encoder),
+        );
     }
     // X11 / GStreamer path — best-effort; init is cheap if already done.
     if gst::init().is_err() {
         // Fall back to ffmpeg availability if GST is unavailable.
         return ffmpeg_encoder_available(profile.ffmpeg_encoder);
     }
-    gst::ElementFactory::find(profile.encoder).is_some()
-        || ffmpeg_encoder_available(profile.ffmpeg_encoder)
+    encoder_present(
+        SessionKind::X11,
+        gst::ElementFactory::find(profile.encoder).is_some(),
+        ffmpeg_encoder_available(profile.ffmpeg_encoder),
+    )
 }
 
 pub(super) fn select_encoder(
@@ -241,4 +270,22 @@ pub(super) fn normalize_recording_config_for_profile(
     }
 
     normalized
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn x11_requires_the_gstreamer_element() {
+        // ffmpeg having libx264 does not help the GStreamer pipeline.
+        assert!(!encoder_present(SessionKind::X11, false, true));
+        assert!(encoder_present(SessionKind::X11, true, false));
+    }
+
+    #[test]
+    fn wayland_requires_the_ffmpeg_encoder() {
+        assert!(!encoder_present(SessionKind::Wayland, true, false));
+        assert!(encoder_present(SessionKind::Wayland, false, true));
+    }
 }

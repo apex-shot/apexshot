@@ -495,13 +495,14 @@ install_gtk4_layer_shell_from_source() {
     ok "libgtk4-layer-shell installed from source"
 }
 
+is_x11_session() {
+    [[ -z "${WAYLAND_DISPLAY:-}" ]] && [[ -n "${DISPLAY:-}" ]]
+}
+
 warn_if_x11_session() {
     # ApexShot has an X11 backend, but Wayland (especially GNOME) is the
     # personally tested path. X11 remains experimental — do not block install.
-    if [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
-        return 0
-    fi
-    if [[ -z "${DISPLAY:-}" ]]; then
+    if ! is_x11_session; then
         return 0
     fi
     warn "X11 session detected. ApexShot supports X11, but it is experimental."
@@ -792,7 +793,9 @@ cleanup_shadowing_home_binaries() {
 }
 
 capture_backend_summary() {
-    if is_gnome_session; then
+    if is_x11_session; then
+        printf '%s' "X11 capture for screenshots; GStreamer for recording."
+    elif is_gnome_session; then
         printf '%s' "GNOME Shell D-Bus API for screenshots; ScreenCast portal + PipeWire for recording."
     else
         printf '%s' "wlr-screencopy / Screenshot portal for screenshots; ScreenCast portal + PipeWire/wf-recorder for recording."

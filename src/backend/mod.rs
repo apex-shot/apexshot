@@ -5,12 +5,29 @@ pub mod portal_still;
 pub mod screencopy;
 pub mod wayland;
 pub mod x11;
+pub mod x11_window_pick;
 
 // Re-export backend implementations
 pub use wayland::WaylandBackend;
 pub use x11::X11Backend;
 
 use thiserror::Error;
+
+/// True when the session runs directly on X11 rather than Wayland.
+pub fn is_x11_session() -> bool {
+    is_x11_session_env(
+        std::env::var("XDG_SESSION_TYPE").ok().as_deref(),
+        std::env::var_os("WAYLAND_DISPLAY").is_some(),
+        std::env::var_os("DISPLAY").is_some(),
+    )
+}
+
+fn is_x11_session_env(session_type: Option<&str>, wayland_display: bool, display: bool) -> bool {
+    if session_type.is_some_and(|value| value.eq_ignore_ascii_case("x11")) {
+        return true;
+    }
+    !wayland_display && display
+}
 
 #[derive(Debug, Error)]
 pub enum DisplayError {
@@ -248,6 +265,15 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
     use test_case::test_case;
+
+    #[test]
+    fn x11_session_detection() {
+        assert!(is_x11_session_env(Some("x11"), false, true));
+        assert!(is_x11_session_env(Some("X11"), false, false));
+        assert!(is_x11_session_env(None, false, true));
+        assert!(!is_x11_session_env(None, true, true));
+        assert!(!is_x11_session_env(None, false, false));
+    }
 
     #[test]
     fn test_pixel_format_rgb24() {

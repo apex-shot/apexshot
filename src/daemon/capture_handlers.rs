@@ -803,8 +803,8 @@ fn handle_interactive_capture_result(
                     return;
                 }
                 eprintln!("[daemon] Recording failed: {err}");
-                send_desktop_notification(&crate::i18n::t("Recording failed"), &err.to_string());
-                // Show notification for GNOME extension not installed
+                // A missing shell extension has its own, more helpful message,
+                // and the controls outcome handler leaves that case to this one.
                 if err
                     .to_string()
                     .contains("GNOME Shell extension is not installed")
@@ -815,7 +815,17 @@ fn handle_interactive_capture_result(
                             "GNOME Shell extension is not installed. Please install the ApexShot GNOME extension first.",
                         ),
                     );
+                    return;
                 }
+                // The controls outcome handler already showed the single
+                // failure notification; only log it here.
+                if err
+                    .downcast_ref::<crate::recording::RecordingFailureNotified>()
+                    .is_some()
+                {
+                    return;
+                }
+                send_desktop_notification(&crate::i18n::t("Recording failed"), &err.to_string());
             }
         }
         Err(err) => {

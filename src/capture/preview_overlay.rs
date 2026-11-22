@@ -1145,11 +1145,10 @@ fn register_gnome_preview(display: Option<CaptureDisplay>) {
 
 /// On X11, set `_NET_WM_WINDOW_TYPE_NOTIFICATION` so the preview card:
 ///  - does **not** appear in the taskbar / dock
-///  - is **not** animated by the compositor (no slide-in / scale-up)
 ///  - stays above other windows without needing always-on-top tricks
 ///
-/// Called from `connect_realize` so the hints are in place before the
-/// first MapNotify — the compositor therefore never starts an animation.
+/// Called from `connect_realize` so the hints are in place before the first
+/// MapNotify.
 fn suppress_x11_preview_window_type(window: &Window) {
     let Some(surface) = window.surface() else {
         return;
@@ -1164,6 +1163,9 @@ fn suppress_x11_preview_window_type(window: &Window) {
         return;
     };
 
+    // Transparent windows must stay composited on X11: bypassing the
+    // compositor paints their transparent areas black.
+
     // _NET_WM_WINDOW_TYPE = _NET_WM_WINDOW_TYPE_NOTIFICATION
     // Notification windows skip the taskbar and compositor open/close animations.
     if let (Ok(type_cookie), Ok(notif_cookie)) = (
@@ -1177,20 +1179,6 @@ fn suppress_x11_preview_window_type(window: &Window) {
                 type_reply.atom,
                 xproto::AtomEnum::ATOM,
                 &[notif_reply.atom],
-            );
-        }
-    }
-
-    // _NET_WM_BYPASS_COMPOSITOR = 1 — ask the compositor to skip compositing
-    // this window so it appears without any fade / scale animation.
-    if let Ok(cookie) = conn.intern_atom(false, b"_NET_WM_BYPASS_COMPOSITOR") {
-        if let Ok(reply) = cookie.reply() {
-            let _ = conn.change_property32(
-                xproto::PropMode::REPLACE,
-                xid,
-                reply.atom,
-                xproto::AtomEnum::CARDINAL,
-                &[1u32],
             );
         }
     }

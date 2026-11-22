@@ -58,20 +58,8 @@ pub(crate) fn suppress_x11_compositor_animation(window: &ApplicationWindow) {
         return;
     };
 
-    // _NET_WM_BYPASS_COMPOSITOR = 1
-    // Asks the compositor to skip compositing this window entirely, which
-    // also disables any open/close transition effects.
-    if let Ok(cookie) = conn.intern_atom(false, b"_NET_WM_BYPASS_COMPOSITOR") {
-        if let Ok(reply) = cookie.reply() {
-            let _ = conn.change_property32(
-                xproto::PropMode::REPLACE,
-                xid,
-                reply.atom,
-                xproto::AtomEnum::CARDINAL,
-                &[1u32],
-            );
-        }
-    }
+    // Transparent windows must stay composited on X11: bypassing the
+    // compositor paints their transparent areas black.
 
     // _NET_WM_WINDOW_TYPE = _NET_WM_WINDOW_TYPE_UTILITY
     // UTILITY windows are never animated by compositors (Mutter, KWin, Picom).
