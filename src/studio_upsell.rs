@@ -64,6 +64,36 @@ const CSS: &str = r#"
     .apexshot-studio-body { padding: 18px; }
     .apexshot-studio-body.apexshot-studio-body-offer { padding: 0 28px 22px 28px; }
 
+    /* The release highlights in a Studio card: the card surface sized to its
+       content, a quiet list under the hero, and the Studio pill for the
+       features that need a license. */
+    window.apexshot-whats-new { background: transparent; }
+    .apexshot-whats-new-body { padding: 0 28px 24px 28px; }
+    .apexshot-whats-new-row { padding: 14px 0; }
+    .apexshot-whats-new-divider {
+        min-height: 1px;
+        background: rgba(255, 255, 255, 0.10);
+    }
+    .apexshot-whats-new-title {
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: -0.1px;
+        color: #f1f1f3;
+    }
+    .apexshot-whats-new-copy {
+        margin-top: 4px;
+        font-size: 13px;
+        color: rgba(255, 255, 255, 0.55);
+    }
+    .apexshot-whats-new-pill {
+        padding: 2px 9px;
+        border-radius: 999px;
+        background: alpha(#ff670d, 0.14);
+        color: #ff670d;
+        font-size: 11px;
+        font-weight: 600;
+    }
+
     .apexshot-studio-title {
         color: #f1f1f3;
         font-size: 15px;
@@ -128,6 +158,12 @@ const CSS: &str = r#"
     button.apexshot-studio-activate:hover { background: #ff792b; }
     button.apexshot-studio-primary:active,
     button.apexshot-studio-activate:active { background: #e65c0a; }
+    button.apexshot-studio-primary.apexshot-whats-new-action {
+        min-height: 30px;
+        padding: 0 18px;
+        border-radius: 8px;
+        font-size: 13px;
+    }
     button.apexshot-studio-primary.apexshot-studio-cta {
         min-height: 40px;
         border-radius: 8px;
@@ -201,6 +237,13 @@ const CSS: &str = r#"
     .apexshot-studio-light .apexshot-studio-fineprint { color: rgba(29, 33, 41, 0.45); }
     .apexshot-studio-light .apexshot-studio-separator { color: rgba(29, 33, 41, 0.25); }
     .apexshot-studio-light .apexshot-studio-feedback { color: #b42318; }
+    .apexshot-studio-light .apexshot-whats-new-divider { background: alpha(#111827, 0.10); }
+    .apexshot-studio-light .apexshot-whats-new-title { color: #1d2129; }
+    .apexshot-studio-light .apexshot-whats-new-copy { color: rgba(29, 33, 41, 0.58); }
+    .apexshot-studio-light .apexshot-whats-new-pill {
+        background: alpha(#d15b12, 0.12);
+        color: #d15b12;
+    }
     .apexshot-studio-light button.apexshot-studio-ghost,
     .apexshot-studio-light button.apexshot-studio-link,
     .apexshot-studio-light button.apexshot-studio-close { color: rgba(29, 33, 41, 0.62); }

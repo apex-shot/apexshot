@@ -290,16 +290,6 @@ pub(crate) fn quiet_button(label: &str) -> Button {
     button
 }
 
-/// The secondary action's outlined treatment, matching the primary button's
-/// height and radius without competing with it.
-pub(crate) fn outlined_button(label: &str) -> Button {
-    let button = Button::with_label(label);
-    button.set_has_frame(false);
-    button.add_css_class("update-outline-button");
-    button.set_halign(Align::Center);
-    button
-}
-
 /// The same minimize and close controls as onboarding, so the two windows of
 /// the first-run family match.
 pub(crate) fn window_controls(window: &ApplicationWindow) -> GtkBox {

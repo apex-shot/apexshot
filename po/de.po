@@ -5379,14 +5379,10 @@ msgstr "{used} von {max} belegt."
 msgid "Try Studio free"
 msgstr "Studio kostenlos testen"
 
-msgid "Your next 3 Studio exports are on us. A label beside Export shows how many are left."
-msgstr "Deine nächsten 3 Studio-Exporte gehen auf uns. Ein Hinweis neben „Export“ zeigt, wie viele noch übrig sind."
 
 msgid "Buying Studio takes one step"
 msgstr "Studio kaufen in einem Schritt"
 
-msgid "Choose Studio in ApexShot, sign in, and pay. The app turns Studio on by itself, with nothing to copy or import."
-msgstr "Wähle Studio in ApexShot, melde dich an und bezahle. Die App schaltet Studio selbst frei, ohne Kopieren oder Importieren."
 
 msgid "Capture, annotation, recording, and the editors' core tools stay free."
 msgstr "Aufnahme, Anmerkungen, Bildschirmaufnahme und die Kernwerkzeuge der Editoren bleiben kostenlos."
@@ -5420,3 +5416,18 @@ msgstr "Hol dir Studio, um diese Stile zu behalten."
 
 msgid "Get Studio"
 msgstr "Studio holen"
+
+msgid "Try Studio free"
+msgstr "Studio kostenlos testen"
+
+msgid "Your next 3 Studio exports are on us. After each one, ApexShot shows how many are left."
+msgstr "Deine nächsten 3 Studio-Exporte gehen auf uns. Nach jedem zeigt ApexShot, wie viele noch übrig sind."
+
+msgid "Buying Studio takes one step"
+msgstr "Studio kaufen in einem Schritt"
+
+msgid "Choose Studio in ApexShot, sign in, and pay. ApexShot turns Studio on for you, with no licence file to copy or import."
+msgstr "Wähle Studio in ApexShot, melde dich an und bezahle. ApexShot schaltet Studio für dich frei, ohne Lizenzdatei zum Kopieren oder Importieren."
+
+msgid "Capture, annotation, recording, and the editors' core tools stay free."
+msgstr "Aufnahme, Anmerkungen, Bildschirmaufnahme und die Kernwerkzeuge der Editoren bleiben kostenlos."

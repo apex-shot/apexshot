@@ -386,7 +386,7 @@ fn build_card(window: &Window, dark: bool, limit: &CloudLimit, almost: bool) {
     go_pro.connect_clicked({
         let window = window.downgrade();
         move |_| {
-            open_in_background(BILLING_URL, t("Could not open billing"));
+            open_link(BILLING_URL, t("Could not open billing"));
             if let Some(window) = window.upgrade() {
                 window.close();
             }
@@ -403,7 +403,7 @@ fn build_card(window: &Window, dark: bool, limit: &CloudLimit, almost: bool) {
         manage.connect_clicked({
             let window = window.downgrade();
             move |_| {
-                open_in_background(DASHBOARD_URL, t("Could not open the dashboard"));
+                open_link(DASHBOARD_URL, t("Could not open the dashboard"));
                 if let Some(window) = window.upgrade() {
                     window.close();
                 }
@@ -448,12 +448,12 @@ fn build_card(window: &Window, dark: bool, limit: &CloudLimit, almost: bool) {
     window.add_controller(keys);
 }
 
-fn open_in_background(url: &'static str, failure_title: String) {
-    std::thread::spawn(move || {
-        if let Err(error) = crate::utils::open::open_url(url) {
-            crate::utils::notify::desktop_notification(&failure_title, &error);
-        }
-    });
+/// Hand `url` to the desktop before the card closes. The launch returns at
+/// once; a background thread would die with a standalone card's process.
+fn open_link(url: &str, failure_title: String) {
+    if let Err(error) = crate::utils::open::open_url(url) {
+        crate::utils::notify::desktop_notification(&failure_title, &error);
+    }
 }
 
 #[cfg(test)]

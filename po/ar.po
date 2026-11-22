@@ -5302,14 +5302,10 @@ msgstr "تم استخدام {used} من {max}."
 msgid "Try Studio free"
 msgstr "جرّب Studio مجانًا"
 
-msgid "Your next 3 Studio exports are on us. A label beside Export shows how many are left."
-msgstr "عمليات تصدير Studio الثلاث التالية مجانية. تُظهر علامة بجوار التصدير عدد ما تبقّى منها."
 
 msgid "Buying Studio takes one step"
 msgstr "شراء Studio بخطوة واحدة"
 
-msgid "Choose Studio in ApexShot, sign in, and pay. The app turns Studio on by itself, with nothing to copy or import."
-msgstr "اختر Studio في ApexShot، وسجّل الدخول، وادفع. يفعّل التطبيق Studio تلقائيًا، دون أي نسخ أو استيراد."
 
 msgid "Capture, annotation, recording, and the editors' core tools stay free."
 msgstr "تظل أدوات الالتقاط والتعليق والتسجيل والأدوات الأساسية في المحررات مجانية."
@@ -5343,3 +5339,18 @@ msgstr "احصل على Studio للاحتفاظ بهذه الأنماط."
 
 msgid "Get Studio"
 msgstr "الحصول على Studio"
+
+msgid "Try Studio free"
+msgstr "جرّب Studio مجانًا"
+
+msgid "Your next 3 Studio exports are on us. After each one, ApexShot shows how many are left."
+msgstr "عمليات تصدير Studio الثلاث التالية مجانية. بعد كل عملية، يعرض ApexShot عدد ما تبقّى منها."
+
+msgid "Buying Studio takes one step"
+msgstr "شراء Studio بخطوة واحدة"
+
+msgid "Choose Studio in ApexShot, sign in, and pay. ApexShot turns Studio on for you, with no licence file to copy or import."
+msgstr "اختر Studio في ApexShot، وسجّل الدخول، وادفع. يفعّل ApexShot Studio نيابةً عنك، دون أي ملف ترخيص لنسخه أو استيراده."
+
+msgid "Capture, annotation, recording, and the editors' core tools stay free."
+msgstr "تظل أدوات الالتقاط والتعليق والتسجيل والأدوات الأساسية في المحررات مجانية."
