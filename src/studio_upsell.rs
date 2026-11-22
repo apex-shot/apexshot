@@ -221,6 +221,41 @@ const CSS: &str = r#"
         color: #1d2129;
     }
     .apexshot-studio-light entry.apexshot-studio-entry:focus-within { border-color: alpha(#111827, 0.30); }
+
+    /* The trial toast floats over the canvas, so it borrows the sheet's
+       surface but not its size or its focus behaviour. */
+    .apexshot-studio-toast {
+        font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
+        background: #141414;
+        color: #f1f1f3;
+        border: 1px solid rgba(255, 255, 255, 0.10);
+        border-radius: 14px;
+        box-shadow: none;
+    }
+    .apexshot-studio-toast-row { padding: 12px 16px; }
+    .apexshot-studio-toast-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: #f1f1f3;
+    }
+    .apexshot-studio-toast-subtitle {
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.55);
+    }
+    button.apexshot-studio-primary.apexshot-studio-toast-action {
+        min-height: 28px;
+        padding: 0 12px;
+        border-radius: 8px;
+        font-size: 12px;
+        font-weight: 600;
+    }
+    .apexshot-studio-toast.apexshot-studio-light {
+        background: #f6f7fb;
+        color: #1d2129;
+        border-color: alpha(#111827, 0.12);
+    }
+    .apexshot-studio-light .apexshot-studio-toast-title { color: #1d2129; }
+    .apexshot-studio-light .apexshot-studio-toast-subtitle { color: rgba(29, 33, 41, 0.58); }
 "#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -396,15 +431,19 @@ pub(crate) fn gate(
 /// The overlay a card can be raised into. The image editor's window child is
 /// one, while the video editor keeps its overlay under the window's root box,
 /// so a direct-child cast would miss it there.
-fn overlay_for(window: &ApplicationWindow) -> Option<Overlay> {
-    let child = window.child()?;
+pub(crate) fn overlay_for(window: &impl IsA<gtk4::Window>) -> Option<Overlay> {
+    let window = window.upcast_ref::<gtk4::Window>();
+    let child = match gtk4::Window::clone(window).downcast::<gtk4::ApplicationWindow>() {
+        Ok(application) => application.child()?,
+        Err(window) => window.first_child()?,
+    };
     if let Ok(overlay) = child.clone().downcast::<Overlay>() {
         return Some(overlay);
     }
     first_overlay(&child)
 }
 
-fn first_overlay(root: &gtk4::Widget) -> Option<Overlay> {
+pub(crate) fn first_overlay(root: &gtk4::Widget) -> Option<Overlay> {
     if let Ok(overlay) = root.clone().downcast::<Overlay>() {
         return Some(overlay);
     }

@@ -101,6 +101,15 @@ pub(super) fn set_bar_shown(root: &GtkBox, shown: bool) {
     }
 }
 
+/// Whether a floating bar currently occupies its docked band.
+///
+/// [`set_bar_shown`] keeps bars mapped and only drops their opacity, so a
+/// plain visibility check would count every hidden bar. Allocated height is
+/// the other half: a bar reports `0` until GTK has laid it out.
+pub(super) fn bar_is_shown(root: &GtkBox) -> bool {
+    root.opacity() > 0.0 && root.is_mapped() && root.height() > 0
+}
+
 /// Claim (or give back) the canvas space above a docked bar.
 ///
 /// The layout and the draw transform both read the inset, so the canvas has to repaint

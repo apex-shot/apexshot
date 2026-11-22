@@ -195,7 +195,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     {
         let host = canvas.host.clone();
         let in_motion = in_motion.clone();
-        crate::studio_trial::attach_indicator(&inspector.trial_label, move || {
+        crate::studio_trial::attach_export_tooltip(&inspector.export_button, move || {
             if in_motion.get() {
                 crate::studio_entitlement::capabilities_for_motion_export()
             } else {
@@ -301,7 +301,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
             }
             let trial = crate::studio_entitlement::studio_access(capabilities).is_trial();
             match motion.current_frame_image() {
-                Some(frame) => copy_frame_image(&host, frame, trial),
+                Some(frame) => copy_frame_image(&window, &host, frame, trial),
                 None => {
                     // The Motion page covers the canvas toast, so the failure
                     // also goes to a system notification.
@@ -509,6 +509,43 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     pages_overlay.set_vexpand(true);
     pages_overlay.set_child(Some(&workspace_stack));
     pages_overlay.add_overlay(&top_chrome);
+
+    // The Studio trial card hangs just below the floating tool bar, and below
+    // the docked tool bar when one is up, centred on the bar. The toolbar and
+    // the sub-bars live in different overlays, so the anchor translates the
+    // toolbar into canvas coordinates.
+    {
+        let overlay = canvas.root.clone();
+        let toolbar_stack = toolbar_stack.clone();
+        let sub_bars_root = sub_bars.root.clone();
+        let toast_anchor: Rc<dyn Fn() -> Option<(f64, f64)>> = Rc::new(move || {
+            // The stack swaps toolbars with the mode; anchor to the visible one.
+            let toolbar = toolbar_stack
+                .visible_child()
+                .unwrap_or_else(|| toolbar_stack.clone().upcast::<gtk4::Widget>());
+            let origin =
+                toolbar.compute_point(&overlay, &gtk4::graphene::Point::new(0.0, 0.0))?;
+            let toolbar_width = f64::from(toolbar.width());
+            if toolbar_width <= 0.0 {
+                return None;
+            }
+            let center_x = f64::from(origin.x()) + toolbar_width / 2.0;
+            let mut top_y = f64::from(origin.y()) + f64::from(toolbar.height());
+            // The sub-bars dock at the chrome strip's bottom; a bar that
+            // drifted onto the canvas must not push the card down.
+            if sub_bars_root.is_visible() && sub_bars_root.is_mapped() {
+                let bar_top = f64::from(sub_bars_root.margin_top());
+                let bar_height = f64::from(sub_bars_root.height());
+                if bar_height > 1.0 && bar_top <= f64::from(px(TOP_CHROME_HEIGHT, scale)) + 4.0 {
+                    top_y = top_y.max(bar_top + bar_height);
+                }
+            }
+            Some((center_x, top_y + f64::from(px(8.0, scale))))
+        });
+        canvas
+            .host
+            .set_trial_toast_anchor(canvas.root.clone(), toast_anchor);
+    }
 
     let utility = build_utility_strip(&window, scale);
     inspector.root.prepend(&utility);
@@ -1002,6 +1039,7 @@ fn choose_motion_video_destination(
     let sync_all = sync_all.clone();
     let lock = lock.clone();
     lock.set_choosing(true);
+    let toast_window = window.downgrade();
     dialog.save(Some(window), gtk4::gio::Cancellable::NONE, move |result| {
         lock.set_choosing(false);
         if let Ok(file) = result {
@@ -1038,6 +1076,7 @@ fn choose_motion_video_destination(
                         let cancel = cancel.clone();
                         let original_label = original_label.clone();
                         let lock = lock.clone();
+                        let toast_window = toast_window.clone();
                         move |result| {
                             exporting.set(false);
                             lock.release();
@@ -1053,7 +1092,21 @@ fn choose_motion_video_destination(
                                     // History lists this under Motion Edits,
                                     // not Recordings.
                                     crate::history::motion_exports::record_export(&path);
-                                    let body = match crate::studio_trial::finished_feedback(trial) {
+                                    // The renderer consumed the trial; the
+                                    // floating toast now carries the count.
+                                    let shown = trial
+                                        && toast_window.upgrade().is_some_and(|window| {
+                                            crate::studio_trial_toast::show(
+                                                &window,
+                                                crate::studio_trial::trial_remaining(),
+                                            )
+                                        });
+                                    let feedback = if shown {
+                                        None
+                                    } else {
+                                        crate::studio_trial::finished_feedback(trial)
+                                    };
+                                    let body = match feedback {
                                         Some(text) => {
                                             format!("{}\n\n{text}", path.display())
                                         }
@@ -1189,17 +1242,22 @@ fn copy_image(window: &ApplicationWindow, host: &Rc<super::annotate::EditorHost>
             copy_image(&window, &host);
         }
     }) {
-        host.copy_to_clipboard();
+        host.copy_to_clipboard(window);
     }
 }
 
 /// Copy the already rendered Motion pose. The caller runs the Studio style
 /// gate first; the static pose gate does not apply to Motion poses.
-fn copy_frame_image(host: &Rc<super::annotate::EditorHost>, frame: image::RgbaImage, trial: bool) {
+fn copy_frame_image(
+    window: &ApplicationWindow,
+    host: &Rc<super::annotate::EditorHost>,
+    frame: image::RgbaImage,
+    trial: bool,
+) {
     if !host.has_document() || host.background_loading() {
         return;
     }
-    host.copy_frame_to_clipboard(frame, trial);
+    host.copy_frame_to_clipboard(window, frame, trial);
 }
 
 /// Upload the flattened document as a temporary PNG. The temp file lives only
@@ -1258,7 +1316,15 @@ fn upload_image(
         }
     };
     upload_rendered_image(
-        window, button, uploading, config, snapshot, lock, sync_all, trial,
+        window,
+        button,
+        uploading,
+        config,
+        snapshot,
+        lock,
+        sync_all,
+        trial,
+        host.trial_toast_anchor(),
     );
 }
 
@@ -1459,9 +1525,12 @@ fn upload_path(
             outcome.heads_up,
         ));
     });
-    poll_upload(window, button, uploading, receiver, on_finish, lock, trial);
+    poll_upload(
+        window, button, uploading, receiver, on_finish, lock, trial, None,
+    );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn poll_upload(
     window: &ApplicationWindow,
     button: &gtk4::Button,
@@ -1473,6 +1542,7 @@ fn poll_upload(
     on_finish: Option<Rc<dyn Fn()>>,
     lock: Option<Rc<EditingLock>>,
     trial: bool,
+    toast: Option<crate::studio_trial_toast::Anchor>,
 ) {
     let window = window.downgrade();
     let button = button.downgrade();
@@ -1500,14 +1570,27 @@ fn poll_upload(
                         if trial {
                             crate::studio_trial::record_trial_export();
                         }
-                        if let Some(mut text) = crate::studio_trial::finished_feedback(trial) {
-                            if let Some(heads_up) = &heads_up {
-                                text = heads_up.append_to(&text);
+                        // The floating toast carries the trial count; the
+                        // notification keeps it only when no overlay could
+                        // host the card.
+                        let shown = trial
+                            && window.upgrade().is_some_and(|window| {
+                                crate::studio_trial_toast::show_for(
+                                    &window,
+                                    toast.as_ref(),
+                                    crate::studio_trial::trial_remaining(),
+                                )
+                            });
+                        if !shown {
+                            if let Some(mut text) = crate::studio_trial::finished_feedback(trial) {
+                                if let Some(heads_up) = &heads_up {
+                                    text = heads_up.append_to(&text);
+                                }
+                                crate::utils::notify::desktop_notification(
+                                    &crate::i18n::t("Upload complete"),
+                                    &text,
+                                );
                             }
-                            crate::utils::notify::desktop_notification(
-                                &crate::i18n::t("Upload complete"),
-                                &text,
-                            );
                         }
                         if let Some(window) = window.upgrade() {
                             if let Some(heads_up) = &heads_up {
@@ -1547,6 +1630,7 @@ fn poll_upload(
 
 /// Upload an already rendered frame. Static output ends here so the temporary
 /// file, widget busy state and share-URL clipboard behave the same.
+#[allow(clippy::too_many_arguments)]
 fn upload_rendered_image(
     window: &ApplicationWindow,
     button: &gtk4::Button,
@@ -1556,6 +1640,7 @@ fn upload_rendered_image(
     lock: &Rc<EditingLock>,
     sync_all: Rc<dyn Fn()>,
     trial: bool,
+    toast: Option<crate::studio_trial_toast::Anchor>,
 ) {
     uploading.set(true);
     button.set_sensitive(false);
@@ -1603,6 +1688,7 @@ fn upload_rendered_image(
         Some(sync_all),
         Some(lock.clone()),
         trial,
+        toast,
     );
 }
 

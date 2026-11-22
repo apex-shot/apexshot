@@ -486,6 +486,18 @@ void startWhatsNewCheck()
                  .arg(started));
 }
 
+/// The tray's What's new item reopens the current release's highlights.
+void openWhatsNewWindow()
+{
+    const QString executable = settingsExecutable();
+    if (executable.isEmpty()) {
+        debugLog(QStringLiteral("whats new: no settings executable"));
+        return;
+    }
+    QProcess::startDetached(executable,
+                            {QStringLiteral("--whats-new"), QStringLiteral("--force")});
+}
+
 void openImageEditorWindow(const QString& path = QString())
 {
     QString executable = qEnvironmentVariable("APEXSHOT_IMAGE_EDITOR");
@@ -4416,6 +4428,7 @@ int run(QApplication& app)
     menu->addSeparator();
     QAction* videoEditorAction = menu->addAction(QStringLiteral("Video Editor..."));
     QAction* historyAction = menu->addAction(QStringLiteral("History..."));
+    QAction* whatsNewAction = menu->addAction(QStringLiteral("What's new"));
     QAction* settingsAction = menu->addAction(QStringLiteral("Settings..."));
     menu->addSeparator();
     QAction* quit = menu->addAction(QStringLiteral("Quit"));
@@ -4437,6 +4450,9 @@ int run(QApplication& app)
 
     QObject::connect(settingsAction, &QAction::triggered, shell, [] {
         openSettingsWindow();
+    });
+    QObject::connect(whatsNewAction, &QAction::triggered, shell, [] {
+        openWhatsNewWindow();
     });
     QObject::connect(historyAction, &QAction::triggered, shell, [] {
         openHistoryWindow();

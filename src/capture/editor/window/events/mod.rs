@@ -77,6 +77,9 @@ pub(super) struct EventContext {
     pub traffic_minimize: Button,
     pub traffic_zoom: Button,
     pub canvas_overlay: Overlay,
+    /// Where the Studio trial card hangs: the canvas overlay plus the band
+    /// under the floating toolbar (see `studio_trial_toast::Anchor`).
+    pub trial_toast_anchor: Option<crate::studio_trial_toast::Anchor>,
     pub canvas_scroller: ScrolledWindow,
     pub zoom_button: Button,
     pub zoom_label: Label,
@@ -170,6 +173,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         traffic_minimize,
         traffic_zoom,
         canvas_overlay: _canvas_overlay,
+        trial_toast_anchor,
         canvas_scroller,
         zoom_button,
         zoom_label: _zoom_label,
@@ -285,6 +289,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         &save_spinner,
         &traffic_close,
         in_motion.clone(),
+        trial_toast_anchor,
         export_motion,
         studio_mark,
     );

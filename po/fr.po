@@ -5406,3 +5406,27 @@ msgstr "Studio est actif sur cet appareil"
 
 msgid "Studio activation failed"
 msgstr "Échec de l'activation de Studio"
+
+msgid "Uses Studio · 1 free export left"
+msgstr "Utilise Studio · 1 export gratuit restant"
+
+msgid "Uses Studio · {count} free exports left"
+msgstr "Utilise Studio · {count} exports gratuits restants"
+
+msgid "Exported with Studio."
+msgstr "Exporté avec Studio."
+
+msgid "1 free Studio export left."
+msgstr "1 export Studio gratuit restant."
+
+msgid "{count} free Studio exports left."
+msgstr "{count} exports Studio gratuits restants."
+
+msgid "That was your last free Studio export."
+msgstr "C'était votre dernier export Studio gratuit."
+
+msgid "Get Studio to keep these styles."
+msgstr "Obtenez Studio pour conserver ces styles."
+
+msgid "Get Studio"
+msgstr "Obtenir Studio"

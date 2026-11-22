@@ -93,7 +93,8 @@ pub fn record_trial_export_at_path(path: &Path) -> u32 {
     STUDIO_FREE_EXPORTS.saturating_sub(used)
 }
 
-/// The label editors show near their Export action while a trial is active.
+/// The line the old in-layout trial label showed near Export.
+#[allow(dead_code)]
 pub fn indicator_text(access: crate::studio_entitlement::StudioAccess) -> Option<String> {
     match access {
         crate::studio_entitlement::StudioAccess::Trial { remaining: 1 } => {
@@ -132,36 +133,64 @@ pub fn finished_feedback(was_trial: bool) -> Option<String> {
     }
 }
 
-/// Keep `label` showing the trial count for the capabilities `capabilities`
-/// returns, hiding it whenever the output is free or licensed.
+/// The Export button's tooltip while a trial is active.
+pub fn tooltip_text(access: crate::studio_entitlement::StudioAccess) -> Option<String> {
+    match access {
+        crate::studio_entitlement::StudioAccess::Trial { remaining: 1 } => {
+            Some(t("Uses Studio · 1 free export left"))
+        }
+        crate::studio_entitlement::StudioAccess::Trial { remaining } if remaining > 1 => {
+            let count = remaining.to_string();
+            Some(tfmt(
+                "Uses Studio · {count} free exports left",
+                &[("count", &count)],
+            ))
+        }
+        _ => None,
+    }
+}
+
+/// Keep `button`'s tooltip showing the trial count for the capabilities
+/// `capabilities` returns, restoring the tooltip it had at attach time
+/// whenever the output is free or licensed.
 ///
-/// Editors change their Studio usage through many controls, so the label
+/// Editors change their Studio usage through many controls, so the tooltip
 /// follows them on a quiet timer instead of each control remembering to push
-/// an update. The timer stops with the window.
-pub fn attach_indicator<F>(label: &gtk4::Label, capabilities: F)
+/// an update. The timer stops with the button's window.
+pub fn attach_export_tooltip<F>(button: &gtk4::Button, capabilities: F)
 where
     F: Fn() -> crate::studio_entitlement::StudioCapabilities + 'static,
 {
     use gtk4::prelude::*;
 
-    let label = label.clone();
+    let button = button.clone();
+    let original = button.tooltip_text().map(|text| text.to_string());
     let capabilities = std::rc::Rc::new(capabilities);
-    let last: std::rc::Rc<std::cell::RefCell<Option<String>>> =
+    let owned: std::rc::Rc<std::cell::RefCell<Option<String>>> =
         std::rc::Rc::new(std::cell::RefCell::new(None));
     let refresh = {
-        let label = label.clone();
-        let last = last.clone();
+        let button = button.clone();
+        let original = original.clone();
+        let owned = owned.clone();
         std::rc::Rc::new(move || {
-            let text = indicator_text(crate::studio_entitlement::studio_access(capabilities()));
-            if *last.borrow() != text {
-                match &text {
-                    Some(text) => {
-                        label.set_text(text);
-                        label.set_visible(true);
+            match tooltip_text(crate::studio_entitlement::studio_access(capabilities())) {
+                Some(text) => {
+                    if button.tooltip_text().as_deref() != Some(text.as_str()) {
+                        button.set_tooltip_text(Some(text.as_str()));
                     }
-                    None => label.set_visible(false),
+                    *owned.borrow_mut() = Some(text);
                 }
-                *last.borrow_mut() = text;
+                None => {
+                    let mut owned = owned.borrow_mut();
+                    // Restore the attach-time tooltip only if the trial text is
+                    // still the one showing, so a mode-specific tooltip set in
+                    // the meantime keeps winning.
+                    if let Some(text) = owned.take() {
+                        if button.tooltip_text().as_deref() == Some(text.as_str()) {
+                            button.set_tooltip_text(original.as_deref());
+                        }
+                    }
+                }
             }
         })
     };
@@ -169,7 +198,7 @@ where
 
     let refresh = refresh.clone();
     gtk4::glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
-        if label.root().is_none() {
+        if button.root().is_none() {
             return gtk4::glib::ControlFlow::Break;
         }
         refresh();
@@ -366,6 +395,26 @@ mod tests {
             finished_feedback(true),
             Some(t(
                 "That was your last free Studio export. Get Studio to keep these styles."
+            ))
+        );
+    }
+
+    #[test]
+    fn the_export_tooltip_names_the_remaining_exports() {
+        use crate::studio_entitlement::StudioAccess;
+
+        assert_eq!(tooltip_text(StudioAccess::NotNeeded), None);
+        assert_eq!(tooltip_text(StudioAccess::Licensed), None);
+        assert_eq!(tooltip_text(StudioAccess::Trial { remaining: 0 }), None);
+        assert_eq!(
+            tooltip_text(StudioAccess::Trial { remaining: 1 }),
+            Some(t("Uses Studio · 1 free export left"))
+        );
+        assert_eq!(
+            tooltip_text(StudioAccess::Trial { remaining: 3 }),
+            Some(tfmt(
+                "Uses Studio · {count} free exports left",
+                &[("count", "3")]
             ))
         );
     }
