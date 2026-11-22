@@ -82,10 +82,13 @@ const CSS: &str = r#"
         font-weight: 400;
         letter-spacing: -1.4px;
         color: #f1f1f3;
+        /* A soft glow in the card's colour quiets the dots behind the words. */
+        text-shadow: 0 0 22px #141414, 0 0 10px #141414, 0 0 4px #141414;
     }
     .apexshot-studio-lede {
         font-size: 13px;
         color: rgba(255, 255, 255, 0.55);
+        text-shadow: 0 0 12px #141414, 0 0 4px #141414;
     }
     .apexshot-studio-meta {
         font-size: 13px;
@@ -182,6 +185,12 @@ const CSS: &str = r#"
     }
     .apexshot-studio-light .apexshot-studio-title,
     .apexshot-studio-light .apexshot-studio-headline { color: #1d2129; }
+    .apexshot-studio-light .apexshot-studio-headline {
+        text-shadow: 0 0 22px #f6f7fb, 0 0 10px #f6f7fb, 0 0 4px #f6f7fb;
+    }
+    .apexshot-studio-light .apexshot-studio-lede {
+        text-shadow: 0 0 12px #f6f7fb, 0 0 4px #f6f7fb;
+    }
     .apexshot-studio-light .apexshot-studio-subtitle,
     .apexshot-studio-light .apexshot-studio-lede,
     .apexshot-studio-light .apexshot-studio-meta { color: rgba(29, 33, 41, 0.58); }
@@ -884,7 +893,7 @@ fn dither_intensity(x: f64, y: f64, width: f64, height: f64, t: f64) -> f64 {
     if width <= 0.0 || height <= 0.0 {
         return 0.0;
     }
-    let fall = (1.0 - y / height).clamp(0.0, 1.0).powf(1.6);
+    let fall = (1.0 - y / height).clamp(0.0, 1.0).powf(2.3);
     let dx = x - 0.72 * width;
     let distance = (dx * dx + y * y).sqrt();
     let glow = 0.55 + 0.45 * (1.0 - distance / (0.9 * width)).clamp(0.0, 1.0);
