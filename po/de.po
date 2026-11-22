@@ -5292,6 +5292,7 @@ msgstr "Kamera-Freisteller"
 msgid "Cut yourself out of the camera and set yourself on the screen."
 msgstr "Stelle dich aus dem Kamerabild frei und platziere dich auf dem Bildschirm."
 
+<<<<<<< HEAD
 msgid "Almost out of free uploads"
 msgstr "Fast keine kostenlosen Uploads mehr"
 
@@ -5300,6 +5301,16 @@ msgstr "Das Dashboard konnte nicht geöffnet werden"
 
 msgid "Delete old uploads, or Go Pro for 50 GB."
 msgstr "Lösche alte Uploads oder hol dir Pro für 50 GB."
+=======
+msgid "See Studio"
+msgstr "Studio ansehen"
+
+msgid "What's new"
+msgstr "Neuigkeiten"
+
+msgid "What's new in ApexShot {version}"
+msgstr "Neu in ApexShot {version}"
+>>>>>>> feat/studio-free-exports
 
 msgid "Explore Studio"
 msgstr "Studio entdecken"
@@ -5310,6 +5321,7 @@ msgstr "Mit Studio exportiert. Noch 1 kostenloser Studio-Export."
 msgid "Exported with Studio. {count} free Studio exports left."
 msgstr "Mit Studio exportiert. Noch {count} kostenlose Studio-Exporte."
 
+<<<<<<< HEAD
 msgid "Go Pro for 50 GB."
 msgstr "Hol dir Pro für 50 GB."
 
@@ -5322,6 +5334,8 @@ msgstr "Uploads verwalten"
 msgid "Not uploaded"
 msgstr "Nicht hochgeladen"
 
+=======
+>>>>>>> feat/studio-free-exports
 msgid "Studio exports left on the free trial"
 msgstr "Verbleibende Studio-Exporte im kostenlosen Test"
 
@@ -5334,6 +5348,7 @@ msgstr "Studio · noch {count} kostenlose Exporte"
 msgid "That was your last free Studio export. Get Studio to keep these styles."
 msgstr "Das war dein letzter kostenloser Studio-Export. Hol dir Studio, um diese Stile zu behalten."
 
+<<<<<<< HEAD
 msgid "Uploads come back next month."
 msgstr "Uploads sind nächsten Monat wieder verfügbar."
 
@@ -5396,3 +5411,7 @@ msgstr "Studio ist auf diesem Gerät aktiv"
 
 msgid "Studio activation failed"
 msgstr "Studio-Aktivierung fehlgeschlagen"
+=======
+msgid "You've used your 3 free Studio exports"
+msgstr "Du hast deine 3 kostenlosen Studio-Exporte genutzt"
+>>>>>>> feat/studio-free-exports

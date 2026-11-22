@@ -5272,6 +5272,7 @@ msgstr "Вырезание из камеры"
 msgid "Cut yourself out of the camera and set yourself on the screen."
 msgstr "Вырежьте себя из изображения камеры и разместите поверх экрана."
 
+<<<<<<< HEAD
 msgid "Almost out of free uploads"
 msgstr "Бесплатные загрузки почти закончились"
 
@@ -5280,6 +5281,16 @@ msgstr "Не удалось открыть панель управления"
 
 msgid "Delete old uploads, or Go Pro for 50 GB."
 msgstr "Удалите старые загрузки или перейдите на Pro, чтобы получить 50 ГБ."
+=======
+msgid "See Studio"
+msgstr "Подробнее о Studio"
+
+msgid "What's new"
+msgstr "Что нового"
+
+msgid "What's new in ApexShot {version}"
+msgstr "Что нового в ApexShot {version}"
+>>>>>>> feat/studio-free-exports
 
 msgid "Explore Studio"
 msgstr "Узнать о Studio"
@@ -5290,6 +5301,7 @@ msgstr "Экспортировано со Studio. Остался 1 беспла�
 msgid "Exported with Studio. {count} free Studio exports left."
 msgstr "Экспортировано со Studio. Осталось бесплатных экспортов Studio: {count}."
 
+<<<<<<< HEAD
 msgid "Go Pro for 50 GB."
 msgstr "Перейдите на Pro, чтобы получить 50 ГБ."
 
@@ -5302,6 +5314,8 @@ msgstr "Управление загрузками"
 msgid "Not uploaded"
 msgstr "Не загружено"
 
+=======
+>>>>>>> feat/studio-free-exports
 msgid "Studio exports left on the free trial"
 msgstr "Оставшиеся экспорты Studio в бесплатной пробной версии"
 
@@ -5314,6 +5328,7 @@ msgstr "Studio · бесплатных экспортов: {count}"
 msgid "That was your last free Studio export. Get Studio to keep these styles."
 msgstr "Это был ваш последний бесплатный экспорт Studio. Приобретите Studio, чтобы сохранить эти стили."
 
+<<<<<<< HEAD
 msgid "Uploads come back next month."
 msgstr "Загрузки снова станут доступны в следующем месяце."
 
@@ -5376,3 +5391,7 @@ msgstr "Studio активна на этом устройстве"
 
 msgid "Studio activation failed"
 msgstr "Не удалось активировать Studio"
+=======
+msgid "You've used your 3 free Studio exports"
+msgstr "Вы использовали 3 бесплатных экспорта Studio"
+>>>>>>> feat/studio-free-exports

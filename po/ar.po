@@ -5215,6 +5215,7 @@ msgstr "قصّ الكاميرا"
 msgid "Cut yourself out of the camera and set yourself on the screen."
 msgstr "اقتطع نفسك من الكاميرا وضع نفسك على الشاشة."
 
+<<<<<<< HEAD
 msgid "Almost out of free uploads"
 msgstr "أوشكت عمليات الرفع المجانية على النفاد"
 
@@ -5223,6 +5224,16 @@ msgstr "تعذّر فتح لوحة التحكم"
 
 msgid "Delete old uploads, or Go Pro for 50 GB."
 msgstr "احذف عمليات الرفع القديمة، أو قم بالترقية إلى Pro للحصول على 50 غيغابايت."
+=======
+msgid "See Studio"
+msgstr "عرض Studio"
+
+msgid "What's new"
+msgstr "ما الجديد"
+
+msgid "What's new in ApexShot {version}"
+msgstr "ما الجديد في ApexShot {version}"
+>>>>>>> feat/studio-free-exports
 
 msgid "Explore Studio"
 msgstr "استكشف Studio"
@@ -5233,6 +5244,7 @@ msgstr "تم التصدير باستخدام Studio. تبقّى تصدير مج�
 msgid "Exported with Studio. {count} free Studio exports left."
 msgstr "تم التصدير باستخدام Studio. عدد عمليات تصدير Studio المجانية المتبقية: {count}."
 
+<<<<<<< HEAD
 msgid "Go Pro for 50 GB."
 msgstr "قم بالترقية إلى Pro للحصول على 50 غيغابايت."
 
@@ -5245,6 +5257,8 @@ msgstr "إدارة عمليات الرفع"
 msgid "Not uploaded"
 msgstr "لم يتم الرفع"
 
+=======
+>>>>>>> feat/studio-free-exports
 msgid "Studio exports left on the free trial"
 msgstr "عمليات تصدير Studio المتبقية في الفترة التجريبية المجانية"
 
@@ -5257,6 +5271,7 @@ msgstr "Studio · عمليات التصدير المجانية المتبقية:
 msgid "That was your last free Studio export. Get Studio to keep these styles."
 msgstr "كان هذا آخر تصدير مجاني لك من Studio. احصل على Studio للاحتفاظ بهذه الأنماط."
 
+<<<<<<< HEAD
 msgid "Uploads come back next month."
 msgstr "ستعود عمليات الرفع الشهر القادم."
 
@@ -5319,3 +5334,7 @@ msgstr "Studio مفعّل على هذا الجهاز"
 
 msgid "Studio activation failed"
 msgstr "فشل تفعيل Studio"
+=======
+msgid "You've used your 3 free Studio exports"
+msgstr "لقد استخدمت عمليات تصدير Studio المجانية الثلاث"
+>>>>>>> feat/studio-free-exports

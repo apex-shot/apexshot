@@ -5189,6 +5189,7 @@ msgstr "カメラの切り抜き"
 msgid "Cut yourself out of the camera and set yourself on the screen."
 msgstr "カメラ映像から自分を切り抜いて画面上に配置します。"
 
+<<<<<<< HEAD
 msgid "Almost out of free uploads"
 msgstr "無料アップロードの残りがわずかです"
 
@@ -5197,6 +5198,16 @@ msgstr "ダッシュボードを開けませんでした"
 
 msgid "Delete old uploads, or Go Pro for 50 GB."
 msgstr "古いアップロードを削除するか、Pro にアップグレードして 50 GB を利用しましょう。"
+=======
+msgid "See Studio"
+msgstr "Studio を確認"
+
+msgid "What's new"
+msgstr "新機能"
+
+msgid "What's new in ApexShot {version}"
+msgstr "ApexShot {version} の新機能"
+>>>>>>> feat/studio-free-exports
 
 msgid "Explore Studio"
 msgstr "Studio を見る"
@@ -5207,6 +5218,7 @@ msgstr "Studio で書き出しました。残りの無料 Studio 書き出しは
 msgid "Exported with Studio. {count} free Studio exports left."
 msgstr "Studio で書き出しました。残りの無料 Studio 書き出しは {count} 回です。"
 
+<<<<<<< HEAD
 msgid "Go Pro for 50 GB."
 msgstr "Pro にアップグレードして 50 GB を利用しましょう。"
 
@@ -5219,6 +5231,8 @@ msgstr "アップロードを管理"
 msgid "Not uploaded"
 msgstr "アップロードされませんでした"
 
+=======
+>>>>>>> feat/studio-free-exports
 msgid "Studio exports left on the free trial"
 msgstr "無料トライアルで残っている Studio 書き出し"
 
@@ -5231,6 +5245,7 @@ msgstr "Studio · 無料書き出し残り {count} 回"
 msgid "That was your last free Studio export. Get Studio to keep these styles."
 msgstr "これが最後の無料 Studio 書き出しでした。これらのスタイルを使い続けるには Studio を入手してください。"
 
+<<<<<<< HEAD
 msgid "Uploads come back next month."
 msgstr "アップロードは来月また利用できます。"
 
@@ -5293,3 +5308,7 @@ msgstr "このデバイスで Studio が有効になりました"
 
 msgid "Studio activation failed"
 msgstr "Studio を有効にできませんでした"
+=======
+msgid "You've used your 3 free Studio exports"
+msgstr "3 回の無料 Studio 書き出しを使い切りました"
+>>>>>>> feat/studio-free-exports

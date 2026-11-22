@@ -5179,6 +5179,7 @@ msgstr "摄像头抠像"
 msgid "Cut yourself out of the camera and set yourself on the screen."
 msgstr "将你从摄像头画面中抠出并放到屏幕上。"
 
+<<<<<<< HEAD
 msgid "Almost out of free uploads"
 msgstr "免费上传次数即将用完"
 
@@ -5187,6 +5188,16 @@ msgstr "无法打开控制台"
 
 msgid "Delete old uploads, or Go Pro for 50 GB."
 msgstr "删除旧的上传内容，或升级到 Pro 获取 50 GB。"
+=======
+msgid "See Studio"
+msgstr "查看 Studio"
+
+msgid "What's new"
+msgstr "新功能"
+
+msgid "What's new in ApexShot {version}"
+msgstr "ApexShot {version} 新功能"
+>>>>>>> feat/studio-free-exports
 
 msgid "Explore Studio"
 msgstr "了解 Studio"
@@ -5197,6 +5208,7 @@ msgstr "已使用 Studio 导出。还剩 1 次免费 Studio 导出。"
 msgid "Exported with Studio. {count} free Studio exports left."
 msgstr "已使用 Studio 导出。还剩 {count} 次免费 Studio 导出。"
 
+<<<<<<< HEAD
 msgid "Go Pro for 50 GB."
 msgstr "升级到 Pro 获取 50 GB。"
 
@@ -5209,6 +5221,8 @@ msgstr "管理上传"
 msgid "Not uploaded"
 msgstr "未上传"
 
+=======
+>>>>>>> feat/studio-free-exports
 msgid "Studio exports left on the free trial"
 msgstr "免费试用中剩余的 Studio 导出次数"
 
@@ -5221,6 +5235,7 @@ msgstr "Studio · 还剩 {count} 次免费导出"
 msgid "That was your last free Studio export. Get Studio to keep these styles."
 msgstr "这是你最后一次免费 Studio 导出。获取 Studio 以继续使用这些样式。"
 
+<<<<<<< HEAD
 msgid "Uploads come back next month."
 msgstr "下个月可以继续上传。"
 
@@ -5283,3 +5298,7 @@ msgstr "Studio 已在此设备上启用"
 
 msgid "Studio activation failed"
 msgstr "Studio 启用失败"
+=======
+msgid "You've used your 3 free Studio exports"
+msgstr "你已用完 3 次免费 Studio 导出"
+>>>>>>> feat/studio-free-exports
