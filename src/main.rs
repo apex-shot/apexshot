@@ -57,6 +57,17 @@ fn main() {
     }
 
     apexshot::i18n::init_from_config();
+
+    // The desktop file hands the app an `apexshot://` URL when the Studio page
+    // sends a licence back after a purchase or recovery. Handle it before any
+    // subcommand dispatch, so the link can never be mistaken for one.
+    if let Some(url) = args
+        .get(1)
+        .filter(|argument| argument.starts_with("apexshot://"))
+    {
+        activate_studio_from_url(url);
+    }
+
     apexshot::recording::dnd::recover_stale_gnome_dnd();
 
     if args.len() < 2 {
@@ -178,6 +189,18 @@ fn main() {
             println!("{}", apexshot::studio_status_line());
             return;
         }
+        "studio-activate" => {
+            let url = match args.get(2) {
+                Some(url) => url,
+                None => {
+                    eprintln!(
+                        "Error: studio-activate requires an apexshot:// Studio activation link"
+                    );
+                    std::process::exit(1);
+                }
+            };
+            activate_studio_from_url(url);
+        }
         "video-editor" => {
             let result = if args.len() < 3 {
                 open_empty_recording_editor()
@@ -230,6 +253,25 @@ fn main() {
     tokio::runtime::Runtime::new()
         .expect("Failed to create tokio runtime")
         .block_on(async_main(args));
+}
+
+/// Activates the Studio licence carried by an `apexshot://studio/activate`
+/// link and reports the result through a desktop notification, then exits.
+fn activate_studio_from_url(url: &str) -> ! {
+    match apexshot::activate_from_url(url) {
+        Ok(()) => {
+            apexshot::utils::notify::desktop_notification("Studio is active on this device", "");
+            std::process::exit(0);
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            apexshot::utils::notify::desktop_notification_important(
+                "Studio activation failed",
+                &error.to_string(),
+            );
+            std::process::exit(1);
+        }
+    }
 }
 
 async fn async_main(args: Vec<String>) {
@@ -683,6 +725,7 @@ pub(crate) fn print_usage() {
     println!("  show-last-preview Reopen the last capture preview via daemon");
     println!("  settings          Open settings window");
     println!("  studio-status     Print this build's Studio licence state");
+    println!("  studio-activate <url> Activate Studio from an apexshot:// link");
     println!("  studio-device-id  Print this machine's Studio device ID");
     println!("  history           Open capture history window");
     println!("  login             Sign in to ApexShot Cloud (device authorization)");

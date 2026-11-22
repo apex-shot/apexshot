@@ -3,7 +3,8 @@
 use crate::capture::editor::window::icon_names::custom;
 use crate::i18n::{t, tfmt};
 use crate::studio_entitlement::{
-    activate_token, ensure_export_allowed, StudioCapabilities, StudioEntitlementError, StudioStatus,
+    activate_token, ensure_export_allowed, studio_page_url, StudioCapabilities,
+    StudioEntitlementError, StudioStatus,
 };
 use gtk4::{
     glib, prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, CssProvider, Entry,
@@ -13,6 +14,7 @@ use gtk4::{
 use std::cell::Cell;
 use std::rc::Rc;
 
+#[cfg(test)]
 const STUDIO_URL: &str = "https://apexshot.org/studio";
 const SCRIM_CLASS: &str = "apexshot-studio-scrim";
 const LIGHT_CLASS: &str = "apexshot-studio-light";
@@ -268,12 +270,12 @@ impl PrimaryAction {
         }
     }
 
-    fn url(self) -> Option<&'static str> {
+    fn url(self) -> Option<String> {
         match self {
             Self::Upgrade
             | Self::GetStudioReadyBuild
             | Self::RecoverLicense
-            | Self::ManageLicense => Some(STUDIO_URL),
+            | Self::ManageLicense => Some(studio_page_url()),
             Self::KeepEditing => None,
         }
     }
@@ -608,7 +610,6 @@ fn build_card(
 /// Opens the action's page, or closes the card when the action has none.
 fn connect_primary(primary: &Button, action: PrimaryAction, dismiss: &Rc<dyn Fn()>) {
     if let Some(url) = action.url() {
-        let url = url.to_string();
         primary.connect_clicked(move |_| {
             let _ = crate::utils::open::open_url(&url);
         });
@@ -1113,42 +1114,47 @@ mod tests {
 
     #[test]
     fn primary_actions_match_license_state_and_use_the_official_studio_route() {
-        for (error, expected, label, url) in [
+        for (error, expected, label, offers_studio) in [
             (
                 StudioEntitlementError::NotActivated,
                 PrimaryAction::Upgrade,
                 t("Upgrade to Studio"),
-                Some(STUDIO_URL),
+                true,
             ),
             (
                 StudioEntitlementError::InvalidEntitlement,
                 PrimaryAction::RecoverLicense,
                 t("Recover license"),
-                Some(STUDIO_URL),
+                true,
             ),
             (
                 StudioEntitlementError::UpdateAccessEnded,
                 PrimaryAction::ManageLicense,
                 t("Manage license"),
-                Some(STUDIO_URL),
+                true,
             ),
             (
                 StudioEntitlementError::ConfigurationUnavailable,
                 PrimaryAction::GetStudioReadyBuild,
                 t("Check Studio availability"),
-                Some(STUDIO_URL),
+                true,
             ),
             (
                 StudioEntitlementError::Storage("disk full".into()),
                 PrimaryAction::KeepEditing,
                 t("Keep editing"),
-                None,
+                false,
             ),
         ] {
             let action = primary_action(&error);
             assert_eq!(action, expected);
             assert_eq!(action.label(), label);
-            assert_eq!(action.url(), url);
+            if offers_studio {
+                let url = action.url().expect("Studio action opens a page");
+                assert!(url.starts_with(STUDIO_URL), "{url}");
+            } else {
+                assert_eq!(action.url(), None);
+            }
         }
     }
 

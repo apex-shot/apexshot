@@ -120,7 +120,7 @@ fn build_hero(status: StudioStatus) -> (GtkBox, HeroParts) {
         action.add_css_class("settings-primary-btn");
     }
     action.connect_clicked(|_| {
-        let _ = crate::utils::open::open_url("https://apexshot.org/studio");
+        let _ = crate::utils::open::open_url(&crate::studio_entitlement::studio_page_url());
     });
     hero.append(&action);
 

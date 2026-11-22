@@ -39,9 +39,9 @@ pub mod settings;
 pub(crate) mod studio_entitlement;
 pub(crate) mod studio_upsell;
 
-/// The CLI needs this machine's Studio Device ID and status line; nothing else
-/// about entitlements is exported.
-pub use studio_entitlement::{device_id, studio_status_line};
+/// The CLI needs this machine's Studio Device ID, status line, and the entry
+/// point for an activation link; nothing else about entitlements is exported.
+pub use studio_entitlement::{activate_from_url, device_id, studio_status_line};
 #[cfg(test)]
 mod test_support;
 mod typography;

@@ -188,6 +188,82 @@ pub fn activate_token(token: &str) -> Result<(), StudioEntitlementError> {
     activate_token_at_path(&path, token, &configuration)
 }
 
+/// Activates the licence carried by an `apexshot://studio/activate` link.
+///
+/// The purchase page hands a device-bound licence back through this link, with
+/// the signed token envelope as unpadded base64url in its `token` parameter.
+/// The token is verified exactly like a pasted one, so a link from any page can
+/// only install a licence signed by the official key and bound to this device.
+pub fn activate_from_url(url: &str) -> Result<(), StudioEntitlementError> {
+    let token = decode_activation_url(url)?;
+    activate_token(&token)
+}
+
+fn decode_activation_url(url: &str) -> Result<String, StudioEntitlementError> {
+    let query = url
+        .strip_prefix("apexshot://studio/activate?")
+        .or_else(|| url.strip_prefix("apexshot://studio/activate/?"))
+        .ok_or(StudioEntitlementError::InvalidEntitlement)?;
+    if query.is_empty() || query.contains('#') {
+        return Err(StudioEntitlementError::InvalidEntitlement);
+    }
+
+    // The link carries exactly one parameter; anything else is malformed.
+    if query.contains('&') {
+        return Err(StudioEntitlementError::InvalidEntitlement);
+    }
+    let token = query
+        .strip_prefix("token=")
+        .ok_or(StudioEntitlementError::InvalidEntitlement)?;
+
+    let decoded = percent_decode(token)?;
+    if decoded.len() > MAX_TOKEN_BYTES {
+        return Err(StudioEntitlementError::InvalidEntitlement);
+    }
+    let token =
+        String::from_utf8(decoded).map_err(|_| StudioEntitlementError::InvalidEntitlement)?;
+    let bytes = decode_base64url(token.trim_end_matches('='))?;
+    if bytes.len() > MAX_TOKEN_BYTES {
+        return Err(StudioEntitlementError::InvalidEntitlement);
+    }
+    String::from_utf8(bytes).map_err(|_| StudioEntitlementError::InvalidEntitlement)
+}
+
+fn percent_decode(value: &str) -> Result<Vec<u8>, StudioEntitlementError> {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let high = bytes
+                .get(index + 1)
+                .copied()
+                .and_then(hex_value)
+                .ok_or(StudioEntitlementError::InvalidEntitlement)?;
+            let low = bytes
+                .get(index + 2)
+                .copied()
+                .and_then(hex_value)
+                .ok_or(StudioEntitlementError::InvalidEntitlement)?;
+            decoded.push((high << 4) | low);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    Ok(decoded)
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
 /// The entitlement text saved on this device, exactly as it was accepted.
 ///
 /// Settings offers it so a license can be carried to another machine without a
@@ -541,6 +617,26 @@ fn verify_token(
 /// offers it for copying, so it has to be readable without an entitlement.
 pub fn device_id() -> Option<String> {
     crate::usage_telemetry::ensure_install_id()
+}
+
+/// The official Studio page, carrying this machine's Device ID so a purchase
+/// can be bound to it without the customer copying anything.
+///
+/// Falls back to the plain page when no id is available; the customer can then
+/// still copy the Device ID from Settings and claim the licence by hand.
+pub fn studio_page_url() -> String {
+    let Some(device_id) = device_id() else {
+        return "https://apexshot.org/studio".to_string();
+    };
+    if !is_uuid(&device_id) {
+        return "https://apexshot.org/studio".to_string();
+    }
+    let platform = if cfg!(target_os = "windows") {
+        "windows"
+    } else {
+        "linux"
+    };
+    format!("https://apexshot.org/studio?device={device_id}&from=app&platform={platform}")
 }
 
 /// One line a customer can paste into a support request: the licence state and
@@ -1612,5 +1708,63 @@ mod tests {
         // both must leave nothing on disk.
         assert_eq!(result, Err(StudioEntitlementError::DeviceMismatch));
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn an_activation_link_saves_a_device_bound_licence() {
+        let device = device_id().expect("test device id");
+        let token = signed_token_for_test(
+            &synthetic_signing_key(),
+            schema2_payload(&device).to_string().as_bytes(),
+        );
+        let encoded = URL_SAFE_NO_PAD.encode(token.as_bytes());
+        let mut padded = encoded.clone();
+        while !padded.len().is_multiple_of(4) {
+            padded.push('=');
+        }
+
+        for (prefix, value) in [
+            ("apexshot://studio/activate?", encoded),
+            ("apexshot://studio/activate/?", padded.clone()),
+            ("apexshot://studio/activate?", padded.replace('=', "%3D")),
+        ] {
+            let path = scratch_path();
+            let _scope = test_entitlement_path_scope(path.clone());
+            let url = format!("{prefix}token={value}");
+            assert_eq!(activate_from_url(&url), Ok(()));
+            assert_eq!(
+                current_status(),
+                StudioStatus::Active {
+                    updates_until: 3_000_000_000
+                }
+            );
+            let _ = fs::remove_dir_all(path.parent().unwrap());
+        }
+    }
+
+    #[test]
+    fn malformed_activation_links_are_rejected_without_writing() {
+        let path = scratch_path();
+        let _scope = test_entitlement_path_scope(path.clone());
+        let oversized = "A".repeat(MAX_TOKEN_BYTES * 2);
+        for url in [
+            "https://studio/activate?token=e30".to_string(),
+            "apexshot://studio/purchase?token=e30".to_string(),
+            "apexshot://studio/activate".to_string(),
+            "apexshot://studio/activate?from=app".to_string(),
+            "apexshot://studio/activate?token=".to_string(),
+            "apexshot://studio/activate?token=not*base64".to_string(),
+            "apexshot://studio/activate?token=e30&from=app".to_string(),
+            "apexshot://studio/activate?token=e30#fragment".to_string(),
+            "apexshot://studio/activate?token=%ZZ".to_string(),
+            format!("apexshot://studio/activate?token={oversized}"),
+        ] {
+            assert_eq!(
+                activate_from_url(&url),
+                Err(StudioEntitlementError::InvalidEntitlement),
+                "{url}"
+            );
+            assert!(!path.exists());
+        }
     }
 }

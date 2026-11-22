@@ -8,6 +8,33 @@ fn main() {
     app::platform::prepare_process();
     app::i18n::init_from_config();
 
+    // The Studio page hands a purchased or recovered licence back through an
+    // `apexshot://` link. Activate it and leave without opening Settings.
+    if let Some(url) = std::env::args()
+        .nth(1)
+        .filter(|url| url.starts_with("apexshot://"))
+    {
+        match app::studio_entitlement::activate_from_url(&url) {
+            Ok(()) => {
+                app::utils::notify::desktop_notification_and_wait(
+                    "Studio is active on this device",
+                    "",
+                    false,
+                );
+                std::process::exit(0);
+            }
+            Err(error) => {
+                eprintln!("{error}");
+                app::utils::notify::desktop_notification_and_wait(
+                    "Studio activation failed",
+                    &error.to_string(),
+                    true,
+                );
+                std::process::exit(1);
+            }
+        }
+    }
+
     // The capture shell has no Cloud transport of its own; it runs this
     // binary in helper mode to upload a finished capture.
     if let Some(command) = app::cloud::helper::command_from_args(std::env::args_os().skip(1)) {
