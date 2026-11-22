@@ -21,6 +21,7 @@ pub mod compositor;
 pub mod config;
 pub mod daemon;
 pub mod distro;
+pub(crate) mod dither_field;
 pub mod gnome_extension;
 pub mod gnome_integration;
 pub mod gnome_shell;

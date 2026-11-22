@@ -34,6 +34,8 @@ pub mod cloud;
 pub mod config;
 pub mod css_scale;
 pub mod daemon;
+#[path = "../../src/dither_field.rs"]
+pub(crate) mod dither_field;
 pub mod history;
 pub mod i18n;
 pub mod icons;
