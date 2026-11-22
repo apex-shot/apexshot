@@ -7,11 +7,11 @@ use crate::studio_entitlement::{
     StudioEntitlementError, StudioStatus,
 };
 use gtk4::{
-    glib, prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, CssProvider, Entry,
-    EventControllerKey, Image, Label, Orientation, Overlay, PropagationPhase, Revealer,
+    glib, prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, CssProvider, DrawingArea,
+    Entry, EventControllerKey, Image, Label, Orientation, Overlay, PropagationPhase, Revealer,
     RevealerTransitionType,
 };
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 #[cfg(test)]
@@ -20,26 +20,31 @@ const SCRIM_CLASS: &str = "apexshot-studio-scrim";
 const LIGHT_CLASS: &str = "apexshot-studio-light";
 const CARD_WIDTH: f64 = 600.0;
 const NATURAL_WIDTH_CHARS: i32 = 20;
-const SHOT_WIDTH: f64 = 520.0;
-const SHOT_HEIGHT: f64 = 320.0;
-const FADE_HEIGHT: f64 = 170.0;
+const HERO_HEIGHT: f64 = 190.0;
+const DITHER_CELL: f64 = 6.0;
+const DITHER_GAP: f64 = 2.0;
+const DITHER_BAYER: [[u8; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
+const STUDIO_ACCENT_DARK: (u8, u8, u8) = (0xff, 0x67, 0x0d);
+const STUDIO_ACCENT_LIGHT: (u8, u8, u8) = (0xd1, 0x5b, 0x12);
 const CTA_WIDTH: f64 = 320.0;
 const HEADLINE_WIDTH_CHARS: i32 = 26;
-/// Placeholder product shot until the final hero art lands.
-const HERO_SHOT: &[u8] = include_bytes!("../media/image-editor.png");
 
-/// Logical size to device pixels, the way the editor's own widgets do it. GDK
-/// already reports a scaled display on Linux, so only Windows needs the
-/// conversion.
-fn px(value: f64) -> i32 {
+/// The scale the sheet is authored against. GDK already reports a scaled
+/// display on Linux, so only Windows needs the conversion.
+fn ui_scale() -> f64 {
     #[cfg(target_os = "windows")]
     {
-        (value * crate::platform::ui_scale()).round() as i32
+        crate::platform::ui_scale()
     }
     #[cfg(not(target_os = "windows"))]
     {
-        value.round() as i32
+        1.0
     }
+}
+
+/// Logical size to device pixels, the way the editor's own widgets do it.
+fn px(value: f64) -> i32 {
+    (value * ui_scale()).round() as i32
 }
 
 const CSS: &str = r#"
@@ -61,16 +66,6 @@ const CSS: &str = r#"
     }
     .apexshot-studio-body { padding: 18px; }
     .apexshot-studio-body.apexshot-studio-body-offer { padding: 0 28px 22px 28px; }
-
-    .apexshot-studio-shot {
-        border: 1px solid rgba(255, 255, 255, 0.10);
-        border-bottom-width: 0;
-        border-radius: 10px 10px 0 0;
-        background: #0d0d0d;
-    }
-    .apexshot-studio-fade {
-        background-image: linear-gradient(180deg, rgba(20, 20, 20, 0), rgba(20, 20, 20, 0.92) 55%, #141414);
-    }
 
     .apexshot-studio-title {
         color: #f1f1f3;
@@ -184,13 +179,6 @@ const CSS: &str = r#"
         background: #f6f7fb;
         color: #1d2129;
         border-color: alpha(#111827, 0.10);
-    }
-    .apexshot-studio-light .apexshot-studio-shot {
-        border-color: alpha(#111827, 0.10);
-        background: #eef0f5;
-    }
-    .apexshot-studio-light .apexshot-studio-fade {
-        background-image: linear-gradient(180deg, rgba(246, 247, 251, 0), rgba(246, 247, 251, 0.92) 55%, #f6f7fb);
     }
     .apexshot-studio-light .apexshot-studio-title,
     .apexshot-studio-light .apexshot-studio-headline { color: #1d2129; }
@@ -643,7 +631,7 @@ fn build_offer(
     entry: &Entry,
 ) -> gtk4::Widget {
     let (title, subtitle) = card_copy(error);
-    card.append(&hero(&title, &subtitle, dismiss));
+    card.append(&hero(&title, &subtitle, dark, dismiss));
     card.append(body);
     body.append(&offer_meta(capabilities, dark));
 
@@ -764,38 +752,18 @@ fn offer_meta(capabilities: StudioCapabilities, dark: bool) -> GtkBox {
     row
 }
 
-/// The top of the purchase card, after the reference: a product shot that
-/// fades into the sheet, with the headline set over the fade.
-fn hero(title: &str, subtitle: &str, dismiss: &Rc<dyn Fn()>) -> Overlay {
-    let base = GtkBox::new(Orientation::Vertical, 0);
-    base.add_css_class("apexshot-studio-hero");
-    let screen = GtkBox::new(Orientation::Vertical, 0);
-    screen.add_css_class("apexshot-studio-shot");
-    screen.set_overflow(gtk4::Overflow::Hidden);
-    screen.set_halign(Align::Center);
-    screen.set_margin_top(px(36.0));
-    screen.set_size_request(px(SHOT_WIDTH), px(SHOT_HEIGHT));
-    if let Some(texture) = hero_shot() {
-        let picture = gtk4::Picture::for_paintable(&texture);
-        picture.set_can_shrink(false);
-        screen.append(&picture);
-    }
-    base.append(&screen);
-
+/// The top of the purchase card: an ordered-dither field in the accent that
+/// is densest at the top and dissolves into the sheet, with the headline set
+/// over its quiet lower edge.
+fn hero(title: &str, subtitle: &str, dark: bool, dismiss: &Rc<dyn Fn()>) -> Overlay {
     let overlay = Overlay::new();
-    overlay.set_child(Some(&base));
-
-    let fade = GtkBox::new(Orientation::Vertical, 0);
-    fade.add_css_class("apexshot-studio-fade");
-    fade.set_valign(Align::End);
-    fade.set_size_request(-1, px(FADE_HEIGHT));
-    fade.set_can_target(false);
-    overlay.add_overlay(&fade);
+    overlay.set_child(Some(&hero_field(dark)));
 
     let words = GtkBox::new(Orientation::Vertical, px(8.0));
     words.set_valign(Align::End);
     words.set_margin_start(px(28.0));
     words.set_margin_end(px(28.0));
+    words.set_margin_bottom(px(4.0));
     let headline = centered_label(title, "apexshot-studio-headline");
     headline.set_max_width_chars(HEADLINE_WIDTH_CHARS);
     let lede = centered_label(subtitle, "apexshot-studio-lede");
@@ -817,35 +785,118 @@ fn hero(title: &str, subtitle: &str, dismiss: &Rc<dyn Fn()>) -> Overlay {
     overlay
 }
 
-/// The product shot at exactly the size it is shown, filled from the top so
-/// the editor's toolbar stays in view. Pre-scaling keeps the source's own
-/// pixel size from setting the card's width the way a `Picture` would.
-fn hero_shot() -> Option<gtk4::gdk::Texture> {
-    let source = image::load_from_memory(HERO_SHOT).ok()?.to_rgba8();
-    let width = px(SHOT_WIDTH).max(1) as u32;
-    let height = px(SHOT_HEIGHT).max(1) as u32;
-    let by_width = width as f64 / source.width() as f64;
-    let by_height = height as f64 / source.height() as f64;
-    let scale = by_width.max(by_height);
-    let scaled_width = ((source.width() as f64 * scale).ceil() as u32).max(width);
-    let scaled_height = ((source.height() as f64 * scale).ceil() as u32).max(height);
-    let resized = image::imageops::resize(
-        &source,
-        scaled_width,
-        scaled_height,
-        image::imageops::FilterType::Triangle,
+/// The hero's dot field. Nothing else is painted, so the card's own surface
+/// shows through the gaps and around the dissolving edge.
+fn hero_field(dark: bool) -> DrawingArea {
+    let field = DrawingArea::new();
+    field.set_hexpand(true);
+    field.set_size_request(-1, px(HERO_HEIGHT));
+    field.set_can_target(false);
+
+    let elapsed = Rc::new(Cell::new(0.0));
+    field.set_draw_func({
+        let elapsed = elapsed.clone();
+        move |_area, context, width, height| {
+            draw_dither(
+                context,
+                f64::from(width),
+                f64::from(height),
+                elapsed.get(),
+                dark,
+            );
+        }
+    });
+
+    if animations_enabled() {
+        let tick = field.add_tick_callback({
+            let elapsed = elapsed.clone();
+            let started = Cell::new(None::<i64>);
+            let last_draw = Cell::new(f64::NEG_INFINITY);
+            move |area, clock| {
+                let now = clock.frame_time();
+                let start = started.get().unwrap_or(now);
+                started.set(Some(start));
+                elapsed.set((now - start).max(0) as f64 / 1_000_000.0);
+                let seconds = now as f64 / 1_000_000.0;
+                // The shimmer reads the same at 30 fps as at the display's
+                // refresh rate, so skip the frames in between.
+                if seconds - last_draw.get() >= 1.0 / 30.0 {
+                    last_draw.set(seconds);
+                    area.queue_draw();
+                }
+                glib::ControlFlow::Continue
+            }
+        });
+        let tick = Rc::new(RefCell::new(Some(tick)));
+        field.connect_unrealize(move |_| {
+            if let Some(tick) = tick.borrow_mut().take() {
+                tick.remove();
+            }
+        });
+    }
+    field
+}
+
+fn animations_enabled() -> bool {
+    gtk4::Settings::default().is_none_or(|settings| settings.is_gtk_enable_animations())
+}
+
+fn draw_dither(context: &gtk4::cairo::Context, width: f64, height: f64, t: f64, dark: bool) {
+    if width <= 0.0 || height <= 0.0 {
+        return;
+    }
+    let cell = (DITHER_CELL * ui_scale()).max(DITHER_GAP + 1.0);
+    let dot = (cell - DITHER_GAP).round().max(1.0);
+    let (red, green, blue) = if dark {
+        STUDIO_ACCENT_DARK
+    } else {
+        STUDIO_ACCENT_LIGHT
+    };
+    let (red, green, blue) = (
+        f64::from(red) / 255.0,
+        f64::from(green) / 255.0,
+        f64::from(blue) / 255.0,
     );
-    let left = (scaled_width - width) / 2;
-    let cropped = image::imageops::crop_imm(&resized, left, 0, width, height).to_image();
-    let bytes = glib::Bytes::from_owned(cropped.into_raw());
-    let texture = gtk4::gdk::MemoryTexture::new(
-        width as i32,
-        height as i32,
-        gtk4::gdk::MemoryFormat::R8g8b8a8,
-        &bytes,
-        width as usize * 4,
-    );
-    Some(texture.upcast())
+    let columns = (width / cell).ceil() as usize;
+    let rows = (height / cell).ceil() as usize;
+    for row in 0..rows {
+        for column in 0..columns {
+            let x = (column as f64 + 0.5) * cell;
+            let y = (row as f64 + 0.5) * cell;
+            let v = dither_intensity(x, y, width, height, t);
+            if dither_lit(column, row, v) {
+                context.set_source_rgba(red, green, blue, 0.35 + 0.65 * v);
+                context.rectangle(
+                    (column as f64 * cell).round(),
+                    (row as f64 * cell).round(),
+                    dot,
+                    dot,
+                );
+                context.fill();
+            }
+        }
+    }
+}
+
+/// The field's brightness at one cell centre: strongest along the top, with
+/// a bloom toward the upper right and a slow diagonal shimmer.
+fn dither_intensity(x: f64, y: f64, width: f64, height: f64, t: f64) -> f64 {
+    if width <= 0.0 || height <= 0.0 {
+        return 0.0;
+    }
+    let fall = (1.0 - y / height).clamp(0.0, 1.0).powf(1.6);
+    let dx = x - 0.72 * width;
+    let distance = (dx * dx + y * y).sqrt();
+    let glow = 0.55 + 0.45 * (1.0 - distance / (0.9 * width)).clamp(0.0, 1.0);
+    let shimmer = 0.16 * (std::f64::consts::TAU * ((x + y) / 260.0 - t * 0.12)).sin();
+    (fall * glow + shimmer * fall).clamp(0.0, 1.0)
+}
+
+/// Ordered dithering: the cell lights when its intensity clears the 4x4
+/// Bayer threshold, so mid-tones arrive as a stable dot pattern.
+fn dither_lit(column: usize, row: usize, v: f64) -> bool {
+    let bayer = f64::from(DITHER_BAYER[row % 4][column % 4]);
+    v > (bayer + 0.5) / 16.0
 }
 
 /// Settings pairs every icon with a light-theme drawing; the card reads the
@@ -1272,6 +1323,44 @@ mod tests {
         });
         assert_eq!(features[0], (Feature::Style, true));
         assert!(features[1..].iter().all(|(_, used)| !used));
+    }
+
+    #[test]
+    fn the_dither_field_is_gone_at_the_bottom() {
+        for t in [0.0, 1.7, 9.3] {
+            for x in [0.0, 300.0, 599.0] {
+                assert_eq!(dither_intensity(x, 190.0, 600.0, 190.0, t), 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn the_dither_field_is_brighter_toward_the_top_right() {
+        let top_right = dither_intensity(0.72 * 600.0, 0.0, 600.0, 190.0, 0.0);
+        let top_left = dither_intensity(0.0, 0.0, 600.0, 190.0, 0.0);
+        let bottom_left = dither_intensity(0.0, 190.0, 600.0, 190.0, 0.0);
+        assert!(top_right > top_left);
+        assert!(top_right > bottom_left);
+        assert!(top_right > 0.5);
+    }
+
+    #[test]
+    fn extreme_intensities_light_every_cell_or_none() {
+        for row in 0..4 {
+            for column in 0..4 {
+                assert!(dither_lit(column, row, 1.0));
+                assert!(!dither_lit(column, row, 0.0));
+            }
+        }
+    }
+
+    #[test]
+    fn the_bayer_grid_lights_half_its_cells_at_mid_intensity() {
+        let lit = (0..4)
+            .flat_map(|row| (0..4).map(move |column| (column, row)))
+            .filter(|(column, row)| dither_lit(*column, *row, 0.5))
+            .count();
+        assert_eq!(lit, 8);
     }
 
     #[test]
