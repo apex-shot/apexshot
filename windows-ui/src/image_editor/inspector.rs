@@ -7,7 +7,7 @@
 use std::rc::Rc;
 
 use gtk4::prelude::*;
-use gtk4::{Box as GtkBox, Orientation, PolicyType, ScrolledWindow, Stack};
+use gtk4::{Box as GtkBox, Label, Orientation, PolicyType, ScrolledWindow, Stack};
 
 use super::motion_controls::MotionControls;
 use super::sections;
