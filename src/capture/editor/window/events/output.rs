@@ -197,7 +197,9 @@ pub(super) fn wire_output_lifecycle(
                                 )
                             });
                         if !shown {
-                            if let Some(mut text) = crate::studio_trial::finished_feedback(was_trial) {
+                            if let Some(mut text) =
+                                crate::studio_trial::finished_feedback(was_trial)
+                            {
                                 if let Some(heads_up) = &heads_up {
                                     text = heads_up.append_to(&text);
                                 }
