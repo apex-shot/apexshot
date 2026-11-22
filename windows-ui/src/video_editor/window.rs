@@ -73,7 +73,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     }
 
     let document_title = Rc::new(RefCell::new(document_title(initial)));
-    let (title_bar, export_button, presets_button) =
+    let (title_bar, export_button, presets_button, trial_indicator) =
         build_title_bar(&window, document_title.clone(), scale);
 
     let workspace = GtkBox::new(Orientation::Horizontal, 0);
@@ -109,6 +109,20 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     // project file and restores it on load, through this one shared cell.
     timeline.set_quality_handle(stage.quality.clone());
     super::presets_popover::attach(&stage.presets_button, &timeline, scale);
+    // The free-trial line follows the document as zooms, captions and the
+    // camera change; the export model already answers which Studio features
+    // are in use.
+    {
+        let stage = stage.clone();
+        let timeline = timeline.clone();
+        crate::studio_trial::attach_indicator(&trial_indicator, move || {
+            studio_model(&stage, &timeline)
+                .map(|model| {
+                    super::studio::capabilities_at(&model, timeline.composition_duration())
+                })
+                .unwrap_or_default()
+        });
+    }
 
     let tools_column = super::side_panel::build_tools_column(
         scale,
@@ -383,7 +397,7 @@ fn build_title_bar(
     window: &ApplicationWindow,
     document_title: Rc<RefCell<String>>,
     scale: f64,
-) -> (GtkBox, Button, Button) {
+) -> (GtkBox, Button, Button, Label) {
     let bar = GtkBox::new(Orientation::Horizontal, 0);
     bar.add_css_class("settings-window-controls");
     bar.add_css_class("video-editor-titlebar");
@@ -476,10 +490,18 @@ fn build_title_bar(
     export_button.set_margin_end((8.0 * scale).round() as i32);
 
     let presets_button = super::presets_popover::title_button(scale);
+    let trial_indicator = Label::new(None);
+    trial_indicator.add_css_class("recording-editor-estimate");
+    trial_indicator.set_valign(Align::Center);
+    trial_indicator.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    trial_indicator.set_max_width_chars(28);
+    trial_indicator.set_visible(false);
+    trial_indicator.set_margin_end((6.0 * scale).round() as i32);
     let actions = GtkBox::new(Orientation::Horizontal, 0);
     actions.set_halign(Align::End);
     actions.set_valign(Align::Fill);
     actions.append(&presets_button);
+    actions.append(&trial_indicator);
     actions.append(&export_button);
     actions.append(&minimize);
     actions.append(&maximize);
@@ -502,7 +524,7 @@ fn build_title_bar(
     // spacers have no handlers of their own, while every button claims its
     // own press before the bar sees it.
     windowing::install_window_drag(&bar, window);
-    (bar, export_button, presets_button)
+    (bar, export_button, presets_button, trial_indicator)
 }
 
 fn set_title_bar_text(bar: &GtkBox, title: &str) {
@@ -2323,6 +2345,24 @@ fn export_model(
     stage: &Stage,
     timeline: &super::timeline::Timeline,
 ) -> Option<super::export::ExportModel> {
+    export_model_inner(stage, timeline, true)
+}
+
+/// The model behind the Studio badges beside Export. The canvas is the
+/// expensive part of a model and no Studio requirement reads it, so the
+/// frequent trial refresh builds the model without one.
+fn studio_model(
+    stage: &Stage,
+    timeline: &super::timeline::Timeline,
+) -> Option<super::export::ExportModel> {
+    export_model_inner(stage, timeline, false)
+}
+
+fn export_model_inner(
+    stage: &Stage,
+    timeline: &super::timeline::Timeline,
+    with_canvas: bool,
+) -> Option<super::export::ExportModel> {
     let footage = timeline.export_footage()?;
     let source_size = stage.source_size.get()?;
     let sidecar = stage.cursor.sidecar();
@@ -2360,7 +2400,11 @@ fn export_model(
             .0;
             (widened != source_size).then_some(widened)
         },
-        canvas: export_canvas(stage, source_size),
+        canvas: if with_canvas {
+            export_canvas(stage, source_size)
+        } else {
+            None
+        },
         crf: stage.quality.get().crf(),
         audio,
     })

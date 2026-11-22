@@ -294,10 +294,19 @@ fn primary_action(error: &StudioEntitlementError) -> PrimaryAction {
 
 fn card_copy(error: &StudioEntitlementError) -> (String, String) {
     match (kind_for(error), error) {
-        (Kind::Purchase, _) => (
-            t("Unlock ApexShot Studio"),
-            t("Professional tools for presenting your captures."),
-        ),
+        (Kind::Purchase, _) => {
+            // The card only reaches the not-activated case once the free
+            // trial is spent; the copy says so instead of offering a first try.
+            let title = if crate::studio_trial::trial_remaining() == 0 {
+                t("You've used your 3 free Studio exports")
+            } else {
+                t("Unlock ApexShot Studio")
+            };
+            (
+                title,
+                t("Professional tools for presenting your captures."),
+            )
+        }
         (Kind::InvalidLicense, _) => (
             t("Studio license couldn't be verified"),
             t("The license saved on this device couldn't be checked. Paste a valid license to unlock Studio."),
@@ -1156,6 +1165,20 @@ mod tests {
                 assert_eq!(action.url(), None);
             }
         }
+    }
+
+    #[test]
+    fn the_purchase_card_names_the_used_up_trial() {
+        let _trial = crate::studio_trial::test_trial_used_up();
+        let (title, _) = card_copy(&StudioEntitlementError::NotActivated);
+        assert_eq!(title, t("You've used your 3 free Studio exports"));
+    }
+
+    #[test]
+    fn the_purchase_card_offers_a_first_try_while_the_trial_remains() {
+        let _trial = crate::studio_trial::test_trial_path_scope();
+        let (title, _) = card_copy(&StudioEntitlementError::NotActivated);
+        assert_eq!(title, t("Unlock ApexShot Studio"));
     }
 
     #[test]

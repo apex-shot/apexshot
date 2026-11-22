@@ -213,13 +213,21 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
     let export_flow_active: export_flow::FlowActive = Rc::new(Cell::new(false));
     let export_cancellation = Arc::new(AtomicBool::new(false));
     let close_after_export = Rc::new(Cell::new(false));
-    let (title_bar, title_label, upload_btn, export_btn) = build_window_controls(
+    let (title_bar, title_label, upload_btn, export_btn, trial_indicator) = build_window_controls(
         &window,
         state.clone(),
         exporting.clone(),
         export_cancellation.clone(),
         export_flow_active.clone(),
     );
+    // The trial line also follows the counter after an export finishes, which
+    // no edit refresh covers.
+    {
+        let state = state.clone();
+        crate::studio_trial::attach_indicator(&trial_indicator, move || {
+            crate::studio_entitlement::capabilities_for_video(&state.lock().unwrap())
+        });
+    }
     root.append(&title_bar);
 
     let estimate_label = Label::new(None);
@@ -236,6 +244,7 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
         let export_btn = export_btn.clone();
         let exporting = exporting.clone();
         let estimate_label = estimate_label.clone();
+        let trial_indicator = trial_indicator.clone();
         Rc::new(move || {
             let (name, has_video) = {
                 let state = state.lock().unwrap();
@@ -247,6 +256,7 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
             upload_btn.set_sensitive(enabled);
             export_btn.set_sensitive(enabled);
             footer::update_estimate(&estimate_label, &state, false);
+            footer::refresh_trial_indicator(&trial_indicator, &state);
             if let Some(paint) = paint_slot.borrow().clone() {
                 paint();
             }
@@ -797,7 +807,7 @@ fn build_window_controls(
     exporting: Rc<Cell<bool>>,
     export_cancellation: Arc<AtomicBool>,
     export_flow_active: export_flow::FlowActive,
-) -> (GtkBox, Label, Button, Button) {
+) -> (GtkBox, Label, Button, Button, Label) {
     const TRAFFIC_LIGHTS_WIDTH: i32 = 100;
     let bar = GtkBox::new(Orientation::Horizontal, 8);
     bar.add_css_class("recording-editor-window-controls");
@@ -834,11 +844,13 @@ fn build_window_controls(
         export_cancellation,
         export_flow_active,
     );
+    let trial_indicator = footer::build_trial_indicator();
     let actions = GtkBox::new(Orientation::Horizontal, 8);
     actions.add_css_class("recording-editor-title-actions");
     actions.set_valign(Align::Center);
     actions.append(&upload_spinner);
     actions.append(&upload);
+    actions.append(&trial_indicator);
     actions.append(&export_spinner);
     actions.append(&export);
     let lights = toolbar::build_traffic_lights(window);
@@ -858,7 +870,7 @@ fn build_window_controls(
     bar.append(&right_balance);
 
     crate::capture::editor::ui_support::install_window_drag(&bar, window);
-    (bar, title, upload, export)
+    (bar, title, upload, export, trial_indicator)
 }
 
 #[cfg(test)]

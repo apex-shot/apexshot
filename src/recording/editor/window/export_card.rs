@@ -390,6 +390,12 @@ pub(super) fn start(
     export_cancellation: Arc<AtomicBool>,
 ) {
     exporting.set(true);
+    // Captured before encoding: the finished file consumes the trial inside
+    // the renderer, and this drives the completion copy.
+    let was_trial = crate::studio_entitlement::studio_access(
+        crate::studio_entitlement::capabilities_for_video(&snapshot),
+    )
+    .is_trial();
 
     let progress = Arc::new(ExportProgress::new(0));
     snapshot.export_progress = Some(progress.clone());
@@ -758,9 +764,15 @@ pub(super) fn start(
                             Ok(path) => {
                                 let size =
                                     std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
+                                let mut body = format_size(size);
+                                if let Some(text) =
+                                    crate::studio_trial::finished_feedback(was_trial)
+                                {
+                                    body = format!("{body}\n\n{text}");
+                                }
                                 crate::utils::notify::desktop_notification(
                                     &t("Export complete"),
-                                    &format_size(size),
+                                    &body,
                                 );
                             }
                             Err(err) => {
@@ -795,6 +807,11 @@ pub(super) fn start(
                                         t("Video exported, but could not copy to clipboard:")
                                     )),
                                 }
+                            }
+                            // A finished trial export tells the user how many
+                            // remain, and when the last one is gone.
+                            if let Some(text) = crate::studio_trial::finished_feedback(was_trial) {
+                                notes.push(text);
                             }
                             let notes_text = notes.join("\n");
                             detail.remove_css_class("recording-editor-export-error");

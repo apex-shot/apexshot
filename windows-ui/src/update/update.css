@@ -122,6 +122,43 @@ progressbar.update-progress progress {
     color: #cf530b;
 }
 
+/* The secondary action mirrors the primary's height and radius, outlined in
+   the accent colour so it reads as a choice, not the call to action. */
+.editor-root.onboarding-root .onboarding-actions button.update-outline-button {
+    min-width: 0;
+    min-height: 42px;
+    padding: 0 18px;
+    border: 1px solid #ff670d;
+    border-radius: 7px;
+    background: transparent;
+    background-image: none;
+    color: #ff670d;
+    font-size: 14px;
+    font-weight: 600;
+    box-shadow: none;
+}
+
+.editor-root.onboarding-root .onboarding-actions button.update-outline-button:hover {
+    background: alpha(#ff670d, 0.08);
+}
+
+.editor-root.onboarding-root .onboarding-actions button.update-outline-button:active {
+    background: alpha(#ff670d, 0.14);
+}
+
+.editor-root.onboarding-root.editor-theme-light
+    .onboarding-actions
+    button.update-outline-button {
+    border-color: #cf530b;
+    color: #cf530b;
+}
+
+.editor-root.onboarding-root.editor-theme-light
+    .onboarding-actions
+    button.update-outline-button:hover {
+    background: alpha(#cf530b, 0.08);
+}
+
 .editor-theme-light.onboarding-root .update-card {
     background: #e9e6e0;
     border-color: rgba(37, 35, 31, 0.07);

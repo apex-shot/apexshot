@@ -713,12 +713,18 @@ pub(super) fn build_window(app: &Application, release: Release) {
 
 /// The brand mark above a centred headline, shared by every state.
 pub(crate) fn header(scale: f64, dark: bool, title: &str, copy: &str) -> GtkBox {
+    header_parts(scale, dark, title, copy).0
+}
+
+/// The same block with its supporting copy exposed for pages that hide it.
+pub(crate) fn header_parts(scale: f64, dark: bool, title: &str, copy: &str) -> (GtkBox, Label) {
     let block = GtkBox::new(Orientation::Vertical, 0);
     let mark = crate::onboarding::showcase::brand_mark(scale, dark);
     mark.set_margin_bottom(px(scale, 18.0));
     block.append(&mark);
-    block.append(&crate::onboarding::ui::heading(scale, title, copy));
-    block
+    let parts = crate::onboarding::ui::heading_parts(scale, title, copy);
+    block.append(&parts.block);
+    (block, parts.copy)
 }
 
 pub(crate) fn page(scale: f64) -> GtkBox {
@@ -756,7 +762,7 @@ pub(crate) fn page_body(page: &GtkBox, body: &GtkBox, actions: &GtkBox) {
     page.append(actions);
 }
 
-/// One action at each edge of the row: the quiet choice on the left, the
+/// One action at each edge of the row: the secondary choice on the left, the
 /// primary action on the right. A lone action sits in the middle.
 pub(crate) fn action_row(scale: f64, left: Option<&Button>, right: &Button) -> GtkBox {
     let actions = GtkBox::new(Orientation::Horizontal, px(scale, 12.0));
@@ -833,6 +839,16 @@ pub(crate) fn primary_button(label: &str) -> Button {
 pub(crate) fn quiet_button(label: &str) -> Button {
     let button = Button::with_label(label);
     button.add_css_class("onboarding-text-button");
+    button.set_halign(Align::Center);
+    button
+}
+
+/// The secondary action's outlined treatment, matching the primary button's
+/// height and radius without competing with it.
+pub(crate) fn outlined_button(label: &str) -> Button {
+    let button = Button::with_label(label);
+    button.set_has_frame(false);
+    button.add_css_class("update-outline-button");
     button.set_halign(Align::Center);
     button
 }

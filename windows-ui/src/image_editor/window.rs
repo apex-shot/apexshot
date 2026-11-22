@@ -192,6 +192,17 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
             canvas.refresh_cursor();
         })
     };
+    {
+        let host = canvas.host.clone();
+        let in_motion = in_motion.clone();
+        crate::studio_trial::attach_indicator(&inspector.trial_label, move || {
+            if in_motion.get() {
+                crate::studio_entitlement::capabilities_for_motion_export()
+            } else {
+                host.read(|st| st.studio_capabilities()).unwrap_or_default()
+            }
+        });
+    }
     canvas.add_change_listener(sync_all.clone());
     // Crash safety: autosave the session once edits have been quiet for two
     // seconds, so a drag in progress is never written.
@@ -288,8 +299,9 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
             }) {
                 return;
             }
+            let trial = crate::studio_entitlement::studio_access(capabilities).is_trial();
             match motion.current_frame_image() {
-                Some(frame) => copy_frame_image(&host, frame),
+                Some(frame) => copy_frame_image(&host, frame, trial),
                 None => {
                     // The Motion page covers the canvas toast, so the failure
                     // also goes to a system notification.
@@ -903,6 +915,11 @@ fn save_motion_video_dialog(
     ) {
         return;
     }
+    // Captured before rendering: only a finished MP4 consumes the trial.
+    let trial = crate::studio_entitlement::studio_access(
+        crate::studio_entitlement::capabilities_for_motion_export(),
+    )
+    .is_trial();
 
     let chooser_window = window.downgrade();
     let host = host.clone();
@@ -925,6 +942,7 @@ fn save_motion_video_dialog(
             &cancel,
             &name,
             options,
+            trial,
             sync_all.clone(),
             &lock,
         );
@@ -944,6 +962,7 @@ fn choose_motion_video_destination(
     cancel: &MotionCancel,
     name: &str,
     options: motion::MotionExportOptions,
+    trial: bool,
     sync_all: Rc<dyn Fn()>,
     lock: &Rc<EditingLock>,
 ) {
@@ -1034,9 +1053,15 @@ fn choose_motion_video_destination(
                                     // History lists this under Motion Edits,
                                     // not Recordings.
                                     crate::history::motion_exports::record_export(&path);
+                                    let body = match crate::studio_trial::finished_feedback(trial) {
+                                        Some(text) => {
+                                            format!("{}\n\n{text}", path.display())
+                                        }
+                                        None => path.display().to_string(),
+                                    };
                                     crate::utils::notify::desktop_notification(
                                         &t("Export complete"),
-                                        &path.display().to_string(),
+                                        &body,
                                     );
                                 }
                                 // Cancelling is the user's choice, not a failure.
@@ -1170,11 +1195,11 @@ fn copy_image(window: &ApplicationWindow, host: &Rc<super::annotate::EditorHost>
 
 /// Copy the already rendered Motion pose. The caller runs the Studio style
 /// gate first; the static pose gate does not apply to Motion poses.
-fn copy_frame_image(host: &Rc<super::annotate::EditorHost>, frame: image::RgbaImage) {
+fn copy_frame_image(host: &Rc<super::annotate::EditorHost>, frame: image::RgbaImage, trial: bool) {
     if !host.has_document() || host.background_loading() {
         return;
     }
-    host.copy_frame_to_clipboard(frame);
+    host.copy_frame_to_clipboard(frame, trial);
 }
 
 /// Upload the flattened document as a temporary PNG. The temp file lives only
@@ -1215,6 +1240,9 @@ fn upload_image(
     }) {
         return;
     }
+    let trial = host
+        .read(|st| crate::studio_entitlement::studio_access(st.studio_capabilities()))
+        .is_some_and(|access| access.is_trial());
 
     let Some(config) = configured_cloud() else {
         return;
@@ -1229,7 +1257,9 @@ fn upload_image(
             return;
         }
     };
-    upload_rendered_image(window, button, uploading, config, snapshot, lock, sync_all);
+    upload_rendered_image(
+        window, button, uploading, config, snapshot, lock, sync_all, trial,
+    );
 }
 
 fn configured_cloud() -> Option<crate::config::AppConfig> {
@@ -1347,6 +1377,8 @@ fn upload_motion_video(
                             Some(cleanup),
                             Some(sync_all),
                             Some(lock.clone()),
+                            // The finished Motion MP4 already consumed it.
+                            false,
                         );
                     } else {
                         uploading.set(false);
@@ -1407,6 +1439,8 @@ fn upload_path(
     cleanup: Option<std::path::PathBuf>,
     on_finish: Option<Rc<dyn Fn()>>,
     lock: Option<Rc<EditingLock>>,
+    // Motion's video render already consumed the trial before this upload.
+    trial: bool,
 ) {
     uploading.set(true);
     button.set_sensitive(false);
@@ -1421,7 +1455,7 @@ fn upload_path(
         }
         let _ = sender.send(result);
     });
-    poll_upload(window, button, uploading, receiver, on_finish, lock);
+    poll_upload(window, button, uploading, receiver, on_finish, lock, trial);
 }
 
 fn poll_upload(
@@ -1431,6 +1465,7 @@ fn poll_upload(
     receiver: std::sync::mpsc::Receiver<Result<String, crate::cloud::upload::UploadError>>,
     on_finish: Option<Rc<dyn Fn()>>,
     lock: Option<Rc<EditingLock>>,
+    trial: bool,
 ) {
     let window = window.downgrade();
     let button = button.downgrade();
@@ -1452,6 +1487,17 @@ fn poll_upload(
                     Ok(share_url) => {
                         if let Some(display) = gdk::Display::default() {
                             display.clipboard().set_text(&share_url);
+                        }
+                        // Only a completed upload consumes a free still export;
+                        // a Motion upload already consumed its MP4 render.
+                        if trial {
+                            crate::studio_trial::record_trial_export();
+                        }
+                        if let Some(text) = crate::studio_trial::finished_feedback(trial) {
+                            crate::utils::notify::desktop_notification(
+                                &crate::i18n::t("Upload complete"),
+                                &text,
+                            );
                         }
                     }
                     Err(crate::cloud::upload::UploadError::UpgradeRequired(message)) => {
@@ -1492,6 +1538,7 @@ fn upload_rendered_image(
     snapshot: image::RgbaImage,
     lock: &Rc<EditingLock>,
     sync_all: Rc<dyn Fn()>,
+    trial: bool,
 ) {
     uploading.set(true);
     button.set_sensitive(false);
@@ -1528,6 +1575,7 @@ fn upload_rendered_image(
         receiver,
         Some(sync_all),
         Some(lock.clone()),
+        trial,
     );
 }
 

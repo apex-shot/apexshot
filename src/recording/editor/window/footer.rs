@@ -188,6 +188,32 @@ pub(super) fn build_export_action(
     (button, spinner)
 }
 
+/// The line beside Export showing the free Studio trial, hidden when the
+/// document needs no Studio output or a licence already covers it.
+pub(super) fn build_trial_indicator() -> Label {
+    let label = Label::new(None);
+    label.add_css_class("recording-editor-estimate");
+    label.set_valign(gtk4::Align::Center);
+    label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    label.set_max_width_chars(28);
+    label.set_visible(false);
+    label
+}
+
+/// Refresh the trial line after an edit, an activation, or a finished export.
+pub(super) fn refresh_trial_indicator(label: &Label, state: &Arc<Mutex<VideoEditState>>) {
+    let access = crate::studio_entitlement::studio_access(
+        crate::studio_entitlement::capabilities_for_video(&state.lock().unwrap()),
+    );
+    match crate::studio_trial::indicator_text(access) {
+        Some(text) => {
+            label.set_text(&text);
+            label.set_visible(true);
+        }
+        None => label.set_visible(false),
+    }
+}
+
 pub(super) fn update_estimate(label: &Label, state: &Arc<Mutex<VideoEditState>>, _trim_only: bool) {
     let state = state.lock().unwrap();
     let trim_only = !state.needs_reencode();
@@ -228,6 +254,10 @@ fn wire_upload_button(
         ) {
             return;
         }
+        let was_trial = crate::studio_entitlement::studio_access(
+            crate::studio_entitlement::capabilities_for_video(&state_snapshot),
+        )
+        .is_trial();
 
         let config = crate::config::load_config();
         if !crate::cloud::upload::is_configured(&config) {
@@ -247,8 +277,9 @@ fn wire_upload_button(
         // Export with current editor settings first, then upload the result.
         let cancellation_worker = export_cancellation.clone();
         let (sender, receiver) =
-            std::sync::mpsc::channel::<Result<String, crate::cloud::upload::UploadError>>();
+            std::sync::mpsc::channel::<(Result<String, crate::cloud::upload::UploadError>, bool)>();
         std::thread::spawn(move || {
+            let mut rendered = false;
             let result = (|| {
                 if cancellation_worker.load(Ordering::Acquire) {
                     return Err(crate::cloud::upload::UploadError::Server(
@@ -277,6 +308,7 @@ fn wire_upload_button(
                 let path = if let Some(path) = cached_path {
                     path
                 } else {
+                    rendered = true;
                     ffmpeg::export_edited_to_cancellable(
                         &state_snapshot,
                         state_snapshot.export_path(),
@@ -295,7 +327,7 @@ fn wire_upload_button(
                 }
                 crate::cloud::upload::upload_file(&config, &path).map(|result| result.share_url)
             })();
-            let _ = sender.send(result);
+            let _ = sender.send((result, rendered));
         });
 
         let controls = controls.clone();
@@ -305,7 +337,7 @@ fn wire_upload_button(
         let export_cancellation = export_cancellation.clone();
         glib::timeout_add_local(Duration::from_millis(100), move || {
             match receiver.try_recv() {
-                Ok(result) => {
+                Ok((result, rendered)) => {
                     exporting.set(false);
                     spinner.stop();
                     spinner.set_visible(false);
@@ -323,11 +355,21 @@ fn wire_upload_button(
                                         window.upcast_ref(),
                                         &share_url,
                                     );
-                                let body = if copied_now {
+                                let mut body = if copied_now {
                                     t("Share link copied to clipboard")
                                 } else {
                                     t("Switch back to the editor to copy the link")
                                 };
+                                // A fresh export inside this upload already
+                                // consumed one finished Studio output; a cached
+                                // export was consumed when it was first written.
+                                if rendered {
+                                    if let Some(text) =
+                                        crate::studio_trial::finished_feedback(was_trial)
+                                    {
+                                        body = format!("{body}\n\n{text}");
+                                    }
+                                }
                                 crate::utils::notify::desktop_notification(
                                     &t("Upload complete"),
                                     &body,

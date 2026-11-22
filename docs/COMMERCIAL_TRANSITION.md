@@ -41,6 +41,14 @@ use a Studio capability require an eligible entitlement. Missing official
 verification configuration blocks those outputs but does not affect free
 capture, editing, recording, project access, or clean exports.
 
+Each computer can make three free Studio outputs before activation. The count
+is stored locally beside the entitlement with private permissions, and only a
+finished output consumes one: cancelled or failed outputs never count, and a
+build with a covering licence never touches the counter. The editors show the
+remaining count beside Export, and the upgrade card appears only once the free
+outputs are used. The trial does not apply when a build cannot verify licences
+or read its storage, because activation could not end it there.
+
 The existing GPL grant cannot be withdrawn from copies already released. Before
 sales begin, review prior public statements about upcoming features; if a
 specific Studio capability was explicitly promised as free, provide an

@@ -2,7 +2,7 @@
 //!
 //! Everything here is authored at 100% scale, matching the onboarding sheet:
 //! the brand mark over a centred headline, a quiet fact card, and one action
-//! row whose quiet choice sits on the left.
+//! row whose secondary choice sits on the left.
 
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
@@ -193,7 +193,7 @@ pub(crate) fn page_body(page: &GtkBox, body: &GtkBox, actions: &GtkBox) {
     page.append(actions);
 }
 
-/// One action at each edge of the row: the quiet choice on the left, the
+/// One action at each edge of the row: the secondary choice on the left, the
 /// primary action on the right. A lone action sits in the middle.
 pub(crate) fn action_row(left: Option<&Button>, right: &Button) -> GtkBox {
     let actions = GtkBox::new(Orientation::Horizontal, 12);
@@ -286,6 +286,16 @@ pub(crate) fn primary_button(label: &str) -> Button {
 pub(crate) fn quiet_button(label: &str) -> Button {
     let button = Button::with_label(label);
     button.add_css_class("onboarding-text-button");
+    button.set_halign(Align::Center);
+    button
+}
+
+/// The secondary action's outlined treatment, matching the primary button's
+/// height and radius without competing with it.
+pub(crate) fn outlined_button(label: &str) -> Button {
+    let button = Button::with_label(label);
+    button.set_has_frame(false);
+    button.add_css_class("update-outline-button");
     button.set_halign(Align::Center);
     button
 }

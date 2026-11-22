@@ -22,38 +22,31 @@ pub struct Highlight {
 #[derive(Debug, PartialEq, Eq)]
 pub struct ReleaseNotes {
     pub version: &'static str,
+    /// The supporting line under the headline, when this release has one.
+    pub subtitle: Option<&'static str>,
     pub highlights: &'static [Highlight],
 }
 
 /// Every release with highlights, newest first.
+///
+/// Free improvements for a release go first in this list before shipping, so
+/// the window leads with what every copy gains.
 pub const RELEASES: &[ReleaseNotes] = &[ReleaseNotes {
     version: "0.3.1",
+    subtitle: None,
     highlights: &[
         Highlight {
-            title: "Studio turns on by itself",
-            body: "Choose Studio in ApexShot, sign in, and pay. The app activates on this computer with nothing to copy or import.",
+            title: "Try Studio free",
+            body: "Your next 3 Studio exports are on us. A label beside Export shows how many are left.",
             studio: true,
         },
         Highlight {
-            title: "Motion export",
-            body: "Animated titles and timing tools for polished product videos.",
-            studio: true,
-        },
-        Highlight {
-            title: "Advanced zoom camera",
-            body: "Instant zooms and fine camera controls on top of the free auto-zoom.",
-            studio: true,
-        },
-        Highlight {
-            title: "Neural upscaling",
-            body: "Sharpen small captures on export, fully offline.",
-            studio: true,
+            title: "Buying Studio takes one step",
+            body: "Choose Studio in ApexShot, sign in, and pay. The app turns Studio on by itself, with nothing to copy or import.",
+            studio: false,
         },
     ],
 }];
-
-/// The supporting line under the window's headline.
-pub const HEADER_COPY: &str = "Here's what this release adds.";
 
 /// The line under the highlight list, so the free tools stay visible.
 pub const FOOTER: &str = "Capture, annotation, recording, and the editors' core tools stay free.";
@@ -219,6 +212,15 @@ mod tests {
     fn the_newest_qualifying_entry_is_the_one_returned() {
         let notes = notes_to_show("0.3.1", Some("0.1.0")).expect("the release qualifies");
         assert_eq!(notes.version, RELEASES[0].version);
+    }
+
+    #[test]
+    fn the_current_release_leads_with_the_free_trial_and_has_no_subtitle() {
+        let notes = notes_for("0.3.1").expect("the current release");
+        assert_eq!(notes.subtitle, None);
+        assert_eq!(notes.highlights.len(), 2);
+        assert!(notes.highlights[0].studio);
+        assert!(!notes.highlights[1].studio);
     }
 
     #[test]

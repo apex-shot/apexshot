@@ -1386,6 +1386,8 @@ mod tests {
 
     #[test]
     fn a_styled_document_is_locked_and_a_clean_one_is_not() {
+        // These assertions are about the licence gate, not the free trial.
+        let _trial = crate::studio_trial::test_trial_used_up();
         let mut styled = studio_document();
         styled.frame_style = FrameStyle::InsetLight;
         let error = styled
@@ -1413,6 +1415,7 @@ mod tests {
 
     #[test]
     fn studio_gates_only_nonidentity_final_output() {
+        let _trial = crate::studio_trial::test_trial_used_up();
         let mut state = studio_document();
         state.static_image_transform.perspective = 0.4;
         assert!(state.to_final_image().is_ok());

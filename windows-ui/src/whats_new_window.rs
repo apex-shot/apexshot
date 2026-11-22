@@ -10,8 +10,8 @@ use gtk4::{Align, Application, ApplicationWindow, Box as GtkBox, Label, Orientat
 
 use crate::i18n::{t, tfmt};
 use crate::update::window::{
-    action_row, body, card, header, install_css, page, page_body, primary_button, px, quiet_button,
-    window_controls,
+    action_row, body, card, header_parts, install_css, outlined_button, page, page_body,
+    primary_button, px, window_controls,
 };
 use crate::whats_new::{self, Highlight, ReleaseNotes};
 
@@ -111,15 +111,19 @@ fn build_window(app: &Application, notes: &'static ReleaseNotes) {
 
     let page = page(scale);
     let reading = body();
-    reading.append(&header(
+    let subtitle = notes.subtitle.map(|text| t(text)).unwrap_or_default();
+    let (heading, subtitle_label) = header_parts(
         scale,
         dark,
         &tfmt(
             "What's new in ApexShot {version}",
             &[("version", notes.version)],
         ),
-        &t(whats_new::HEADER_COPY),
-    ));
+        &subtitle,
+    );
+    // Releases without a supporting line hide it instead of leaving a gap.
+    subtitle_label.set_visible(notes.subtitle.is_some());
+    reading.append(&heading);
 
     for highlight in notes.highlights {
         reading.append(&highlight_card(scale, highlight));
@@ -146,7 +150,7 @@ fn build_window(app: &Application, notes: &'static ReleaseNotes) {
     );
     let has_studio_highlight = notes.highlights.iter().any(|highlight| highlight.studio);
     let actions = if has_studio_highlight && !studio_active {
-        let see_studio = quiet_button(&t("See Studio"));
+        let see_studio = outlined_button(&t("Explore Studio"));
         see_studio.connect_clicked({
             let window = window.clone();
             move |_| {

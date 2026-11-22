@@ -35,6 +35,8 @@ pub(super) struct Inspector {
     pub copy_button: gtk4::Button,
     pub upload_button: gtk4::Button,
     pub export_button: gtk4::Button,
+    /// The free-Studio-exports line in the actions row.
+    pub trial_label: Label,
 }
 
 impl Inspector {
@@ -183,6 +185,13 @@ pub(super) fn build(
     }
     let copy_button = action_buttons[0].clone();
     let upload_button = action_buttons[1].clone();
+    let trial_label = Label::new(None);
+    trial_label.add_css_class("image-editor-hint");
+    trial_label.set_valign(gtk4::Align::Center);
+    trial_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    trial_label.set_max_width_chars(28);
+    trial_label.set_visible(false);
+    actions.append(&trial_label);
     let spacer = GtkBox::new(Orientation::Horizontal, 0);
     spacer.set_hexpand(true);
     actions.append(&spacer);
@@ -205,6 +214,7 @@ pub(super) fn build(
         copy_button,
         upload_button,
         export_button: export,
+        trial_label,
     }
 }
 

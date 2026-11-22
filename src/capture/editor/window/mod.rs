@@ -1243,6 +1243,7 @@ fn setup_editor_window_full(
     let upload_btn = footer_parts.upload_btn;
     let save_btn = footer_parts.save_btn;
     let save_spinner = footer_parts.save_spinner;
+    let studio_label = footer_parts.studio_label;
     copy_btn.add_css_class("editor-sidebar-action-button");
     upload_btn.add_css_class("editor-sidebar-action-button");
     if empty_drop_zone {
@@ -1314,6 +1315,19 @@ fn setup_editor_window_full(
     }));
     let last_inspector = motion_host.last_inspector();
     let in_motion = motion_host.in_motion();
+    // The Export row's free-trial line follows the current mode: Motion
+    // always needs Studio, Static only when its appearance does.
+    {
+        let state = state.clone();
+        let in_motion = in_motion.clone();
+        crate::studio_trial::attach_indicator(&studio_label, move || {
+            if in_motion.get() {
+                crate::studio_entitlement::capabilities_for_motion_export()
+            } else {
+                state.lock().unwrap().studio_capabilities()
+            }
+        });
+    }
 
     let tracked_window_id = next_tracked_window_id("annotate-editor");
     let window_title = "ApexShot Editor";
@@ -1624,6 +1638,7 @@ fn setup_editor_window_full(
         upload_btn: &upload_btn,
         save_btn: &save_btn,
         save_spinner: &save_spinner,
+        studio_label: &studio_label,
     });
 
     // Canvas fills the pane (checkerboard). Toolbar + drag strip float on top;

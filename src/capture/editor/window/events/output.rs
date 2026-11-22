@@ -81,6 +81,8 @@ pub(super) fn wire_output_lifecycle(
         }) {
             return;
         }
+        let trial_access = crate::studio_entitlement::studio_access(capabilities);
+        let was_trial = trial_access.is_trial();
 
         let config = crate::config::load_config().sanitized();
         let mode = crate::utils::clipboard::ScreenshotClipboardMode::from_config_value(
@@ -113,12 +115,24 @@ pub(super) fn wire_output_lifecycle(
                 }
                 result
             });
-            if let Err(error) = result {
-                eprintln!("Copy failed: {error}");
-                crate::utils::notify::desktop_notification_important(
-                    &crate::i18n::t("Copy failed"),
-                    &error,
-                );
+            match result {
+                Ok(()) => {
+                    // A finished copy is one Studio output; a failed one is not.
+                    crate::studio_entitlement::finish_trial_export(trial_access);
+                    if let Some(text) = crate::studio_trial::finished_feedback(was_trial) {
+                        crate::utils::notify::desktop_notification(
+                            &crate::i18n::t("Copied"),
+                            &text,
+                        );
+                    }
+                }
+                Err(error) => {
+                    eprintln!("Copy failed: {error}");
+                    crate::utils::notify::desktop_notification_important(
+                        &crate::i18n::t("Copy failed"),
+                        &error,
+                    );
+                }
             }
         });
     });
@@ -127,24 +141,36 @@ pub(super) fn wire_output_lifecycle(
     let state_upload = state.clone();
     // Worker completion returns to GTK's main loop so the !Send button can be re-enabled.
     let uploading = Rc::new(Cell::new(false));
-    let (upload_done_tx, upload_done_rx) =
-        std::sync::mpsc::channel::<Result<String, crate::cloud::upload::UploadError>>();
+    let (upload_done_tx, upload_done_rx) = std::sync::mpsc::channel::<(
+        Result<String, crate::cloud::upload::UploadError>,
+        crate::studio_entitlement::StudioAccess,
+    )>();
     let upload_btn_poll = upload_btn.clone();
     let uploading_poll = uploading.clone();
     let upload_lock_poll = editing_lock.clone();
     let window_upload = window.downgrade();
     glib::timeout_add_local(Duration::from_millis(50), move || {
         match upload_done_rx.try_recv() {
-            Ok(result) => {
+            Ok((result, trial_access)) => {
                 uploading_poll.set(false);
                 upload_lock_poll.release();
                 upload_btn_poll.set_sensitive(true);
                 match result {
                     Ok(share_url) => {
+                        // The upload finished, so its export is a finished
+                        // Studio output; a failed request never consumes one.
+                        let was_trial = trial_access.is_trial();
+                        crate::studio_entitlement::finish_trial_export(trial_access);
                         if let Err(error) =
                             crate::utils::clipboard::copy_text_to_gtk_clipboard(&share_url)
                         {
                             eprintln!("[editor] Failed to copy share link: {error}");
+                        }
+                        if let Some(text) = crate::studio_trial::finished_feedback(was_trial) {
+                            crate::utils::notify::desktop_notification(
+                                &crate::i18n::t("Upload complete"),
+                                &text,
+                            );
                         }
                     }
                     Err(crate::cloud::upload::UploadError::UpgradeRequired(message)) => {
@@ -205,6 +231,7 @@ pub(super) fn wire_output_lifecycle(
         }) {
             return;
         }
+        let trial_access = crate::studio_entitlement::studio_access(image_capabilities);
 
         let config = crate::config::load_config();
         if !crate::cloud::upload::is_configured(&config) {
@@ -279,7 +306,7 @@ pub(super) fn wire_output_lifecycle(
                     "Could not save edits: the upload worker stopped unexpectedly.".into(),
                 ))
             });
-            let _ = upload_done_tx.send(result);
+            let _ = upload_done_tx.send((result, trial_access));
         });
     });
 
@@ -388,6 +415,12 @@ pub(super) fn wire_output_lifecycle(
                     if export_busy_resp.get() {
                         return;
                     }
+                    // The MP4 render consumes its own trial output when it
+                    // succeeds; this only carries the count into the feedback.
+                    let was_trial = crate::studio_entitlement::studio_access(
+                        crate::studio_entitlement::capabilities_for_motion_export(),
+                    )
+                    .is_trial();
                     start_export_controls(
                         &export_busy_resp,
                         &export_spinner_resp,
@@ -416,9 +449,16 @@ pub(super) fn wire_output_lifecycle(
                                     &state_resp.lock().unwrap(),
                                 ) {
                                     Ok(()) => {
+                                        let body =
+                                            match crate::studio_trial::finished_feedback(was_trial) {
+                                                Some(text) => {
+                                                    format!("{}\n\n{text}", video_path.display())
+                                                }
+                                                None => video_path.display().to_string(),
+                                            };
                                         crate::utils::notify::desktop_notification(
                                             &crate::i18n::t("Export complete"),
-                                            &video_path.display().to_string(),
+                                            &body,
                                         );
                                         if close_after_export {
                                             if let Some(window) = window_resp.upgrade() {
@@ -437,12 +477,18 @@ pub(super) fn wire_output_lifecycle(
                                         }
                                     }
                                     Err(error) => {
+                                        let mut body = crate::i18n::tfmt(
+                                            "Export completed, but the editing session could not be saved: {error}",
+                                            &[("error", &error.to_string())],
+                                        );
+                                        if let Some(text) =
+                                            crate::studio_trial::finished_feedback(was_trial)
+                                        {
+                                            body = format!("{body}\n\n{text}");
+                                        }
                                         crate::utils::notify::desktop_notification_important(
                                             &crate::i18n::t("Export complete"),
-                                            &crate::i18n::tfmt(
-                                                "Export completed, but the editing session could not be saved: {error}",
-                                                &[("error", &error.to_string())],
-                                            ),
+                                            &body,
                                         );
                                         reset_export_controls(
                                             &export_busy_inner,
@@ -820,6 +866,10 @@ fn start_static_export(
         return;
     }
     start_export_controls(&busy, &spinner, &button, &lock);
+    // Captured before the render: only a written file consumes a free export.
+    let trial_access =
+        crate::studio_entitlement::studio_access(state.lock().unwrap().studio_capabilities());
+    let was_trial = trial_access.is_trial();
     let snapshot = state.lock().unwrap().export_snapshot();
     glib::MainContext::default().spawn_local(async move {
         let worker_destination = destination.clone();
@@ -839,9 +889,16 @@ fn start_static_export(
         });
         match result {
             Ok(()) => {
+                // The file is written: one finished Studio export leaves the
+                // free trial. A cancelled or failed run never reaches here.
+                crate::studio_entitlement::finish_trial_export(trial_access);
+                let body = match crate::studio_trial::finished_feedback(was_trial) {
+                    Some(text) => format!("{}\n\n{text}", destination.display()),
+                    None => destination.display().to_string(),
+                };
                 crate::utils::notify::desktop_notification(
                     &crate::i18n::t("Export complete"),
-                    &destination.display().to_string(),
+                    &body,
                 );
                 if !finish_image_export(&destination, close_after_export, &window, &app) {
                     reset_export_controls(&busy, &spinner, &button, &lock);
@@ -849,6 +906,11 @@ fn start_static_export(
             }
             Err(error) => {
                 let session_failure = matches!(&error, StaticExportError::Session(_));
+                if session_failure {
+                    // The image itself was written; only saving the editing
+                    // session failed, so this output still used its trial.
+                    crate::studio_entitlement::finish_trial_export(trial_access);
+                }
                 notify_static_export_error(error);
                 if session_failure {
                     let _ = finish_image_export(&destination, false, &window, &app);
@@ -1032,7 +1094,7 @@ mod tests {
         assert!(on_gtk_thread.contains("upload_btn_click.set_sensitive(false)"));
         assert!(worker.contains("catch_unwind"));
         assert!(worker.contains("state.to_final_image()"));
-        assert!(worker.contains("upload_done_tx.send(result)"));
+        assert!(worker.contains("upload_done_tx.send((result, trial_access))"));
     }
 
     #[test]

@@ -43,6 +43,8 @@ pub mod platform;
 pub mod recording;
 pub mod settings;
 pub mod studio_entitlement;
+#[path = "../../src/studio_trial.rs"]
+pub mod studio_trial;
 #[path = "../../src/studio_upsell.rs"]
 pub(crate) mod studio_upsell;
 #[cfg(test)]

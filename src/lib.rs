@@ -37,6 +37,7 @@ pub mod qr;
 pub mod recording;
 pub mod settings;
 pub(crate) mod studio_entitlement;
+pub(crate) mod studio_trial;
 pub(crate) mod studio_upsell;
 
 /// The CLI needs this machine's Studio Device ID, status line, and the entry

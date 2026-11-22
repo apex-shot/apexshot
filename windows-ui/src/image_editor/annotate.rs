@@ -3135,6 +3135,9 @@ impl EditorHost {
             return;
         }
         self.commit_text_if_active();
+        let trial = self
+            .with_state(|st| crate::studio_entitlement::studio_access(st.studio_capabilities()))
+            .is_some_and(|access| access.is_trial());
         let snapshot = self.with_state(|st| st.to_final_image().ok());
         let Some(snapshot) = snapshot.flatten() else {
             report_output_failure(
@@ -3144,22 +3147,22 @@ impl EditorHost {
             );
             return;
         };
-        self.write_snapshot_to_clipboard(snapshot);
+        self.write_snapshot_to_clipboard(snapshot, trial);
     }
 
     /// Clipboard an already rendered frame, the current Motion pose, through
     /// the same BMP and PNG provider the flattened document uses.
-    pub fn copy_frame_to_clipboard(&self, frame: image::RgbaImage) {
+    pub fn copy_frame_to_clipboard(&self, frame: image::RgbaImage, trial: bool) {
         if self.background_loading() {
             self.report_error(crate::i18n::t(
                 "Wait for the background image to finish loading.",
             ));
             return;
         }
-        self.write_snapshot_to_clipboard(frame);
+        self.write_snapshot_to_clipboard(frame, trial);
     }
 
-    fn write_snapshot_to_clipboard(&self, snapshot: image::RgbaImage) {
+    fn write_snapshot_to_clipboard(&self, snapshot: image::RgbaImage, trial: bool) {
         let report = self.on_error.clone();
         let (sender, receiver) = mpsc::channel::<Option<(Vec<u8>, Vec<u8>)>>();
         std::thread::spawn(move || {
@@ -3191,7 +3194,16 @@ impl EditorHost {
                     .is_some_and(|display| display.clipboard().set_content(Some(&provider)).is_ok())
             });
             if copied {
-                report(crate::i18n::t("Image copied to clipboard"));
+                // Only a copy that actually reached the clipboard consumes a
+                // free Studio export.
+                if trial {
+                    crate::studio_trial::record_trial_export();
+                }
+                let mut message = crate::i18n::t("Image copied to clipboard");
+                if let Some(text) = crate::studio_trial::finished_feedback(trial) {
+                    message = format!("{message}\n{text}");
+                }
+                report(message);
             } else {
                 report_output_failure(
                     &*report,
@@ -3237,6 +3249,10 @@ impl EditorHost {
             return;
         }
         self.commit_text_if_active();
+        // Captured before the render: only a saved image consumes a free export.
+        let trial = self
+            .read(|st| crate::studio_entitlement::studio_access(st.studio_capabilities()))
+            .is_some_and(|access| access.is_trial());
         let snapshot = self.with_state(|st| st.to_final_image().ok());
         let Some(snapshot) = snapshot.flatten() else {
             report_output_failure(
@@ -3248,7 +3264,7 @@ impl EditorHost {
             return;
         };
         let session = self.read(EditableSession::capture);
-        self.save_snapshot(path, snapshot, session, on_done);
+        self.save_snapshot(path, snapshot, session, trial, on_done);
         let _ = parent;
     }
 
@@ -3257,6 +3273,7 @@ impl EditorHost {
         path: &std::path::Path,
         snapshot: image::RgbaImage,
         session: Option<EditableSession>,
+        trial: bool,
         on_done: Box<dyn Fn(bool)>,
     ) {
         let path = path.to_path_buf();
@@ -3277,9 +3294,18 @@ impl EditorHost {
         glib::timeout_add_local(Duration::from_millis(50), move || {
             match receiver.try_recv() {
                 Ok(Ok(())) => {
+                    let mut body = reported_path.display().to_string();
+                    if trial {
+                        // The file is written: one finished Studio export
+                        // leaves the free trial.
+                        crate::studio_trial::record_trial_export();
+                        if let Some(text) = crate::studio_trial::finished_feedback(true) {
+                            body = format!("{body}\n\n{text}");
+                        }
+                    }
                     crate::utils::notify::desktop_notification(
                         &crate::i18n::t("Export complete"),
-                        &reported_path.display().to_string(),
+                        &body,
                     );
                     on_done(true);
                     glib::ControlFlow::Break
