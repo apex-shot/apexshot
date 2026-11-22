@@ -93,20 +93,36 @@ redistributing the source.
 
 ## Local activation and recovery
 
-Open **Settings → Studio**, paste the signed entitlement, and select **Activate**.
-The token is verified locally and stored at
+The **Purchase or recover Studio** link opens the official Studio page with
+this machine's Device ID already in the URL:
+`https://apexshot.org/studio?device=<device_id>&from=app&platform=<linux|windows>`.
+The page binds the purchase to that ID, so the customer no longer copies and
+pastes a Device ID by hand. If the app cannot read a Device ID, the link falls
+back to plain `https://apexshot.org/studio`.
+
+After a purchase or recovery, the website opens
+`apexshot://studio/activate?token=<unpadded base64url envelope>`. Both desktop
+packages register the `apexshot` URL scheme: the Linux desktop entry declares
+an `x-scheme-handler`, and the Windows installer registers it under the
+per-user `Software\Classes` key. The app receives the link, decodes the token,
+and verifies it offline exactly as if it had been pasted, including the
+signature, the schema 2 device binding, and the token size limit. A link from
+any other website therefore cannot install a licence that this build accepts.
+
+Manual activation stays available as the fallback. Open **Settings → Studio**,
+paste the signed entitlement, and select **Activate**. In both paths the token
+is verified locally and stored at
 `${XDG_CONFIG_HOME:-~/.config}/apexshot/studio/entitlement.json` with private
 directory/file permissions and atomic replacement. A malformed or invalid
 replacement does not overwrite a previously valid token. The app reloads and
 verifies the token from disk when checking access, so activation survives
 restart and works offline.
 
-Use the **Purchase or recover Studio** link to open `https://apexshot.org/studio`
-in a browser. The desktop does not call a purchase, account, or recovery API;
-the person providing the token must verify purchase ownership before issuing
-one. The desktop repository contains no production signing key or issuance
-service, so official sales and automated recovery are not ready until those
-separate operations are configured.
+The desktop does not call a purchase, account, or recovery API; the person
+providing the token must verify purchase ownership before issuing one. The
+desktop repository contains no production signing key or issuance service, so
+official sales and automated recovery are not ready until those separate
+operations are configured.
 
 When an export, copy, or upload would use a Studio capability without an
 eligible token, the editor raises an in-window card instead of a desktop

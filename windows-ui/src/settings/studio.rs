@@ -13,8 +13,6 @@ use gtk4::{glib, Align, Box as GtkBox, Button, Entry, Label, Orientation, Reveal
 use std::cell::Cell;
 use std::rc::Rc;
 
-const STUDIO_URL: &str = "https://apexshot.org/studio";
-
 pub fn build_studio_section() -> GtkBox {
     install_css();
     let root = GtkBox::new(Orientation::Vertical, 0);
@@ -171,7 +169,9 @@ fn status_row(status: StudioStatus, flash: Option<String>) -> GtkBox {
     }
     action.connect_clicked(|_| {
         std::thread::spawn(|| {
-            if let Err(error) = crate::utils::open::open_url(STUDIO_URL) {
+            if let Err(error) =
+                crate::utils::open::open_url(&crate::studio_entitlement::studio_page_url())
+            {
                 eprintln!("[studio] Could not open the Studio page: {error}");
             }
         });
