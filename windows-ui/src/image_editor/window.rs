@@ -523,8 +523,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
             let toolbar = toolbar_stack
                 .visible_child()
                 .unwrap_or_else(|| toolbar_stack.clone().upcast::<gtk4::Widget>());
-            let origin =
-                toolbar.compute_point(&overlay, &gtk4::graphene::Point::new(0.0, 0.0))?;
+            let origin = toolbar.compute_point(&overlay, &gtk4::graphene::Point::new(0.0, 0.0))?;
             let toolbar_width = f64::from(toolbar.width());
             if toolbar_width <= 0.0 {
                 return None;
