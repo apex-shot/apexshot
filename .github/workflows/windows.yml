@@ -61,19 +61,20 @@ jobs:
       # GTK4 for the crate's gtk4/pango/gdk bindings, plus pkg-config and the
       # GNU linker the GNU Rust toolchain below drives. The MinGW packages are
       # the supported way to get GTK4 headers and DLLs onto a Windows runner
-      # without building GTK from source.
+      # without building GTK from source. MSYS2 retired the MINGW64 package
+      # set, so this uses UCRT64, its supported GCC environment.
       - name: Install GTK4
         uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW64
+          msystem: UCRT64
           update: false
           # The job installs its own toolchain into ~/.cargo/bin, which the
           # MSYS2 shell does not see under its default strict PATH.
           path-type: inherit
           install: >-
-            mingw-w64-x86_64-gtk4
-            mingw-w64-x86_64-pkgconf
-            mingw-w64-x86_64-gcc
+            mingw-w64-ucrt-x86_64-gtk4
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-gcc
 
       # The MSVC toolchain cannot link against the MinGW GTK import libraries,
       # so the crate is built for the GNU target that matches them.
@@ -89,10 +90,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: windows-ui -> target
-          shared-key: windows-ui
+          shared-key: windows-ui-ucrt64
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      # Run inside the MSYS2 shell so pkg-config finds the MinGW GTK4 .pc files
+      # Run inside the MSYS2 shell so pkg-config finds the UCRT64 GTK4 .pc files
       # and the test binaries find the GTK DLLs at run time.
       - name: Format, lint, and test
         shell: msys2 {0}
