@@ -48,8 +48,8 @@ appropriate transition entitlement rather than silently changing that promise.
 This repository change does not inspect or revise the separate website or
 payment service.
 
-The proposed refund window is 14 days on the first Studio purchase. Publish it
-only with consistent checkout terms. An offline entitlement has no live
+The refund window is 14 days on the first Studio purchase, published on the
+website's refund page and in the checkout terms. An offline entitlement has no live
 revocation channel: a refund cannot immediately disable a token already stored
 on a disconnected device, and a covered build remains usable. Do not promise
 instant revocation.
