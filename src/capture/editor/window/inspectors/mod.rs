@@ -75,7 +75,6 @@ pub(super) struct InspectorContentInputs<'a> {
     pub upload_btn: &'a Button,
     pub save_btn: &'a Button,
     pub save_spinner: &'a Spinner,
-    pub studio_label: &'a Label,
 }
 
 pub(super) fn build_tool_inspectors(input: InspectorContentInputs<'_>) -> InspectorParts {
@@ -234,7 +233,6 @@ pub(super) fn build_tool_inspectors(input: InspectorContentInputs<'_>) -> Inspec
     sidebar_action_spacer.set_hexpand(true);
     sidebar_actions.append(input.copy_btn);
     sidebar_actions.append(input.upload_btn);
-    sidebar_actions.append(input.studio_label);
     sidebar_actions.append(&sidebar_action_spacer);
     sidebar_actions.append(input.save_spinner);
     sidebar_actions.append(input.save_btn);

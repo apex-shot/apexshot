@@ -912,6 +912,7 @@ fn setup_editor_window_full(
 
     let toolbar::ToolbarRightParts {
         root: sidebar_utility_controls,
+        studio_slot,
         history_group,
         undo_btn,
         redo_btn,
@@ -1244,6 +1245,7 @@ fn setup_editor_window_full(
     let save_btn = footer_parts.save_btn;
     let save_spinner = footer_parts.save_spinner;
     let studio_label = footer_parts.studio_label;
+    studio_slot.append(&studio_label);
     copy_btn.add_css_class("editor-sidebar-action-button");
     upload_btn.add_css_class("editor-sidebar-action-button");
     if empty_drop_zone {
@@ -1638,7 +1640,6 @@ fn setup_editor_window_full(
         upload_btn: &upload_btn,
         save_btn: &save_btn,
         save_spinner: &save_spinner,
-        studio_label: &studio_label,
     });
 
     // Canvas fills the pane (checkerboard). Toolbar + drag strip float on top;

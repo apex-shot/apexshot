@@ -18,8 +18,8 @@ pub(super) struct FooterParts {
     pub upload_btn: Button,
     pub save_btn: Button,
     pub save_spinner: Spinner,
-    /// The free-Studio-exports line beside Export, hidden when it does not
-    /// apply.
+    /// The free-Studio-exports line, shown in the top bar beside the window
+    /// buttons and hidden when it does not apply.
     pub studio_label: Label,
 }
 
@@ -129,7 +129,7 @@ pub(super) fn build_footer(copy_icon_name: &str, upload_icon_name: &str) -> Foot
     studio_label.set_valign(gtk4::Align::Center);
     studio_label.set_xalign(0.0);
     studio_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-    studio_label.set_max_width_chars(28);
+    studio_label.set_max_width_chars(26);
     studio_label.set_tooltip_text(Some(&t("Studio exports left on the free trial")));
     studio_label.set_visible(false);
 
