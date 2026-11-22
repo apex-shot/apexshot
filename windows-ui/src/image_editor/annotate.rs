@@ -10,7 +10,7 @@ use gtk4::cairo::ImageSurface;
 use gtk4::gdk;
 use gtk4::glib::{self, Propagation};
 use gtk4::prelude::*;
-use gtk4::DrawingArea;
+use gtk4::{DrawingArea, Overlay};
 use image::RgbaImage;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -251,6 +251,9 @@ pub struct EditorHost {
     /// Bumped by every session write; an autosave that a newer write has
     /// overtaken never runs, and the close path waits out one in progress.
     session_writes: Arc<std::sync::Mutex<u64>>,
+    /// Where the Studio trial card hangs: the canvas overlay plus the band
+    /// under the floating tool bar (see `studio_trial_toast::Anchor`).
+    trial_toast_anchor: RefCell<Option<crate::studio_trial_toast::Anchor>>,
 }
 
 impl EditorHost {
@@ -297,7 +300,24 @@ impl EditorHost {
             text_input_focused: Cell::new(false),
             last_persisted: RefCell::new(None),
             session_writes: Arc::new(std::sync::Mutex::new(0)),
+            trial_toast_anchor: RefCell::new(None),
         })
+    }
+
+    /// Point the Studio trial card at the canvas overlay and the band under
+    /// the floating tool bar (and any docked tool bar). Until this is called
+    /// the card keeps the window's bottom-centre spot.
+    pub(super) fn set_trial_toast_anchor(
+        &self,
+        overlay: Overlay,
+        anchor: Rc<dyn Fn() -> Option<(f64, f64)>>,
+    ) {
+        *self.trial_toast_anchor.borrow_mut() =
+            Some(crate::studio_trial_toast::Anchor::new(overlay, anchor));
+    }
+
+    pub(super) fn trial_toast_anchor(&self) -> Option<crate::studio_trial_toast::Anchor> {
+        self.trial_toast_anchor.borrow().clone()
     }
 
     pub fn has_document(&self) -> bool {
@@ -3127,7 +3147,7 @@ impl EditorHost {
     /// Clipboard the flattened document as a PNG texture. The flatten runs
     /// on a worker so a pending effect pass never leaks an unredacted frame;
     /// the texture lands back on the main loop.
-    pub fn copy_to_clipboard(&self) {
+    pub fn copy_to_clipboard(&self, window: &impl IsA<gtk4::Window>) {
         if self.background_loading() {
             self.report_error(crate::i18n::t(
                 "Wait for the background image to finish loading.",
@@ -3147,23 +3167,35 @@ impl EditorHost {
             );
             return;
         };
-        self.write_snapshot_to_clipboard(snapshot, trial);
+        self.write_snapshot_to_clipboard(snapshot, trial, window);
     }
 
     /// Clipboard an already rendered frame, the current Motion pose, through
     /// the same BMP and PNG provider the flattened document uses.
-    pub fn copy_frame_to_clipboard(&self, frame: image::RgbaImage, trial: bool) {
+    pub fn copy_frame_to_clipboard(
+        &self,
+        window: &impl IsA<gtk4::Window>,
+        frame: image::RgbaImage,
+        trial: bool,
+    ) {
         if self.background_loading() {
             self.report_error(crate::i18n::t(
                 "Wait for the background image to finish loading.",
             ));
             return;
         }
-        self.write_snapshot_to_clipboard(frame, trial);
+        self.write_snapshot_to_clipboard(frame, trial, window);
     }
 
-    fn write_snapshot_to_clipboard(&self, snapshot: image::RgbaImage, trial: bool) {
+    fn write_snapshot_to_clipboard(
+        &self,
+        snapshot: image::RgbaImage,
+        trial: bool,
+        window: &impl IsA<gtk4::Window>,
+    ) {
         let report = self.on_error.clone();
+        let toast_window = gtk4::Window::clone(window.upcast_ref::<gtk4::Window>());
+        let toast_anchor = self.trial_toast_anchor();
         let (sender, receiver) = mpsc::channel::<Option<(Vec<u8>, Vec<u8>)>>();
         std::thread::spawn(move || {
             let bmp = crate::capture::editor::io_ops::bmp_bytes(&snapshot).ok();
@@ -3199,9 +3231,19 @@ impl EditorHost {
                 if trial {
                     crate::studio_trial::record_trial_export();
                 }
+                // The floating toast carries the trial count, so the canvas
+                // message only repeats it when no card could be raised.
+                let shown = trial
+                    && crate::studio_trial_toast::show_for(
+                        &toast_window,
+                        toast_anchor.as_ref(),
+                        crate::studio_trial::trial_remaining(),
+                    );
                 let mut message = crate::i18n::t("Image copied to clipboard");
-                if let Some(text) = crate::studio_trial::finished_feedback(trial) {
-                    message = format!("{message}\n{text}");
+                if !shown {
+                    if let Some(text) = crate::studio_trial::finished_feedback(trial) {
+                        message = format!("{message}\n{text}");
+                    }
                 }
                 report(message);
             } else {
@@ -3264,8 +3306,7 @@ impl EditorHost {
             return;
         };
         let session = self.read(EditableSession::capture);
-        self.save_snapshot(path, snapshot, session, trial, on_done);
-        let _ = parent;
+        self.save_snapshot(path, snapshot, session, trial, parent, on_done);
     }
 
     fn save_snapshot(
@@ -3274,10 +3315,13 @@ impl EditorHost {
         snapshot: image::RgbaImage,
         session: Option<EditableSession>,
         trial: bool,
+        window: &impl IsA<gtk4::Window>,
         on_done: Box<dyn Fn(bool)>,
     ) {
         let path = path.to_path_buf();
         let report = self.on_error.clone();
+        let toast_window = gtk4::Window::clone(window.upcast_ref::<gtk4::Window>());
+        let toast_anchor = self.trial_toast_anchor();
         let reported_path = path.clone();
         let (sender, receiver) =
             mpsc::channel::<Result<(), crate::capture::editor::types::EditorError>>();
@@ -3299,7 +3343,17 @@ impl EditorHost {
                         // The file is written: one finished Studio export
                         // leaves the free trial.
                         crate::studio_trial::record_trial_export();
-                        if let Some(text) = crate::studio_trial::finished_feedback(true) {
+                    }
+                    // The floating toast carries the trial count; the
+                    // notification keeps it only when no card could be raised.
+                    let shown = trial
+                        && crate::studio_trial_toast::show_for(
+                            &toast_window,
+                            toast_anchor.as_ref(),
+                            crate::studio_trial::trial_remaining(),
+                        );
+                    if !shown {
+                        if let Some(text) = crate::studio_trial::finished_feedback(trial) {
                             body = format!("{body}\n\n{text}");
                         }
                     }
@@ -5556,7 +5610,8 @@ mod tests {
             Rc::new(|| (0.0, 0.0)),
         );
         h.load_document_headless(test_image(64, 64));
-        h.copy_to_clipboard();
+        let window = gtk4::Window::new();
+        h.copy_to_clipboard(&window);
 
         let main_loop = glib::MainLoop::new(None, false);
         let quit = main_loop.clone();

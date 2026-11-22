@@ -188,32 +188,6 @@ pub(super) fn build_export_action(
     (button, spinner)
 }
 
-/// The line beside Export showing the free Studio trial, hidden when the
-/// document needs no Studio output or a licence already covers it.
-pub(super) fn build_trial_indicator() -> Label {
-    let label = Label::new(None);
-    label.add_css_class("recording-editor-estimate");
-    label.set_valign(gtk4::Align::Center);
-    label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-    label.set_max_width_chars(28);
-    label.set_visible(false);
-    label
-}
-
-/// Refresh the trial line after an edit, an activation, or a finished export.
-pub(super) fn refresh_trial_indicator(label: &Label, state: &Arc<Mutex<VideoEditState>>) {
-    let access = crate::studio_entitlement::studio_access(
-        crate::studio_entitlement::capabilities_for_video(&state.lock().unwrap()),
-    );
-    match crate::studio_trial::indicator_text(access) {
-        Some(text) => {
-            label.set_text(&text);
-            label.set_visible(true);
-        }
-        None => label.set_visible(false),
-    }
-}
-
 pub(super) fn update_estimate(label: &Label, state: &Arc<Mutex<VideoEditState>>, _trim_only: bool) {
     let state = state.lock().unwrap();
     let trim_only = !state.needs_reencode();
@@ -363,11 +337,21 @@ fn wire_upload_button(
                                 // A fresh export inside this upload already
                                 // consumed one finished Studio output; a cached
                                 // export was consumed when it was first written.
+                                // The floating toast carries the trial count,
+                                // so the notification only keeps it as a
+                                // fallback when no overlay could host the card.
                                 if rendered {
-                                    if let Some(text) =
-                                        crate::studio_trial::finished_feedback(was_trial)
-                                    {
-                                        body = format!("{body}\n\n{text}");
+                                    let shown = was_trial
+                                        && crate::studio_trial_toast::show(
+                                            &window,
+                                            crate::studio_trial::trial_remaining(),
+                                        );
+                                    if !shown {
+                                        if let Some(text) =
+                                            crate::studio_trial::finished_feedback(was_trial)
+                                        {
+                                            body = format!("{body}\n\n{text}");
+                                        }
                                     }
                                 }
                                 crate::utils::notify::desktop_notification(

@@ -5304,3 +5304,27 @@ msgstr "Это был ваш последний бесплатный экспо�
 
 msgid "You've used your 3 free Studio exports"
 msgstr "Вы использовали 3 бесплатных экспорта Studio"
+
+msgid "Uses Studio · 1 free export left"
+msgstr "Использует Studio · остался 1 бесплатный экспорт"
+
+msgid "Uses Studio · {count} free exports left"
+msgstr "Использует Studio · осталось {count} бесплатных экспортов"
+
+msgid "Exported with Studio."
+msgstr "Экспортировано с Studio."
+
+msgid "1 free Studio export left."
+msgstr "Остался 1 бесплатный экспорт Studio."
+
+msgid "{count} free Studio exports left."
+msgstr "Осталось {count} бесплатных экспортов Studio."
+
+msgid "That was your last free Studio export."
+msgstr "Это был ваш последний бесплатный экспорт Studio."
+
+msgid "Get Studio to keep these styles."
+msgstr "Получите Studio, чтобы сохранить эти стили."
+
+msgid "Get Studio"
+msgstr "Получить Studio"

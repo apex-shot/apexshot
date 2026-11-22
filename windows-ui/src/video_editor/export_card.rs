@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 /// cannot be started until this card is dismissed.
 pub(super) fn show(
     shell: &Overlay,
+    window: &gtk4::ApplicationWindow,
     model: ExportModel,
     output: PathBuf,
     settings: ExportSettings,
@@ -162,9 +163,11 @@ pub(super) fn show(
     let started = Instant::now();
     let mut eta = Eta::default();
     let mut fraction = 0.0_f64;
+    let toast_window = window.downgrade();
     glib::timeout_add_local(Duration::from_millis(100), {
         let shell = shell.downgrade();
         let screen = screen.downgrade();
+        let toast_window = toast_window.clone();
         move || {
             let (Some(shell), Some(screen)) = (shell.upgrade(), screen.upgrade()) else {
                 crate::update::open_windows::set_busy(false);
@@ -222,7 +225,20 @@ pub(super) fn show(
                 Ok(ExportUpdate::Finished(path, sound)) => {
                     crate::update::open_windows::set_busy(false);
                     title.set_text(&t("Exported successfully"));
-                    let feedback = crate::studio_trial::finished_feedback(was_trial);
+                    // The renderer consumed the trial; the floating toast now
+                    // carries the count on screen.
+                    let shown = was_trial
+                        && toast_window.upgrade().is_some_and(|window| {
+                            crate::studio_trial_toast::show(
+                                &window,
+                                crate::studio_trial::trial_remaining(),
+                            )
+                        });
+                    let feedback = if shown {
+                        None
+                    } else {
+                        crate::studio_trial::finished_feedback(was_trial)
+                    };
                     let notification = match &feedback {
                         Some(text) => format!("{}\n\n{text}", path.display()),
                         None => path.display().to_string(),

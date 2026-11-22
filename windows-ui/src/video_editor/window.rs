@@ -73,7 +73,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     }
 
     let document_title = Rc::new(RefCell::new(document_title(initial)));
-    let (title_bar, export_button, presets_button, trial_indicator) =
+    let (title_bar, export_button, presets_button) =
         build_title_bar(&window, document_title.clone(), scale);
 
     let workspace = GtkBox::new(Orientation::Horizontal, 0);
@@ -109,13 +109,14 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     // project file and restores it on load, through this one shared cell.
     timeline.set_quality_handle(stage.quality.clone());
     super::presets_popover::attach(&stage.presets_button, &timeline, scale);
-    // The free-trial line follows the document as zooms, captions and the
-    // camera change; the export model already answers which Studio features
-    // are in use.
+    // The Export tooltip carries the free-trial count and follows the
+    // document as zooms, captions and the camera change; the export model
+    // already answers which Studio features are in use.
     {
         let stage = stage.clone();
+        let tooltip_button = stage.export_button.clone();
         let timeline = timeline.clone();
-        crate::studio_trial::attach_indicator(&trial_indicator, move || {
+        crate::studio_trial::attach_export_tooltip(&tooltip_button, move || {
             studio_model(&stage, &timeline)
                 .map(|model| {
                     super::studio::capabilities_at(&model, timeline.composition_duration())
@@ -397,7 +398,7 @@ fn build_title_bar(
     window: &ApplicationWindow,
     document_title: Rc<RefCell<String>>,
     scale: f64,
-) -> (GtkBox, Button, Button, Label) {
+) -> (GtkBox, Button, Button) {
     let bar = GtkBox::new(Orientation::Horizontal, 0);
     bar.add_css_class("settings-window-controls");
     bar.add_css_class("video-editor-titlebar");
@@ -490,18 +491,10 @@ fn build_title_bar(
     export_button.set_margin_end((8.0 * scale).round() as i32);
 
     let presets_button = super::presets_popover::title_button(scale);
-    let trial_indicator = Label::new(None);
-    trial_indicator.add_css_class("recording-editor-estimate");
-    trial_indicator.set_valign(Align::Center);
-    trial_indicator.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-    trial_indicator.set_max_width_chars(28);
-    trial_indicator.set_visible(false);
-    trial_indicator.set_margin_end((6.0 * scale).round() as i32);
     let actions = GtkBox::new(Orientation::Horizontal, 0);
     actions.set_halign(Align::End);
     actions.set_valign(Align::Fill);
     actions.append(&presets_button);
-    actions.append(&trial_indicator);
     actions.append(&export_button);
     actions.append(&minimize);
     actions.append(&maximize);
@@ -524,7 +517,7 @@ fn build_title_bar(
     // spacers have no handlers of their own, while every button claims its
     // own press before the bar sees it.
     windowing::install_window_drag(&bar, window);
-    (bar, export_button, presets_button, trial_indicator)
+    (bar, export_button, presets_button)
 }
 
 fn set_title_bar_text(bar: &GtkBox, title: &str) {
@@ -2670,6 +2663,7 @@ fn start_gated_video_export(
     ) {
         super::export_card::show(
             shell,
+            window,
             model,
             request.output,
             request.settings,

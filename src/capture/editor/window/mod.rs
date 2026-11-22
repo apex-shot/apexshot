@@ -912,7 +912,6 @@ fn setup_editor_window_full(
 
     let toolbar::ToolbarRightParts {
         root: sidebar_utility_controls,
-        studio_slot,
         history_group,
         undo_btn,
         redo_btn,
@@ -1244,8 +1243,6 @@ fn setup_editor_window_full(
     let upload_btn = footer_parts.upload_btn;
     let save_btn = footer_parts.save_btn;
     let save_spinner = footer_parts.save_spinner;
-    let studio_label = footer_parts.studio_label;
-    studio_slot.append(&studio_label);
     copy_btn.add_css_class("editor-sidebar-action-button");
     upload_btn.add_css_class("editor-sidebar-action-button");
     if empty_drop_zone {
@@ -1317,12 +1314,13 @@ fn setup_editor_window_full(
     }));
     let last_inspector = motion_host.last_inspector();
     let in_motion = motion_host.in_motion();
-    // The Export row's free-trial line follows the current mode: Motion
-    // always needs Studio, Static only when its appearance does.
+    // The Export tooltip carries the free-trial count, so it follows the
+    // current mode: Motion always needs Studio, Static only when its
+    // appearance does.
     {
         let state = state.clone();
         let in_motion = in_motion.clone();
-        crate::studio_trial::attach_indicator(&studio_label, move || {
+        crate::studio_trial::attach_export_tooltip(&save_btn, move || {
             if in_motion.get() {
                 crate::studio_entitlement::capabilities_for_motion_export()
             } else {
@@ -1928,6 +1926,70 @@ fn setup_editor_window_full(
         &dock_refs,
         &docked_inset,
     );
+
+    // The Studio trial card hangs just below the floating toolbar, and below a
+    // docked tool bar when one is up, centred on the toolbar. Both live in
+    // overlays above the canvas, so the anchor reports the toolbar's centre and
+    // the free band's top in `canvas_overlay` coordinates; the card rides that
+    // same overlay and only ever moves its own margins.
+    let trial_toast_anchor = Some(crate::studio_trial_toast::Anchor::new(
+        canvas_overlay.clone(),
+        {
+            let overlay = canvas_overlay.clone();
+            let main_toolbar = toolbar.clone();
+            let motion_toolbar = motion_host.parts.shell.static_toolbar.clone();
+            let anchor_dock_refs = floating_bar::DockRefs {
+                scroller: canvas_scroller.clone(),
+                drawing_area: drawing_area.clone(),
+            };
+            // Only the bars that dock in the chrome band belong here: the
+            // obfuscate/focus slider bars follow their rect and must not push
+            // the card down.
+            let docked_bars = vec![
+                crop_control_bar.clone(),
+                text_bar.root.clone(),
+                number_bar.root.clone(),
+                highlighter_bar.root.clone(),
+                arrow_bar.root.clone(),
+                stroke_bar.root.clone(),
+                obfuscate_bar.method_bar.clone(),
+                focus_bar.label_bar.clone(),
+            ];
+            Rc::new(move || {
+                // Motion swaps the toolbar, so anchor to whichever page is up.
+                let toolbar = if main_toolbar.is_mapped() {
+                    &main_toolbar
+                } else if motion_toolbar.is_mapped() {
+                    &motion_toolbar
+                } else {
+                    return None;
+                };
+                let origin =
+                    toolbar.compute_point(&overlay, &gtk4::graphene::Point::new(0.0, 0.0))?;
+                let toolbar_width = f64::from(toolbar.width());
+                if toolbar_width <= 0.0 {
+                    return None;
+                }
+                let center_x = f64::from(origin.x()) + toolbar_width / 2.0;
+                let mut top_y = f64::from(origin.y()) + f64::from(toolbar.height());
+                // `dock_position` is where an actively docked bar sits this
+                // frame; a bar following its element would not match it.
+                let (_, docked_top) = floating_bar::dock_position(&anchor_dock_refs, 1.0);
+                for bar in &docked_bars {
+                    if !floating_bar::bar_is_shown(bar) {
+                        continue;
+                    }
+                    let bar_top = f64::from(bar.margin_top());
+                    if (bar_top - docked_top).abs() > 4.0 {
+                        continue;
+                    }
+                    let bar_bottom = bar_top + f64::from(bar.height());
+                    top_y = top_y.max(bar_bottom);
+                }
+                Some((center_x, top_y + floating_bar::DOCK_PAD))
+            })
+        },
+    ));
 
     color_status.set_tooltip_text(Some(&t("Colors")));
     color_status.set_cursor_from_name(Some("pointer"));
@@ -2973,6 +3035,7 @@ fn setup_editor_window_full(
         traffic_minimize: traffic_minimize.clone(),
         traffic_zoom: traffic_zoom.clone(),
         canvas_overlay: canvas_overlay.clone(),
+        trial_toast_anchor: trial_toast_anchor.clone(),
         canvas_scroller: canvas_scroller.clone(),
         zoom_button: zoom_button.clone(),
         zoom_label: zoom_label.clone(),

@@ -39,6 +39,7 @@ pub fn persist_image_session(path: &Path, state: &EditorState) -> Result<(), Ann
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn wire_output_lifecycle(
     app: &Application,
     window: &ApplicationWindow,
@@ -50,6 +51,7 @@ pub(super) fn wire_output_lifecycle(
     save_spinner: &Spinner,
     traffic_close: &Button,
     in_motion: Rc<Cell<bool>>,
+    trial_toast_anchor: Option<crate::studio_trial_toast::Anchor>,
     export_motion: super::super::motion_host::MotionExport,
     studio_mark: super::super::studio_mark::StudioMark,
 ) {
@@ -60,6 +62,7 @@ pub(super) fn wire_output_lifecycle(
     let copying = Rc::new(Cell::new(false));
     let copy_btn_click = copy_btn.clone();
     let studio_mark_copy = studio_mark.clone();
+    let toast_anchor_copy = trial_toast_anchor.clone();
     copy_btn.connect_clicked(move |_| {
         if copying.get() {
             return;
@@ -96,6 +99,8 @@ pub(super) fn wire_output_lifecycle(
         copy_btn_click.set_sensitive(false);
         let copying_done = copying.clone();
         let copy_btn_done = copy_btn_click.clone();
+        let toast_window = window.downgrade();
+        let toast_anchor = toast_anchor_copy.clone();
         glib::MainContext::default().spawn_local(async move {
             let rendered =
                 gio::spawn_blocking(move || save_clipboard_image(&directory, &snapshot()))
@@ -119,11 +124,23 @@ pub(super) fn wire_output_lifecycle(
                 Ok(()) => {
                     // A finished copy is one Studio output; a failed one is not.
                     crate::studio_entitlement::finish_trial_export(trial_access);
-                    if let Some(text) = crate::studio_trial::finished_feedback(was_trial) {
-                        crate::utils::notify::desktop_notification(
-                            &crate::i18n::t("Copied"),
-                            &text,
-                        );
+                    // The floating toast now carries the trial count, so the
+                    // notification below is only the overlay-less fallback.
+                    let shown = was_trial
+                        && toast_window.upgrade().is_some_and(|window| {
+                            crate::studio_trial_toast::show_for(
+                                &window,
+                                toast_anchor.as_ref(),
+                                crate::studio_trial::trial_remaining(),
+                            )
+                        });
+                    if !shown {
+                        if let Some(text) = crate::studio_trial::finished_feedback(was_trial) {
+                            crate::utils::notify::desktop_notification(
+                                &crate::i18n::t("Copied"),
+                                &text,
+                            );
+                        }
                     }
                 }
                 Err(error) => {
@@ -149,6 +166,7 @@ pub(super) fn wire_output_lifecycle(
     let uploading_poll = uploading.clone();
     let upload_lock_poll = editing_lock.clone();
     let window_upload = window.downgrade();
+    let toast_anchor_upload = trial_toast_anchor.clone();
     glib::timeout_add_local(Duration::from_millis(50), move || {
         match upload_done_rx.try_recv() {
             Ok((result, trial_access)) => {
@@ -166,11 +184,24 @@ pub(super) fn wire_output_lifecycle(
                         {
                             eprintln!("[editor] Failed to copy share link: {error}");
                         }
-                        if let Some(text) = crate::studio_trial::finished_feedback(was_trial) {
-                            crate::utils::notify::desktop_notification(
-                                &crate::i18n::t("Upload complete"),
-                                &text,
-                            );
+                        // The floating toast carries the trial count; the
+                        // notification keeps it only when no card could be
+                        // raised over the editor.
+                        let shown = was_trial
+                            && window_upload.upgrade().is_some_and(|window| {
+                                crate::studio_trial_toast::show_for(
+                                    &window,
+                                    toast_anchor_upload.as_ref(),
+                                    crate::studio_trial::trial_remaining(),
+                                )
+                            });
+                        if !shown {
+                            if let Some(text) = crate::studio_trial::finished_feedback(was_trial) {
+                                crate::utils::notify::desktop_notification(
+                                    &crate::i18n::t("Upload complete"),
+                                    &text,
+                                );
+                            }
                         }
                     }
                     Err(crate::cloud::upload::UploadError::UpgradeRequired(message)) => {
@@ -327,6 +358,7 @@ pub(super) fn wire_output_lifecycle(
         let window_save = window_save.clone();
         let app_save = app_save.clone();
         let in_motion = in_motion.clone();
+        let trial_toast_anchor = trial_toast_anchor.clone();
         let export_motion = export_motion.clone();
         let save_chooser = save_chooser.clone();
         let save_chooser_open = save_chooser_open.clone();
@@ -449,13 +481,26 @@ pub(super) fn wire_output_lifecycle(
                                     &state_resp.lock().unwrap(),
                                 ) {
                                     Ok(()) => {
-                                        let body =
-                                            match crate::studio_trial::finished_feedback(was_trial) {
-                                                Some(text) => {
-                                                    format!("{}\n\n{text}", video_path.display())
-                                                }
-                                                None => video_path.display().to_string(),
-                                            };
+                                        // The renderer consumed the trial; the
+                                        // floating toast now carries the count.
+                                        let shown = was_trial
+                                            && window_resp.upgrade().is_some_and(|window| {
+                                                crate::studio_trial_toast::show(
+                                                    &window,
+                                                    crate::studio_trial::trial_remaining(),
+                                                )
+                                            });
+                                        let feedback = if shown {
+                                            None
+                                        } else {
+                                            crate::studio_trial::finished_feedback(was_trial)
+                                        };
+                                        let body = match feedback {
+                                            Some(text) => {
+                                                format!("{}\n\n{text}", video_path.display())
+                                            }
+                                            None => video_path.display().to_string(),
+                                        };
                                         crate::utils::notify::desktop_notification(
                                             &crate::i18n::t("Export complete"),
                                             &body,
@@ -481,10 +526,19 @@ pub(super) fn wire_output_lifecycle(
                                             "Export completed, but the editing session could not be saved: {error}",
                                             &[("error", &error.to_string())],
                                         );
-                                        if let Some(text) =
-                                            crate::studio_trial::finished_feedback(was_trial)
-                                        {
-                                            body = format!("{body}\n\n{text}");
+                                        let shown = was_trial
+                                            && window_resp.upgrade().is_some_and(|window| {
+                                                crate::studio_trial_toast::show(
+                                                    &window,
+                                                    crate::studio_trial::trial_remaining(),
+                                                )
+                                            });
+                                        if !shown {
+                                            if let Some(text) =
+                                                crate::studio_trial::finished_feedback(was_trial)
+                                            {
+                                                body = format!("{body}\n\n{text}");
+                                            }
                                         }
                                         crate::utils::notify::desktop_notification_important(
                                             &crate::i18n::t("Export complete"),
@@ -529,6 +583,7 @@ pub(super) fn wire_output_lifecycle(
                     close_after_export,
                     window_save,
                     app_save,
+                    trial_toast_anchor,
                     export_busy,
                     export_spinner,
                     export_btn,
@@ -552,6 +607,7 @@ pub(super) fn wire_output_lifecycle(
             let spinner_done = export_spinner.clone();
             let button_done = export_btn.clone();
             let lock_done = export_lock.clone();
+            let anchor_done = trial_toast_anchor.clone();
             let chooser = static_export_chooser(&parent, &suggestion);
             chooser.connect_response(move |dialog, response| {
                 dialog.hide();
@@ -582,6 +638,7 @@ pub(super) fn wire_output_lifecycle(
                     close_after_export,
                     window_done.clone(),
                     app_done.clone(),
+                    anchor_done.clone(),
                     busy_done.clone(),
                     spinner_done.clone(),
                     button_done.clone(),
@@ -849,6 +906,7 @@ impl EditingLock {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn start_static_export(
     state: Arc<Mutex<EditorState>>,
     source: PathBuf,
@@ -857,6 +915,7 @@ fn start_static_export(
     close_after_export: bool,
     window: gtk4::glib::WeakRef<ApplicationWindow>,
     app: gtk4::glib::WeakRef<Application>,
+    trial_toast_anchor: Option<crate::studio_trial_toast::Anchor>,
     busy: Rc<Cell<bool>>,
     spinner: Spinner,
     button: Button,
@@ -892,7 +951,22 @@ fn start_static_export(
                 // The file is written: one finished Studio export leaves the
                 // free trial. A cancelled or failed run never reaches here.
                 crate::studio_entitlement::finish_trial_export(trial_access);
-                let body = match crate::studio_trial::finished_feedback(was_trial) {
+                // The floating toast carries the trial count; the
+                // notification keeps it only when no overlay could host it.
+                let shown = was_trial
+                    && window.upgrade().is_some_and(|window| {
+                        crate::studio_trial_toast::show_for(
+                            &window,
+                            trial_toast_anchor.as_ref(),
+                            crate::studio_trial::trial_remaining(),
+                        )
+                    });
+                let feedback = if shown {
+                    None
+                } else {
+                    crate::studio_trial::finished_feedback(was_trial)
+                };
+                let body = match feedback {
                     Some(text) => format!("{}\n\n{text}", destination.display()),
                     None => destination.display().to_string(),
                 };

@@ -5324,3 +5324,27 @@ msgstr "Das war dein letzter kostenloser Studio-Export. Hol dir Studio, um diese
 
 msgid "You've used your 3 free Studio exports"
 msgstr "Du hast deine 3 kostenlosen Studio-Exporte genutzt"
+
+msgid "Uses Studio · 1 free export left"
+msgstr "Nutzt Studio · noch 1 kostenloser Export"
+
+msgid "Uses Studio · {count} free exports left"
+msgstr "Nutzt Studio · noch {count} kostenlose Exporte"
+
+msgid "Exported with Studio."
+msgstr "Mit Studio exportiert."
+
+msgid "1 free Studio export left."
+msgstr "Noch 1 kostenloser Studio-Export."
+
+msgid "{count} free Studio exports left."
+msgstr "Noch {count} kostenlose Studio-Exporte."
+
+msgid "That was your last free Studio export."
+msgstr "Das war dein letzter kostenloser Studio-Export."
+
+msgid "Get Studio to keep these styles."
+msgstr "Hol dir Studio, um diese Stile zu behalten."
+
+msgid "Get Studio"
+msgstr "Studio holen"

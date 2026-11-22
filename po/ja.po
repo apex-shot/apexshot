@@ -5221,3 +5221,27 @@ msgstr "これが最後の無料 Studio 書き出しでした。これらのス�
 
 msgid "You've used your 3 free Studio exports"
 msgstr "3 回の無料 Studio 書き出しを使い切りました"
+
+msgid "Uses Studio · 1 free export left"
+msgstr "Studio を使用 · 無料エクスポート残り 1 回"
+
+msgid "Uses Studio · {count} free exports left"
+msgstr "Studio を使用 · 無料エクスポート残り {count} 回"
+
+msgid "Exported with Studio."
+msgstr "Studio でエクスポートしました。"
+
+msgid "1 free Studio export left."
+msgstr "無料の Studio エクスポートは残り 1 回です。"
+
+msgid "{count} free Studio exports left."
+msgstr "無料の Studio エクスポートは残り {count} 回です。"
+
+msgid "That was your last free Studio export."
+msgstr "これが最後の無料 Studio エクスポートでした。"
+
+msgid "Get Studio to keep these styles."
+msgstr "これらのスタイルを続けるには Studio を入手してください。"
+
+msgid "Get Studio"
+msgstr "Studio を入手"

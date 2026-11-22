@@ -5211,3 +5211,27 @@ msgstr "这是你最后一次免费 Studio 导出。获取 Studio 以继续使�
 
 msgid "You've used your 3 free Studio exports"
 msgstr "你已用完 3 次免费 Studio 导出"
+
+msgid "Uses Studio · 1 free export left"
+msgstr "使用 Studio · 剩余 1 次免费导出"
+
+msgid "Uses Studio · {count} free exports left"
+msgstr "使用 Studio · 剩余 {count} 次免费导出"
+
+msgid "Exported with Studio."
+msgstr "已使用 Studio 导出。"
+
+msgid "1 free Studio export left."
+msgstr "剩余 1 次免费 Studio 导出。"
+
+msgid "{count} free Studio exports left."
+msgstr "剩余 {count} 次免费 Studio 导出。"
+
+msgid "That was your last free Studio export."
+msgstr "这是你最后一次免费 Studio 导出。"
+
+msgid "Get Studio to keep these styles."
+msgstr "获取 Studio 以保留这些样式。"
+
+msgid "Get Studio"
+msgstr "获取 Studio"

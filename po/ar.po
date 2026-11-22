@@ -5247,3 +5247,27 @@ msgstr "كان هذا آخر تصدير مجاني لك من Studio. احصل ع
 
 msgid "You've used your 3 free Studio exports"
 msgstr "لقد استخدمت عمليات تصدير Studio المجانية الثلاث"
+
+msgid "Uses Studio · 1 free export left"
+msgstr "يستخدم Studio · يتبقى تصدير مجاني واحد"
+
+msgid "Uses Studio · {count} free exports left"
+msgstr "يستخدم Studio · يتبقى {count} تصديرات مجانية"
+
+msgid "Exported with Studio."
+msgstr "تم التصدير باستخدام Studio."
+
+msgid "1 free Studio export left."
+msgstr "يتبقى تصدير Studio مجاني واحد."
+
+msgid "{count} free Studio exports left."
+msgstr "يتبقى {count} تصديرات Studio مجانية."
+
+msgid "That was your last free Studio export."
+msgstr "كان هذا آخر تصدير Studio مجاني لك."
+
+msgid "Get Studio to keep these styles."
+msgstr "احصل على Studio للاحتفاظ بهذه الأنماط."
+
+msgid "Get Studio"
+msgstr "الحصول على Studio"

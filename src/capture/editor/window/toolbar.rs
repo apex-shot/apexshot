@@ -67,9 +67,6 @@ pub(super) struct ToolbarBaseIconNames<'a> {
 
 pub(super) struct ToolbarRightParts {
     pub root: GtkBox,
-    /// Holds the free-trial Studio label beside the window buttons, so it
-    /// never widens the sidebar.
-    pub studio_slot: GtkBox,
     pub history_group: GtkBox,
     pub undo_btn: Button,
     pub redo_btn: Button,
@@ -1227,14 +1224,10 @@ pub(super) fn build_toolbar_right_controls(
     let spacer = GtkBox::new(Orientation::Horizontal, 0);
     spacer.set_hexpand(true);
     root.append(&spacer);
-    let studio_slot = GtkBox::new(Orientation::Horizontal, 0);
-    studio_slot.set_valign(Align::Center);
-    root.append(&studio_slot);
     root.append(&wm_controls);
 
     ToolbarRightParts {
         root,
-        studio_slot,
         history_group,
         undo_btn,
         redo_btn,
