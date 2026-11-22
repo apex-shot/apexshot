@@ -86,31 +86,45 @@ pub(super) fn export_motion_card_mp4(
     backdrop.flush();
     let mut surface =
         ImageSurface::create(Format::ARgb32, out_w, out_h).map_err(|error| error.to_string())?;
-    let mut encoder = Command::new("ffmpeg")
-        .args([
-            "-y",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-f",
-            "rawvideo",
-            "-pixel_format",
-            "rgba",
-            "-video_size",
-            &format!("{out_w}x{out_h}"),
-            "-framerate",
-            &MOTION_EXPORT_FPS.to_string(),
-            "-i",
-            "pipe:0",
+    let mut command = Command::new("ffmpeg");
+    command.args([
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-f",
+        "rawvideo",
+        "-pixel_format",
+        "rgba",
+        "-video_size",
+        &format!("{out_w}x{out_h}"),
+        "-framerate",
+        &MOTION_EXPORT_FPS.to_string(),
+        "-i",
+        "pipe:0",
+    ]);
+    // The image editor follows the same software encoder choice as the video
+    // export: libx264 where the build has it, libopenh264 on ffmpeg-free.
+    if crate::recording::editor::hardware_encode::software_h264_encoder() == Some("libopenh264") {
+        command.args([
             "-c:v",
-            "libx264",
+            "libopenh264",
+            "-b:v",
+            "12M",
+            "-maxrate",
+            "15M",
+            "-bufsize",
+            "24M",
+            "-allow_skip_frames",
+            "0",
             "-pix_fmt",
             "yuv420p",
-            "-crf",
-            "18",
-            "-movflags",
-            "+faststart",
-        ])
+        ]);
+    } else {
+        command.args(["-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18"]);
+    }
+    let mut encoder = command
+        .args(["-movflags", "+faststart"])
         .arg(&output)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())

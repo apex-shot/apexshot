@@ -17,7 +17,8 @@ gnome-extensions pack gnome-extension --force \
   --extra-source=shell-overlay.js \
   --extra-source=window-list.js \
   --extra-source=preview-stacking.js \
-  --extra-source=daemon-ownership.js
+  --extra-source=daemon-ownership.js \
+  --extra-source=capture-menu-placement.js
 gnome-extensions install --force \
   apexshot-gnome-integration@apexshot.github.io.shell-extension.zip
 gnome-extensions enable apexshot-gnome-integration@apexshot.github.io
@@ -50,7 +51,7 @@ archive until a compatible extension release exists.
 | Native coexistence | Starting Flatpak does not replace the native daemon or use its capture-helper sockets |
 | Recording consent | Authorized ScreenCast produces decodable video with the chosen source/crop |
 | Host distro detection | Distro detection inside Flatpak reports the host distro and release, not the runtime/SDK base |
-| Fedora recording limit | Current Fedora recording refusal remains explicit; screenshot capture still succeeds |
+| Fedora recording | Fedora uses the same recording path as other distros (newly enabled; runtime validation in progress); screenshot capture still succeeds |
 | Recording controls | Countdown, stop/save, pause/resume/restart, pointer sidecar, and editor playback/export remain coherent |
 | Audio | Mic and speaker selection/metering work through the allowed socket; output contains requested audio |
 | Clipboard | Text, PNG, and saved-file references paste into another app, including after the capture worker returns |

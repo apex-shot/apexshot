@@ -793,15 +793,6 @@ fn handle_interactive_capture_result(
                     eprintln!("[daemon] Recording cancelled by user.");
                     return;
                 }
-                // The Fedora refusal already showed "Recording not supported".
-                // Stacking "Recording failed" on top of it reads as two bugs.
-                if err
-                    .downcast_ref::<crate::recording::FedoraRecordingUnsupported>()
-                    .is_some()
-                {
-                    eprintln!("[daemon] Recording unavailable: {err}");
-                    return;
-                }
                 eprintln!("[daemon] Recording failed: {err}");
                 // A missing shell extension has its own, more helpful message,
                 // and the controls outcome handler leaves that case to this one.

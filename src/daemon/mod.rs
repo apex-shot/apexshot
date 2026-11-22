@@ -78,6 +78,11 @@ pub enum DaemonAction {
     OpenVideoEditor,
     OpenImageEditor,
     StopRecordingSave,
+    PauseRecording,
+    ResumeRecording,
+    ToggleRecordingPause,
+    RestartRecording,
+    DiscardRecording,
     ShowLastPreview,
     SaveLastCapture,
     ShowPreviewForPath(std::path::PathBuf),
@@ -109,6 +114,10 @@ impl From<TrayAction> for DaemonAction {
             TrayAction::RecordScreen => Self::RecordScreen,
             TrayAction::RecordWindow => Self::RecordWindow,
             TrayAction::StopRecordingSave => Self::StopRecordingSave,
+            TrayAction::PauseRecording => Self::PauseRecording,
+            TrayAction::ResumeRecording => Self::ResumeRecording,
+            TrayAction::RestartRecording => Self::RestartRecording,
+            TrayAction::DiscardRecording => Self::DiscardRecording,
             TrayAction::ShowLastPreview => Self::ShowLastPreview,
             TrayAction::OpenLastCapture => Self::OpenLastCapture,
             TrayAction::OpenHistory => Self::OpenHistory,
@@ -819,6 +828,24 @@ pub(super) fn parse_trigger_action(action: &str) -> Option<DaemonAction> {
         "recording_stop_save" | "stop_recording" | "stop_recording_save" => {
             Some(DaemonAction::StopRecordingSave)
         }
+        "recording_pause" | "recording-pause" | "pause_recording" | "pause-recording" => {
+            Some(DaemonAction::PauseRecording)
+        }
+        "recording_resume" | "recording-resume" | "resume_recording" | "resume-recording" => {
+            Some(DaemonAction::ResumeRecording)
+        }
+        "recording_toggle_pause"
+        | "recording-toggle-pause"
+        | "toggle_recording_pause"
+        | "toggle-recording-pause"
+        | "toggle_pause"
+        | "toggle-pause" => Some(DaemonAction::ToggleRecordingPause),
+        "recording_restart" | "recording-restart" | "restart_recording" | "restart-recording" => {
+            Some(DaemonAction::RestartRecording)
+        }
+        "recording_discard" | "recording-discard" | "discard_recording" | "discard-recording" => {
+            Some(DaemonAction::DiscardRecording)
+        }
         "recording_session_started" => Some(DaemonAction::RecordingSessionStarted),
         "recording_session_paused" => Some(DaemonAction::RecordingSessionPaused),
         "recording_session_resumed" => Some(DaemonAction::RecordingSessionResumed),
@@ -1119,6 +1146,37 @@ mod tests {
             binding_to_daemon_action(&stop_by_args_only),
             Some(super::DaemonAction::StopRecordingSave)
         ));
+
+        let toggle_pause = crate::hotkeys::HotkeyBinding {
+            accelerator: "CTRL+ALT+SHIFT+P".into(),
+            args: vec!["record".into(), "toggle-pause".into()],
+            name: Some("recording_toggle_pause".into()),
+        };
+        assert_eq!(
+            binding_to_daemon_action(&toggle_pause),
+            Some(super::DaemonAction::ToggleRecordingPause)
+        );
+
+        let restart = crate::hotkeys::HotkeyBinding {
+            accelerator: "CTRL+ALT+SHIFT+R".into(),
+            args: vec!["record".into(), "restart".into()],
+            name: Some("recording_restart".into()),
+        };
+        assert_eq!(
+            binding_to_daemon_action(&restart),
+            Some(super::DaemonAction::RestartRecording)
+        );
+
+        // Args-only bindings still resolve after the name fallback.
+        let discard_by_args = crate::hotkeys::HotkeyBinding {
+            accelerator: String::new(),
+            args: vec!["record".into(), "discard".into()],
+            name: None,
+        };
+        assert_eq!(
+            binding_to_daemon_action(&discard_by_args),
+            Some(super::DaemonAction::DiscardRecording)
+        );
     }
 
     #[test]
@@ -1245,6 +1303,58 @@ mod tests {
         assert_eq!(
             binding_to_daemon_action(&open_file),
             Some(super::DaemonAction::OpenFile)
+        );
+    }
+
+    #[test]
+    fn parse_trigger_action_accepts_recording_control_verbs() {
+        assert_eq!(
+            parse_trigger_action("recording_pause"),
+            Some(DaemonAction::PauseRecording)
+        );
+        assert_eq!(
+            parse_trigger_action("pause-recording"),
+            Some(DaemonAction::PauseRecording)
+        );
+        assert_eq!(
+            parse_trigger_action("recording_resume"),
+            Some(DaemonAction::ResumeRecording)
+        );
+        assert_eq!(
+            parse_trigger_action("recording_toggle_pause"),
+            Some(DaemonAction::ToggleRecordingPause)
+        );
+        assert_eq!(
+            parse_trigger_action("toggle-pause"),
+            Some(DaemonAction::ToggleRecordingPause)
+        );
+        assert_eq!(
+            parse_trigger_action("recording_restart"),
+            Some(DaemonAction::RestartRecording)
+        );
+        assert_eq!(
+            parse_trigger_action("discard_recording"),
+            Some(DaemonAction::DiscardRecording)
+        );
+    }
+
+    #[test]
+    fn tray_recording_controls_map_to_daemon_actions() {
+        assert_eq!(
+            DaemonAction::from(TrayAction::PauseRecording),
+            DaemonAction::PauseRecording
+        );
+        assert_eq!(
+            DaemonAction::from(TrayAction::ResumeRecording),
+            DaemonAction::ResumeRecording
+        );
+        assert_eq!(
+            DaemonAction::from(TrayAction::RestartRecording),
+            DaemonAction::RestartRecording
+        );
+        assert_eq!(
+            DaemonAction::from(TrayAction::DiscardRecording),
+            DaemonAction::DiscardRecording
         );
     }
 

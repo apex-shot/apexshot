@@ -348,7 +348,8 @@ install_system_files() {
         shell-overlay.js \
         window-list.js \
         preview-stacking.js \
-        daemon-ownership.js
+        daemon-ownership.js \
+        capture-menu-placement.js
     do
         $SUDO install -Dm0644 "${REPO_DIR}/gnome-extension/${ext_file}" \
             "${extension_dir}/${ext_file}"

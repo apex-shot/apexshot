@@ -31,8 +31,8 @@ pub(crate) fn capture_daemon_action(capture_type: &str) -> Option<&'static str> 
 }
 
 /// Map `apexshot record <type>` to a daemon D-Bus Trigger action name.
-/// Control actions require a running daemon; start actions can
-/// fall back to an in-process path when the daemon is unavailable.
+/// Control actions can also be sent straight to the recording process when
+/// the daemon is unavailable; start actions fall back to an in-process path.
 pub(crate) fn record_daemon_action(record_type: &str) -> Option<&'static str> {
     match record_type {
         // NOTE: discontinued entries ("area", "ui") intentionally map to
@@ -43,12 +43,47 @@ pub(crate) fn record_daemon_action(record_type: &str) -> Option<&'static str> {
         "window" => Some("record_window"),
         // Must match `DaemonIpc::trigger` action names in daemon/mod.rs.
         "stop" => Some("recording_stop_save"),
+        "pause" => Some("recording_pause"),
+        "resume" => Some("recording_resume"),
+        "toggle-pause" | "toggle_pause" | "pause-resume" => Some("recording_toggle_pause"),
+        "restart" => Some("recording_restart"),
+        "discard" => Some("recording_discard"),
         _ => None,
     }
 }
 
 pub(crate) fn is_record_control_action(record_type: &str) -> bool {
-    matches!(record_type, "stop")
+    matches!(
+        record_type,
+        "stop"
+            | "pause"
+            | "resume"
+            | "toggle-pause"
+            | "toggle_pause"
+            | "pause-resume"
+            | "restart"
+            | "discard"
+    )
+}
+
+/// Send a control verb straight to a recording started without the daemon.
+///
+/// The recording process exposes its own `org.apexshot.RecordingControl`
+/// service, so pause/resume/restart/discard still work when no daemon owns
+/// the session. Returns `false` when no recording control service answers.
+pub(crate) fn send_external_record_control(record_type: &str) -> bool {
+    use apexshot::recording::{
+        send_external_recording_command, send_external_toggle_pause, RecordingControlCommand,
+    };
+    match record_type {
+        "stop" => send_external_recording_command(RecordingControlCommand::StopSave),
+        "pause" => send_external_recording_command(RecordingControlCommand::Pause),
+        "resume" => send_external_recording_command(RecordingControlCommand::Resume),
+        "toggle-pause" | "toggle_pause" | "pause-resume" => send_external_toggle_pause(),
+        "restart" => send_external_recording_command(RecordingControlCommand::Restart),
+        "discard" => send_external_recording_command(RecordingControlCommand::StopDiscard),
+        _ => false,
+    }
 }
 
 pub(crate) fn ensure_gio_desktop_env_for_capture() {
@@ -618,13 +653,6 @@ fn ocr_success_notification(result: &OcrOutput) -> (String, String) {
 }
 
 pub(crate) async fn run_record(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    // Fedora: video recording intentionally unsupported (screenshots still work).
-    if apexshot::recording::is_fedora_recording_unsupported() {
-        apexshot::recording::refuse_fedora_recording()
-            .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
-        return Ok(());
-    }
-
     let record_type = args[2].as_str();
     let mut output_path: Option<PathBuf> = None;
     let mut overlay_stop = false;

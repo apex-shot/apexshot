@@ -15,7 +15,7 @@ cd gnome-extension
 zip apexshot-gnome-integration.zip \
   extension.js metadata.json \
   cursor-classifier.js press-tracker.js shell-overlay.js window-list.js \
-  preview-stacking.js daemon-ownership.js
+  preview-stacking.js daemon-ownership.js capture-menu-placement.js
 ```
 
 Before uploading, run the review checks locally:
@@ -75,7 +75,7 @@ gnome-extensions enable apexshot-gnome-integration@apexshot.github.io
 ```bash
 mkdir -p ~/.local/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io
 cp extension.js metadata.json cursor-classifier.js press-tracker.js shell-overlay.js window-list.js \
-  preview-stacking.js daemon-ownership.js \
+  preview-stacking.js daemon-ownership.js capture-menu-placement.js \
   ~/.local/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io/
 gnome-extensions enable apexshot-gnome-integration@apexshot.github.io
 journalctl /usr/bin/gnome-shell -f | grep apexshot

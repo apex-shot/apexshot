@@ -7,7 +7,7 @@ mod tests {
         parse_area_capture_output_with_persist, parse_area_capture_output_with_stderr,
         parse_capture_menu_control_request, parse_capture_screen_json,
         parse_capture_screen_json_with_mode, parse_recording_json, parse_selection_json,
-        quick_capture_menu_result_json, recording_availability_args, save_capture_to_temp_png,
+        quick_capture_menu_result_json, save_capture_to_temp_png,
         should_request_screenshot_lock, should_use_gtk_layer_shell_selector_from_env,
         should_use_layer_shell_quick_capture_menu_from_env, supports_custom_shutter_sound_from,
         tracked_overlay_id, validate_capture_session_with, AreaCapturePathResult,
@@ -38,7 +38,6 @@ mod tests {
             "--show-zoom-preview=1",
             "--rec-controls",
             "--no-hidpi",
-            "--recording-unavailable",
         ] {
             assert!(
                 !args.contains(&unexpected.to_string()),
@@ -318,7 +317,7 @@ mod tests {
             },
         ];
         for menu in cases {
-            let json = quick_capture_menu_result_json(menu, true).unwrap();
+            let json = quick_capture_menu_result_json(menu).unwrap();
             let parsed: CaptureMenuResult = serde_json::from_str(&json).unwrap();
             assert_eq!(parsed, menu);
         }
@@ -338,14 +337,13 @@ mod tests {
     fn layer_shell_menu_result_rejects_cancel_and_unsupported_state() {
         use crate::overlay::{CaptureMenuAction as Action, CaptureMenuResult};
 
-        assert!(quick_capture_menu_result_json(CaptureMenuResult::default(), true).is_err());
+        assert!(quick_capture_menu_result_json(CaptureMenuResult::default()).is_err());
         assert!(quick_capture_menu_result_json(
             CaptureMenuResult {
                 action: Action::Display,
                 ocr: true,
                 ..CaptureMenuResult::default()
             },
-            true,
         )
         .is_err());
         assert!(quick_capture_menu_result_json(
@@ -354,16 +352,6 @@ mod tests {
                 recording: true,
                 ..CaptureMenuResult::default()
             },
-            true,
-        )
-        .is_err());
-        assert!(quick_capture_menu_result_json(
-            CaptureMenuResult {
-                action: Action::Display,
-                recording: true,
-                ..CaptureMenuResult::default()
-            },
-            false,
         )
         .is_err());
         assert!(quick_capture_menu_result_json(
@@ -372,7 +360,6 @@ mod tests {
                 timer_seconds: 5,
                 ..CaptureMenuResult::default()
             },
-            true,
         )
         .is_err());
         assert!(serde_json::from_str::<CaptureMenuResult>("not json").is_err());
@@ -896,14 +883,6 @@ mod tests {
         };
         let args = build_quick_capture_args(&cursor_hidden);
         assert!(args.iter().any(|arg| arg == "--screenshot-cursor=0"));
-    }
-    #[test]
-    fn recording_availability_args_follow_the_platform_gate() {
-        assert!(recording_availability_args(true).is_empty());
-        assert_eq!(
-            recording_availability_args(false),
-            vec!["--recording-unavailable".to_string()]
-        );
     }
 
     #[test]

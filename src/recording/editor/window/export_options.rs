@@ -400,10 +400,10 @@ pub(super) fn show(
 
     let availability_note = Label::new(None);
     availability_note.add_css_class("recording-editor-export-muted");
+    availability_note.add_css_class("recording-editor-export-availability");
     availability_note.set_xalign(0.0);
     availability_note.set_wrap(true);
     availability_note.set_visible(false);
-    content.append(&availability_note);
 
     let actions = GtkBox::new(Orientation::Horizontal, 16);
     actions.add_css_class("recording-editor-export-actions");
@@ -424,6 +424,9 @@ pub(super) fn show(
     actions.append(&copy);
     actions.append(&spacer);
     actions.append(&export);
+    // The note explains why the actions are disabled, so it has to sit outside
+    // the scrolled body and stay visible above the buttons.
+    card.append(&availability_note);
     card.append(&actions);
 
     let availability = Rc::new(Cell::new(None::<CodecAvailability>));

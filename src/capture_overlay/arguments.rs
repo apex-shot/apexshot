@@ -13,13 +13,6 @@ fn append_screenshot_timer_args(args: &mut Vec<String>, config: &crate::config::
 fn build_area_init_args(config: &crate::config::AppConfig) -> Vec<String> {
     let mut extra_args: Vec<String> = vec!["--area-init".into()];
 
-    // The C++ toolbar advertises recording. Tell it when this platform refuses
-    // recording so it draws that item disabled and explains itself, instead of
-    // accepting a click that the Rust side then has to reject.
-    extra_args.extend(recording_availability_args(
-        crate::recording::recording_supported(),
-    ));
-
     if config.rec_remember_selection {
         if let (Some(x), Some(y), Some(w), Some(h)) = (
             config.last_selection_x,
@@ -113,18 +106,6 @@ fn build_area_init_args(config: &crate::config::AppConfig) -> Vec<String> {
     extra_args
 }
 
-/// Extra overlay arguments describing whether recording is offered here.
-///
-/// Split out from the config-driven args so the Fedora decision stays testable
-/// without depending on the host's `/etc/os-release`.
-fn recording_availability_args(recording_supported: bool) -> Vec<String> {
-    if recording_supported {
-        Vec::new()
-    } else {
-        vec!["--recording-unavailable".into()]
-    }
-}
-
 fn build_recording_ui_args(config: &crate::config::AppConfig) -> Vec<String> {
     let mut args = build_area_init_args(config);
     args.push("--open-recording-ui".into());
@@ -145,8 +126,7 @@ fn build_quick_capture_args_with_menu(
     config: &crate::config::AppConfig,
     menu: crate::overlay::CaptureMenuResult,
 ) -> Result<Vec<String>, String> {
-    let recording_available = crate::recording::recording_supported();
-    let menu_json = quick_capture_menu_result_json(menu, recording_available)?;
+    let menu_json = quick_capture_menu_result_json(menu)?;
     let mut args = build_quick_capture_args(config);
     args.push(format!("--capture-menu-result={menu_json}"));
     Ok(args)
@@ -154,7 +134,6 @@ fn build_quick_capture_args_with_menu(
 
 fn quick_capture_menu_result_json(
     menu: crate::overlay::CaptureMenuResult,
-    recording_available: bool,
 ) -> Result<String, String> {
     use crate::overlay::CaptureMenuAction as Action;
 
@@ -165,7 +144,7 @@ fn quick_capture_menu_result_json(
         Action::Cancel => false,
     };
     let valid_mode = if menu.recording {
-        recording_available && !menu.ocr && menu.timer_seconds == 0
+        !menu.ocr && menu.timer_seconds == 0
     } else {
         !(menu.ocr && menu.timer_seconds > 0)
             && menu.timer_seconds <= 10

@@ -468,6 +468,28 @@ pub(super) fn binding_to_daemon_action(binding: &HotkeyBinding) -> Option<Daemon
             | "stop_recording_save" => {
                 return Some(super::DaemonAction::StopRecordingSave);
             }
+            "recording_pause" | "recording-pause" | "pause_recording" | "pause-recording" => {
+                return Some(super::DaemonAction::PauseRecording);
+            }
+            "recording_resume" | "recording-resume" | "resume_recording" | "resume-recording" => {
+                return Some(super::DaemonAction::ResumeRecording);
+            }
+            "recording_toggle_pause"
+            | "recording-toggle-pause"
+            | "toggle_recording_pause"
+            | "toggle-recording-pause"
+            | "toggle_pause"
+            | "toggle-pause" => {
+                return Some(super::DaemonAction::ToggleRecordingPause);
+            }
+            "recording_restart" | "recording-restart" | "restart_recording"
+            | "restart-recording" => {
+                return Some(super::DaemonAction::RestartRecording);
+            }
+            "recording_discard" | "recording-discard" | "discard_recording"
+            | "discard-recording" => {
+                return Some(super::DaemonAction::DiscardRecording);
+            }
             _ => {}
         }
     }
@@ -494,10 +516,24 @@ pub(super) fn binding_to_daemon_action(binding: &HotkeyBinding) -> Option<Daemon
             Some("window") => Some(super::DaemonAction::RecordWindow),
             Some("area") => Some(super::DaemonAction::RecordArea),
             Some("stop") => Some(super::DaemonAction::StopRecordingSave),
+            Some("pause") => Some(super::DaemonAction::PauseRecording),
+            Some("resume") => Some(super::DaemonAction::ResumeRecording),
+            Some("toggle-pause") | Some("toggle_pause") => {
+                Some(super::DaemonAction::ToggleRecordingPause)
+            }
+            Some("restart") => Some(super::DaemonAction::RestartRecording),
+            Some("discard") => Some(super::DaemonAction::DiscardRecording),
             _ => None,
         },
         Some("recording-control") => match binding.args.get(1).map(|s| s.as_str()) {
             Some("stop-save") => Some(super::DaemonAction::StopRecordingSave),
+            Some("pause") => Some(super::DaemonAction::PauseRecording),
+            Some("resume") => Some(super::DaemonAction::ResumeRecording),
+            Some("pause-resume") | Some("toggle-pause") => {
+                Some(super::DaemonAction::ToggleRecordingPause)
+            }
+            Some("restart") => Some(super::DaemonAction::RestartRecording),
+            Some("discard") => Some(super::DaemonAction::DiscardRecording),
             _ => None,
         },
         _ => None,

@@ -321,11 +321,10 @@ flatpak run --command=sh org.apexshot.ApexShot   # poke around the sandbox
   once the metainfo exists.
 - Announce the Flathub availability on r/linux, r/gnome, r/unixporn, and Hacker News.
   Write the announcement against the current feature set.
-- **Fix the Fedora recording gap or stop shipping the Fedora path as primary.**
-  "Video recording is not supported on Fedora" is a large asterisk on one of the
-  biggest desktop distros, and Flatpak is exactly the mechanism that could solve it
-  (bundled ffmpeg + portal ScreenCast, no distro codec politics). This is a strong
-  argument for prioritizing the Flatpak.
+- **The Fedora recording gap is closed.** Video recording on Fedora now uses the
+  same portal/PipeWire/GStreamer path as other distros (newly enabled; runtime
+  validation is in progress), so the distro limitation no longer needs to steer
+  the launch plan.
 
 ---
 

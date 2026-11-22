@@ -1,4 +1,7 @@
-use super::crop::{normalize_window_frame, window_cursor_update, window_frame_crop};
+use super::crop::{
+    normalize_window_frame, stream_cursor_from_metadata, stream_cursor_update,
+    window_cursor_from_metadata, window_cursor_update, window_frame_crop,
+};
 use super::*;
 use crate::pipewire_engine::{FrameCrop, PipeWireFrame};
 use gstreamer::glib;
@@ -10,10 +13,11 @@ use gstreamer::glib;
 fn start_gst_audio_or_fallback(
     config: &super::RecordingConfig,
     muxer: &str,
+    inputs: super::audio::AudioInputs,
 ) -> Option<super::gst_audio::ActiveGstAudio> {
     use super::gst_audio::{audio_available, ActiveGstAudio, AudioTermination, GstAudioSetup};
 
-    let setup = GstAudioSetup::from_recording(config)?;
+    let setup = GstAudioSetup::from_recording(config, inputs)?;
     if !audio_available(muxer, AudioTermination::AppSink, setup.noise_suppression) {
         eprintln!("[recording] GStreamer audio unavailable; using ffmpeg pulse inputs");
         return None;
@@ -40,6 +44,20 @@ fn start_gst_audio_or_fallback(
             }
         }
     }
+}
+
+/// Failure text for an encoder that exited before the recording finished.
+/// Carries ffmpeg's own diagnostics so a dead input never surfaces as a bare
+/// "Broken pipe".
+fn ffmpeg_encoding_failure(
+    encoder_name: &str,
+    status: &std::process::ExitStatus,
+    stderr: &str,
+) -> String {
+    format!(
+        "ffmpeg failed to encode the recording with {encoder_name} (exit {status}).{}",
+        ffmpeg_error_detail(stderr)
+    )
 }
 
 fn first_valid_window_frame(
@@ -107,12 +125,18 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
     // audio run while the portal/PipeWire stream is still negotiating, which
     // makes the saved audio track longer than the actual video timeline.
     let _ = super::gst_audio::ensure_gst_initialized();
-    let mut audio_exclusive = Some(RecordingAudioExclusiveGuard::acquire(
-        config.mic_enabled || config.speaker_enabled,
-    ));
     if config.mic_enabled || config.speaker_enabled {
         super::audio::ensure_pipewire_pulse_running();
     }
+    // Check the requested devices exist before either audio path references
+    // them: a missing mic or monitor must cost only its own track, not the
+    // recording. ffmpeg otherwise exits when it cannot open the pulse input.
+    let audio_inputs = if config.mic_enabled || config.speaker_enabled {
+        super::audio::resolve_available_audio_inputs(config)
+    } else {
+        super::audio::AudioInputs::default()
+    };
+    let mut audio_exclusive = Some(RecordingAudioExclusiveGuard::acquire(audio_inputs.any()));
 
     // Open PipeWire capture stream (continuous).
     // Portal path: connect via the remote FD from OpenPipeWireRemote.
@@ -133,12 +157,13 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
             hint_h,
             cursor_metadata_enabled,
         ),
-        Some(fd) => crate::pipewire_engine::PipeWireCapture::connect(
+        Some(fd) => crate::pipewire_engine::PipeWireCapture::connect_with_cursor_metadata(
             fd,
             wayland_source.node_id,
             None, // continuous — no max frame limit
             hint_w,
             hint_h,
+            cursor_metadata_enabled,
         ),
         None => crate::pipewire_engine::PipeWireCapture::connect_default(
             wayland_source.node_id,
@@ -165,8 +190,12 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
     let mut first_window_frame = None;
     let mut first_window_cursor = None;
     let mut window_output_size = None;
+    // Crop of the newest window pixel frame. Pointer-only updates carry no
+    // pixels, so they map through this crop instead of recomputing bounds.
+    let mut last_window_crop = None;
     let crop = if window_target {
         let (frame, crop) = first_valid_window_frame(&capture)?;
+        last_window_crop = Some(crop);
         let width = crop.width;
         let height = crop.height;
         first_window_cursor = window_cursor_update(&frame, crop, width, height)
@@ -216,8 +245,8 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
 
     // Start audio only after the video capture stream is negotiated. This
     // keeps the encoded audio timeline aligned with the first video frame.
-    let mut active_audio = if config.mic_enabled || config.speaker_enabled {
-        start_gst_audio_or_fallback(config, audio_muxer)
+    let mut active_audio = if audio_inputs.any() {
+        start_gst_audio_or_fallback(config, audio_muxer, audio_inputs)
     } else {
         None
     };
@@ -252,8 +281,10 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
         ffmpeg_cmd.arg("-f").arg(format);
         ffmpeg_cmd.arg("-i").arg("pipe:3");
         attach_audio_pipe_as_fd3(&mut ffmpeg_cmd, read_fd);
-    } else if config.mic_enabled || config.speaker_enabled {
-        if config.mic_enabled {
+    } else if audio_inputs.any() {
+        // Only sources that were checked above reach ffmpeg; a missing one
+        // would make ffmpeg exit on its input and kill the whole recording.
+        if audio_inputs.mic {
             let mic_dev = config
                 .mic_source
                 .clone()
@@ -263,7 +294,7 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
             ffmpeg_cmd.arg("-i").arg(&mic_dev);
         }
 
-        if config.speaker_enabled {
+        if audio_inputs.speaker {
             let spk_dev = config
                 .speaker_source
                 .clone()
@@ -427,7 +458,7 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
     }
 
     // Map audio after all inputs have been declared.
-    if config.mic_enabled || config.speaker_enabled {
+    if audio_inputs.any() {
         if active_audio.is_some() {
             // Encoded audio is muxed as-is; mono is handled by the GStreamer
             // branch caps, so no channel conversion happens here.
@@ -447,7 +478,7 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
         } else {
             // Legacy pulse inputs: ffmpeg captures from PulseAudio directly;
             // on modern GNOME this is provided by pipewire-pulse.
-            if config.mic_enabled && config.speaker_enabled {
+            if audio_inputs.mic && audio_inputs.speaker {
                 ffmpeg_cmd.arg("-filter_complex");
                 ffmpeg_cmd.arg("[1:a][2:a]amix=inputs=2:duration=first[aout]");
                 ffmpeg_cmd.arg("-map").arg("0:v");
@@ -560,19 +591,26 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
     let mut last_encoded_pixels = None;
     let mut paused = false;
     let mut timeline = super::timeline::RecordingTimeline::default();
-    if window_target && cursor_metadata_enabled {
-        let (width, height) = window_output_size.expect("window target has an initial frame");
-        timeline.enable_window_cursor(width, height);
+    if cursor_metadata_enabled {
+        let (width, height) = if window_target {
+            window_output_size.expect("window target has an initial frame")
+        } else {
+            (input_width, input_height)
+        };
+        timeline.enable_stream_cursor(width, height);
         if let Some((captured_at_us, cursor)) = first_window_cursor {
-            timeline.record_window_cursor(captured_at_us, cursor);
+            timeline.record_stream_cursor(captured_at_us, cursor);
         }
     }
-    if active_audio.is_none() && (config.mic_enabled || config.speaker_enabled) {
+    if active_audio.is_none() && audio_inputs.any() {
         timeline.retain_live_audio_pauses();
         eprintln!("[recording] Live Pulse audio fallback retains frozen pause intervals on the media clock");
     }
     let mut last_frame_at_us = None;
     let first_frame_deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    // A failed write means ffmpeg stopped reading; teardown below reports its
+    // stderr instead of returning the bare pipe error.
+    let mut ffmpeg_write_error: Option<std::io::Error> = None;
 
     loop {
         // Check for control commands
@@ -651,6 +689,38 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
             continue;
         }
 
+        // Pointer-only buffers arrive between pixel frames, so drain them on
+        // every tick rather than on the frame cadence below. They go straight
+        // into the cursor track and never reach ffmpeg or the frame counter.
+        while let Some(update) = capture.try_recv_cursor_update() {
+            if !cursor_metadata_enabled {
+                continue;
+            }
+            // Positions captured before the first encoded frame have no place
+            // in the sidecar; rebasing would drop them anyway.
+            let Some(origin_us) = timeline.origin_us() else {
+                continue;
+            };
+            if update.captured_at_us < origin_us {
+                continue;
+            }
+            let cursor = if window_target {
+                last_window_crop.and_then(|window_crop| {
+                    window_cursor_from_metadata(
+                        update.cursor_metadata,
+                        window_crop,
+                        input_width,
+                        input_height,
+                    )
+                })
+            } else {
+                stream_cursor_from_metadata(update.cursor_metadata, crop, input_width, input_height)
+            };
+            if let Some(cursor) = cursor {
+                timeline.record_stream_cursor(update.captured_at_us, cursor);
+            }
+        }
+
         // Gate acquisition on cadence (one frame per tick): acquiring
         // and converting a full RGBA frame on every 1ms spin burns hundreds
         // of MiB/s of copies for frames that are overwritten before use.
@@ -669,6 +739,7 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
                 let mut cursor_update = None;
                 let pixels = if window_target {
                     window_frame_crop(&frame).and_then(|crop| {
+                        last_window_crop = Some(crop);
                         if cursor_metadata_enabled {
                             cursor_update =
                                 window_cursor_update(&frame, crop, input_width, input_height);
@@ -679,6 +750,10 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
                     && frame.width == format.width
                     && frame.height == format.height
                 {
+                    if cursor_metadata_enabled {
+                        cursor_update =
+                            stream_cursor_update(&frame, crop, input_width, input_height);
+                    }
                     if let Some(crop) = crop {
                         crop_rgba_frame(&frame, crop, input_width, input_height).ok()
                     } else if frame.pixels.len() == expected {
@@ -691,9 +766,6 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
                 };
                 match pixels {
                     Some(pixels) if pixels.len() == expected => {
-                        if let Some(cursor) = cursor_update {
-                            timeline.record_window_cursor(captured_at_us, cursor);
-                        }
                         update_pending_video_frame(
                             &mut last_pixels,
                             &mut pending_frame_at_us,
@@ -711,6 +783,11 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
                             "[recording] Skipping frame with invalid crop, format, or dimensions"
                         );
                     }
+                }
+                // A pixel buffer's cursor metadata is valid even when its
+                // pixels cannot be encoded, so record it independently.
+                if let Some(cursor) = cursor_update {
+                    timeline.record_stream_cursor(captured_at_us, cursor);
                 }
                 if next_frame_at.is_none() {
                     next_frame_at = Some(std::time::Instant::now());
@@ -863,6 +940,7 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
                 } else {
                     eprintln!("Failed to write to ffmpeg: {e}");
                 }
+                ffmpeg_write_error = Some(e);
                 break;
             }
         }
@@ -874,6 +952,27 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
         audio.set_end_now();
     }
     timeline.finish(stopped_at_us);
+
+    // One line per recording that shows exactly what the compositor sent.
+    // A cursorless video caused by pointer-only buffers being dropped looks
+    // identical to a compositor that never granted metadata without it.
+    let buffer_stats = capture.buffer_stats();
+    let stream_cursor_samples = timeline.stream_cursor_sample_count();
+    eprintln!(
+        "[recording] pipewire buffers: pixel_frames={} cursor_only={} corrupted={} empty={} cursor_present={} cursor_hidden={} cursor_missing={} stream_cursor_samples={stream_cursor_samples}",
+        buffer_stats.pixel_frames,
+        buffer_stats.cursor_only,
+        buffer_stats.corrupted,
+        buffer_stats.empty,
+        buffer_stats.cursor_present,
+        buffer_stats.cursor_hidden,
+        buffer_stats.cursor_missing,
+    );
+    if cursor_metadata_enabled && stream_cursor_samples == 0 {
+        eprintln!(
+            "[recording] cursor metadata granted but no cursor positions arrived; the video has no cursor"
+        );
+    }
 
     if disk_guard.tripped() && stop_action == super::RecordingTerminalAction::Save {
         crate::utils::notify::desktop_notification(
@@ -912,7 +1011,7 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
     }
     drop(audio_exclusive.take());
 
-    if stop_action == super::RecordingTerminalAction::Save {
+    if stop_action == super::RecordingTerminalAction::Save && ffmpeg_write_error.is_none() {
         if let (Some(pixels), Some(last_frame_at_us)) = (&last_encoded_pixels, last_frame_at_us) {
             let end_pts = timeline.frame_time_us(stopped_at_us);
             let tail_pts = end_pts.saturating_sub(1_000_000 / u64::from(fps));
@@ -932,11 +1031,10 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
                         disk_guard: &mut disk_guard,
                     },
                 ) {
-                    drop(stdin);
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    let _ = stderr_reader.join();
-                    return Err(err.into());
+                    // Fall through to the shared teardown so the failure is
+                    // reported with ffmpeg's own stderr, not a bare pipe error.
+                    eprintln!("Failed to write the final frame to ffmpeg: {err}");
+                    ffmpeg_write_error = Some(err);
                 }
             }
         }
@@ -971,6 +1069,24 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
         });
     }
 
+    // ffmpeg stopped reading the video pipe. ffmpeg has now exited and its
+    // stderr is joined, so report the real cause (a missing pulse input, an
+    // encoder error, ...) instead of just "Broken pipe".
+    if let Some(write_error) = ffmpeg_write_error {
+        eprintln!("[recording] ffmpeg input pipe failed: {write_error}");
+        let keep_output = std::fs::metadata(&final_path)
+            .map(|metadata| metadata.len() > 0)
+            .unwrap_or(false);
+        if !keep_output {
+            let _ = std::fs::remove_file(&final_path);
+        }
+        return Err(RecordError::GStreamerError(ffmpeg_encoding_failure(
+            encoder_name,
+            &status,
+            &ffmpeg_stderr,
+        )));
+    }
+
     if frames_written == 0 {
         let _ = std::fs::remove_file(&final_path);
         return Err(RecordError::GStreamerError(
@@ -984,9 +1100,10 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
             .unwrap_or(false);
         if !keep_output {
             let _ = std::fs::remove_file(&final_path);
-            let detail = ffmpeg_error_detail(&ffmpeg_stderr);
-            return Err(RecordError::GStreamerError(format!(
-                "ffmpeg failed to encode the recording with {encoder_name} (exit {status}).{detail}"
+            return Err(RecordError::GStreamerError(ffmpeg_encoding_failure(
+                encoder_name,
+                &status,
+                &ffmpeg_stderr,
             )));
         }
         eprintln!("[recording] ffmpeg exited {status}; keeping output because it already has data");
@@ -1132,5 +1249,22 @@ mod tests {
             reanchor > write,
             "the re-anchor must follow the frame write it belongs to",
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_early_ffmpeg_exit_reports_ffmpeg_stderr() {
+        use std::os::unix::process::ExitStatusExt;
+
+        let status = std::process::ExitStatus::from_raw(1 << 8);
+        let message = ffmpeg_encoding_failure(
+            "libopenh264",
+            &status,
+            "[pulse @ 0x1] Error opening input file default.\nInput/output error\n",
+        );
+        assert!(message.contains("libopenh264"));
+        assert!(message.contains("exit status: 1"));
+        assert!(message.contains("Error opening input file default."));
+        assert!(message.contains("Input/output error"));
     }
 }

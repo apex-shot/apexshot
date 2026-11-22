@@ -151,6 +151,45 @@ pub(super) fn dispatch_daemon_action(
             }
             std::thread::spawn(crate::gnome_shell::hide_recording_mask_best_effort);
         }
+        DaemonAction::PauseRecording => {
+            dispatch_recording_control(
+                crate::recording::RecordingControlCommand::Pause,
+                "pause",
+                state,
+                tray_handle,
+                recording_tray_state,
+            );
+        }
+        DaemonAction::ResumeRecording => {
+            dispatch_recording_control(
+                crate::recording::RecordingControlCommand::Resume,
+                "resume",
+                state,
+                tray_handle,
+                recording_tray_state,
+            );
+        }
+        DaemonAction::ToggleRecordingPause => {
+            dispatch_toggle_recording_pause(state, tray_handle, recording_tray_state);
+        }
+        DaemonAction::RestartRecording => {
+            dispatch_recording_control(
+                crate::recording::RecordingControlCommand::Restart,
+                "restart",
+                state,
+                tray_handle,
+                recording_tray_state,
+            );
+        }
+        DaemonAction::DiscardRecording => {
+            dispatch_recording_control(
+                crate::recording::RecordingControlCommand::StopDiscard,
+                "discard",
+                state,
+                tray_handle,
+                recording_tray_state,
+            );
+        }
 
         DaemonAction::SaveLastCapture => {
             tokio::task::spawn_blocking(move || {
@@ -290,4 +329,80 @@ fn idle_recording_tray(
     // in the middle of a re-register left the icon gone.
     *recording_tray_state = None;
     recording_handlers::update_tray_recording_state(tray_handle, None);
+}
+
+fn dispatch_recording_control(
+    command: crate::recording::RecordingControlCommand,
+    label: &str,
+    state: &Arc<Mutex<DaemonState>>,
+    tray_handle: &mut Option<ksni::Handle<ApexShotTray>>,
+    recording_tray_state: &mut Option<recording_handlers::RecordingTrayState>,
+) {
+    let sent = crate::recording::send_active_recording_command(command)
+        || crate::recording::send_external_recording_command(command);
+    if !sent {
+        if let Ok(mut daemon_state) = state.lock() {
+            daemon_state.recording_active = false;
+        }
+        eprintln!("[daemon] No active recording available for {label}.");
+        idle_recording_tray(tray_handle, recording_tray_state);
+        return;
+    }
+
+    match command {
+        crate::recording::RecordingControlCommand::Pause => {
+            sync_tray_paused_state(true, tray_handle, recording_tray_state);
+        }
+        crate::recording::RecordingControlCommand::Resume
+        | crate::recording::RecordingControlCommand::Restart => {
+            sync_tray_paused_state(false, tray_handle, recording_tray_state);
+        }
+        crate::recording::RecordingControlCommand::StopDiscard => {
+            if let Ok(mut daemon_state) = state.lock() {
+                daemon_state.recording_active = false;
+            }
+            idle_recording_tray(tray_handle, recording_tray_state);
+        }
+        crate::recording::RecordingControlCommand::StopSave => {}
+    }
+}
+
+fn dispatch_toggle_recording_pause(
+    state: &Arc<Mutex<DaemonState>>,
+    tray_handle: &mut Option<ksni::Handle<ApexShotTray>>,
+    recording_tray_state: &mut Option<recording_handlers::RecordingTrayState>,
+) {
+    let toggled = crate::recording::toggle_active_recording_pause()
+        || crate::recording::send_external_toggle_pause();
+    if !toggled {
+        if let Ok(mut daemon_state) = state.lock() {
+            daemon_state.recording_active = false;
+        }
+        eprintln!("[daemon] No active recording available for toggle-pause.");
+        idle_recording_tray(tray_handle, recording_tray_state);
+        return;
+    }
+
+    let was_paused = recording_tray_state
+        .as_ref()
+        .is_some_and(|state| state.is_paused());
+    sync_tray_paused_state(!was_paused, tray_handle, recording_tray_state);
+}
+
+fn sync_tray_paused_state(
+    paused: bool,
+    tray_handle: &mut Option<ksni::Handle<ApexShotTray>>,
+    recording_tray_state: &mut Option<recording_handlers::RecordingTrayState>,
+) {
+    {
+        let Some(recording_state) = recording_tray_state.as_mut() else {
+            return;
+        };
+        if paused {
+            recording_state.pause();
+        } else {
+            recording_state.resume();
+        }
+    }
+    recording_handlers::update_recording_tray(tray_handle, recording_tray_state.as_ref());
 }

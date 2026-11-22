@@ -1779,9 +1779,6 @@ msgstr "无法录制窗口"
 msgid "Recording not saved"
 msgstr "录音未保存"
 
-msgid "Recording not supported"
-msgstr "不支持录音"
-
 msgid "Recording path copied"
 msgstr "已复制录制路径"
 
@@ -2127,10 +2124,6 @@ msgstr "非常厚"
 
 msgid "Video"
 msgstr "视频"
-
-msgid ""
-"Video recording is not supported on Fedora. Screenshots still work. For screen recording, use Spectacle or Kooha."
-msgstr "Fedora 不支持视频录制。截图功能仍可正常使用。如需录屏，请使用 Spectacle 或 Kooha。"
 
 msgid "Videos"
 msgstr "视频"
@@ -5176,6 +5169,36 @@ msgstr "摄像头抠像"
 msgid "Cut yourself out of the camera and set yourself on the screen."
 msgstr "将你从摄像头画面中抠出并放到屏幕上。"
 
+msgid "Microphone unavailable"
+msgstr "麦克风不可用"
+
+msgid "Recording continues without the microphone."
+msgstr "将继续录制，但不包含麦克风。"
+
+msgid "System audio unavailable"
+msgstr "系统音频不可用"
+
+msgid "Recording continues without system audio."
+msgstr "将继续录制，但不包含系统音频。"
+
+msgid "Pause Recording"
+msgstr "暂停录制"
+
+msgid "Resume Recording"
+msgstr "继续录制"
+
+msgid "Restart Recording"
+msgstr "重新开始录制"
+
+msgid "Discard Recording"
+msgstr "放弃录制"
+
+msgid "Choose your screen"
+msgstr "选择屏幕"
+
+msgid "A virtual screen records an empty display. Pick your screen in the sharing dialog."
+msgstr "虚拟屏幕录制的是空白画面。请在共享对话框中选择屏幕。"
+
 msgid "Almost out of free uploads"
 msgstr "免费上传次数即将用完"
 
@@ -5266,10 +5289,8 @@ msgstr "已使用 {used}，共 {max}。"
 msgid "Try Studio free"
 msgstr "免费试用 Studio"
 
-
 msgid "Buying Studio takes one step"
 msgstr "购买 Studio 只需一步"
-
 
 msgid "Capture, annotation, recording, and the editors' core tools stay free."
 msgstr "截图、标注、录屏以及编辑器的核心工具仍然免费。"
@@ -5304,17 +5325,8 @@ msgstr "获取 Studio 以保留这些样式。"
 msgid "Get Studio"
 msgstr "获取 Studio"
 
-msgid "Try Studio free"
-msgstr "免费试用 Studio"
-
 msgid "Your next 3 Studio exports are on us. After each one, ApexShot shows how many are left."
 msgstr "接下来的 3 次 Studio 导出免费。每次导出后，ApexShot 会显示剩余次数。"
 
-msgid "Buying Studio takes one step"
-msgstr "购买 Studio 只需一步"
-
 msgid "Choose Studio in ApexShot, sign in, and pay. ApexShot turns Studio on for you, with no licence file to copy or import."
 msgstr "在 ApexShot 中选择 Studio，登录并付款。ApexShot 会为你开启 Studio，无需复制或导入许可证文件。"
-
-msgid "Capture, annotation, recording, and the editors' core tools stay free."
-msgstr "截图、标注、录屏以及编辑器的核心工具仍然免费。"

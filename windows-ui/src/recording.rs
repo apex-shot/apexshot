@@ -1,7 +1,7 @@
 //! Recording constants shared with the settings pages.
 //!
 //! The Windows recorder itself lives in the C++ shell; the settings window only
-//! needs the option counts and the availability answer.
+//! needs the option counts.
 
 pub const VIDEO_MAX_RES_OPTION_COUNT: usize = 7;
 pub const VIDEO_FPS_OPTION_COUNT: usize = 4;
@@ -15,9 +15,6 @@ pub fn crf_for_quality(tier: u8) -> u32 {
         _ => 20, // High (default)
     }
 }
-
-pub const FEDORA_RECORDING_UNSUPPORTED_MSG: &str =
-    "Video recording is not supported here. Screenshots still work.";
 
 pub mod editor {
     /// Click-effect geometry, shared with the Linux editor.
@@ -567,8 +564,4 @@ mod output_dir_tests {
             std::path::PathBuf::from(r"D:\Clips")
         );
     }
-}
-
-pub fn recording_supported() -> bool {
-    true
 }

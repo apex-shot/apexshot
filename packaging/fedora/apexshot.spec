@@ -33,8 +33,14 @@ Requires:       gstreamer1-plugins-base
 Requires:       gstreamer1-plugins-good
 Requires:       gstreamer1-plugins-bad-free
 Requires:       gstreamer1-plugin-libav
+# Fedora's libav plugin has no H.264 decoder, and the video editor preview
+# decodes recordings through GStreamer. The plugin comes from Fedora's
+# openh264 repository, which is enabled by default, hence Recommends.
+Recommends:     gstreamer1-plugin-openh264
 Requires:       pipewire
 Requires:       pipewire-pulseaudio
+# pactl lists and picks the audio sources a recording captures.
+Requires:       pulseaudio-utils
 Requires:       tesseract
 Requires:       unzip
 Requires:       wget
@@ -84,6 +90,7 @@ install -Dm0644 gnome-extension/shell-overlay.js "${extension_dir}/shell-overlay
 install -Dm0644 gnome-extension/window-list.js "${extension_dir}/window-list.js"
 install -Dm0644 gnome-extension/preview-stacking.js "${extension_dir}/preview-stacking.js"
 install -Dm0644 gnome-extension/daemon-ownership.js "${extension_dir}/daemon-ownership.js"
+install -Dm0644 gnome-extension/capture-menu-placement.js "${extension_dir}/capture-menu-placement.js"
 
 for img in src/capture/editor/background-images/*.jpg; do
     install -Dm0644 "${img}" "%{buildroot}%{_datadir}/apexshot/background-images/$(basename "${img}")"

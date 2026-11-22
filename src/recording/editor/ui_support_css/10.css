@@ -27,6 +27,12 @@
                 font-size: 13px;
             }
 
+            /* Outside the scrolled body so a disabled export's explanation stays
+               visible above the buttons. */
+            .recording-editor-export-options-card .recording-editor-export-availability {
+                margin-bottom: 14px;
+            }
+
             .recording-editor-export-eyebrow {
                 color: #8a8a8a;
                 font-size: 11px;
@@ -187,6 +193,13 @@
                 background: #ff7c2f;
             }
 
+            /* A disabled export keeps its orange fill, so it needs to read as
+               unavailable instead of looking clickable. */
+            .recording-editor-export-options-card button.recording-editor-export-action:disabled,
+            .recording-editor-export-options-card button.recording-editor-export-primary:disabled {
+                opacity: 0.45;
+            }
+
             .recording-editor-export-options-card button:focus-visible {
                 outline: 2px solid #ff7c2f;
                 outline-offset: 2px;
@@ -266,6 +279,11 @@
 
             .recording-editor-export-screen button.recording-editor-export-primary:hover {
                 background: #ff7c2f;
+            }
+
+            .recording-editor-export-screen button.recording-editor-export-action:disabled,
+            .recording-editor-export-screen button.recording-editor-export-primary:disabled {
+                opacity: 0.45;
             }
 
             .recording-editor-export-screen button:focus-visible {

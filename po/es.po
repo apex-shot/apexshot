@@ -1816,9 +1816,6 @@ msgstr "La grabación de ventana no está disponible"
 msgid "Recording not saved"
 msgstr "La grabación no se ha guardado"
 
-msgid "Recording not supported"
-msgstr "La grabación no es compatible"
-
 msgid "Recording path copied"
 msgstr "Se ha copiado la ruta de grabación"
 
@@ -2169,11 +2166,6 @@ msgstr "Muy espeso"
 
 msgid "Video"
 msgstr "Vídeo"
-
-msgid ""
-"Video recording is not supported on Fedora. Screenshots still work. For screen recording, use Spectacle or Kooha."
-msgstr ""
-"Fedora no admite la grabación de vídeo. Las capturas de pantalla siguen funcionando. Para grabar la pantalla, utiliza Spectacle o Kooha."
 
 msgid "Videos"
 msgstr "Vídeos"
@@ -5287,6 +5279,36 @@ msgstr "Recorte de cámara"
 msgid "Cut yourself out of the camera and set yourself on the screen."
 msgstr "Recórtate de la cámara y colócate sobre la pantalla."
 
+msgid "Microphone unavailable"
+msgstr "Micrófono no disponible"
+
+msgid "Recording continues without the microphone."
+msgstr "La grabación continúa sin el micrófono."
+
+msgid "System audio unavailable"
+msgstr "Audio del sistema no disponible"
+
+msgid "Recording continues without system audio."
+msgstr "La grabación continúa sin el audio del sistema."
+
+msgid "Pause Recording"
+msgstr "Pausar grabación"
+
+msgid "Resume Recording"
+msgstr "Reanudar grabación"
+
+msgid "Restart Recording"
+msgstr "Reiniciar grabación"
+
+msgid "Discard Recording"
+msgstr "Descartar grabación"
+
+msgid "Choose your screen"
+msgstr "Elige tu pantalla"
+
+msgid "A virtual screen records an empty display. Pick your screen in the sharing dialog."
+msgstr "Una pantalla virtual graba una pantalla vacía. Elige tu pantalla en el diálogo de compartir."
+
 msgid "Almost out of free uploads"
 msgstr "Casi sin subidas gratuitas"
 
@@ -5377,10 +5399,8 @@ msgstr "{used} de {max} usados."
 msgid "Try Studio free"
 msgstr "Prueba Studio gratis"
 
-
 msgid "Buying Studio takes one step"
 msgstr "Comprar Studio lleva un solo paso"
-
 
 msgid "Capture, annotation, recording, and the editors' core tools stay free."
 msgstr "La captura, la anotación, la grabación y las herramientas básicas de los editores siguen siendo gratuitas."
@@ -5415,17 +5435,8 @@ msgstr "Consigue Studio para conservar estos estilos."
 msgid "Get Studio"
 msgstr "Consigue Studio"
 
-msgid "Try Studio free"
-msgstr "Prueba Studio gratis"
-
 msgid "Your next 3 Studio exports are on us. After each one, ApexShot shows how many are left."
 msgstr "Tus próximas 3 exportaciones de Studio corren por nuestra cuenta. Después de cada una, ApexShot te muestra cuántas te quedan."
 
-msgid "Buying Studio takes one step"
-msgstr "Comprar Studio lleva un solo paso"
-
 msgid "Choose Studio in ApexShot, sign in, and pay. ApexShot turns Studio on for you, with no licence file to copy or import."
 msgstr "Elige Studio en ApexShot, inicia sesión y paga. ApexShot activa Studio por ti, sin archivo de licencia que copiar ni importar."
-
-msgid "Capture, annotation, recording, and the editors' core tools stay free."
-msgstr "La captura, la anotación, la grabación y las herramientas básicas de los editores siguen siendo gratuitas."

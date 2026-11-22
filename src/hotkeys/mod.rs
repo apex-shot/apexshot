@@ -777,6 +777,27 @@ mod tests {
     }
 
     #[test]
+    fn app_config_exposes_recording_pause_and_restart_hotkeys() {
+        let hotkeys = hotkey_config_from_app_config(&crate::config::AppConfig::default());
+
+        let pause = hotkeys
+            .bindings
+            .iter()
+            .find(|binding| binding.name.as_deref() == Some("recording_toggle_pause"))
+            .expect("pause binding should exist by default");
+        assert_eq!(pause.accelerator, "CTRL+ALT+SHIFT+P");
+        assert_eq!(pause.args, vec!["record", "toggle-pause"]);
+
+        let restart = hotkeys
+            .bindings
+            .iter()
+            .find(|binding| binding.name.as_deref() == Some("recording_restart"))
+            .expect("restart binding should exist by default");
+        assert_eq!(restart.accelerator, "CTRL+ALT+SHIFT+R");
+        assert_eq!(restart.args, vec!["record", "restart"]);
+    }
+
+    #[test]
     fn app_config_exposes_record_screen_separately_from_quick_capture() {
         let cfg = crate::config::AppConfig {
             shortcut_capture_menu: "Ctrl+Alt+M".into(),

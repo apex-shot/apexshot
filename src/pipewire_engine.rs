@@ -121,6 +121,43 @@ pub enum CursorMetadataState {
     Present(CursorPosition),
 }
 
+/// Cursor metadata from a buffer that carried no new video pixels.
+///
+/// Compositors report pointer-only changes this way: the pointer moved or was
+/// hidden while the picture stayed the same, so the buffer has an empty chunk
+/// and/or the corrupted flag but still carries `SPA_META_Cursor`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CursorUpdate {
+    /// Compositor capture time on the local monotonic clock, or buffer receipt
+    /// time when the producer does not expose that clock domain.
+    pub captured_at_us: i64,
+    /// Cursor validity and hotspot position for this buffer.
+    pub cursor_metadata: CursorMetadataState,
+}
+
+/// How the compositor's buffers were classified over one capture.
+///
+/// This is diagnostic data for field reports: it shows whether a compositor
+/// attached cursor metadata at all and how many buffers were pixel frames,
+/// pointer-only updates, or unusable.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PipeWireBufferStats {
+    /// Buffers delivered as full video frames.
+    pub pixel_frames: u64,
+    /// Buffers with no usable pixels whose cursor metadata was forwarded.
+    pub cursor_only: u64,
+    /// Buffers dropped because the SPA header marked them corrupted.
+    pub corrupted: u64,
+    /// Buffers dropped for having no usable pixel payload.
+    pub empty: u64,
+    /// Buffers that carried a cursor position.
+    pub cursor_present: u64,
+    /// Buffers that reported the cursor as hidden.
+    pub cursor_hidden: u64,
+    /// Buffers without cursor metadata.
+    pub cursor_missing: u64,
+}
+
 /// Color space information from the negotiated video format.
 #[derive(Debug, Clone, Copy)]
 pub struct ColorSpace {
@@ -234,6 +271,7 @@ fn video_format_preference(prefer_alpha: bool) -> [spa::param::video::VideoForma
 // ---------------------------------------------------------------------------
 
 const CONTINUOUS_FRAME_QUEUE_CAPACITY: usize = 1;
+const CURSOR_UPDATE_QUEUE_CAPACITY: usize = 64;
 
 fn push_latest_continuous_frame<T>(frames: &mut std::collections::VecDeque<T>, frame: T) -> usize {
     let mut dropped = 0;
@@ -259,9 +297,23 @@ struct StreamInner {
     format: Option<NegotiatedFormat>,
     raw_format: Option<spa::param::video::VideoInfoRaw>,
     frames: std::collections::VecDeque<QueuedFrame>,
+    // Pointer-only updates travel on their own queue: they must never evict a
+    // pixel frame (whose display can be static for seconds) and pixel frames
+    // must never hide the newest cursor position.
+    cursor_updates: std::collections::VecDeque<CursorUpdate>,
     frames_consumed: u64,
+    buffer_stats: PipeWireBufferStats,
     error: Option<String>,
     max_frames: Option<u64>,
+}
+
+impl StreamInner {
+    fn push_cursor_update(&mut self, update: CursorUpdate) {
+        while self.cursor_updates.len() >= CURSOR_UPDATE_QUEUE_CAPACITY {
+            self.cursor_updates.pop_front();
+        }
+        self.cursor_updates.push_back(update);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -343,6 +395,32 @@ impl PipeWireCapture {
         )
     }
 
+    /// Connect to a portal screen/area stream and optionally request
+    /// per-buffer cursor metadata.
+    ///
+    /// Unlike [`Self::connect_window`] this does not prefer an alpha-bearing
+    /// format: monitor streams stay on the desktop's opaque format, while the
+    /// cursor position still arrives in SPA cursor metadata when the portal
+    /// granted `CursorMode::Metadata`.
+    pub fn connect_with_cursor_metadata(
+        pipewire_fd: OwnedFd,
+        node_id: u32,
+        max_frames: Option<u64>,
+        width_hint: Option<u32>,
+        height_hint: Option<u32>,
+        cursor_metadata: bool,
+    ) -> PipeWireResult<Self> {
+        Self::connect_inner(
+            PipeWireCoreSource::PortalFd(pipewire_fd),
+            node_id,
+            max_frames,
+            width_hint,
+            height_hint,
+            false,
+            cursor_metadata,
+        )
+    }
+
     /// Connect to the default session PipeWire socket.
     ///
     /// Used by KDE-native `zkde_screencast_unstable_v1` streams, which publish
@@ -401,7 +479,9 @@ impl PipeWireCapture {
             format: None,
             raw_format: None,
             frames: std::collections::VecDeque::new(),
+            cursor_updates: std::collections::VecDeque::new(),
             frames_consumed: 0,
+            buffer_stats: PipeWireBufferStats::default(),
             error: None,
             max_frames,
         }));
@@ -527,41 +607,48 @@ impl PipeWireCapture {
                 let Some(raw_format) = guard.raw_format else {
                     return;
                 };
-                let Some((
-                    pixel_data,
-                    stride,
-                    crop,
-                    cursor,
-                    cursor_metadata,
-                    header_pts,
-                )) = buffer.copy_frame()
-                else {
+                let Some(ingest) = buffer.copy_frame() else {
                     return;
                 };
-                let captured_at_us = frame_capture_time_us(header_pts, received_at_us, monotonic_header);
-                if guard.frames.is_empty() && guard.frames_consumed == 0 {
-                    eprintln!("[pipewire] first frame clock header_pts_ns={header_pts:?} received_us={received_at_us} captured_us={captured_at_us}");
-                }
+                let captured_at_us =
+                    frame_capture_time_us(ingest.pts, received_at_us, monotonic_header);
+                accumulate_ingest_stats(&mut guard.buffer_stats, &ingest);
+                match ingest.payload {
+                    SpaIngestPayload::Pixels { pixels, stride } => {
+                        if guard.frames.is_empty() && guard.frames_consumed == 0 {
+                            eprintln!("[pipewire] first frame clock header_pts_ns={:?} received_us={received_at_us} captured_us={captured_at_us}", ingest.pts);
+                        }
 
-                // A recording encoder can be slower than the compositor at
-                // large resolutions. Never retain every full RGBA frame while
-                // it catches up: a 1920x1200 frame is about 9 MiB, so an
-                // unbounded queue can OOM-kill the daemon (and its tray icon)
-                // within seconds. Recording needs the freshest frame, whereas
-                // finite still capture must preserve every requested frame.
-                let frame = QueuedFrame {
-                    pixels: pixel_data,
-                    format: raw_format,
-                    stride,
-                    crop,
-                    cursor,
-                    cursor_metadata,
-                    captured_at_us,
-                };
-                if guard.max_frames.is_none() {
-                    push_latest_continuous_frame(&mut guard.frames, frame);
-                } else {
-                    guard.frames.push_back(frame);
+                        // A recording encoder can be slower than the compositor at
+                        // large resolutions. Never retain every full RGBA frame while
+                        // it catches up: a 1920x1200 frame is about 9 MiB, so an
+                        // unbounded queue can OOM-kill the daemon (and its tray icon)
+                        // within seconds. Recording needs the freshest frame, whereas
+                        // finite still capture must preserve every requested frame.
+                        let frame = QueuedFrame {
+                            pixels,
+                            format: raw_format,
+                            stride,
+                            crop: ingest.crop,
+                            cursor: ingest.cursor,
+                            cursor_metadata: ingest.cursor_metadata,
+                            captured_at_us,
+                        };
+                        if guard.max_frames.is_none() {
+                            push_latest_continuous_frame(&mut guard.frames, frame);
+                        } else {
+                            guard.frames.push_back(frame);
+                        }
+                    }
+                    // Pointer-only update: no video bytes to encode, but the
+                    // cursor moved or hid, and only this buffer knows it.
+                    SpaIngestPayload::CursorOnly if guard.max_frames.is_none() => {
+                        guard.push_cursor_update(CursorUpdate {
+                            captured_at_us,
+                            cursor_metadata: ingest.cursor_metadata,
+                        });
+                    }
+                    SpaIngestPayload::CursorOnly | SpaIngestPayload::Dropped => {}
                 }
             })
             .register()
@@ -690,6 +777,22 @@ impl PipeWireCapture {
         }))
     }
 
+    /// Pop the oldest pointer-only update.
+    ///
+    /// Compositors deliver cursor movement between pixel frames in buffers
+    /// with no usable video data. They are kept off the frame queue so
+    /// consumers that only need pixels ignore them, while a recording
+    /// consumer drains them into its cursor track. Stream errors surface
+    /// through [`Self::try_recv_frame`].
+    pub fn try_recv_cursor_update(&self) -> Option<CursorUpdate> {
+        self.inner.lock().unwrap().cursor_updates.pop_front()
+    }
+
+    /// Buffer classification counters since the stream connected.
+    pub fn buffer_stats(&self) -> PipeWireBufferStats {
+        self.inner.lock().unwrap().buffer_stats
+    }
+
     /// ffmpeg `-pix_fmt` matching the negotiated SPA format, so the raw pipe
     /// carries native bytes with no channel swap.
     pub fn pix_fmt(&self) -> &'static str {
@@ -741,18 +844,9 @@ impl<'a> CaptureBuffer<'a> {
         Some(Self { raw, stream })
     }
 
-    fn copy_frame(
-        &mut self,
-    ) -> Option<(
-        Vec<u8>,
-        i32,
-        FrameCropMetadata,
-        Option<CursorOverlay>,
-        CursorMetadataState,
-        Option<i64>,
-    )> {
+    fn copy_frame(&mut self) -> Option<SpaIngest> {
         let buffer = unsafe { self.raw.as_ref().buffer.as_mut() }?;
-        unsafe { copy_spa_frame(buffer) }
+        Some(unsafe { copy_spa_frame(buffer) })
     }
 }
 
@@ -762,23 +856,64 @@ impl Drop for CaptureBuffer<'_> {
     }
 }
 
+/// What a dequeued SPA buffer was found to carry.
+enum SpaIngestPayload {
+    /// Usable video pixels plus the chunk stride.
+    Pixels { pixels: Vec<u8>, stride: i32 },
+    /// No usable pixels, but cursor metadata worth forwarding.
+    CursorOnly,
+    /// Nothing worth forwarding.
+    Dropped,
+}
+
+/// Why a buffer's pixels were unusable, for the diagnostic counters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SpaDropReason {
+    /// The SPA header marked the buffer corrupted.
+    Corrupted,
+    /// The chunk was empty or the memory could not be mapped.
+    Empty,
+}
+
+/// One buffer read, classified before any pixels are normalized.
+struct SpaIngest {
+    payload: SpaIngestPayload,
+    /// Set when `payload` carries no pixels.
+    no_pixels: Option<SpaDropReason>,
+    crop: FrameCropMetadata,
+    cursor: Option<CursorOverlay>,
+    cursor_metadata: CursorMetadataState,
+    pts: Option<i64>,
+}
+
+fn accumulate_ingest_stats(stats: &mut PipeWireBufferStats, ingest: &SpaIngest) {
+    match &ingest.payload {
+        SpaIngestPayload::Pixels { .. } => stats.pixel_frames += 1,
+        SpaIngestPayload::CursorOnly => stats.cursor_only += 1,
+        SpaIngestPayload::Dropped => {}
+    }
+    match ingest.no_pixels {
+        Some(SpaDropReason::Corrupted) => stats.corrupted += 1,
+        Some(SpaDropReason::Empty) => stats.empty += 1,
+        None => {}
+    }
+    match ingest.cursor_metadata {
+        CursorMetadataState::Present(_) => stats.cursor_present += 1,
+        CursorMetadataState::Hidden => stats.cursor_hidden += 1,
+        CursorMetadataState::Missing | CursorMetadataState::Invalid => stats.cursor_missing += 1,
+    }
+}
+
 /// Copy a dequeued buffer before returning its pixel storage to PipeWire.
+///
+/// Pixel data and cursor metadata are read independently: a compositor can
+/// send a pointer-only update (empty chunk and/or the corrupted flag) that
+/// still carries valid cursor metadata, and dropping it would lose every
+/// cursor position between screen changes.
 ///
 /// # Safety
 /// The buffer's metadata and data arrays must remain valid for the call.
-unsafe fn copy_spa_frame(
-    buffer: &mut spa_sys::spa_buffer,
-) -> Option<(
-    Vec<u8>,
-    i32,
-    FrameCropMetadata,
-    Option<CursorOverlay>,
-    CursorMetadataState,
-    Option<i64>,
-)> {
-    if buffer.n_datas == 0 || buffer.datas.is_null() {
-        return None;
-    }
+unsafe fn copy_spa_frame(buffer: &mut spa_sys::spa_buffer) -> SpaIngest {
     let header = unsafe {
         spa_sys::spa_buffer_find_meta_data(
             buffer,
@@ -788,12 +923,54 @@ unsafe fn copy_spa_frame(
         .cast::<spa_sys::spa_meta_header>()
         .as_ref()
     };
-    if header.is_some_and(|header| header.flags & spa_sys::SPA_META_HEADER_FLAG_CORRUPTED != 0) {
-        return None;
-    }
+    let corrupted =
+        header.is_some_and(|header| header.flags & spa_sys::SPA_META_HEADER_FLAG_CORRUPTED != 0);
     let pts = header.map(|header| header.pts);
     let crop = unsafe { copy_spa_crop(buffer) };
     let (cursor_metadata, cursor) = unsafe { copy_spa_cursor(buffer) };
+    let pixels = if corrupted {
+        None
+    } else {
+        unsafe { copy_spa_pixels(buffer) }
+    };
+    let (payload, no_pixels) = match pixels {
+        Some((pixels, stride)) => (SpaIngestPayload::Pixels { pixels, stride }, None),
+        None => {
+            let reason = if corrupted {
+                SpaDropReason::Corrupted
+            } else {
+                SpaDropReason::Empty
+            };
+            let has_cursor = matches!(
+                cursor_metadata,
+                CursorMetadataState::Present(_) | CursorMetadataState::Hidden
+            );
+            let payload = if has_cursor {
+                SpaIngestPayload::CursorOnly
+            } else {
+                SpaIngestPayload::Dropped
+            };
+            (payload, Some(reason))
+        }
+    };
+    SpaIngest {
+        payload,
+        no_pixels,
+        crop,
+        cursor,
+        cursor_metadata,
+        pts,
+    }
+}
+
+/// Copy the first data plane's chunk when the buffer has usable video memory.
+///
+/// # Safety
+/// The buffer's data array must remain valid for the call.
+unsafe fn copy_spa_pixels(buffer: &mut spa_sys::spa_buffer) -> Option<(Vec<u8>, i32)> {
+    if buffer.n_datas == 0 || buffer.datas.is_null() {
+        return None;
+    }
     let datas = unsafe {
         std::slice::from_raw_parts_mut(
             buffer.datas.cast::<spa::buffer::Data>(),
@@ -807,10 +984,6 @@ unsafe fn copy_spa_frame(
     Some((
         copy_cpu_frame(&mut datas[0], chunk_offset, chunk_size)?,
         chunk_stride,
-        crop,
-        cursor,
-        cursor_metadata,
-        pts,
     ))
 }
 
@@ -1138,12 +1311,49 @@ fn build_crop_meta_pod() -> Vec<u8> {
     )
 }
 
-fn build_cursor_meta_pod() -> Vec<u8> {
-    const CURSOR_BITMAP_SIDE: usize = 384;
-    let size = std::mem::size_of::<spa_sys::spa_meta_cursor>()
+/// Bytes a cursor meta needs for a `side` x `side` RGBA bitmap.
+fn cursor_meta_size(side: usize) -> i32 {
+    (std::mem::size_of::<spa_sys::spa_meta_cursor>()
         + std::mem::size_of::<spa_sys::spa_meta_bitmap>()
-        + CURSOR_BITMAP_SIDE * CURSOR_BITMAP_SIDE * 4;
-    build_frame_meta_pod(SPA_META_CURSOR, size)
+        + side * side * 4) as i32
+}
+
+/// Ask for cursor metadata as a size range, not one size.
+///
+/// The compositor allocates the meta and offers its own size: KWin offers a
+/// fixed 256x256 bitmap, other compositors offer a range. A single fixed size
+/// here only intersects an offer of exactly that size, so a mismatch leaves
+/// every buffer without cursor metadata. A range from a bare position up to
+/// a 1024x1024 bitmap accepts any of them.
+fn build_cursor_meta_pod() -> Vec<u8> {
+    use pw::spa::pod::{ChoiceValue, Object, Property, Value};
+    use pw::spa::utils::{Choice, ChoiceEnum, ChoiceFlags, Id, SpaTypes};
+
+    let object = Object {
+        type_: SpaTypes::ObjectParamMeta.as_raw(),
+        id: spa::param::ParamType::Meta.as_raw(),
+        properties: vec![
+            Property::new(spa_sys::SPA_PARAM_META_type, Value::Id(Id(SPA_META_CURSOR))),
+            Property::new(
+                spa_sys::SPA_PARAM_META_size,
+                Value::Choice(ChoiceValue::Int(Choice::<i32>(
+                    ChoiceFlags::empty(),
+                    ChoiceEnum::<i32>::Range {
+                        default: cursor_meta_size(256),
+                        min: cursor_meta_size(0),
+                        max: cursor_meta_size(1024),
+                    },
+                ))),
+            ),
+        ],
+    };
+    pw::spa::pod::serialize::PodSerializer::serialize(
+        std::io::Cursor::new(Vec::with_capacity(128)),
+        &Value::Object(object),
+    )
+    .unwrap()
+    .0
+    .into_inner()
 }
 
 fn build_frame_meta_pod(meta_type: u32, size: usize) -> Vec<u8> {
@@ -1326,7 +1536,7 @@ mod tests {
     fn with_cursor_metadata<R>(
         cursor: spa_sys::spa_meta_cursor,
         bitmap: Option<(spa_sys::spa_meta_bitmap, Vec<u8>)>,
-        f: impl FnOnce(&spa_sys::spa_buffer) -> R,
+        f: impl FnOnce(&mut spa_sys::spa_buffer) -> R,
     ) -> R {
         let cursor_size = std::mem::size_of::<spa_sys::spa_meta_cursor>();
         let bitmap_end = bitmap
@@ -1366,13 +1576,13 @@ mod tests {
             size: metadata_size as u32,
             data: base.cast(),
         };
-        let buffer = spa_sys::spa_buffer {
+        let mut buffer = spa_sys::spa_buffer {
             n_metas: 1,
             n_datas: 0,
             metas: &mut metadata,
             datas: std::ptr::null_mut(),
         };
-        f(&buffer)
+        f(&mut buffer)
     }
 
     fn cursor_header(id: u32, bitmap_offset: u32) -> spa_sys::spa_meta_cursor {
@@ -1534,12 +1744,18 @@ mod tests {
         assert!(spa::pod::Pod::from_bytes(&build_cursor_meta_pod()).is_some());
     }
 
-    #[test]
-    fn frame_metadata_stays_with_its_pixels_and_corrupted_buffers_are_rejected() {
+    /// Build a buffer with an optional header meta, an optional position-only
+    /// cursor meta, and one MemPtr data plane of `chunk_size` bytes.
+    fn with_buffer<R>(
+        header_flags: Option<u32>,
+        cursor: Option<spa_sys::spa_meta_cursor>,
+        chunk_size: usize,
+        f: impl FnOnce(&mut spa_sys::spa_buffer) -> R,
+    ) -> R {
         let mut pixels = vec![1u8, 2, 3, 4, 5, 6, 7, 8];
         let mut chunk = spa_sys::spa_chunk {
             offset: 0,
-            size: pixels.len() as u32,
+            size: chunk_size as u32,
             stride: 8,
             flags: 0,
         };
@@ -1552,54 +1768,167 @@ mod tests {
             data: pixels.as_mut_ptr().cast(),
             chunk: &mut chunk,
         };
-        let mut header = spa_sys::spa_meta_header {
-            flags: 0,
+        let mut header = header_flags.map(|flags| spa_sys::spa_meta_header {
+            flags,
             offset: 0,
             pts: 9_000_123_000,
             dts_offset: 0,
             seq: 1,
-        };
-        let mut metadata = spa_sys::spa_meta {
-            type_: spa_sys::SPA_META_Header,
-            size: std::mem::size_of::<spa_sys::spa_meta_header>() as u32,
-            data: (&mut header as *mut spa_sys::spa_meta_header).cast(),
-        };
+        });
+        let cursor_size = std::mem::size_of::<spa_sys::spa_meta_cursor>();
+        let mut cursor_storage = cursor.map(|cursor| {
+            let mut storage = vec![0u64; cursor_size.div_ceil(std::mem::size_of::<u64>())];
+            unsafe {
+                std::ptr::write(
+                    storage.as_mut_ptr().cast::<spa_sys::spa_meta_cursor>(),
+                    cursor,
+                );
+            }
+            storage
+        });
+        let mut metas = Vec::new();
+        if let Some(header) = header.as_mut() {
+            metas.push(spa_sys::spa_meta {
+                type_: spa_sys::SPA_META_Header,
+                size: std::mem::size_of::<spa_sys::spa_meta_header>() as u32,
+                data: (header as *mut spa_sys::spa_meta_header).cast(),
+            });
+        }
+        if let Some(storage) = cursor_storage.as_mut() {
+            metas.push(spa_sys::spa_meta {
+                type_: SPA_META_CURSOR,
+                size: cursor_size as u32,
+                data: storage.as_mut_ptr().cast(),
+            });
+        }
         let mut buffer = spa_sys::spa_buffer {
-            n_metas: 1,
+            n_metas: metas.len() as u32,
             n_datas: 1,
-            metas: &mut metadata,
+            metas: metas.as_mut_ptr(),
             datas: &mut data,
         };
-        assert_eq!(
-            unsafe { copy_spa_frame(&mut buffer) },
-            Some((
-                pixels.clone(),
-                8,
-                FrameCropMetadata::Missing,
-                None,
-                CursorMetadataState::Missing,
-                Some(header.pts)
-            ))
+        f(&mut buffer)
+    }
+
+    fn cursor_position() -> CursorMetadataState {
+        CursorMetadataState::Present(CursorPosition {
+            x: 30,
+            y: 40,
+            hotspot_x: 2,
+            hotspot_y: 3,
+        })
+    }
+
+    #[test]
+    fn normal_buffers_keep_their_pixels_stride_and_capture_time() {
+        with_buffer(Some(0), None, 8, |buffer| {
+            let ingest = unsafe { copy_spa_frame(buffer) };
+            let SpaIngestPayload::Pixels { pixels, stride } = ingest.payload else {
+                panic!("a complete buffer must stay a pixel frame");
+            };
+            assert_eq!(pixels, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+            assert_eq!(stride, 8);
+            assert_eq!(ingest.pts, Some(9_000_123_000));
+            assert_eq!(ingest.crop, FrameCropMetadata::Missing);
+            assert_eq!(ingest.cursor, None);
+            assert_eq!(ingest.cursor_metadata, CursorMetadataState::Missing);
+            assert_eq!(ingest.no_pixels, None);
+        });
+        // No header meta: pixels still arrive, but with no compositor clock.
+        with_buffer(None, None, 8, |buffer| {
+            let ingest = unsafe { copy_spa_frame(buffer) };
+            assert!(matches!(ingest.payload, SpaIngestPayload::Pixels { .. }));
+            assert_eq!(ingest.pts, None);
+        });
+    }
+
+    #[test]
+    fn corrupted_buffers_with_cursor_metadata_become_cursor_updates() {
+        with_buffer(
+            Some(spa_sys::SPA_META_HEADER_FLAG_CORRUPTED),
+            Some(cursor_header(7, 0)),
+            8,
+            |buffer| {
+                let ingest = unsafe { copy_spa_frame(buffer) };
+                assert!(matches!(ingest.payload, SpaIngestPayload::CursorOnly));
+                assert_eq!(ingest.no_pixels, Some(SpaDropReason::Corrupted));
+                assert_eq!(ingest.cursor_metadata, cursor_position());
+                assert_eq!(ingest.pts, Some(9_000_123_000));
+            },
         );
-        header.flags = spa_sys::SPA_META_HEADER_FLAG_CORRUPTED;
-        assert_eq!(header.flags, spa_sys::SPA_META_HEADER_FLAG_CORRUPTED);
-        assert!(unsafe { copy_spa_frame(&mut buffer) }.is_none());
-        buffer.n_metas = 0;
-        buffer.metas = std::ptr::null_mut();
-        assert_eq!(
-            unsafe { copy_spa_frame(&mut buffer) },
-            Some((
-                pixels.clone(),
-                8,
-                FrameCropMetadata::Missing,
-                None,
-                CursorMetadataState::Missing,
-                None
-            ))
+        // Without metadata there is nothing worth forwarding.
+        with_buffer(
+            Some(spa_sys::SPA_META_HEADER_FLAG_CORRUPTED),
+            None,
+            8,
+            |buffer| {
+                let ingest = unsafe { copy_spa_frame(buffer) };
+                assert!(matches!(ingest.payload, SpaIngestPayload::Dropped));
+                assert_eq!(ingest.no_pixels, Some(SpaDropReason::Corrupted));
+            },
         );
-        buffer.n_datas = 0;
-        buffer.datas = std::ptr::null_mut();
-        assert!(unsafe { copy_spa_frame(&mut buffer) }.is_none());
+    }
+
+    #[test]
+    fn empty_chunks_with_cursor_metadata_become_cursor_updates() {
+        with_buffer(Some(0), Some(cursor_header(7, 0)), 0, |buffer| {
+            let ingest = unsafe { copy_spa_frame(buffer) };
+            assert!(matches!(ingest.payload, SpaIngestPayload::CursorOnly));
+            assert_eq!(ingest.no_pixels, Some(SpaDropReason::Empty));
+            assert_eq!(ingest.cursor_metadata, cursor_position());
+        });
+        with_buffer(Some(0), Some(cursor_header(0, 0)), 0, |buffer| {
+            let ingest = unsafe { copy_spa_frame(buffer) };
+            assert!(matches!(ingest.payload, SpaIngestPayload::CursorOnly));
+            assert_eq!(ingest.cursor_metadata, CursorMetadataState::Hidden);
+        });
+        with_buffer(Some(0), None, 0, |buffer| {
+            let ingest = unsafe { copy_spa_frame(buffer) };
+            assert!(matches!(ingest.payload, SpaIngestPayload::Dropped));
+            assert_eq!(ingest.no_pixels, Some(SpaDropReason::Empty));
+            assert_eq!(ingest.cursor_metadata, CursorMetadataState::Missing);
+        });
+    }
+
+    #[test]
+    fn buffers_without_a_data_array_still_yield_cursor_updates() {
+        with_cursor_metadata(cursor_header(7, 0), None, |buffer| {
+            let ingest = unsafe { copy_spa_frame(buffer) };
+            assert!(matches!(ingest.payload, SpaIngestPayload::CursorOnly));
+            assert_eq!(ingest.no_pixels, Some(SpaDropReason::Empty));
+            assert_eq!(ingest.cursor_metadata, cursor_position());
+            assert_eq!(ingest.pts, None);
+        });
+    }
+
+    #[test]
+    fn buffer_classification_feeds_the_diagnostic_counters() {
+        let mut stats = PipeWireBufferStats::default();
+        with_buffer(Some(0), Some(cursor_header(7, 0)), 8, |buffer| {
+            let ingest = unsafe { copy_spa_frame(buffer) };
+            accumulate_ingest_stats(&mut stats, &ingest);
+        });
+        with_buffer(
+            Some(spa_sys::SPA_META_HEADER_FLAG_CORRUPTED),
+            Some(cursor_header(7, 0)),
+            8,
+            |buffer| {
+                let ingest = unsafe { copy_spa_frame(buffer) };
+                accumulate_ingest_stats(&mut stats, &ingest);
+            },
+        );
+        with_buffer(Some(0), None, 0, |buffer| {
+            let ingest = unsafe { copy_spa_frame(buffer) };
+            accumulate_ingest_stats(&mut stats, &ingest);
+        });
+
+        assert_eq!(stats.pixel_frames, 1);
+        assert_eq!(stats.cursor_only, 1);
+        assert_eq!(stats.corrupted, 1);
+        assert_eq!(stats.empty, 1);
+        assert_eq!(stats.cursor_present, 2);
+        assert_eq!(stats.cursor_hidden, 0);
+        assert_eq!(stats.cursor_missing, 1);
     }
 
     #[test]

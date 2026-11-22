@@ -161,14 +161,19 @@ pub(super) struct GstAudioSetup {
 }
 
 impl GstAudioSetup {
-    /// Resolve devices for GStreamer capture. `None` when audio is disabled or
-    /// the monitor source name cannot be resolved for pulsesrc.
-    pub(super) fn from_recording(config: &RecordingConfig) -> Option<Self> {
-        if !config.mic_enabled && !config.speaker_enabled {
+    /// Resolve devices for GStreamer capture. `inputs` holds only the sources
+    /// that exist, so a dead device never takes the whole pipeline down.
+    /// `None` when no input remains or the monitor source name cannot be
+    /// resolved for pulsesrc.
+    pub(super) fn from_recording(
+        config: &RecordingConfig,
+        inputs: super::audio::AudioInputs,
+    ) -> Option<Self> {
+        if !inputs.any() {
             return None;
         }
         let ResolvedAudioDevices { mic, monitor } =
-            super::audio::resolve_recording_audio_devices(config)?;
+            super::audio::resolve_recording_audio_devices(config, inputs)?;
         Some(Self {
             mic,
             monitor,

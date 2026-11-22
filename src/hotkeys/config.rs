@@ -323,6 +323,21 @@ pub fn hotkey_config_from_app_config(app_config: &crate::config::AppConfig) -> H
         &app_config.shortcut_recording_stop_save,
         &["record", "stop"],
     );
+    // Pause and restart sit beside Stop for desktops where the floating
+    // recording bar is intentionally not shown while a full-screen
+    // recording runs.
+    push_binding(
+        &mut bindings,
+        "recording_toggle_pause",
+        &app_config.shortcut_recording_pause,
+        &["record", "toggle-pause"],
+    );
+    push_binding(
+        &mut bindings,
+        "recording_restart",
+        &app_config.shortcut_recording_restart,
+        &["record", "restart"],
+    );
 
     HotkeyConfig { bindings }
 }

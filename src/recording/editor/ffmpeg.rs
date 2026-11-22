@@ -1066,11 +1066,63 @@ fn build_single_trim_args(
     args
 }
 
-/// The video output arguments for `encoder`, or libx264 when it is `None`.
+/// Average bitrates for libopenh264, which has no CRF mode.
+///
+/// The export card's quality tiers map to descending bitrates: Maximum
+/// (CRF 18 and below) 16M, High (26 and below) 10M, Balanced (34 and below)
+/// 6M, and Compact above that 3M. `maxrate` is 1.25× the average and `bufsize`
+/// 2×, matching the live recorder's OpenH264 rate control.
+fn software_h264_bitrates(crf: u32) -> (&'static str, &'static str, &'static str) {
+    match crf {
+        0..=18 => ("16M", "20M", "32M"),
+        19..=26 => ("10M", "12.5M", "20M"),
+        27..=34 => ("6M", "7.5M", "12M"),
+        _ => ("3M", "3.75M", "6M"),
+    }
+}
+
+/// The software H.264 arguments for `encoder`.
+///
+/// libx264 keeps its CRF and preset. libopenh264 has neither, so it gets an
+/// average bitrate derived from the same quality tier plus the frame-skip
+/// control the live recorder uses.
+fn software_h264_args(encoder: &str, crf: u32) -> Vec<String> {
+    if encoder == "libopenh264" {
+        let (bitrate, maxrate, bufsize) = software_h264_bitrates(crf);
+        return vec![
+            "-c:v".into(),
+            "libopenh264".into(),
+            "-b:v".into(),
+            bitrate.into(),
+            "-maxrate".into(),
+            maxrate.into(),
+            "-bufsize".into(),
+            bufsize.into(),
+            "-allow_skip_frames".into(),
+            "0".into(),
+            "-pix_fmt".into(),
+            "yuv420p".into(),
+        ];
+    }
+    vec![
+        "-c:v".into(),
+        "libx264".into(),
+        "-preset".into(),
+        "veryfast".into(),
+        "-crf".into(),
+        crf.to_string(),
+        "-pix_fmt".into(),
+        "yuv420p".into(),
+    ]
+}
+
+/// The video output arguments for `encoder`, or the software encoder when it
+/// is `None`.
 ///
 /// Hardware is only ever `Some` after an explicit opt-in and a passing runtime
-/// probe (see `super::hardware_encode`), so the software branch is the default
-/// and keeps the previous export byte-for-byte.
+/// probe (see `super::hardware_encode`), so the software branch is the default.
+/// Where libx264 exists its arguments are unchanged byte-for-byte; a build with
+/// only libopenh264 uses that encoder's rate control instead.
 fn export_video_args(encoder: Option<HardwareEncoder>, codec: Codec, crf: u32) -> Vec<String> {
     match encoder {
         Some(encoder) => hardware_encode::hardware_video_args_for(
@@ -1091,16 +1143,10 @@ fn export_video_args(encoder: Option<HardwareEncoder>, codec: Codec, crf: u32) -
                 "-pix_fmt".into(),
                 "yuv420p".into(),
             ],
-            _ => vec![
-                "-c:v".into(),
-                "libx264".into(),
-                "-preset".into(),
-                "veryfast".into(),
-                "-crf".into(),
-                crf.to_string(),
-                "-pix_fmt".into(),
-                "yuv420p".into(),
-            ],
+            _ => software_h264_args(
+                hardware_encode::software_h264_encoder().unwrap_or("libx264"),
+                crf,
+            ),
         },
     }
 }
@@ -1195,8 +1241,9 @@ fn progress_feed(state: &VideoEditState, base_seconds: f64) -> Option<ProgressFe
 
 /// Append the VA-API upload to a filter graph when the chosen encoder needs it.
 ///
-/// VA-API reads GPU frames, so the graph has to end with `hwupload`; NVENC and
-/// libx264 take system-memory frames and leave the filter untouched.
+/// VA-API reads GPU frames, so the graph has to end with `hwupload`; NVENC,
+/// libx264, and libopenh264 take system-memory frames and leave the filter
+/// untouched.
 fn with_hardware_upload(
     filter: Option<String>,
     encoder: Option<HardwareEncoder>,
@@ -1285,8 +1332,8 @@ fn build_composite_convert_args(
     let scratch = ScratchDir::new("export", start);
     let cmd_path = scratch.path.join("zoom.cmd");
     // An opt-in hardware encoder applies to the composite graph too. It is
-    // `None` (libx264) unless the user asked for hardware and the runtime
-    // probe passed, so the default composite export is unchanged.
+    // `None` (the software encoder) unless the user asked for hardware and the
+    // runtime probe passed, so the default composite export is unchanged.
     let encoder = export_encoder(state);
     let settings = state.export_settings.sanitized();
     // The held tail is part of the composition, so the camera command file has
@@ -1473,7 +1520,8 @@ fn build_composite_convert_args(
         filter.push_str(&tail);
     }
     // VA-API reads GPU frames, so its upload has to be the graph's last step,
-    // after every overlay, mask, and pad. NVENC and libx264 need nothing.
+    // after every overlay, mask, and pad. NVENC, libx264, and libopenh264 need
+    // nothing.
     if let Some(upload) = hardware_encode::hardware_upload_suffix(encoder) {
         filter.push(',');
         filter.push_str(upload);
@@ -2492,8 +2540,15 @@ mod tests {
             Path::new("/tmp/output.mp4"),
         );
 
-        assert!(args.windows(2).any(|pair| pair == ["-c:v", "libx264"]));
-        assert!(args.windows(2).any(|pair| pair == ["-crf", "20"]));
+        assert!(args.windows(2).any(|pair| {
+            pair[0] == "-c:v" && (pair[1] == "libx264" || pair[1] == "libopenh264")
+        }));
+        let encoder = hardware_encode::software_h264_encoder().unwrap_or("libx264");
+        if encoder == "libx264" {
+            assert!(args.windows(2).any(|pair| pair == ["-crf", "20"]));
+        } else {
+            assert!(args.windows(2).any(|pair| pair[0] == "-b:v"));
+        }
         assert!(args.windows(2).any(|pair| {
             pair[0] == "-vf"
                 && pair[1]
@@ -2517,7 +2572,12 @@ mod tests {
             Path::new("/tmp/output.mp4"),
         );
 
-        assert!(args.windows(2).any(|pair| pair == ["-crf", "16"]));
+        let encoder = hardware_encode::software_h264_encoder().unwrap_or("libx264");
+        if encoder == "libx264" {
+            assert!(args.windows(2).any(|pair| pair == ["-crf", "16"]));
+        } else {
+            assert!(args.windows(2).any(|pair| pair[0] == "-b:v"));
+        }
         assert_eq!(args.last().map(String::as_str), Some("/tmp/output.mp4"));
     }
 
@@ -2553,7 +2613,8 @@ mod tests {
             !args.iter().any(|arg| arg == "-shortest"),
             "cursor/zoom export must not cut the video to a shorter overlay track"
         );
-        assert!(args.windows(2).any(|pair| pair == ["-c:v", "libx264"]));
+        let encoder = hardware_encode::software_h264_encoder().unwrap_or("libx264");
+        assert!(args.windows(2).any(|pair| pair == ["-c:v", encoder]));
     }
 
     #[test]
@@ -4343,12 +4404,57 @@ mod tests {
     }
 
     #[test]
+    fn software_h264_args_keep_libx264_settings() {
+        // The default export must stay byte-for-byte the same wherever libx264
+        // exists, whatever quality tier the user picked.
+        assert_eq!(
+            software_h264_args("libx264", 20).join(" "),
+            "-c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p"
+        );
+    }
+
+    #[test]
+    fn software_h264_args_use_openh264_rate_control() {
+        // Fedora's ffmpeg-free has no libx264; OpenH264 takes a bitrate, not a
+        // CRF or a preset, and skipping frames must stay off.
+        let args = software_h264_args("libopenh264", 24);
+        assert!(args.windows(2).any(|pair| pair == ["-c:v", "libopenh264"]));
+        assert!(args.windows(2).any(|pair| pair == ["-b:v", "10M"]));
+        assert!(args.windows(2).any(|pair| pair == ["-maxrate", "12.5M"]));
+        assert!(args.windows(2).any(|pair| pair == ["-bufsize", "20M"]));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["-allow_skip_frames", "0"]));
+        assert!(args.windows(2).any(|pair| pair == ["-pix_fmt", "yuv420p"]));
+        assert!(!args.iter().any(|arg| arg == "-crf"));
+        assert!(!args.iter().any(|arg| arg == "-preset"));
+    }
+
+    #[test]
+    fn openh264_bitrates_follow_the_quality_tiers() {
+        // Maximum (14), High (24), Balanced (30), and Compact (42) must map to
+        // strictly descending bitrates, with maxrate at 1.25× and bufsize at 2×.
+        assert_eq!(software_h264_bitrates(14), ("16M", "20M", "32M"));
+        assert_eq!(software_h264_bitrates(24), ("10M", "12.5M", "20M"));
+        assert_eq!(software_h264_bitrates(30), ("6M", "7.5M", "12M"));
+        assert_eq!(software_h264_bitrates(42), ("3M", "3.75M", "6M"));
+        assert_eq!(software_h264_bitrates(0), software_h264_bitrates(14));
+        assert_eq!(software_h264_bitrates(51), software_h264_bitrates(42));
+    }
+
+    #[test]
     fn the_default_export_encoder_is_software() {
-        // No opt-in: the export must be exactly libx264 at the tier's CRF, so a
-        // machine with a GPU cannot change the file a user without one gets.
+        // No opt-in: the export must use the software encoder at the tier's
+        // settings, so a machine with a GPU cannot change the file a user
+        // without one gets.
         let args = export_video_args(None, Codec::H264, ExportQuality::High.crf());
-        assert!(args.windows(2).any(|pair| pair == ["-c:v", "libx264"]));
-        assert!(args.windows(2).any(|pair| pair == ["-crf", "20"]));
+        let encoder = hardware_encode::software_h264_encoder().unwrap_or("libx264");
+        assert!(args.windows(2).any(|pair| pair == ["-c:v", encoder]));
+        if encoder == "libx264" {
+            assert!(args.windows(2).any(|pair| pair == ["-crf", "20"]));
+        } else {
+            assert!(args.windows(2).any(|pair| pair[0] == "-b:v"));
+        }
         assert!(!args.iter().any(|arg| arg == "-qp"));
     }
 
@@ -4409,10 +4515,11 @@ mod tests {
             ..Default::default()
         };
         let command = build_single_convert_args(&state, 0.0, 9.0, Path::new("/tmp/out.mp4"));
+        let encoder = hardware_encode::software_h264_encoder().unwrap_or("libx264");
         assert!(command
             .args
             .windows(2)
-            .any(|pair| pair == ["-c:v", "libx264"]));
+            .any(|pair| pair == ["-c:v", encoder]));
         assert!(!command.args.iter().any(|arg| arg.contains("nvenc")));
         assert!(!command.args.iter().any(|arg| arg.contains("vaapi")));
     }
@@ -4429,7 +4536,13 @@ mod tests {
             ..Default::default()
         };
         let command = build_single_convert_args(&state, 0.0, 9.0, Path::new("/tmp/out.mp4"));
-        assert!(command.args.windows(2).any(|pair| pair == ["-crf", "16"]));
+        let encoder = hardware_encode::software_h264_encoder().unwrap_or("libx264");
+        if encoder == "libx264" {
+            assert!(command.args.windows(2).any(|pair| pair == ["-crf", "16"]));
+        } else {
+            // OpenH264 has no CRF mode; the tier still has to reach the encoder.
+            assert!(command.args.windows(2).any(|pair| pair[0] == "-b:v"));
+        }
     }
 
     #[test]

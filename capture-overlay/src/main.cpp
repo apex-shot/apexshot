@@ -728,7 +728,6 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
     CaptureMenuResult::Selection selectedCaptureMenuResult;
     bool saveOutput = false;
     bool recordControlsMode = false;
-    bool recordingUnavailable = false;
     bool timerCaptureEnabled = false;
     QString backgroundPath;
     QString controlDbusDest;
@@ -803,10 +802,6 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
                 captureMenuResultSpecified = true;
                 captureMenuResultJson = argument.mid(captureMenuResultPrefix.size()).toUtf8();
             }
-        } else if (std::strcmp(argv[i], "--recording-unavailable") == 0) {
-            // Passed by the Rust side when this platform refuses video
-            // recording, so the toolbar disables the Video item up front.
-            recordingUnavailable = true;
         } else if (std::strcmp(argv[i], "--save-output") == 0) {
             saveOutput = true;
         } else if (std::strcmp(argv[i], "--record-controls") == 0) {
@@ -969,7 +964,7 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
     if (captureMenuResultSpecified) {
         QString menuError;
         if (!CaptureMenuResult::parse(captureMenuResultJson,
-                                      !recordingUnavailable,
+                                      true,
                                       &selectedCaptureMenuResult,
                                       &menuError)) {
             std::fprintf(stderr,
@@ -1111,7 +1106,7 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
                 && !ScreenCapture::isWaylandSession()
                 && Platform::ScrollCaptureSession::available(&scrollError);
             captureMenuResult = CaptureModeToolbar::choose(
-                &sessionServer, nullptr, !recordingUnavailable, false,
+                &sessionServer, nullptr, true, false,
                 scrollCaptureAvailable, toolbarDefaults);
             if (captureMenuResult.action == CaptureModeToolbar::Action::Cancel) {
                 sessionServer.close();

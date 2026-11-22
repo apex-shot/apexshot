@@ -37,7 +37,8 @@ fn build_x11_audio_bin(
         audio_available, build_audio_bin, encoder_for_muxer, AudioTermination, GstAudioSetup,
     };
 
-    let setup = GstAudioSetup::from_recording(config)?;
+    let inputs = super::super::audio::resolve_available_audio_inputs(config);
+    let setup = GstAudioSetup::from_recording(config, inputs)?;
     if !audio_available(
         profile.muxer,
         AudioTermination::GhostPad,

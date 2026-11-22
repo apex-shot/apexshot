@@ -237,7 +237,6 @@ def registered_messages() -> list[str]:
         "A, B, C, D...",
         "a, b, c, d...",
         "i, ii, iii, iv...",
-        "Video recording is not supported on Fedora. Screenshots still work. For screen recording, use Spectacle or Kooha.",
     ]
     found.update(extra)
     return sorted(found)

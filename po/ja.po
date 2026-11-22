@@ -1781,9 +1781,6 @@ msgstr "ウィンドウ録画を利用できません"
 msgid "Recording not saved"
 msgstr "録画が保存されませんでした"
 
-msgid "Recording not supported"
-msgstr "録音はサポートされていません"
-
 msgid "Recording path copied"
 msgstr "記録パスをコピーしました"
 
@@ -2129,11 +2126,6 @@ msgstr "とても分厚い"
 
 msgid "Video"
 msgstr "動画"
-
-msgid ""
-"Video recording is not supported on Fedora. Screenshots still work. For screen recording, use Spectacle or Kooha."
-msgstr ""
-"Fedora では動画の録画はサポートされていません。スクリーンショットの撮影は可能です。画面録画を行う場合は、Spectacle または Kooha をご利用ください。"
 
 msgid "Videos"
 msgstr "動画"
@@ -5186,6 +5178,36 @@ msgstr "カメラの切り抜き"
 msgid "Cut yourself out of the camera and set yourself on the screen."
 msgstr "カメラ映像から自分を切り抜いて画面上に配置します。"
 
+msgid "Microphone unavailable"
+msgstr "マイクを利用できません"
+
+msgid "Recording continues without the microphone."
+msgstr "マイクなしで録画を続行します。"
+
+msgid "System audio unavailable"
+msgstr "システム音声を利用できません"
+
+msgid "Recording continues without system audio."
+msgstr "システム音声なしで録画を続行します。"
+
+msgid "Pause Recording"
+msgstr "録画を一時停止"
+
+msgid "Resume Recording"
+msgstr "録画を再開"
+
+msgid "Restart Recording"
+msgstr "録画をやり直す"
+
+msgid "Discard Recording"
+msgstr "録画を破棄"
+
+msgid "Choose your screen"
+msgstr "画面を選択してください"
+
+msgid "A virtual screen records an empty display. Pick your screen in the sharing dialog."
+msgstr "仮想画面には何も表示されず、空の映像が録画されます。共有ダイアログで画面を選択してください。"
+
 msgid "Almost out of free uploads"
 msgstr "無料アップロードの残りがわずかです"
 
@@ -5276,10 +5298,8 @@ msgstr "{used} / {max} を使用しています。"
 msgid "Try Studio free"
 msgstr "Studio を無料で試す"
 
-
 msgid "Buying Studio takes one step"
 msgstr "Studio の購入はワンステップ"
-
 
 msgid "Capture, annotation, recording, and the editors' core tools stay free."
 msgstr "キャプチャ、注釈、録画、エディターの基本ツールは引き続き無料です。"
@@ -5314,17 +5334,8 @@ msgstr "これらのスタイルを続けるには Studio を入手してくだ�
 msgid "Get Studio"
 msgstr "Studio を入手"
 
-msgid "Try Studio free"
-msgstr "Studio を無料で試す"
-
 msgid "Your next 3 Studio exports are on us. After each one, ApexShot shows how many are left."
 msgstr "次の 3 回の Studio 書き出しは無料です。書き出すたびに ApexShot が残り回数を表示します。"
 
-msgid "Buying Studio takes one step"
-msgstr "Studio の購入はワンステップ"
-
 msgid "Choose Studio in ApexShot, sign in, and pay. ApexShot turns Studio on for you, with no licence file to copy or import."
 msgstr "ApexShot で Studio を選び、サインインして支払うだけ。ApexShot が Studio を有効にするので、ライセンスファイルのコピーやインポートは不要です。"
-
-msgid "Capture, annotation, recording, and the editors' core tools stay free."
-msgstr "キャプチャ、注釈、録画、エディターの基本ツールは引き続き無料です。"

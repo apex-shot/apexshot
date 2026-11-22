@@ -104,11 +104,11 @@ module is the authoritative recorder on supported distros (Ubuntu, Arch, etc.),
 whether the user interacts through the Qt overlay (GNOME) or the daemon/CLI
 (non-GNOME).
 
-> **Fedora:** Video recording is **not supported**. All recording entry points
-> call `refuse_fedora_recording()` and show a desktop notification, and
-> `recording_supported()` keeps the tray, both capture toolbars, and the
-> Recording settings page from offering recording at all. Screenshots
-> and the rest of the app remain available. See
+> **Fedora:** Video recording runs through the same portal/PipeWire/GStreamer
+> path as other distros, on Fedora GNOME and KDE Plasma Wayland. Recording on
+> Fedora was newly enabled; runtime validation is in progress. Fedora's
+> `ffmpeg-free`/`openh264` codec packaging is handled by the existing encoder
+> probe. See
 > [the Fedora install notes](INSTALL.md#fedora-workstation--kde-plasma--spins).
 
 **Architecture overview for non-GNOME users:**

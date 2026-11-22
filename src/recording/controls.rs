@@ -63,7 +63,9 @@ fn take_harvested_pointer_track() -> Option<crate::gnome_shell::PointerTrackResu
 struct PointerTrackSession {
     started: bool,
     region: CaptureRegion,
-    window_cursor_metadata: bool,
+    stream_cursor_metadata: bool,
+    /// What the sidecar this session writes was recorded from.
+    target: super::RecordingTarget,
     /// What the manifest records beside the sidecar this session writes.
     manifest: RecordingManifest,
 }
@@ -77,15 +79,16 @@ struct PointerTrackSession {
 /// (including fractional scaling such as 1.25). The Settings resolution cap can
 /// scale the encoded frame down again, so that cap is folded in as well.
 ///
-/// Returns 1.0 with no size when the ratio cannot be determined: a window
-/// capture (whose samples are already in window pixels), an unresolved
-/// monitor, or a session that cannot query Mutter.
+/// Returns 1.0 with no size when the ratio cannot be determined: a capture
+/// whose samples are already video pixels (stream cursor metadata), a
+/// non-area region, an unresolved monitor, or a session that cannot query
+/// Mutter.
 fn recording_pixel_geometry(
     config: &super::RecordingConfig,
     region: CaptureRegion,
-    window_cursor_metadata: bool,
+    stream_cursor_metadata: bool,
 ) -> (f64, Option<(u32, u32)>) {
-    if window_cursor_metadata || !region.is_area() {
+    if stream_cursor_metadata || !region.is_area() {
         return (1.0, None);
     }
     let monitors = match crate::gnome_shell::query_mutter_monitor_configs() {
@@ -174,7 +177,7 @@ fn window_clicks_from_shell_track(
                 .t0_monotonic_us
                 .saturating_add((*t * 1_000_000.0).round() as i64);
             timeline
-                .window_cursor_positions_at(at_us)
+                .stream_cursor_positions_at(at_us)
                 .into_iter()
                 .filter_map(|(local_x, local_y, sampled_at_us)| {
                     let sampled_t =
@@ -229,8 +232,9 @@ fn window_clicks_from_shell_track(
         .collect()
 }
 
-fn write_window_cursor_sidecar(
+fn write_stream_cursor_sidecar(
     output_path: &Path,
+    target: super::RecordingTarget,
     timeline: &super::timeline::RecordingTimeline,
     origin_us: i64,
     clicks: Vec<ClickSample>,
@@ -241,7 +245,7 @@ fn write_window_cursor_sidecar(
         origin_us,
         CaptureRegion::from_capture(None, None, None, None),
     );
-    if !timeline.add_window_cursor_to_sidecar(&mut sidecar, origin_us) {
+    if !timeline.add_stream_cursor_to_sidecar(&mut sidecar, origin_us) {
         PointerSidecar::delete_next_to_video(output_path);
         return false;
     }
@@ -249,7 +253,7 @@ fn write_window_cursor_sidecar(
     sidecar.presses = presses;
     if !timeline.rebase(&mut sidecar) {
         eprintln!(
-            "[recording] No retained media clock; deleting unsynchronized window cursor sidecar"
+            "[recording] No retained media clock; deleting unsynchronized stream cursor sidecar"
         );
         PointerSidecar::delete_next_to_video(output_path);
         return false;
@@ -258,11 +262,12 @@ fn write_window_cursor_sidecar(
     sidecar.compact_samples();
     match sidecar.write_next_to_video(output_path) {
         Ok(path) => {
-            eprintln!("[recording] wrote window cursor sidecar {}", path.display());
-            // Window samples are already in the window's pixels, so the ratio
-            // is 1 and the sidecar's region is the encoded frame size.
+            eprintln!("[recording] wrote stream cursor sidecar {}", path.display());
+            // Metadata samples are already in the encoded frame's pixels, so
+            // the ratio is 1 and the sidecar's region is the frame size fed
+            // to the encoder.
             let manifest = RecordingManifest {
-                target: Some(recording_target_name(super::RecordingTarget::Window).into()),
+                target: Some(recording_target_name(target).into()),
                 width: Some(sidecar.region.w),
                 height: Some(sidecar.region.h),
                 ..base_manifest.clone()
@@ -271,11 +276,45 @@ fn write_window_cursor_sidecar(
             true
         }
         Err(err) => {
-            eprintln!("[recording] failed to write window cursor sidecar: {err}");
+            eprintln!("[recording] failed to write stream cursor sidecar: {err}");
             PointerSidecar::delete_next_to_video(output_path);
             false
         }
     }
+}
+
+/// Write the pointer sidecar for a capture whose cursor positions came from
+/// SPA cursor metadata (window, screen, or area).
+///
+/// `clicks` and `presses` carry button events from a compositor-specific
+/// source; a session with no click source passes empty vectors and the editor
+/// places automatic zooms from where the cursor settles.
+pub(super) fn write_stream_cursor_metadata_sidecar(
+    output_path: &Path,
+    target: super::RecordingTarget,
+    timeline: &super::timeline::RecordingTimeline,
+    frame_rate: f64,
+    clicks: Vec<ClickSample>,
+    presses: Vec<PressSample>,
+) -> bool {
+    let Some(origin_us) = timeline.origin_us() else {
+        PointerSidecar::delete_next_to_video(output_path);
+        return false;
+    };
+    let manifest = RecordingManifest {
+        frame_rate: Some(frame_rate),
+        target: Some(recording_target_name(target).into()),
+        ..RecordingManifest::new(1.0)
+    };
+    write_stream_cursor_sidecar(
+        output_path,
+        target,
+        timeline,
+        origin_us,
+        clicks,
+        presses,
+        &manifest,
+    )
 }
 
 fn window_presses_from_shell_track(
@@ -300,13 +339,6 @@ fn window_presses_from_shell_track(
         .collect()
 }
 
-fn notify_window_click_tracking_unavailable() {
-    crate::utils::notify::desktop_notification(
-        &crate::i18n::t("Pointer track unavailable"),
-        &crate::i18n::t("The window cursor remains editable, but Auto Zoom clicks will not be recorded without the ApexShot GNOME extension."),
-    );
-}
-
 fn shell_fullscreen_pointer_region(params: &RecordingControlsParams) -> Option<CaptureRegion> {
     if !params.is_fullscreen || params.capture_w <= 0 || params.capture_h <= 0 {
         return None;
@@ -328,12 +360,43 @@ impl PointerTrackSession {
     fn start(
         config: &super::RecordingConfig,
         region: CaptureRegion,
-        window_cursor_metadata: bool,
+        stream_cursor_metadata: bool,
     ) -> Self {
+        // Pointer tracking supplies the pointer-track sidecar and, for a
+        // window metadata capture, the clicks Auto Zoom uses. It comes from
+        // the shell on GNOME and from the X11 tracker elsewhere; screen and
+        // area metadata streams need no tracking, because their positions
+        // already arrive with the video frames.
         let should_track = config.pointer_track_enabled()
             || (config.target == super::RecordingTarget::Window
-                && window_cursor_metadata
+                && stream_cursor_metadata
                 && !super::pointer_track::uses_x11_tracker());
+        let manifest = if super::pointer_track::uses_x11_tracker() {
+            // X11 samples are already in video pixels, so the ratio is 1; only
+            // an area capture folds the Settings cap into its recorded size.
+            let size = region.is_area().then(|| {
+                super::backend::fit_within_max_resolution(region.w, region.h, config.max_resolution)
+            });
+            RecordingManifest {
+                frame_rate: Some(f64::from(config.fps)),
+                target: Some(recording_target_name(config.target).into()),
+                width: size.map(|size| size.0),
+                height: size.map(|size| size.1),
+                ..RecordingManifest::new(1.0)
+            }
+        } else if should_track || stream_cursor_metadata {
+            let (device_pixel_ratio, recorded_size) =
+                recording_pixel_geometry(config, region, stream_cursor_metadata);
+            RecordingManifest {
+                frame_rate: Some(f64::from(config.fps)),
+                target: Some(recording_target_name(config.target).into()),
+                width: recorded_size.map(|size| size.0),
+                height: recorded_size.map(|size| size.1),
+                ..RecordingManifest::new(device_pixel_ratio)
+            }
+        } else {
+            RecordingManifest::new(1.0)
+        };
         if !should_track {
             if config.target == super::RecordingTarget::Window {
                 let _ = take_harvested_pointer_track();
@@ -341,29 +404,15 @@ impl PointerTrackSession {
             return Self {
                 started: false,
                 region,
-                window_cursor_metadata,
-                manifest: RecordingManifest::new(1.0),
+                stream_cursor_metadata,
+                target: config.target,
+                manifest,
             };
         }
-        let (device_pixel_ratio, recorded_size) = if super::pointer_track::uses_x11_tracker() {
-            let size = region.is_area().then(|| {
-                super::backend::fit_within_max_resolution(region.w, region.h, config.max_resolution)
-            });
-            (1.0, size)
-        } else {
-            recording_pixel_geometry(config, region, window_cursor_metadata)
-        };
-        let manifest = RecordingManifest {
-            frame_rate: Some(f64::from(config.fps)),
-            target: Some(recording_target_name(config.target).into()),
-            width: recorded_size.map(|size| size.0),
-            height: recorded_size.map(|size| size.1),
-            ..RecordingManifest::new(device_pixel_ratio)
-        };
         let _ = take_harvested_pointer_track();
         match super::pointer_track::start(config.x11_window) {
             Ok(()) => {
-                if window_cursor_metadata {
+                if config.target == super::RecordingTarget::Window && stream_cursor_metadata {
                     eprintln!("[recording] window pointer and click tracking started");
                 } else {
                     eprintln!("[recording] pointer track started (OS cursor hidden)");
@@ -371,14 +420,14 @@ impl PointerTrackSession {
                 Self {
                     started: true,
                     region,
-                    window_cursor_metadata,
+                    stream_cursor_metadata,
+                    target: config.target,
                     manifest,
                 }
             }
             Err(err) => {
-                if window_cursor_metadata {
-                    eprintln!("[recording] StartPointerTrack failed ({err}); window cursor will remain editable without Auto Zoom click data");
-                    notify_window_click_tracking_unavailable();
+                if stream_cursor_metadata {
+                    eprintln!("[recording] StartPointerTrack failed ({err}); stream cursor will remain editable without Auto Zoom click data");
                 } else if super::pointer_track::uses_x11_tracker() {
                     eprintln!(
                         "[recording] X11 pointer track failed ({err}); continuing without sidecar"
@@ -395,7 +444,8 @@ impl PointerTrackSession {
                 Self {
                     started: false,
                     region,
-                    window_cursor_metadata,
+                    stream_cursor_metadata,
+                    target: config.target,
                     manifest,
                 }
             }
@@ -411,7 +461,7 @@ impl PointerTrackSession {
         self.started = false;
         let result = match take_harvested_pointer_track() {
             Some(result) => Ok(result),
-            None if !was_started && !self.window_cursor_metadata => {
+            None if !was_started && !self.stream_cursor_metadata => {
                 PointerSidecar::delete_next_to_video(output_path);
                 return false;
             }
@@ -424,8 +474,9 @@ impl PointerTrackSession {
                     PointerSidecar::delete_next_to_video(output_path);
                     return false;
                 };
-                return write_window_cursor_sidecar(
+                return write_stream_cursor_sidecar(
                     output_path,
+                    self.target,
                     timeline,
                     origin_us,
                     Vec::new(),
@@ -437,14 +488,13 @@ impl PointerTrackSession {
         };
         match result {
             Ok(result) => {
-                if self.window_cursor_metadata {
+                if self.stream_cursor_metadata {
                     let Some(timeline) = timeline else {
                         PointerSidecar::delete_next_to_video(output_path);
                         return false;
                     };
                     if result.samples.is_empty() || result.t0_monotonic_us <= 0 {
-                        eprintln!("[recording] GNOME Shell returned no usable click clock; window cursor will remain editable without Auto Zoom click data");
-                        notify_window_click_tracking_unavailable();
+                        eprintln!("[recording] GNOME Shell returned no usable click clock; the stream cursor remains editable without Auto Zoom click data");
                     }
                     let origin_us = if result.t0_monotonic_us > 0 {
                         result.t0_monotonic_us
@@ -456,8 +506,9 @@ impl PointerTrackSession {
                     };
                     let clicks = window_clicks_from_shell_track(&result, timeline);
                     let presses = window_presses_from_shell_track(&result, &clicks);
-                    return write_window_cursor_sidecar(
+                    return write_stream_cursor_sidecar(
                         output_path,
+                        self.target,
                         timeline,
                         origin_us,
                         clicks,
@@ -826,8 +877,6 @@ pub async fn run_recording_with_controls(
     params: RecordingControlsParams,
     show_controls: bool,
 ) -> anyhow::Result<(PathBuf, StopAction)> {
-    // Fedora: video recording is not supported.
-    super::refuse_fedora_recording()?;
     let _busy = super::control_session::RecordingBusyGuard::acquire()?;
     run_recording_with_controls_locked(config, params, show_controls).await
 }
@@ -1215,11 +1264,6 @@ pub async fn run_recording_with_native_controls(
     mut params: RecordingControlsParams,
     show_controls: bool,
 ) -> anyhow::Result<(PathBuf, StopAction)> {
-    // Belt-and-suspenders: Fedora never records (entry points refuse first).
-    if super::is_fedora_recording_unsupported() {
-        super::refuse_fedora_recording()?;
-    }
-
     // X11 desktops without a ScreenCast portal pick the window here, before the
     // backend is prepared, so the crosshair appears before the countdown.
     let output_path = config.output_path.clone();
@@ -1334,6 +1378,24 @@ pub async fn run_recording_with_native_controls(
         None
     };
     super::notify_daemon_event("recording_session_started");
+    // The backend reports whether the portal actually granted CursorMode::
+    // Metadata. Screen and area streams then carry editable cursor positions
+    // just like a window stream does.
+    let stream_cursor_metadata = prepared_backend
+        .as_ref()
+        .is_some_and(|prepared| prepared.stream_cursor_metadata_enabled());
+    // KDE's compositor gives no global button stream. A temporary script
+    // effect supplies clicks for the sidecar this path writes; it stays `None`
+    // elsewhere and when the compositor refuses script effects.
+    let click_bridge = if config.target == super::RecordingTarget::Window || stream_cursor_metadata
+    {
+        tokio::task::spawn_blocking(super::kwin_clicks::KwinClickBridge::start)
+            .await
+            .ok()
+            .flatten()
+    } else {
+        None
+    };
     let outcome = if let Some(prepared_backend) = prepared_backend {
         super::backend::start_recording_with_prepared_backend(prepared_backend, Some(command_rx))
             .await
@@ -1352,6 +1414,12 @@ pub async fn run_recording_with_native_controls(
             super::notify_recording_session_ended_best_effort();
             return Err(err.into());
         }
+    };
+    let raw_clicks = match click_bridge {
+        Some(bridge) => tokio::task::spawn_blocking(move || bridge.stop())
+            .await
+            .unwrap_or_default(),
+        None => Vec::new(),
     };
     // Capture has stopped, so the bar has done its job.
     drop(controls_bar.take());
@@ -1391,27 +1459,18 @@ pub async fn run_recording_with_native_controls(
             if let Some(pointer_track) = pointer_track.take() {
                 pointer_track.finish_save(&path, timeline.as_ref());
             }
-            if config.target == super::RecordingTarget::Window {
+            if config.target == super::RecordingTarget::Window || stream_cursor_metadata {
                 if let Some(timeline) = timeline.as_ref() {
-                    if let Some(origin_us) = timeline.origin_us() {
-                        let manifest = RecordingManifest {
-                            frame_rate: Some(f64::from(config.fps)),
-                            target: Some(
-                                recording_target_name(super::RecordingTarget::Window).into(),
-                            ),
-                            ..RecordingManifest::new(1.0)
-                        };
-                        write_window_cursor_sidecar(
-                            &path,
-                            timeline,
-                            origin_us,
-                            Vec::new(),
-                            Vec::new(),
-                            &manifest,
-                        );
-                    } else {
-                        PointerSidecar::delete_next_to_video(&path);
-                    }
+                    let (clicks, presses) =
+                        super::kwin_clicks::clicks_and_presses(&raw_clicks, timeline);
+                    write_stream_cursor_metadata_sidecar(
+                        &path,
+                        config.target,
+                        timeline,
+                        f64::from(config.fps),
+                        clicks,
+                        presses,
+                    );
                 } else {
                     PointerSidecar::delete_next_to_video(&path);
                 }
@@ -1509,16 +1568,16 @@ async fn run_recording_with_shell_mask(
             None
         };
         let pointer_region = pointer_capture_region(&config, fullscreen_monitor);
-        let window_cursor_metadata =
+        let stream_cursor_metadata =
             prepared_backend
                 .as_ref()
                 .is_some_and(|prepared| match prepared {
                     PreparedShellRecording::Video(backend) => {
-                        backend.window_cursor_metadata_enabled()
+                        backend.stream_cursor_metadata_enabled()
                     }
                 });
         let pointer_track =
-            PointerTrackSession::start(&config, pointer_region, window_cursor_metadata);
+            PointerTrackSession::start(&config, pointer_region, stream_cursor_metadata);
         let (command_tx, command_rx) = mpsc::unbounded_channel();
         control_server.set_command_sender(command_tx);
         let outcome =
@@ -1595,8 +1654,6 @@ pub fn run_overlay_recording_request_with_gtk(
     request: RecordingRequest,
     _gtk_tx: Option<std::sync::mpsc::Sender<crate::daemon::GtkWork>>,
 ) -> anyhow::Result<PathBuf> {
-    // Fedora: video recording is not supported.
-    super::refuse_fedora_recording()?;
     maybe_prompt_gnome_extension();
 
     let prepared = prepare_overlay_recording_request(
@@ -1796,11 +1853,11 @@ mod tests {
     #[test]
     fn window_clicks_require_a_matching_shell_press_and_fresh_visible_local_cursor() {
         let mut timeline = super::super::timeline::RecordingTimeline::default();
-        timeline.enable_window_cursor(100, 80);
-        timeline.record_window_cursor(1_000_000, Some((10.0, 15.0)));
-        timeline.record_window_cursor(1_016_000, Some((12.0, 18.0)));
-        timeline.record_window_cursor(1_032_000, None);
-        timeline.record_window_cursor(2_000_000, Some((30.0, 40.0)));
+        timeline.enable_stream_cursor(100, 80);
+        timeline.record_stream_cursor(1_000_000, Some((10.0, 15.0)));
+        timeline.record_stream_cursor(1_016_000, Some((12.0, 18.0)));
+        timeline.record_stream_cursor(1_032_000, None);
+        timeline.record_stream_cursor(2_000_000, Some((30.0, 40.0)));
         let result = crate::gnome_shell::PointerTrackResult {
             t0_monotonic_us: 1_000_000,
             samples: vec![
@@ -1842,9 +1899,9 @@ mod tests {
     #[test]
     fn stationary_window_click_maps_from_its_confirmed_shell_anchor() {
         let mut timeline = super::super::timeline::RecordingTimeline::default();
-        timeline.enable_window_cursor(100, 80);
-        timeline.record_window_cursor(1_000_000, Some((12.0, 18.0)));
-        timeline.record_window_cursor(5_000_000, None);
+        timeline.enable_stream_cursor(100, 80);
+        timeline.record_stream_cursor(1_000_000, Some((12.0, 18.0)));
+        timeline.record_stream_cursor(5_000_000, None);
         let result = crate::gnome_shell::PointerTrackResult {
             t0_monotonic_us: 1_000_000,
             samples: vec![(0.0, 300, 400, "default".into())],
@@ -1867,9 +1924,9 @@ mod tests {
     #[test]
     fn stationary_click_accepts_a_matching_shell_sample_bracket() {
         let mut timeline = super::super::timeline::RecordingTimeline::default();
-        timeline.enable_window_cursor(100, 80);
-        timeline.record_window_cursor(1_056_000, Some((12.0, 18.0)));
-        timeline.record_window_cursor(2_000_000, None);
+        timeline.enable_stream_cursor(100, 80);
+        timeline.record_stream_cursor(1_056_000, Some((12.0, 18.0)));
+        timeline.record_stream_cursor(2_000_000, None);
         let result = crate::gnome_shell::PointerTrackResult {
             t0_monotonic_us: 1_000_000,
             samples: vec![
@@ -1903,9 +1960,9 @@ mod tests {
             vec![(0.0, 300, 400, "default".into())],
         ] {
             let mut timeline = super::super::timeline::RecordingTimeline::default();
-            timeline.enable_window_cursor(100, 80);
-            timeline.record_window_cursor(1_056_000, Some((12.0, 18.0)));
-            timeline.record_window_cursor(2_000_000, None);
+            timeline.enable_stream_cursor(100, 80);
+            timeline.record_stream_cursor(1_056_000, Some((12.0, 18.0)));
+            timeline.record_stream_cursor(2_000_000, None);
             let result = crate::gnome_shell::PointerTrackResult {
                 t0_monotonic_us: 1_000_000,
                 samples,
@@ -1918,11 +1975,11 @@ mod tests {
     }
 
     #[test]
-    fn click_elsewhere_does_not_reuse_a_stale_window_cursor_position() {
+    fn click_elsewhere_does_not_reuse_a_stale_stream_cursor_position() {
         let mut timeline = super::super::timeline::RecordingTimeline::default();
-        timeline.enable_window_cursor(100, 80);
-        timeline.record_window_cursor(1_000_000, Some((12.0, 18.0)));
-        timeline.record_window_cursor(4_000_000, None);
+        timeline.enable_stream_cursor(100, 80);
+        timeline.record_stream_cursor(1_000_000, Some((12.0, 18.0)));
+        timeline.record_stream_cursor(4_000_000, None);
         let result = crate::gnome_shell::PointerTrackResult {
             t0_monotonic_us: 1_000_000,
             samples: vec![
@@ -1939,9 +1996,9 @@ mod tests {
     #[test]
     fn click_outside_the_window_before_hidden_metadata_is_not_mapped() {
         let mut timeline = super::super::timeline::RecordingTimeline::default();
-        timeline.enable_window_cursor(100, 80);
-        timeline.record_window_cursor(1_000_000, Some((12.0, 18.0)));
-        timeline.record_window_cursor(1_050_000, None);
+        timeline.enable_stream_cursor(100, 80);
+        timeline.record_stream_cursor(1_000_000, Some((12.0, 18.0)));
+        timeline.record_stream_cursor(1_050_000, None);
         let result = crate::gnome_shell::PointerTrackResult {
             t0_monotonic_us: 1_000_000,
             samples: vec![
@@ -1960,10 +2017,10 @@ mod tests {
         use crate::recording::editor::auto_zoom;
 
         let mut timeline = super::super::timeline::RecordingTimeline::default();
-        timeline.enable_window_cursor(100, 80);
+        timeline.enable_stream_cursor(100, 80);
         timeline.frame_time_us(1_000_000);
-        timeline.record_window_cursor(1_000_000, Some((12.0, 18.0)));
-        timeline.record_window_cursor(4_500_000, None);
+        timeline.record_stream_cursor(1_000_000, Some((12.0, 18.0)));
+        timeline.record_stream_cursor(4_500_000, None);
         timeline.finish(6_000_000);
         let result = crate::gnome_shell::PointerTrackResult {
             t0_monotonic_us: 1_000_000,
@@ -1977,7 +2034,7 @@ mod tests {
         );
         let clicks = window_clicks_from_shell_track(&result, &timeline);
         assert_eq!(clicks.len(), 1);
-        assert!(timeline.add_window_cursor_to_sidecar(&mut sidecar, 1_000_000));
+        assert!(timeline.add_stream_cursor_to_sidecar(&mut sidecar, 1_000_000));
         sidecar.clicks = clicks;
         assert!(timeline.rebase(&mut sidecar));
 
@@ -1994,11 +2051,11 @@ mod tests {
     #[test]
     fn moving_click_uses_a_nearby_window_sample_after_the_click() {
         let mut timeline = super::super::timeline::RecordingTimeline::default();
-        timeline.enable_window_cursor(100, 80);
-        timeline.record_window_cursor(1_000_000, Some((10.0, 15.0)));
-        timeline.record_window_cursor(1_016_000, Some((20.0, 25.0)));
-        timeline.record_window_cursor(1_032_000, Some((30.0, 35.0)));
-        timeline.record_window_cursor(2_000_000, None);
+        timeline.enable_stream_cursor(100, 80);
+        timeline.record_stream_cursor(1_000_000, Some((10.0, 15.0)));
+        timeline.record_stream_cursor(1_016_000, Some((20.0, 25.0)));
+        timeline.record_stream_cursor(1_032_000, Some((30.0, 35.0)));
+        timeline.record_stream_cursor(2_000_000, None);
         let result = crate::gnome_shell::PointerTrackResult {
             t0_monotonic_us: 1_000_000,
             samples: vec![

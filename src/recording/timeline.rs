@@ -5,33 +5,33 @@ use super::editor::sidecar::{
     PointerSidecar, MAX_POINTER_SAMPLES,
 };
 
-const MAX_WINDOW_CURSOR_SAMPLES: usize = MAX_POINTER_SAMPLES * 32;
-const MAX_WINDOW_VISIBILITY_SAMPLES: usize = MAX_POINTER_SAMPLES * 32;
-const WINDOW_CURSOR_CLICK_NEIGHBOR_US: i64 = 50_000;
+const MAX_STREAM_CURSOR_SAMPLES: usize = MAX_POINTER_SAMPLES * 32;
+const MAX_STREAM_VISIBILITY_SAMPLES: usize = MAX_POINTER_SAMPLES * 32;
+const STREAM_CURSOR_CLICK_NEIGHBOR_US: i64 = 50_000;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct WindowPointerSample {
+pub(super) struct StreamPointerSample {
     pub(super) at_us: i64,
     pub(super) x: f64,
     pub(super) y: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct WindowVisibilitySample {
+pub(super) struct StreamVisibilitySample {
     pub(super) at_us: i64,
     pub(super) visible: bool,
 }
 
 #[derive(Debug, Default)]
-struct WindowCursorTrack {
+struct StreamCursorTrack {
     width: u32,
     height: u32,
-    pointer: Vec<WindowPointerSample>,
-    visibility: Vec<WindowVisibilitySample>,
+    pointer: Vec<StreamPointerSample>,
+    visibility: Vec<StreamVisibilitySample>,
     exhausted: bool,
 }
 
-impl WindowCursorTrack {
+impl StreamCursorTrack {
     fn record(&mut self, at_us: i64, position: Option<(f64, f64)>) {
         if at_us <= 0 || self.exhausted {
             return;
@@ -52,13 +52,13 @@ impl WindowCursorTrack {
         }
 
         let visible = position.is_some();
-        if self.visibility.len() >= MAX_WINDOW_VISIBILITY_SAMPLES
+        if self.visibility.len() >= MAX_STREAM_VISIBILITY_SAMPLES
             && self
                 .visibility
                 .last()
                 .is_none_or(|sample| sample.visible != visible)
         {
-            self.visibility.push(WindowVisibilitySample {
+            self.visibility.push(StreamVisibilitySample {
                 at_us,
                 visible: false,
             });
@@ -69,16 +69,16 @@ impl WindowCursorTrack {
         match position {
             Some((x, y)) => {
                 if !self.visibility.last().is_some_and(|sample| sample.visible) {
-                    self.visibility.push(WindowVisibilitySample {
+                    self.visibility.push(StreamVisibilitySample {
                         at_us,
                         visible: true,
                     });
                 }
-                self.pointer.push(WindowPointerSample { at_us, x, y });
-                compact_window_pointer(&mut self.pointer);
+                self.pointer.push(StreamPointerSample { at_us, x, y });
+                compact_stream_pointer(&mut self.pointer);
             }
             None if self.visibility.last().is_none_or(|sample| sample.visible) => {
-                self.visibility.push(WindowVisibilitySample {
+                self.visibility.push(StreamVisibilitySample {
                     at_us,
                     visible: false,
                 });
@@ -117,7 +117,7 @@ impl WindowCursorTrack {
             }
         }
         if let Some(pointer) = self.pointer.get(pointer_index) {
-            if pointer.at_us.saturating_sub(at_us) <= WINDOW_CURSOR_CLICK_NEIGHBOR_US
+            if pointer.at_us.saturating_sub(at_us) <= STREAM_CURSOR_CLICK_NEIGHBOR_US
                 && pointer.at_us < hidden_at
             {
                 positions.push((pointer.x, pointer.y, pointer.at_us));
@@ -127,8 +127,8 @@ impl WindowCursorTrack {
     }
 }
 
-fn compact_window_pointer(samples: &mut Vec<WindowPointerSample>) {
-    if samples.len() <= MAX_WINDOW_CURSOR_SAMPLES {
+fn compact_stream_pointer(samples: &mut Vec<StreamPointerSample>) {
+    if samples.len() <= MAX_STREAM_CURSOR_SAMPLES {
         return;
     }
     let last = samples.len() - 1;
@@ -153,7 +153,7 @@ pub(super) struct RecordingTimeline {
     pauses: Vec<(i64, i64)>,
     paused_at: Option<i64>,
     keep_pause_duration: bool,
-    window_cursor: Option<WindowCursorTrack>,
+    stream_cursor: Option<StreamCursorTrack>,
 }
 
 impl RecordingTimeline {
@@ -161,32 +161,42 @@ impl RecordingTimeline {
         self.keep_pause_duration = true;
     }
 
-    pub(super) fn enable_window_cursor(&mut self, width: u32, height: u32) {
-        self.window_cursor = Some(WindowCursorTrack {
+    pub(super) fn enable_stream_cursor(&mut self, width: u32, height: u32) {
+        self.stream_cursor = Some(StreamCursorTrack {
             width,
             height,
-            ..WindowCursorTrack::default()
+            ..StreamCursorTrack::default()
         });
     }
 
-    pub(super) fn record_window_cursor(&mut self, at_us: i64, position: Option<(f64, f64)>) {
-        if let Some(track) = self.window_cursor.as_mut() {
+    pub(super) fn record_stream_cursor(&mut self, at_us: i64, position: Option<(f64, f64)>) {
+        if let Some(track) = self.stream_cursor.as_mut() {
             track.record(at_us, position);
         }
     }
 
-    pub(super) fn window_cursor_positions_at(&self, at_us: i64) -> Vec<(f64, f64, i64)> {
-        self.window_cursor
+    pub(super) fn stream_cursor_positions_at(&self, at_us: i64) -> Vec<(f64, f64, i64)> {
+        self.stream_cursor
             .as_ref()
             .map_or_else(Vec::new, |track| track.positions_at(at_us))
     }
 
-    pub(super) fn add_window_cursor_to_sidecar(
+    /// How many cursor positions the stream track holds.
+    ///
+    /// Used by the recording diagnostics to tell a compositor's cursor stream
+    /// that never arrived from one that did.
+    pub(super) fn stream_cursor_sample_count(&self) -> usize {
+        self.stream_cursor
+            .as_ref()
+            .map_or(0, |track| track.pointer.len())
+    }
+
+    pub(super) fn add_stream_cursor_to_sidecar(
         &self,
         sidecar: &mut PointerSidecar,
         origin_us: i64,
     ) -> bool {
-        let Some(track) = self.window_cursor.as_ref() else {
+        let Some(track) = self.stream_cursor.as_ref() else {
             return false;
         };
         if track.pointer.is_empty() {
@@ -603,15 +613,15 @@ mod tests {
     }
 
     #[test]
-    fn window_cursor_visibility_rebases_across_removed_pause_intervals() {
+    fn stream_cursor_visibility_rebases_across_removed_pause_intervals() {
         let mut clock = RecordingTimeline::default();
-        clock.enable_window_cursor(100, 80);
+        clock.enable_stream_cursor(100, 80);
         clock.frame_time_us(2_000_000);
-        clock.record_window_cursor(2_000_000, Some((10.0, 10.0)));
-        clock.record_window_cursor(3_000_000, Some((20.0, 20.0)));
+        clock.record_stream_cursor(2_000_000, Some((10.0, 10.0)));
+        clock.record_stream_cursor(3_000_000, Some((20.0, 20.0)));
         clock.pause(4_000_000);
         clock.resume(5_000_000);
-        clock.record_window_cursor(6_000_000, None);
+        clock.record_stream_cursor(6_000_000, None);
         clock.finish(7_000_000);
 
         let mut sidecar = PointerSidecar::new(
@@ -623,7 +633,7 @@ mod tests {
                 h: 80,
             },
         );
-        assert!(clock.add_window_cursor_to_sidecar(&mut sidecar, 1_000_000));
+        assert!(clock.add_stream_cursor_to_sidecar(&mut sidecar, 1_000_000));
         assert!(clock.rebase(&mut sidecar));
         assert_eq!(
             sidecar.visibility,
@@ -655,16 +665,16 @@ mod tests {
     }
 
     #[test]
-    fn retained_pause_holds_keep_window_cursor_visible_until_resume() {
+    fn retained_pause_holds_keep_stream_cursor_visible_until_resume() {
         let mut clock = RecordingTimeline::default();
         clock.retain_live_audio_pauses();
-        clock.enable_window_cursor(100, 80);
+        clock.enable_stream_cursor(100, 80);
         clock.frame_time_us(1_000_000);
-        clock.record_window_cursor(1_000_000, Some((10.0, 10.0)));
-        clock.record_window_cursor(2_000_000, Some((20.0, 20.0)));
+        clock.record_stream_cursor(1_000_000, Some((10.0, 10.0)));
+        clock.record_stream_cursor(2_000_000, Some((20.0, 20.0)));
         clock.pause(3_000_000);
         clock.resume(5_000_000);
-        clock.record_window_cursor(6_000_000, Some((30.0, 30.0)));
+        clock.record_stream_cursor(6_000_000, Some((30.0, 30.0)));
         clock.finish(7_000_000);
 
         let mut sidecar = PointerSidecar::new(
@@ -676,7 +686,7 @@ mod tests {
                 h: 80,
             },
         );
-        assert!(clock.add_window_cursor_to_sidecar(&mut sidecar, 1_000_000));
+        assert!(clock.add_stream_cursor_to_sidecar(&mut sidecar, 1_000_000));
         assert!(clock.rebase(&mut sidecar));
 
         assert!(sidecar
@@ -689,32 +699,32 @@ mod tests {
     }
 
     #[test]
-    fn window_cursor_click_positions_bracket_nearby_samples_and_reset_on_reentry() {
+    fn stream_cursor_click_positions_bracket_nearby_samples_and_reset_on_reentry() {
         let mut clock = RecordingTimeline::default();
-        clock.enable_window_cursor(100, 80);
-        clock.record_window_cursor(1_000_000, Some((10.0, 10.0)));
-        clock.record_window_cursor(1_016_000, Some((20.0, 20.0)));
-        clock.record_window_cursor(1_032_000, None);
-        clock.record_window_cursor(1_040_000, Some((30.0, 30.0)));
-        clock.record_window_cursor(2_000_000, None);
+        clock.enable_stream_cursor(100, 80);
+        clock.record_stream_cursor(1_000_000, Some((10.0, 10.0)));
+        clock.record_stream_cursor(1_016_000, Some((20.0, 20.0)));
+        clock.record_stream_cursor(1_032_000, None);
+        clock.record_stream_cursor(1_040_000, Some((30.0, 30.0)));
+        clock.record_stream_cursor(2_000_000, None);
 
         assert_eq!(
-            clock.window_cursor_positions_at(1_008_000),
+            clock.stream_cursor_positions_at(1_008_000),
             vec![(10.0, 10.0, 1_000_000), (20.0, 20.0, 1_016_000)]
         );
-        assert!(clock.window_cursor_positions_at(1_035_000).is_empty());
+        assert!(clock.stream_cursor_positions_at(1_035_000).is_empty());
         assert_eq!(
-            clock.window_cursor_positions_at(1_040_000),
+            clock.stream_cursor_positions_at(1_040_000),
             vec![(30.0, 30.0, 1_040_000)]
         );
     }
 
     #[test]
-    fn recording_end_bounds_the_final_window_cursor_visibility_interval() {
+    fn recording_end_bounds_the_final_stream_cursor_visibility_interval() {
         let mut clock = RecordingTimeline::default();
-        clock.enable_window_cursor(100, 80);
+        clock.enable_stream_cursor(100, 80);
         clock.frame_time_us(1_000_000);
-        clock.record_window_cursor(1_000_000, Some((10.0, 10.0)));
+        clock.record_stream_cursor(1_000_000, Some((10.0, 10.0)));
         clock.finish(2_000_000);
 
         let mut sidecar = PointerSidecar::new(
@@ -726,7 +736,7 @@ mod tests {
                 h: 80,
             },
         );
-        assert!(clock.add_window_cursor_to_sidecar(&mut sidecar, 1_000_000));
+        assert!(clock.add_stream_cursor_to_sidecar(&mut sidecar, 1_000_000));
         assert!(clock.rebase(&mut sidecar));
 
         assert_eq!(
@@ -745,16 +755,16 @@ mod tests {
     }
 
     #[test]
-    fn window_cursor_pause_rebase_preserves_visibility_on_both_sides_of_resume() {
+    fn stream_cursor_pause_rebase_preserves_visibility_on_both_sides_of_resume() {
         let mut clock = RecordingTimeline::default();
         clock.retain_live_audio_pauses();
-        clock.enable_window_cursor(100, 80);
+        clock.enable_stream_cursor(100, 80);
         clock.frame_time_us(1_000_000);
-        clock.record_window_cursor(1_000_000, Some((10.0, 10.0)));
-        clock.record_window_cursor(2_000_000, Some((20.0, 20.0)));
+        clock.record_stream_cursor(1_000_000, Some((10.0, 10.0)));
+        clock.record_stream_cursor(2_000_000, Some((20.0, 20.0)));
         clock.pause(3_000_000);
         clock.resume(5_000_000);
-        clock.record_window_cursor(6_000_000, Some((30.0, 30.0)));
+        clock.record_stream_cursor(6_000_000, Some((30.0, 30.0)));
         clock.finish(7_000_000);
 
         let mut sidecar = PointerSidecar::new(
@@ -766,7 +776,7 @@ mod tests {
                 h: 80,
             },
         );
-        assert!(clock.add_window_cursor_to_sidecar(&mut sidecar, 1_000_000));
+        assert!(clock.add_stream_cursor_to_sidecar(&mut sidecar, 1_000_000));
         assert!(clock.rebase(&mut sidecar));
 
         assert_eq!(
@@ -788,13 +798,13 @@ mod tests {
     }
 
     #[test]
-    fn window_cursor_compaction_keeps_the_full_recording_end_after_133_seconds() {
+    fn stream_cursor_compaction_keeps_the_full_recording_end_after_133_seconds() {
         let origin_us = 1_000_000;
         let mut clock = RecordingTimeline::default();
-        clock.enable_window_cursor(100, 80);
+        clock.enable_stream_cursor(100, 80);
         clock.frame_time_us(origin_us);
         for index in 0..10_000 {
-            clock.record_window_cursor(
+            clock.record_stream_cursor(
                 origin_us + index * 16_667,
                 Some((index as f64, (index % 80) as f64)),
             );
@@ -809,13 +819,51 @@ mod tests {
                 h: 80,
             },
         );
-        assert!(clock.add_window_cursor_to_sidecar(&mut sidecar, origin_us));
+        assert!(clock.add_stream_cursor_to_sidecar(&mut sidecar, origin_us));
         assert_eq!(sidecar.pointer.len(), 10_000);
         sidecar.compact_samples();
 
         assert!(sidecar.pointer.len() <= MAX_POINTER_SAMPLES);
         assert_eq!(sidecar.pointer.first().unwrap().x, 0.0);
         assert_eq!(sidecar.pointer.last().unwrap().x, 9_999.0);
+    }
+
+    #[test]
+    fn monitor_stream_cursor_writes_a_full_frame_sidecar_without_clicks() {
+        let mut clock = RecordingTimeline::default();
+        clock.frame_time_us(1_000_000);
+        clock.enable_stream_cursor(1920, 1080);
+        clock.record_stream_cursor(1_000_000, Some((100.0, 200.0)));
+        clock.record_stream_cursor(1_500_000, None);
+        clock.record_stream_cursor(2_000_000, Some((300.0, 400.0)));
+        clock.finish(3_000_000);
+
+        let mut sidecar = PointerSidecar::new(
+            1_000_000,
+            CaptureRegion::from_capture(None, None, None, None),
+        );
+        assert!(clock.add_stream_cursor_to_sidecar(&mut sidecar, 1_000_000));
+        assert_eq!(
+            sidecar.region,
+            CaptureRegion {
+                x: 0,
+                y: 0,
+                w: 1920,
+                h: 1080,
+            }
+        );
+        assert_eq!(sidecar.source, PointerDataSource::WindowMetadata);
+        assert!(sidecar.clicks.is_empty());
+        assert!(sidecar.presses.is_empty());
+
+        assert!(clock.rebase(&mut sidecar));
+        assert_eq!(sidecar.pointer.len(), 2);
+        assert_eq!((sidecar.pointer[0].x, sidecar.pointer[0].y), (100.0, 200.0));
+        assert_eq!((sidecar.pointer[1].x, sidecar.pointer[1].y), (300.0, 400.0));
+        assert_eq!(
+            sidecar.pointer[1].t, 1.0,
+            "monitor cursor times follow the media clock"
+        );
     }
 
     #[test]
