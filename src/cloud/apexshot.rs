@@ -6,7 +6,7 @@ use crate::config::{resolve_cloud_backend_url, AppConfig};
 
 #[allow(unused_imports)]
 pub(crate) use super::auth::{refresh_access_token, RefreshError};
-use super::upload::{guess_content_type, UploadError, UploadResult};
+use super::upload::{guess_content_type, CloudLimit, CloudLimitKind, UploadError, UploadResult};
 
 #[derive(Debug, Deserialize)]
 struct CreateUploadResponse {
@@ -44,6 +44,62 @@ struct ApiErrorResponse {
     error: String,
     #[serde(default)]
     code: Option<String>,
+    #[serde(default)]
+    limit: Option<String>,
+    #[serde(default)]
+    used: Option<u64>,
+    #[serde(default)]
+    max: Option<u64>,
+    #[serde(default)]
+    resets_at: Option<String>,
+    #[serde(default)]
+    used_bytes: Option<u64>,
+    #[serde(default)]
+    max_bytes: Option<u64>,
+}
+
+/// The server's structured limit fields, with a text fallback for older
+/// services that only sent `{"error": "..."}`.
+fn cloud_limit_from_body(body: &ApiErrorResponse) -> CloudLimit {
+    let message = body.error.trim().to_string();
+    let limit = body
+        .limit
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_ascii_lowercase);
+    let kind = match limit.as_deref() {
+        Some("monthly_uploads") => CloudLimitKind::MonthlyUploads,
+        Some("storage") => CloudLimitKind::Storage,
+        Some(_) => CloudLimitKind::Other,
+        None => infer_limit_kind(&message),
+    };
+
+    let (used, max) = match kind {
+        CloudLimitKind::Storage => (body.used_bytes.or(body.used), body.max_bytes.or(body.max)),
+        _ => (body.used, body.max),
+    };
+
+    CloudLimit {
+        kind,
+        message,
+        used,
+        max,
+        resets_at: (kind == CloudLimitKind::MonthlyUploads)
+            .then(|| body.resets_at.clone())
+            .flatten(),
+    }
+}
+
+fn infer_limit_kind(message: &str) -> CloudLimitKind {
+    let lower = message.to_ascii_lowercase();
+    if lower.contains("per month") {
+        CloudLimitKind::MonthlyUploads
+    } else if lower.contains("storage") {
+        CloudLimitKind::Storage
+    } else {
+        CloudLimitKind::Other
+    }
 }
 
 pub(crate) fn is_configured(config: &AppConfig) -> bool {
@@ -177,17 +233,17 @@ fn map_upload_http_error(error: ureq::Error) -> UploadError {
             match detail {
                 Some(body) => {
                     let message = body.error.trim();
-                    let detail = format!("HTTP {code}: {message}");
                     if body.code.as_deref() == Some("client_update_required") {
                         return UploadError::Server(message.to_string());
                     }
-                    if code == 400
-                        && (body.code.as_deref() == Some("upgrade_required")
-                            || message.to_ascii_lowercase().contains("upgrade to pro"))
-                    {
-                        UploadError::UpgradeRequired(detail)
+                    let limit_code = body.code.as_deref() == Some("storage_full")
+                        || (code == 400 && body.code.as_deref() == Some("upgrade_required"));
+                    let legacy_limit_text =
+                        code == 400 && message.to_ascii_lowercase().contains("upgrade to pro");
+                    if limit_code || legacy_limit_text {
+                        UploadError::UpgradeRequired(cloud_limit_from_body(&body))
                     } else {
-                        UploadError::HttpRequest(detail)
+                        UploadError::HttpRequest(format!("HTTP {code}: {message}"))
                     }
                 }
                 None => UploadError::HttpRequest(format!("HTTP {code}")),
@@ -479,16 +535,19 @@ mod tests {
     }
 
     #[test]
-    fn surfaces_cloud_quota_error_message() {
+    fn maps_a_legacy_monthly_quota_body_to_a_monthly_limit() {
         let error = map_upload_http_error(make_status_error(
             400,
             r#"{"error":"Free plan uploads are limited to 20 files per month. Upgrade to Pro to remove the monthly cap."}"#,
         ));
 
-        assert_eq!(
-            error.to_string(),
-            "Upload request failed: HTTP 400: Free plan uploads are limited to 20 files per month. Upgrade to Pro to remove the monthly cap."
-        );
+        let UploadError::UpgradeRequired(limit) = error else {
+            panic!("expected a limit error");
+        };
+        assert_eq!(limit.kind, CloudLimitKind::MonthlyUploads);
+        assert_eq!(limit.used, None);
+        assert_eq!(limit.max, None);
+        assert!(limit.message.contains("20 files per month"));
     }
 
     #[test]
@@ -505,10 +564,46 @@ mod tests {
     fn identifies_structured_upgrade_response() {
         let error = map_upload_http_error(make_status_error(
             400,
-            r#"{"error":"Monthly upload limit reached","code":"upgrade_required"}"#,
+            r#"{"error":"Monthly upload limit reached","code":"upgrade_required","limit":"monthly_uploads","used":20,"max":20,"resets_at":"2026-12-01T00:00:00Z"}"#,
         ));
 
-        assert!(matches!(error, UploadError::UpgradeRequired(_)));
+        let UploadError::UpgradeRequired(limit) = error else {
+            panic!("expected a limit error");
+        };
+        assert_eq!(limit.kind, CloudLimitKind::MonthlyUploads);
+        assert_eq!(limit.used, Some(20));
+        assert_eq!(limit.max, Some(20));
+        assert_eq!(limit.resets_at.as_deref(), Some("2026-12-01T00:00:00Z"));
+    }
+
+    #[test]
+    fn identifies_a_structured_storage_error() {
+        let error = map_upload_http_error(make_status_error(
+            400,
+            r#"{"error":"Free storage is full","code":"upgrade_required","limit":"storage","used_bytes":2147483648,"max_bytes":2147483648}"#,
+        ));
+
+        let UploadError::UpgradeRequired(limit) = error else {
+            panic!("expected a limit error");
+        };
+        assert_eq!(limit.kind, CloudLimitKind::Storage);
+        assert_eq!(limit.used, Some(2_147_483_648));
+        assert_eq!(limit.max, Some(2_147_483_648));
+        assert_eq!(limit.resets_at, None);
+    }
+
+    #[test]
+    fn treats_storage_full_as_a_storage_limit() {
+        let error = map_upload_http_error(make_status_error(
+            400,
+            r#"{"error":"Storage full","code":"storage_full","limit":"storage","used_bytes":2147483648,"max_bytes":2147483648}"#,
+        ));
+
+        let UploadError::UpgradeRequired(limit) = error else {
+            panic!("expected a limit error");
+        };
+        assert_eq!(limit.kind, CloudLimitKind::Storage);
+        assert_eq!(limit.used, Some(2_147_483_648));
     }
 
     #[test]
@@ -518,7 +613,12 @@ mod tests {
             r#"{"error":"Free plan storage is limited to 2 GB total. Delete files or upgrade to Pro to upload more."}"#,
         ));
 
-        assert!(matches!(error, UploadError::UpgradeRequired(_)));
+        let UploadError::UpgradeRequired(limit) = error else {
+            panic!("expected a limit error");
+        };
+        assert_eq!(limit.kind, CloudLimitKind::Storage);
+        assert_eq!(limit.used, None);
+        assert_eq!(limit.max, None);
     }
 
     #[test]

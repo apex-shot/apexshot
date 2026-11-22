@@ -47,6 +47,20 @@ fn main() {
         }
     }
 
+    // A Cloud limit is another argument mode of this binary: the upload helper
+    // cannot draw the card itself, so it starts this one and leaves.
+    if let Some((limit, almost)) =
+        app::cloud::helper::cloud_limit_from_args(std::env::args_os().skip(1))
+    {
+        match app::cloud::upgrade::show_standalone(limit, almost) {
+            Ok(()) => std::process::exit(0),
+            Err(error) => {
+                eprintln!("Failed to open the Cloud limit card: {error}");
+                std::process::exit(1);
+            }
+        }
+    }
+
     // The capture shell has no Cloud transport of its own; it runs this
     // binary in helper mode to upload a finished capture.
     if let Some(command) = app::cloud::helper::command_from_args(std::env::args_os().skip(1)) {

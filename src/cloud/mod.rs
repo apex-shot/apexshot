@@ -2,6 +2,7 @@ pub mod account;
 pub mod apexshot;
 pub mod auth;
 pub mod destination;
+pub mod limit_prompt;
 pub mod listing;
 pub mod upgrade;
 pub mod upload;

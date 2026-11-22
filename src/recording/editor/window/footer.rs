@@ -276,8 +276,11 @@ fn wire_upload_button(
 
         // Export with current editor settings first, then upload the result.
         let cancellation_worker = export_cancellation.clone();
-        let (sender, receiver) =
-            std::sync::mpsc::channel::<(Result<String, crate::cloud::upload::UploadError>, bool)>();
+        let (sender, receiver) = std::sync::mpsc::channel::<(
+            Result<String, crate::cloud::upload::UploadError>,
+            bool,
+            Option<crate::cloud::limit_prompt::UploadHeadsUp>,
+        )>();
         std::thread::spawn(move || {
             let mut rendered = false;
             let result = (|| {
@@ -327,7 +330,12 @@ fn wire_upload_button(
                 }
                 crate::cloud::upload::upload_file(&config, &path).map(|result| result.share_url)
             })();
-            let _ = sender.send((result, rendered));
+            let heads_up = if result.is_ok() {
+                crate::cloud::limit_prompt::usage_heads_up(&config)
+            } else {
+                None
+            };
+            let _ = sender.send((result, rendered, heads_up));
         });
 
         let controls = controls.clone();
@@ -337,7 +345,7 @@ fn wire_upload_button(
         let export_cancellation = export_cancellation.clone();
         glib::timeout_add_local(Duration::from_millis(100), move || {
             match receiver.try_recv() {
-                Ok((result, rendered)) => {
+                Ok((result, rendered, heads_up)) => {
                     exporting.set(false);
                     spinner.stop();
                     spinner.set_visible(false);
@@ -370,22 +378,35 @@ fn wire_upload_button(
                                         body = format!("{body}\n\n{text}");
                                     }
                                 }
+                                if let Some(heads_up) = &heads_up {
+                                    body = heads_up.append_to(&body);
+                                }
+                                crate::utils::notify::desktop_notification(
+                                    &t("Upload complete"),
+                                    &body,
+                                );
+                                if let Some(heads_up) = &heads_up {
+                                    for limit in &heads_up.cards {
+                                        crate::cloud::upgrade::show_prompt_almost(&window, limit);
+                                    }
+                                }
+                            }
+                            None => {
+                                let mut body = tfmt("Share link: {url}", &[("url", &share_url)]);
+                                if let Some(heads_up) = &heads_up {
+                                    body = heads_up.append_to(&body);
+                                }
                                 crate::utils::notify::desktop_notification(
                                     &t("Upload complete"),
                                     &body,
                                 );
                             }
-                            None => crate::utils::notify::desktop_notification(
-                                &t("Upload complete"),
-                                &tfmt("Share link: {url}", &[("url", &share_url)]),
-                            ),
                         },
                         Err(err) => {
-                            if let crate::cloud::upload::UploadError::UpgradeRequired(message) =
-                                &err
+                            if let crate::cloud::upload::UploadError::UpgradeRequired(limit) = &err
                             {
                                 if let Some(window) = window.upgrade() {
-                                    crate::cloud::upgrade::show_prompt(&window, message);
+                                    crate::cloud::upgrade::show_prompt(&window, limit);
                                 }
                             } else {
                                 crate::utils::notify::desktop_notification(

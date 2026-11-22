@@ -118,8 +118,14 @@ enum UploadPhase {
 }
 
 enum UploadEvent {
-    Progress { sent: u64, total: u64 },
-    Done(Result<String, crate::cloud::upload::UploadError>),
+    Progress {
+        sent: u64,
+        total: u64,
+    },
+    Done {
+        result: Result<String, crate::cloud::upload::UploadError>,
+        heads_up: Option<crate::cloud::limit_prompt::UploadHeadsUp>,
+    },
 }
 
 /// The export screen widgets the upload flow rewrites, cloned for its poll.
@@ -194,7 +200,12 @@ impl UploadUi {
         self.show_progress(0, total);
     }
 
-    fn show_complete(&self, phase: &Rc<Cell<UploadPhase>>, url: String) {
+    fn show_complete(
+        &self,
+        phase: &Rc<Cell<UploadPhase>>,
+        url: String,
+        heads_up: Option<&crate::cloud::limit_prompt::UploadHeadsUp>,
+    ) {
         phase.set(UploadPhase::Complete);
         *self.share_url.borrow_mut() = Some(url.clone());
         self.title.set_text(&t("Upload complete"));
@@ -212,18 +223,22 @@ impl UploadUi {
                 detail.set_text(&t("Link copied to clipboard"));
             })
         });
-        let detail_text = if copied_now {
+        let mut detail_text = if copied_now {
             t("Link copied to clipboard")
         } else {
             t("The link will be copied when you return to this window")
         };
+        if let Some(heads_up) = heads_up {
+            detail_text = heads_up.append_to(&detail_text);
+        }
         self.detail.set_text(&detail_text);
 
         if !self.window_is_active() {
-            crate::utils::notify::desktop_notification(
-                &t("Upload complete"),
-                &t("Switch back to the editor to copy the link"),
-            );
+            let mut body = t("Switch back to the editor to copy the link");
+            if let Some(heads_up) = heads_up {
+                body = heads_up.append_to(&body);
+            }
+            crate::utils::notify::desktop_notification(&t("Upload complete"), &body);
         }
 
         self.upload.set_label(&t("Copy link"));
@@ -919,7 +934,7 @@ fn start_upload(ui: &UploadUi, phase: &Rc<Cell<UploadPhase>>) {
         move || {
             let progress_sender = sender.clone();
             let last_percent = Cell::new(None::<u32>);
-            let result = crate::cloud::upload::upload_file_with_progress(
+            let outcome = crate::cloud::upload::upload_file_with_progress_and_heads_up(
                 &config,
                 &path,
                 &move |sent, total| {
@@ -929,9 +944,11 @@ fn start_upload(ui: &UploadUi, phase: &Rc<Cell<UploadPhase>>) {
                         let _ = progress_sender.send(UploadEvent::Progress { sent, total });
                     }
                 },
-            )
-            .map(|result| result.share_url);
-            let _ = sender.send(UploadEvent::Done(result));
+            );
+            let _ = sender.send(UploadEvent::Done {
+                result: outcome.result.map(|result| result.share_url),
+                heads_up: outcome.heads_up,
+            });
         }
     });
 
@@ -944,8 +961,8 @@ fn start_upload(ui: &UploadUi, phase: &Rc<Cell<UploadPhase>>) {
         loop {
             match receiver.try_recv() {
                 Ok(UploadEvent::Progress { sent, total }) => latest = Some((sent, total)),
-                Ok(UploadEvent::Done(result)) => {
-                    done = Some(result);
+                Ok(UploadEvent::Done { result, heads_up }) => {
+                    done = Some((result, heads_up));
                     break;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => break,
@@ -960,14 +977,23 @@ fn start_upload(ui: &UploadUi, phase: &Rc<Cell<UploadPhase>>) {
             ui.show_progress(sent, total);
         }
 
-        if let Some(result) = done {
+        if let Some((result, heads_up)) = done {
             match result {
-                Ok(url) => ui.show_complete(&phase, url),
-                Err(crate::cloud::upload::UploadError::UpgradeRequired(message)) => {
+                Ok(url) => {
+                    ui.show_complete(&phase, url, heads_up.as_ref());
+                    if let Some(window) = ui.window() {
+                        if let Some(heads_up) = &heads_up {
+                            for limit in &heads_up.cards {
+                                crate::cloud::upgrade::show_prompt_almost(&window, limit);
+                            }
+                        }
+                    }
+                }
+                Err(crate::cloud::upload::UploadError::UpgradeRequired(limit)) => {
                     phase.set(UploadPhase::Ready);
                     ui.show_complete_state();
                     if let Some(window) = ui.window() {
-                        crate::cloud::upgrade::show_prompt(&window, &message);
+                        crate::cloud::upgrade::show_prompt(&window, &limit);
                     }
                 }
                 Err(err) => {
