@@ -8,6 +8,25 @@ fn main() {
     app::platform::prepare_process();
     app::i18n::init_from_config();
 
+    // The tray shell starts this once per run. The shared decision keeps a
+    // fresh install quiet and shows an upgrade's highlights once.
+    if std::env::args().nth(1).as_deref() == Some("--whats-new") {
+        // `--force` comes from the tray's menu item and always opens the
+        // window; without it this is the once-per-upgrade startup check.
+        let result = if std::env::args().any(|argument| argument == "--force") {
+            app::whats_new_window::show_latest()
+        } else {
+            app::whats_new_window::show_on_startup()
+        };
+        match result {
+            Ok(()) => std::process::exit(0),
+            Err(error) => {
+                eprintln!("Failed to open the What's new window: {error}");
+                std::process::exit(1);
+            }
+        }
+    }
+
     // The Studio page hands a purchased or recovered licence back through an
     // `apexshot://` link. Activate it and leave without opening Settings.
     if let Some(url) = std::env::args()
@@ -53,6 +72,12 @@ fn main() {
                 std::process::exit(1);
             }
         }
+
+        // The shell starts after setup on this platform, so the first shell
+        // run would otherwise treat a fresh install as an upgrade and show the
+        // release highlights. Recording the version keeps a new install quiet;
+        // an upgrade never runs this path.
+        app::whats_new::write_last_seen(env!("CARGO_PKG_VERSION"));
 
         // Publish the finished setup to the C++ shell before it starts, so
         // auto-upload and the rest of the mirror are current from the first

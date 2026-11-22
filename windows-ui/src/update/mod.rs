@@ -15,7 +15,7 @@
 mod check;
 mod download;
 pub mod open_windows;
-mod window;
+pub(crate) mod window;
 
 pub use check::{cached_release, check, check_and_show, prompt_is_snoozed, snooze};
 

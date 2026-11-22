@@ -469,6 +469,35 @@ void startUpdateCheck()
                  .arg(started));
 }
 
+/// Release highlights belong to the settings binary, which owns their state
+/// file and decides whether this start is the one that shows them. The shell
+/// only starts it, after the update check has had its turn.
+void startWhatsNewCheck()
+{
+    const QString executable = settingsExecutable();
+    if (executable.isEmpty()) {
+        debugLog(QStringLiteral("whats new: no settings executable"));
+        return;
+    }
+    const bool started =
+        QProcess::startDetached(executable, {QStringLiteral("--whats-new")});
+    debugLog(QStringLiteral("whats new: %1 started=%2")
+                 .arg(QDir::toNativeSeparators(executable))
+                 .arg(started));
+}
+
+/// The tray's What's new item reopens the current release's highlights.
+void openWhatsNewWindow()
+{
+    const QString executable = settingsExecutable();
+    if (executable.isEmpty()) {
+        debugLog(QStringLiteral("whats new: no settings executable"));
+        return;
+    }
+    QProcess::startDetached(executable,
+                            {QStringLiteral("--whats-new"), QStringLiteral("--force")});
+}
+
 void openImageEditorWindow(const QString& path = QString())
 {
     QString executable = qEnvironmentVariable("APEXSHOT_IMAGE_EDITOR");
@@ -4399,6 +4428,7 @@ int run(QApplication& app)
     menu->addSeparator();
     QAction* videoEditorAction = menu->addAction(QStringLiteral("Video Editor..."));
     QAction* historyAction = menu->addAction(QStringLiteral("History..."));
+    QAction* whatsNewAction = menu->addAction(QStringLiteral("What's new"));
     QAction* settingsAction = menu->addAction(QStringLiteral("Settings..."));
     menu->addSeparator();
     QAction* quit = menu->addAction(QStringLiteral("Quit"));
@@ -4414,8 +4444,15 @@ int run(QApplication& app)
     QObject::connect(updateTimer, &QTimer::timeout, &app, [] { startUpdateCheck(); });
     updateTimer->start();
 
+    // The update prompt goes first, so a start that offers a release does not
+    // also stack the highlights window on top of it.
+    QTimer::singleShot(15000, &app, [] { startWhatsNewCheck(); });
+
     QObject::connect(settingsAction, &QAction::triggered, shell, [] {
         openSettingsWindow();
+    });
+    QObject::connect(whatsNewAction, &QAction::triggered, shell, [] {
+        openWhatsNewWindow();
     });
     QObject::connect(historyAction, &QAction::triggered, shell, [] {
         openHistoryWindow();

@@ -9,6 +9,7 @@
 //! The daemon keeps hotkeys, tray actions, previews, and recording controls
 //! warm so user-triggered actions avoid repeated process setup work.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -24,6 +25,19 @@ use anyhow::Context;
 
 static LOCAL_ACTION_SENDER: std::sync::Mutex<Option<std::sync::mpsc::Sender<DaemonAction>>> =
     std::sync::Mutex::new(None);
+
+/// Set once this daemon start has asked for the update window. The release
+/// highlights wait for their own short delay and stay out of the way when the
+/// update prompt is already taking the user's attention.
+static UPDATE_WINDOW_OPENED: AtomicBool = AtomicBool::new(false);
+
+fn note_update_window_opened() {
+    UPDATE_WINDOW_OPENED.store(true, Ordering::Relaxed);
+}
+
+fn update_window_opened_this_start() -> bool {
+    UPDATE_WINDOW_OPENED.load(Ordering::Relaxed)
+}
 
 mod audio;
 mod capture_handlers;
@@ -68,6 +82,7 @@ pub enum DaemonAction {
     ShowPreviewForPath(std::path::PathBuf),
     OpenLastCapture,
     OpenHistory,
+    WhatsNew,
     OpenSettings,
     SetTrayVisible(bool),
     RecordingSessionStarted,
@@ -96,6 +111,7 @@ impl From<TrayAction> for DaemonAction {
             TrayAction::ShowLastPreview => Self::ShowLastPreview,
             TrayAction::OpenLastCapture => Self::OpenLastCapture,
             TrayAction::OpenHistory => Self::OpenHistory,
+            TrayAction::WhatsNew => Self::WhatsNew,
             TrayAction::OpenSettings => Self::OpenSettings,
             TrayAction::Quit => Self::Quit,
         }
@@ -526,6 +542,34 @@ pub(super) async fn run_daemon_inner(
     let update_tx = action_tx.clone();
     crate::update::spawn_update_check(move |update| {
         let _ = update_tx.send(DaemonAction::UpdateAvailable(update));
+    });
+
+    // Release highlights are due once per upgrade. The decision is taken now,
+    // after the tray is live; the window itself waits a moment so an update
+    // prompt opened by the same start goes first.
+    std::thread::spawn(|| {
+        let current = env!("CARGO_PKG_VERSION");
+        let last_seen = crate::whats_new::read_last_seen();
+        match crate::whats_new::decide_on_startup(
+            current,
+            last_seen.as_deref(),
+            crate::onboarding::is_onboarding_complete(),
+        ) {
+            crate::whats_new::StartupDecision::Show(_) => {
+                std::thread::sleep(Duration::from_secs(5));
+                if update_window_opened_this_start() {
+                    return;
+                }
+                // Recorded before the window opens, so a crash while showing it
+                // cannot make the same release announce itself again.
+                crate::whats_new::write_last_seen(current);
+                capture_handlers::spawn_whats_new_subprocess();
+            }
+            crate::whats_new::StartupDecision::MarkSeen => {
+                crate::whats_new::write_last_seen(current);
+            }
+            crate::whats_new::StartupDecision::Nothing => {}
+        }
     });
 
     {

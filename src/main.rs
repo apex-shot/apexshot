@@ -159,6 +159,13 @@ fn main() {
             }
             return;
         }
+        "whats-new" => {
+            if let Err(error) = apexshot::whats_new_window::show_latest() {
+                eprintln!("Failed to open the What's new window: {error}");
+                std::process::exit(1);
+            }
+            return;
+        }
         "history-internal" => {
             if let Err(e) = apexshot::history::show_history_window() {
                 eprintln!("Failed to open history window: {e}");
@@ -737,6 +744,7 @@ pub(crate) fn print_usage() {
     println!("  install           Install local binary and set up autostart");
     println!("  update            Update ApexShot to the latest published release");
     println!("  update-window     Open the standalone update window (--force ignores snooze)");
+    println!("  whats-new         Open the latest release's highlights");
     println!("  --version / -V    Print version");
     println!("  uninstall         Remove local install, autostart, and native host manifests");
     println!();

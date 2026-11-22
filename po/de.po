@@ -5291,3 +5291,12 @@ msgstr "Kamera-Freisteller"
 
 msgid "Cut yourself out of the camera and set yourself on the screen."
 msgstr "Stelle dich aus dem Kamerabild frei und platziere dich auf dem Bildschirm."
+
+msgid "See Studio"
+msgstr "Studio ansehen"
+
+msgid "What's new"
+msgstr "Neuigkeiten"
+
+msgid "What's new in ApexShot {version}"
+msgstr "Neu in ApexShot {version}"
