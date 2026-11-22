@@ -5281,3 +5281,12 @@ msgstr "Recorte da câmera"
 
 msgid "Cut yourself out of the camera and set yourself on the screen."
 msgstr "Recorte você mesmo da câmera e coloque-se sobre a tela."
+
+msgid "See Studio"
+msgstr "Ver o Studio"
+
+msgid "What's new"
+msgstr "Novidades"
+
+msgid "What's new in ApexShot {version}"
+msgstr "Novidades do ApexShot {version}"

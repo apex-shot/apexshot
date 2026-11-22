@@ -5301,3 +5301,12 @@ msgstr "Détourage de la caméra"
 
 msgid "Cut yourself out of the camera and set yourself on the screen."
 msgstr "Détourez-vous de la caméra et placez-vous sur l’écran."
+
+msgid "See Studio"
+msgstr "Voir Studio"
+
+msgid "What's new"
+msgstr "Nouveautés"
+
+msgid "What's new in ApexShot {version}"
+msgstr "Nouveautés d'ApexShot {version}"

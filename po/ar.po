@@ -5214,3 +5214,12 @@ msgstr "قصّ الكاميرا"
 
 msgid "Cut yourself out of the camera and set yourself on the screen."
 msgstr "اقتطع نفسك من الكاميرا وضع نفسك على الشاشة."
+
+msgid "See Studio"
+msgstr "عرض Studio"
+
+msgid "What's new"
+msgstr "ما الجديد"
+
+msgid "What's new in ApexShot {version}"
+msgstr "ما الجديد في ApexShot {version}"
