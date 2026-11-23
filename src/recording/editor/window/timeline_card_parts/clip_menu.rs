@@ -18,11 +18,10 @@ impl ClipMenuTarget {
     }
 }
 
-/// One row in the menu. `danger` paints the row red, which is how Delete reads.
+/// One row in the menu. Every row, Delete included, is drawn the same way.
 struct MenuItem {
     icon: &'static str,
     label: String,
-    danger: bool,
     action: Rc<dyn Fn()>,
 }
 
@@ -78,7 +77,6 @@ pub fn show_clip_menu(
                     "audio-volume-muted-symbolic"
                 },
                 label: if muted_now { t("Unmute") } else { t("Mute") },
-                danger: false,
                 action: {
                     let state = state.clone();
                     let on_change = on_change.clone();
@@ -98,7 +96,6 @@ pub fn show_clip_menu(
         items.push(MenuItem {
             icon: icon_names::custom::USER_TRASH_SYMBOLIC,
             label: t("Delete"),
-            danger: true,
             action: {
                 let state = state.clone();
                 let on_change = on_change.clone();
@@ -118,7 +115,6 @@ pub fn show_clip_menu(
             MenuItem {
                 icon: icon_names::shipped::COPY_ARROW_RIGHT_REGULAR,
                 label: t("Duplicate"),
-                danger: false,
                 action: {
                     let state = state.clone();
                     let on_change = on_change.clone();
@@ -135,7 +131,6 @@ pub fn show_clip_menu(
             MenuItem {
                 icon: icon_names::shipped::COPY_REGULAR,
                 label: t("Copy"),
-                danger: false,
                 action: {
                     let state = state.clone();
                     let on_change = on_change.clone();
@@ -154,7 +149,6 @@ pub fn show_clip_menu(
             MenuItem {
                 icon: icon_names::shipped::CUT_REGULAR,
                 label: t("Cut"),
-                danger: false,
                 action: {
                     let state = state.clone();
                     let on_change = on_change.clone();
@@ -174,7 +168,6 @@ pub fn show_clip_menu(
                     icon_names::shipped::EYE_OFF_REGULAR
                 },
                 label: if hidden_now { t("Show") } else { t("Hide") },
-                danger: false,
                 action: {
                     let state = state.clone();
                     let on_change = on_change.clone();
@@ -190,7 +183,6 @@ pub fn show_clip_menu(
             MenuItem {
                 icon: icon_names::custom::USER_TRASH_SYMBOLIC,
                 label: t("Delete"),
-                danger: true,
                 action: {
                     let state = state.clone();
                     let on_change = on_change.clone();
@@ -217,7 +209,6 @@ pub fn show_clip_menu(
             MenuItem {
                 icon: icon_names::shipped::CLIPBOARD_PASTE_REGULAR,
                 label: t("Paste"),
-                danger: false,
                 action: Rc::new(move || {
                     state.lock().unwrap().paste_clipboard_at_playhead();
                     on_change();
@@ -226,11 +217,7 @@ pub fn show_clip_menu(
         );
     }
 
-    for (position, item) in items.into_iter().enumerate() {
-        // The reference separates the destructive row from the rest.
-        if item.danger && position > 0 {
-            card.append(&menu_separator());
-        }
+    for item in items {
         card.append(&menu_row(item, &popover));
     }
 
@@ -256,19 +243,9 @@ fn duplicate_start(state: &VideoEditState, index: usize) -> f64 {
         .unwrap_or(0.0)
 }
 
-fn menu_separator() -> GtkBox {
-    let separator = GtkBox::new(Orientation::Vertical, 0);
-    separator.add_css_class("recording-editor-clip-menu-separator");
-    separator.set_size_request(-1, 1);
-    separator
-}
-
 fn menu_row(item: MenuItem, popover: &Popover) -> Button {
     let button = Button::new();
     button.add_css_class("recording-editor-clip-menu-row");
-    if item.danger {
-        button.add_css_class("recording-editor-clip-menu-row-danger");
-    }
     button.set_has_frame(false);
     button.set_focus_on_click(false);
     button.set_size_request(-1, 32);
@@ -342,19 +319,24 @@ mod tests {
     }
 
     #[test]
-    fn a_delete_only_menu_has_no_leading_separator() {
+    fn the_menu_rows_share_one_treatment() {
         let menu = include_str!("clip_menu.rs");
         let source = menu
             .split("#[cfg(test)]")
             .next()
             .expect("the menu's production source");
-        let loop_start = source
-            .find("for (position, item) in items.into_iter().enumerate() {")
-            .expect("the row loop must know each row's position");
-        let rows = &source[loop_start..];
         assert!(
-            rows.contains("if item.danger && position > 0 {"),
-            "a separator must not lead a menu whose only destructive row is first"
+            !source.contains("menu_separator")
+                && !source.contains("recording-editor-clip-menu-separator"),
+            "the menu has no separators: every row is drawn the same way"
+        );
+        assert!(
+            !source.contains("recording-editor-clip-menu-row-danger"),
+            "the destructive row keeps the same ink as every other row"
+        );
+        assert!(
+            source.contains("card.append(&menu_row(item, &popover));"),
+            "every item becomes one row, in order"
         );
     }
 
@@ -367,7 +349,6 @@ mod tests {
                 MenuItem {
                     icon: icon_names::shipped::COPY_REGULAR,
                     label: "Copy".to_string(),
-                    danger: false,
                     action: Rc::new(|| {}),
                 },
                 &popover,
