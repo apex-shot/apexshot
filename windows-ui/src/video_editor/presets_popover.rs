@@ -966,7 +966,9 @@ impl Panel {
 
     fn focus_name(&self) {
         let name = self.name.clone();
-        glib::idle_add_local_once(move || name.grab_focus());
+        glib::idle_add_local_once(move || {
+            name.grab_focus();
+        });
     }
 
     fn clear_form_status(&self) {
@@ -1365,7 +1367,6 @@ fn set_default_video_preset(id: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gtk4::prelude::*;
     use gtk4::{CssProvider, Label, Popover, Widget};
     use std::cell::Cell;
     use std::rc::Rc;
