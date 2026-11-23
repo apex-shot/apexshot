@@ -5458,3 +5458,27 @@ msgstr "Guarda el fondo, el cursor y el sonido de clic de este proyecto y aplíc
 
 msgid "Save this project's background, cursor, camera and captions, then put them on any recording."
 msgstr "Guarda el fondo, el cursor, la cámara y los subtítulos de este proyecto y aplícalos a cualquier grabación."
+
+msgid "ApexShot on X11 desktops"
+msgstr "ApexShot en escritorios X11"
+
+msgid "Cinnamon, Xfce, MATE, and other X11 desktops now get shortcuts, window recordings, scrolling capture, and Auto Zoom."
+msgstr "Cinnamon, Xfce, MATE y otros escritorios X11 ahora tienen atajos, grabación de ventanas, captura con desplazamiento y zoom automático."
+
+msgid "Record on Fedora"
+msgstr "Graba en Fedora"
+
+msgid "Screen recording now works on Fedora. On KDE Plasma, recordings keep an editable cursor, clicks, and Auto Zoom."
+msgstr "La grabación de pantalla ya funciona en Fedora. En KDE Plasma, las grabaciones conservan un cursor editable, los clics y el zoom automático."
+
+msgid "Presets in the video editor"
+msgstr "Preajustes en el editor de vídeo"
+
+msgid "Save a recording's background, cursor, and click sound as a preset, apply it in one click, or make it the default for new recordings."
+msgstr "Guarda el fondo, el cursor y el sonido de clic de una grabación como preajuste, aplícalo con un clic o conviértelo en el predeterminado para las nuevas grabaciones."
+
+msgid "Hide the cursor with one switch"
+msgstr "Oculta el cursor con un interruptor"
+
+msgid "Turn on Hide cursor in the Cursor panel to take the cursor out of the whole video."
+msgstr "Activa «Ocultar el cursor» en el panel «Cursor» para quitar el cursor de todo el vídeo."

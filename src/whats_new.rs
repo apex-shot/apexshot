@@ -19,6 +19,32 @@ pub struct Highlight {
     /// True when the highlight only matters to someone without Studio, such as
     /// the free trial or how to buy it; Studio owners never see it.
     pub without_studio_only: bool,
+    /// The builds the highlight describes; the other build never shows it.
+    pub platform: Platform,
+}
+
+/// Which build a highlight belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Platform {
+    /// Both the Linux and the Windows build.
+    All,
+    /// Only the Linux build.
+    Linux,
+    /// Only the Windows build.
+    Windows,
+}
+
+impl Platform {
+    /// The build this binary is.
+    pub const CURRENT: Platform = if cfg!(target_os = "windows") {
+        Platform::Windows
+    } else {
+        Platform::Linux
+    };
+
+    fn includes(self, build: Platform) -> bool {
+        self == Platform::All || self == build
+    }
 }
 
 /// The highlights of one release.
@@ -39,26 +65,62 @@ pub const RELEASES: &[ReleaseNotes] = &[ReleaseNotes {
     subtitle: None,
     highlights: &[
         Highlight {
+            title: "ApexShot on X11 desktops",
+            body: "Cinnamon, Xfce, MATE, and other X11 desktops now get shortcuts, window recordings, scrolling capture, and Auto Zoom.",
+            studio: false,
+            without_studio_only: false,
+            platform: Platform::Linux,
+        },
+        Highlight {
+            title: "Record on Fedora",
+            body: "Screen recording now works on Fedora. On KDE Plasma, recordings keep an editable cursor, clicks, and Auto Zoom.",
+            studio: false,
+            without_studio_only: false,
+            platform: Platform::Linux,
+        },
+        Highlight {
+            title: "Presets in the video editor",
+            body: "Save a recording's background, cursor, and click sound as a preset, apply it in one click, or make it the default for new recordings.",
+            studio: false,
+            without_studio_only: false,
+            platform: Platform::Linux,
+        },
+        Highlight {
+            title: "Hide the cursor with one switch",
+            body: "Turn on Hide cursor in the Cursor panel to take the cursor out of the whole video.",
+            studio: false,
+            without_studio_only: false,
+            platform: Platform::All,
+        },
+        Highlight {
             title: "Try Studio free",
             body: "Your next 3 Studio exports are on us. After each one, ApexShot shows how many are left.",
             studio: true,
             without_studio_only: true,
+            platform: Platform::All,
         },
         Highlight {
             title: "Buying Studio takes one step",
             body: "Choose Studio in ApexShot, sign in, and pay. ApexShot turns Studio on for you, with no licence file to copy or import.",
             studio: false,
             without_studio_only: true,
+            platform: Platform::All,
         },
     ],
 }];
 
-/// The highlights this person should see: Studio owners skip the ones that
-/// only matter before buying.
+/// The highlights this person should see on this build: Studio owners skip
+/// the ones that only matter before buying, and each build skips the other
+/// build's features.
 pub fn visible_highlights(notes: &ReleaseNotes, studio_active: bool) -> Vec<&Highlight> {
+    highlights_for(notes, studio_active, Platform::CURRENT)
+}
+
+fn highlights_for(notes: &ReleaseNotes, studio_active: bool, build: Platform) -> Vec<&Highlight> {
     notes
         .highlights
         .iter()
+        .filter(|highlight| highlight.platform.includes(build))
         .filter(|highlight| !(studio_active && highlight.without_studio_only))
         .collect()
 }
@@ -230,12 +292,19 @@ mod tests {
     }
 
     #[test]
-    fn the_current_release_leads_with_the_free_trial_and_has_no_subtitle() {
+    fn the_current_release_leads_with_free_improvements_and_has_no_subtitle() {
         let notes = notes_for("0.3.1").expect("the current release");
         assert_eq!(notes.subtitle, None);
-        assert_eq!(notes.highlights.len(), 2);
-        assert!(notes.highlights[0].studio);
-        assert!(!notes.highlights[1].studio);
+        // Free improvements come before anything Studio-related.
+        let first_studio = notes
+            .highlights
+            .iter()
+            .position(|h| h.studio || h.without_studio_only)
+            .expect("a Studio highlight");
+        assert!(first_studio > 0);
+        assert!(notes.highlights[first_studio..]
+            .iter()
+            .all(|h| h.studio || h.without_studio_only));
     }
 
     #[test]
@@ -318,18 +387,21 @@ mod tests {
                     body: "b",
                     studio: false,
                     without_studio_only: false,
+                    platform: Platform::All,
                 },
                 Highlight {
                     title: "Trial",
                     body: "b",
                     studio: true,
                     without_studio_only: true,
+                    platform: Platform::All,
                 },
                 Highlight {
                     title: "New Studio tool",
                     body: "b",
                     studio: true,
                     without_studio_only: false,
+                    platform: Platform::All,
                 },
             ],
         };
@@ -344,7 +416,63 @@ mod tests {
     }
 
     #[test]
-    fn the_current_release_has_nothing_for_studio_owners() {
-        assert!(visible_highlights(&RELEASES[0], true).is_empty());
+    fn each_build_skips_the_other_builds_highlights() {
+        const NOTES: ReleaseNotes = ReleaseNotes {
+            version: "9.9.9",
+            subtitle: None,
+            highlights: &[
+                Highlight {
+                    title: "Everywhere",
+                    body: "b",
+                    studio: false,
+                    without_studio_only: false,
+                    platform: Platform::All,
+                },
+                Highlight {
+                    title: "Linux",
+                    body: "b",
+                    studio: false,
+                    without_studio_only: false,
+                    platform: Platform::Linux,
+                },
+                Highlight {
+                    title: "Windows",
+                    body: "b",
+                    studio: false,
+                    without_studio_only: false,
+                    platform: Platform::Windows,
+                },
+            ],
+        };
+        let titles = |build| -> Vec<&str> {
+            highlights_for(&NOTES, false, build)
+                .iter()
+                .map(|h| h.title)
+                .collect()
+        };
+        assert_eq!(titles(Platform::Linux), ["Everywhere", "Linux"]);
+        assert_eq!(titles(Platform::Windows), ["Everywhere", "Windows"]);
+    }
+
+    #[test]
+    fn the_current_release_shows_studio_owners_only_free_improvements() {
+        for build in [Platform::Linux, Platform::Windows] {
+            let owners = highlights_for(&RELEASES[0], true, build);
+            assert!(!owners.is_empty());
+            assert!(owners.iter().all(|h| !h.studio && !h.without_studio_only));
+        }
+        // The X11, Fedora, and presets work is Linux-only.
+        let windows: Vec<&str> = highlights_for(&RELEASES[0], false, Platform::Windows)
+            .iter()
+            .map(|h| h.title)
+            .collect();
+        assert_eq!(
+            windows,
+            [
+                "Hide the cursor with one switch",
+                "Try Studio free",
+                "Buying Studio takes one step"
+            ]
+        );
     }
 }

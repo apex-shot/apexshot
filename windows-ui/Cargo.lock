@@ -31,7 +31,7 @@ checksum = "fb5dfbc6d8d2675589ccbe4d0fd61df2419075625f8c1a62325e718e2b0049f9"
 
 [[package]]
 name = "apexshot-windows-settings"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "async-channel",

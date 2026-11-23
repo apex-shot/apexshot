@@ -44,6 +44,9 @@
   <url type="donation">https://apexshot.org/pricing</url>
   <launchable type="desktop-id">io.github.codegoddy.apexshot.desktop</launchable>
   <releases>
+    <release version="0.3.1" date="2026-11-23">
+      <description><p>ApexShot on X11 desktops such as Cinnamon, with scrolling capture; screen recording on Fedora with cursor, clicks and Auto Zoom on KDE Plasma; look presets and a single Hide cursor switch in the video editor; three free Studio exports and one-step Studio activation; and clearer Cloud limit messages.</p></description>
+    </release>
     <release version="0.3.0" date="2026-11-19">
       <description><p>ApexShot for Windows in beta; redesigned Linux image and video editors with the zoom camera, compact timelines, recording sound and keystroke captions; upload progress and automatic saving in the editors; and a standalone update window.</p></description>
     </release>

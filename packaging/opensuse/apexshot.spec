@@ -1,5 +1,5 @@
 Name:           apexshot
-Version:        0.3.0
+Version:        0.3.1
 Release:        0
 Summary:        Linux screenshot, annotation, OCR, and screen recording tool
 License:        GPL-3.0-or-later
@@ -157,6 +157,14 @@ fi
 %{_datadir}/apexshot/
 
 %changelog
+* Mon Nov 23 2026 codegoddy <codegoddy@gmail.com> - 0.3.1-0
+- ApexShot on X11 desktops such as Cinnamon, Xfce, and MATE, with scrolling capture
+- Screen recording on Fedora, with cursor, clicks, and Auto Zoom on KDE Plasma
+- Look presets in the video editor
+- One Hide cursor switch for the whole video
+- Three free Studio exports and one-step Studio activation
+- Cloud limit cards that name the limit an upload hit
+
 * Thu Nov 19 2026 codegoddy <codegoddy@gmail.com> - 0.3.0-0
 - First Windows build (beta)
 - Redesigned image and video editors with the zoom camera and compact timelines

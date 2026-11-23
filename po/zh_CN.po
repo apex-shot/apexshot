@@ -5348,3 +5348,27 @@ msgstr "保存此项目的背景、光标和点击音效，然后将它们应用
 
 msgid "Save this project's background, cursor, camera and captions, then put them on any recording."
 msgstr "保存此项目的背景、光标、摄像头和字幕，然后将它们应用到任意录制。"
+
+msgid "ApexShot on X11 desktops"
+msgstr "X11 桌面上的 ApexShot"
+
+msgid "Cinnamon, Xfce, MATE, and other X11 desktops now get shortcuts, window recordings, scrolling capture, and Auto Zoom."
+msgstr "Cinnamon、Xfce、MATE 等 X11 桌面现在支持快捷键、窗口录制、滚动截图和自动缩放。"
+
+msgid "Record on Fedora"
+msgstr "在 Fedora 上录制"
+
+msgid "Screen recording now works on Fedora. On KDE Plasma, recordings keep an editable cursor, clicks, and Auto Zoom."
+msgstr "Fedora 现已支持屏幕录制。在 KDE Plasma 上，录制会保留可编辑的光标、点击和自动缩放。"
+
+msgid "Presets in the video editor"
+msgstr "视频编辑器中的预设"
+
+msgid "Save a recording's background, cursor, and click sound as a preset, apply it in one click, or make it the default for new recordings."
+msgstr "将录制的背景、光标和点击音效保存为预设，一键应用，或设为新录制的默认值。"
+
+msgid "Hide the cursor with one switch"
+msgstr "一个开关隐藏光标"
+
+msgid "Turn on Hide cursor in the Cursor panel to take the cursor out of the whole video."
+msgstr "在“光标”面板中打开“隐藏光标”，即可从整个视频中去掉光标。"

@@ -5383,3 +5383,27 @@ msgstr "احفظ خلفية هذا المشروع والمؤشر وصوت الن
 
 msgid "Save this project's background, cursor, camera and captions, then put them on any recording."
 msgstr "احفظ خلفية هذا المشروع والمؤشر والكاميرا والترجمة، ثم طبّقها على أي تسجيل."
+
+msgid "ApexShot on X11 desktops"
+msgstr "ApexShot على أسطح مكتب X11"
+
+msgid "Cinnamon, Xfce, MATE, and other X11 desktops now get shortcuts, window recordings, scrolling capture, and Auto Zoom."
+msgstr "تحصل Cinnamon وXfce وMATE وغيرها من أسطح مكتب X11 الآن على الاختصارات وتسجيل النوافذ والالتقاط مع التمرير والتكبير التلقائي."
+
+msgid "Record on Fedora"
+msgstr "التسجيل على Fedora"
+
+msgid "Screen recording now works on Fedora. On KDE Plasma, recordings keep an editable cursor, clicks, and Auto Zoom."
+msgstr "يعمل تسجيل الشاشة الآن على Fedora. على KDE Plasma، تحتفظ التسجيلات بمؤشر قابل للتحرير والنقرات والتكبير التلقائي."
+
+msgid "Presets in the video editor"
+msgstr "الإعدادات المسبقة في محرر الفيديو"
+
+msgid "Save a recording's background, cursor, and click sound as a preset, apply it in one click, or make it the default for new recordings."
+msgstr "احفظ خلفية التسجيل والمؤشر وصوت النقر كإعداد مسبق، وطبّقه بنقرة واحدة، أو اجعله الافتراضي للتسجيلات الجديدة."
+
+msgid "Hide the cursor with one switch"
+msgstr "إخفاء المؤشر بمفتاح واحد"
+
+msgid "Turn on Hide cursor in the Cursor panel to take the cursor out of the whole video."
+msgstr "فعّل «إخفاء المؤشر» في لوحة «المؤشر» لإزالة المؤشر من الفيديو بأكمله."
