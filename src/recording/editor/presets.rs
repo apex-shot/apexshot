@@ -7,7 +7,7 @@
 //!
 //! The file holds no path, no timestamp and no trim. Applying a preset must
 //! leave the recording it lands on exactly as it was: the trims, the cuts, the
-//! zoom clips, the hidden-cursor clips and the media list stay with the
+//! zoom clips, the Hide cursor switch and the media list stay with the
 //! footage.
 //!
 //! The cursor's enum fields are stored as plain strings rather than as serde
@@ -176,6 +176,9 @@ impl CursorFile {
             loop_position_before_end_ms: self
                 .loop_position_before_end_ms
                 .filter(|value| value.is_finite()),
+            // The whole-edit Hide cursor switch is a choice about one
+            // recording, not part of a look, so a preset never carries it.
+            hidden: false,
         }
         .clamped()
     }
@@ -476,7 +479,7 @@ fn background_for_stage(stage: &PresetStage) -> VideoBackground {
 /// Capture the look of an open edit as a new preset.
 ///
 /// The stage, the cursor's settings and the click sound come across; the
-/// source, the trims, the cuts, the zoom clips, the hidden-cursor clips, the
+/// source, the trims, the cuts, the zoom clips, the Hide cursor switch, the
 /// playhead and the media list stay behind.
 ///
 /// The id is minted here rather than taken from the name: the name is the
@@ -545,14 +548,18 @@ fn generated_id() -> String {
 /// Put a preset's look on an open edit.
 ///
 /// Only the stage, the cursor and the click sound are written. The trims, the
-/// cuts, the zooms, the hidden-cursor clips, the media list and the title stay
+/// cuts, the zooms, the Hide cursor switch, the media list and the title stay
 /// with the recording, so one call is the whole change.
 pub fn apply_to_state(state: &mut VideoEditState, preset: &Preset) {
     let preset = preset.sanitized();
     state.background = background_for_stage(&preset.stage);
     state.background_padding = preset.stage.padding;
     state.background_corner_radius = preset.stage.radius;
+    // The Hide cursor switch belongs to this recording, so a preset's cursor
+    // look lands without turning it on or off.
+    let hidden = state.cursor.hidden;
     state.cursor = preset.cursor.settings();
+    state.cursor.hidden = hidden;
     state.sound.click_sound = preset.click_sound;
     state.sound.click_sound_volume = preset.click_sound_volume;
     // The cursor's shake filter and tail behaviours reach the pointer plan
@@ -893,6 +900,7 @@ mod tests {
             remove_shake_threshold: 45.0,
             stop_movement_in_last_part_ms: 1200.0,
             loop_position_before_end_ms: Some(750.0),
+            hidden: false,
         }
     }
 
@@ -1124,6 +1132,7 @@ mod tests {
     #[test]
     fn applying_a_preset_leaves_every_recording_fact_alone() {
         let mut target = state();
+        target.cursor.hidden = true;
         let before = target.clone();
         let preset = from_state(&before, "Look").unwrap();
         apply_to_state(&mut target, &preset);
@@ -1141,7 +1150,10 @@ mod tests {
         assert_eq!(target.frozen_segment, before.frozen_segment);
         assert_eq!(target.zoom_clips, before.zoom_clips);
         assert_eq!(target.zoom_camera, before.zoom_camera);
-        assert_eq!(target.cursor_hide_clips, before.cursor_hide_clips);
+        assert!(
+            target.cursor.hidden,
+            "the recording's Hide cursor switch survives a preset"
+        );
         assert_eq!(target.playhead_seconds, before.playhead_seconds);
         assert_eq!(target.timeline_scale, before.timeline_scale);
         assert_eq!(
