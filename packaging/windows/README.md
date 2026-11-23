@@ -10,7 +10,7 @@ packages; this is the Windows-only counterpart.
 ## What a run needs
 
 - A Rust toolchain that can link the GTK4 build `pkg-config` finds: the GNU
-  `x86_64-pc-windows-gnu` toolchain with the MSYS2 MINGW64 GTK4 build (what CI
+  `x86_64-pc-windows-gnu` toolchain with the MSYS2 UCRT64 GTK4 build (what CI
   uses), or MSVC with an MSVC-built GTK4 prefix.
 - Qt 5 with `windeployqt`, found from `capture-overlay/build/CMakeCache.txt` or
   `qmake`.
@@ -32,7 +32,7 @@ staging, which is the fast loop while working on the layout.
 
 The `windows` job in `.github/workflows/release.yml` builds this installer on a
 `windows-2022` runner for every `v*` tag. It installs the GTK4 stack from
-MSYS2 MINGW64, the GNU Rust toolchain, Qt 5.15.2 (MSVC 2019 64-bit), Inno Setup,
+MSYS2 UCRT64, the GNU Rust toolchain, Qt 5.15.2 (MSVC 2019 64-bit), Inno Setup,
 and a staged ffmpeg payload, then uploads `ApexShot-<version>-setup.exe` as the
 `windows-installer` artifact. `stage_release` validates that installer with the
 other package artifacts, checksums it, and adds it to the draft release.
@@ -40,7 +40,7 @@ other package artifacts, checksums it, and adds it to the draft release.
 The package is **x86_64 only**:
 
 - The Rust binaries target `x86_64-pc-windows-gnu`; GTK comes from MSYS2
-  `MINGW64`; Qt is `win64_msvc2019_64`; the capture shell is built with
+  `UCRT64`; Qt is `win64_msvc2019_64`; the capture shell is built with
   `vcvars64`; and Inno Setup is restricted to `x64compatible`.
 - 32-bit Windows is not supported: the installer refuses it and the binaries are
   64-bit.

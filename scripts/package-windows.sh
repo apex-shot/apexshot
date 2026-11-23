@@ -17,7 +17,7 @@
 #     etc/            fontconfig
 #
 # Run it from a shell where pkg-config finds GTK4 (an MSYS2 shell with
-# /mingw64 or C:/gtk on PATH) and cmake finds Qt 5; both are the same tools a
+# /ucrt64 or C:/gtk on PATH) and cmake finds Qt 5; both are the same tools a
 # developer build already needs.
 
 set -euo pipefail

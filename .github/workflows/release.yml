@@ -718,20 +718,20 @@ jobs:
           test -f "$qt_dir/bin/windeployqt.exe"
 
       # GTK4, its pkg-config files, the MinGW linker for the GNU Rust build,
-      # and the ffmpeg payload the editors ship. MINGW64 is the only Windows
-      # architecture this package builds for.
+      # and the ffmpeg payload the editors ship. MSYS2 retired the MINGW64
+      # package set, so this uses UCRT64, its supported x86_64 GCC environment.
       - name: Install GTK4 and ffmpeg
         uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW64
+          msystem: UCRT64
           update: false
           path-type: inherit
           install: >-
-            mingw-w64-x86_64-gtk4
-            mingw-w64-x86_64-pkgconf
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-ffmpeg
-            mingw-w64-x86_64-ninja
+            mingw-w64-ucrt-x86_64-gtk4
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-ffmpeg
+            mingw-w64-ucrt-x86_64-ninja
 
       # The MSVC toolchain cannot link against the MinGW GTK import libraries,
       # so the Rust binaries use the GNU target that matches them. The Qt
@@ -752,9 +752,9 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             windows-ui/target/
-          key: windows-release-cargo-${{ hashFiles('windows-ui/Cargo.lock', 'Cargo.lock') }}
+          key: windows-release-cargo-ucrt64-${{ hashFiles('windows-ui/Cargo.lock', 'Cargo.lock') }}
           restore-keys: |
-            windows-release-cargo-
+            windows-release-cargo-ucrt64-
 
       - name: Install Inno Setup
         shell: powershell
@@ -771,16 +771,21 @@ jobs:
         shell: msys2 {0}
         run: |
           set -euo pipefail
+          prefix=${MINGW_PREFIX:?the MSYS2 shell sets MINGW_PREFIX}
           mkdir -p dist/ffmpeg/bin
-          cp /mingw64/bin/ffmpeg.exe /mingw64/bin/ffprobe.exe dist/ffmpeg/bin/
+          cp "$prefix/bin/ffmpeg.exe" "$prefix/bin/ffprobe.exe" dist/ffmpeg/bin/
           for executable in ffmpeg.exe ffprobe.exe; do
-            libraries=$(PATH="/mingw64/bin:$PATH" ldd "/mingw64/bin/$executable" 2>/dev/null |
-              awk '{ for (field = 1; field <= NF; field++) if ($field ~ /^\/mingw64\/bin\//) print $field }')
+            libraries=$(PATH="$prefix/bin:$PATH" ldd "$prefix/bin/$executable" 2>/dev/null |
+              awk -v bin="$prefix/bin/" '{ for (field = 1; field <= NF; field++) if (index($field, bin) == 1) print $field }')
             while IFS= read -r library; do
               [[ -n $library && -f $library ]] && cp "$library" dist/ffmpeg/bin/
             done <<< "$libraries"
           done
-          for license in /mingw64/share/licenses/ffmpeg/*; do
+          test -n "$(ls dist/ffmpeg/bin/*.dll 2>/dev/null)" || {
+            echo "No ffmpeg DLLs were staged from $prefix/bin" >&2
+            exit 1
+          }
+          for license in "$prefix"/share/licenses/ffmpeg/*; do
             if [[ -f $license ]]; then
               cp "$license" dist/ffmpeg/LICENSE.txt
               break
