@@ -5,12 +5,12 @@ use gtk4::{
 };
 use std::path::PathBuf;
 
-/// The width of the image editor's Motion confirm card, which every dialog in
-/// this editor is sized to.
-const DIALOG_CARD_WIDTH: i32 = 360;
+/// The width of the editor's export card, whose visual language every notice
+/// dialog in this editor follows.
+const DIALOG_CARD_WIDTH: i32 = 420;
 
-/// The body width that card wraps its own body to.
-const DIALOG_BODY_CHARS: i32 = 44;
+/// The body width the export card's type ramp comfortably wraps to.
+const DIALOG_BODY_CHARS: i32 = 52;
 
 pub(super) fn popup_on_editor(
     parent: &ApplicationWindow,
@@ -182,19 +182,20 @@ fn find_widget_with_class(root: &impl IsA<gtk4::Widget>, class: &str) -> Option<
 }
 
 pub(super) fn dialog_card() -> (GtkBox, GtkBox) {
-    let root = GtkBox::new(Orientation::Vertical, 12);
+    let root = GtkBox::new(Orientation::Vertical, 10);
     root.add_css_class("recording-editor-dialog-root");
-    // The image editor's Motion confirm card pads 20px 22px 16px; matching
-    // those insets is what makes this card read as the same dialog.
-    root.set_margin_top(20);
-    root.set_margin_bottom(16);
-    root.set_margin_start(22);
-    root.set_margin_end(22);
+    // The editor's export card pads 26px on every side; matching those insets
+    // is what makes this card read as the same dialog.
+    root.set_margin_top(26);
+    root.set_margin_bottom(26);
+    root.set_margin_start(26);
+    root.set_margin_end(26);
     let wrapper = GtkBox::new(Orientation::Vertical, 0);
     wrapper.add_css_class("recording-editor-dialog-bg");
-    // That card is 360px wide. Keep that as this card's floor, not as content
-    // inside its insets: a floor wide enough for the longer card plus one line
-    // of body text is what strung this dialog out into a shallow strip.
+    // The export card is the width this dialog follows. Keep that as this
+    // card's floor, not as content inside its insets: a floor wide enough for
+    // the longer card plus one line of body text is what strung this dialog
+    // out into a shallow strip.
     wrapper.set_size_request(DIALOG_CARD_WIDTH, -1);
     wrapper.set_hexpand(false);
     wrapper.set_halign(Align::Center);
@@ -202,12 +203,12 @@ pub(super) fn dialog_card() -> (GtkBox, GtkBox) {
     (wrapper, root)
 }
 
-/// Keep a dialog body to the width of the image editor's Motion confirm card.
+/// Keep a dialog body to the width of the editor's export card.
 ///
-/// The 44-character cap only holds while the label keeps GTK's default word
+/// The character cap only holds while the label keeps GTK's default word
 /// wrap: asking for `WrapMode::WordChar` makes the label request its whole line
 /// instead, so a body holding a file name stretched the card to twice the
-/// width of the card this dialog is modelled on. The Motion card's body relies
+/// width of the card this dialog is modelled on. The export card's body relies
 /// on the default mode the same way.
 pub(super) fn constrain_dialog_body(body: &Label) {
     body.set_wrap(true);
@@ -235,7 +236,7 @@ pub(super) fn show_success(parent: &ApplicationWindow, path: PathBuf) {
 
     let button_row = GtkBox::new(Orientation::Horizontal, 0);
     button_row.set_hexpand(true);
-    button_row.set_margin_top(8);
+    button_row.set_margin_top(14);
 
     let open_folder = Button::with_label(&t("Open Folder"));
     open_folder.set_has_frame(false);
@@ -279,14 +280,18 @@ pub(super) fn show_manual_zoom_notice(parent: &ApplicationWindow) {
     body.add_css_class("recording-editor-dialog-body");
     body.set_xalign(0.0);
     constrain_dialog_body(&body);
+    let button_row = GtkBox::new(Orientation::Horizontal, 12);
+    button_row.set_halign(Align::End);
+    button_row.set_margin_top(14);
+
     let close = Button::with_label(&t("Got it"));
     close.set_has_frame(false);
     close.add_css_class("recording-editor-primary-button");
-    close.set_halign(Align::End);
+    button_row.append(&close);
 
     root.append(&title);
     root.append(&body);
-    root.append(&close);
+    root.append(&button_row);
 
     let dialog = popup_on_editor(parent, &wrapper);
     close.connect_clicked(move |_| close_editor_popup(&dialog));
@@ -315,7 +320,7 @@ pub(super) fn show_error(
 
     let button_row = GtkBox::new(Orientation::Horizontal, 12);
     button_row.set_halign(Align::End);
-    button_row.set_margin_top(8);
+    button_row.set_margin_top(14);
 
     let close = Button::with_label(&t("Close"));
     close.set_has_frame(false);
@@ -348,7 +353,7 @@ pub(super) fn show_export_in_progress_close(
 
     let button_row = GtkBox::new(Orientation::Horizontal, 12);
     button_row.set_halign(Align::End);
-    button_row.set_margin_top(8);
+    button_row.set_margin_top(14);
 
     let keep = Button::with_label(&t("Keep editing"));
     keep.set_has_frame(false);
