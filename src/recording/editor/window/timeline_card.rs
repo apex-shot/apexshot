@@ -2,7 +2,7 @@ use crate::capture::editor::window::icon_names;
 use crate::recording::editor::model::{
     format_zoom_scale, freeze_hold_active, freeze_hold_lead, playhead_for_replay,
     snap_range_to_target, snap_to_target, usable_media_timestamp_seconds, VideoEditState, ZoomMode,
-    ADD_ZOOM_DURATION_SECONDS, DEFAULT_CURSOR_HIDE_DURATION_SECONDS,
+    ADD_ZOOM_DURATION_SECONDS,
 };
 use crate::recording::editor::sound::SoundPlan;
 use crate::recording::editor::sound_peaks::Peaks;

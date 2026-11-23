@@ -585,8 +585,9 @@ fn wire_close_persist(
     close_after_export: Rc<Cell<bool>>,
 ) {
     // Crash safety: the project is written while the video is edited, not
-    // only on close. `persist_video_session` compares against the file on
-    // disk, so a tick with nothing new writes nothing.
+    // only on close. `persist_video_session` compares against this window's
+    // own baseline, so a tick with nothing new writes nothing — including
+    // while another editor is saving the same recording.
     {
         let state = state.clone();
         let window = window.downgrade();
@@ -595,8 +596,8 @@ fn wire_close_persist(
                 return glib::ControlFlow::Break;
             }
             // `try_lock`: a tick never waits on the export or the preview.
-            if let Ok(state) = state.try_lock() {
-                persist_video_session(&state);
+            if let Ok(mut state) = state.try_lock() {
+                persist_video_session(&mut state);
             }
             glib::ControlFlow::Continue
         });
@@ -618,7 +619,7 @@ fn wire_close_persist(
                 let window = window.clone();
                 move || {
                     export_cancellation.store(true, Ordering::Release);
-                    persist_video_session(&state.lock().unwrap());
+                    persist_video_session(&mut state.lock().unwrap());
                     close_after_export.set(true);
                     let window = window.clone();
                     let exporting = exporting.clone();
@@ -635,7 +636,7 @@ fn wire_close_persist(
             });
             return glib::Propagation::Stop;
         }
-        persist_video_session(&state.lock().unwrap());
+        persist_video_session(&mut state.lock().unwrap());
         glib::Propagation::Proceed
     });
 }
@@ -1185,7 +1186,7 @@ mod tests {
     }
 
     #[test]
-    fn zoom_and_hide_clips_outline_only_the_selected_clip() {
+    fn zoom_and_video_clips_outline_only_the_selected_clip() {
         let painting = include_str!("timeline_card_parts/painting.rs");
         assert!(
             painting.contains("edge: (f64, f64, f64, f64)"),
@@ -1194,10 +1195,6 @@ mod tests {
         assert!(
             painting.contains("let (r, g, b, a) = blue.edge;"),
             "Selected zoom clips must stroke their outline"
-        );
-        assert!(
-            painting.contains("let (r, g, b, a) = rose.edge;"),
-            "Selected hide clips must stroke their outline"
         );
         assert!(
             painting.contains("let (r, g, b, a) = tone.edge;"),

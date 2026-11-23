@@ -32,7 +32,6 @@ impl VideoEditState {
         self.add_zoom_tool = armed;
         if armed {
             self.selected_zoom = None;
-            self.selected_cursor_hide = None;
             self.selected_segment = None;
         }
         true
@@ -88,7 +87,6 @@ impl VideoEditState {
             self.zoom_clips[index] = left;
             self.zoom_clips.insert(index + 1, right);
             self.selected_zoom = Some(index + 1);
-            self.selected_cursor_hide = None;
             self.selected_segment = None;
             self.selected_tool = EditorTool::Timeline;
             return Some(index + 1);
@@ -129,7 +127,6 @@ impl VideoEditState {
             .iter()
             .position(|clip| (clip.start - start).abs() < 1e-6)?;
         self.selected_zoom = Some(index);
-        self.selected_cursor_hide = None;
         self.selected_segment = None;
         self.selected_tool = EditorTool::Timeline;
         Some(index)
@@ -177,7 +174,6 @@ impl VideoEditState {
             .iter()
             .position(|clip| (clip.start - start).abs() < 1e-6)?;
         self.selected_zoom = Some(index);
-        self.selected_cursor_hide = None;
         self.selected_segment = None;
         self.selected_tool = EditorTool::Timeline;
         Some(index)
@@ -211,30 +207,14 @@ impl VideoEditState {
         };
     }
 
-    pub fn remove_cursor_hide_clip(&mut self, index: usize) {
-        if index >= self.cursor_hide_clips.len() {
-            return;
-        }
-        self.cursor_hide_clips.remove(index);
-        self.selected_cursor_hide = match self.selected_cursor_hide {
-            Some(selected) if selected == index => None,
-            Some(selected) if selected > index => Some(selected - 1),
-            other => other,
-        };
-    }
-
-    /// Index of the hide clip containing `timeline_t`, if any.
-    pub fn cursor_hide_index_at(&self, timeline_t: f64) -> Option<usize> {
-        self.cursor_hide_clips
-            .iter()
-            .position(|clip| timeline_t >= clip.start && timeline_t <= clip.end)
-    }
-
     /// A disabled clip keeps its span but stops feeding the preview and the
-    /// export. Both track kinds share the toggle so the menu reads the same on
-    /// either.
+    /// export.
     pub fn set_zoom_hidden(&mut self, index: usize, hidden: bool) {
-        if self.zoom_clips.get(index).is_none_or(|clip| clip.hidden == hidden) {
+        if self
+            .zoom_clips
+            .get(index)
+            .is_none_or(|clip| clip.hidden == hidden)
+        {
             return;
         }
         self.record_zoom_command();
@@ -244,12 +224,6 @@ impl VideoEditState {
         // A hidden generated clip must survive regeneration: the mute is a
         // deliberate edit, so it becomes the user's work.
         self.protect_zoom_clip(index);
-    }
-
-    pub fn set_cursor_hide_hidden(&mut self, index: usize, hidden: bool) {
-        if let Some(clip) = self.cursor_hide_clips.get_mut(index) {
-            clip.hidden = hidden;
-        }
     }
 
     /// Take a clip off its source anchor and make it the user's work: they
@@ -307,40 +281,13 @@ impl VideoEditState {
             .iter()
             .position(|other| (other.start - start).abs() < 1e-6)?;
         self.selected_zoom = Some(new_index);
-        self.selected_cursor_hide = None;
-        self.selected_segment = None;
-        self.selected_tool = EditorTool::Timeline;
-        Some(new_index)
-    }
-
-    pub fn duplicate_cursor_hide_clip(&mut self, index: usize, start: f64) -> Option<usize> {
-        let clip = self.cursor_hide_clips.get(index)?.clone();
-        let start = start.max(0.0);
-        let (start, end) = fit_effect_move(self, start, clip.duration());
-        if self
-            .cursor_hide_clips
-            .iter()
-            .any(|other| ranges_overlap(start, end, other.start, other.end))
-        {
-            return None;
-        }
-        self.cursor_hide_clips
-            .push(CursorHideClip { start, end, ..clip });
-        self.cursor_hide_clips
-            .sort_by(|a, b| a.start.total_cmp(&b.start));
-        let new_index = self
-            .cursor_hide_clips
-            .iter()
-            .position(|other| (other.start - start).abs() < 1e-6)?;
-        self.selected_cursor_hide = Some(new_index);
-        self.selected_zoom = None;
         self.selected_segment = None;
         self.selected_tool = EditorTool::Timeline;
         Some(new_index)
     }
 
     /// The clip most recently copied or cut, ready to paste at the playhead.
-    pub fn clipboard_clip(&self) -> Option<&ClipClipboard> {
+    pub fn clipboard_clip(&self) -> Option<&ZoomClip> {
         self.clipboard.as_ref()
     }
 
@@ -348,15 +295,7 @@ impl VideoEditState {
         let Some(clip) = self.zoom_clips.get(index).cloned() else {
             return false;
         };
-        self.clipboard = Some(ClipClipboard::Zoom(clip));
-        true
-    }
-
-    pub fn copy_cursor_hide_clip(&mut self, index: usize) -> bool {
-        let Some(clip) = self.cursor_hide_clips.get(index).cloned() else {
-            return false;
-        };
-        self.clipboard = Some(ClipClipboard::Hide(clip));
+        self.clipboard = Some(clip);
         true
     }
 
@@ -367,18 +306,9 @@ impl VideoEditState {
         // Recorded before the copy lands: the pending paste is part of the
         // step, so undoing a cut has to drop the clipboard again.
         self.record_zoom_command();
-        self.clipboard = Some(ClipClipboard::Zoom(clip));
+        self.clipboard = Some(clip);
         self.zoom_clips.remove(index);
         self.selected_zoom = None;
-        true
-    }
-
-    pub fn cut_cursor_hide_clip(&mut self, index: usize) -> bool {
-        if !self.copy_cursor_hide_clip(index) {
-            return false;
-        }
-        self.cursor_hide_clips.remove(index);
-        self.selected_cursor_hide = None;
         true
     }
 
@@ -393,66 +323,37 @@ impl VideoEditState {
     /// composition is trimmed, cut or sped up.
     pub fn paste_clipboard_at_playhead(&mut self) -> Option<usize> {
         let at = self.playhead_seconds.max(0.0);
-        let placed = match self.clipboard.clone()? {
-            ClipClipboard::Zoom(clip) => {
-                let (start, end) = fit_effect_span(self, at.max(0.0), at.max(0.0) + clip.duration())?;
-                if self
-                    .zoom_clips
-                    .iter()
-                    .any(|other| ranges_overlap(start, end, other.start, other.end))
-                {
-                    return None;
-                }
-                self.record_zoom_command();
-                self.zoom_clips.push(ZoomClip {
-                    start,
-                    end,
-                    origin: ZoomOrigin::User,
-                    anchor: None,
-                    ..clip
-                });
-                self.zoom_clips.sort_by(|a, b| a.start.total_cmp(&b.start));
-                let index = self
-                    .zoom_clips
-                    .iter()
-                    .position(|other| (other.start - start).abs() < 1e-6)?;
-                self.selected_zoom = Some(index);
-                self.selected_cursor_hide = None;
-                self.selected_segment = None;
-                self.selected_tool = EditorTool::Timeline;
-                Some(index)
-            }
-            ClipClipboard::Hide(clip) => {
-                let (start, end) = fit_effect_span(self, at.max(0.0), at.max(0.0) + clip.duration())?;
-                if self
-                    .cursor_hide_clips
-                    .iter()
-                    .any(|other| ranges_overlap(start, end, other.start, other.end))
-                {
-                    return None;
-                }
-                self.cursor_hide_clips.push(CursorHideClip { start, end, ..clip });
-                self.cursor_hide_clips
-                    .sort_by(|a, b| a.start.total_cmp(&b.start));
-                let index = self
-                    .cursor_hide_clips
-                    .iter()
-                    .position(|other| (other.start - start).abs() < 1e-6)?;
-                self.selected_cursor_hide = Some(index);
-                self.selected_zoom = None;
-                self.selected_segment = None;
-                self.selected_tool = EditorTool::Timeline;
-                Some(index)
-            }
-        };
+        let clip = self.clipboard.clone()?;
+        let (start, end) = fit_effect_span(self, at.max(0.0), at.max(0.0) + clip.duration())?;
+        if self
+            .zoom_clips
+            .iter()
+            .any(|other| ranges_overlap(start, end, other.start, other.end))
+        {
+            return None;
+        }
+        self.record_zoom_command();
+        self.zoom_clips.push(ZoomClip {
+            start,
+            end,
+            origin: ZoomOrigin::User,
+            anchor: None,
+            ..clip
+        });
+        self.zoom_clips.sort_by(|a, b| a.start.total_cmp(&b.start));
+        let index = self
+            .zoom_clips
+            .iter()
+            .position(|other| (other.start - start).abs() < 1e-6)?;
+        self.selected_zoom = Some(index);
+        self.selected_segment = None;
+        self.selected_tool = EditorTool::Timeline;
         // Placing the clip finishes the copy. Leaving it on the clipboard kept
         // the editor dimmed and the ghost on the lane after the paste, so the
         // next click placed another copy instead of returning to normal
         // editing.
-        if placed.is_some() {
-            self.clipboard = None;
-        }
-        placed
+        self.clipboard = None;
+        Some(index)
     }
 
     pub fn clear_clipboard(&mut self) {
@@ -466,15 +367,10 @@ impl VideoEditState {
         self.clipboard.is_some()
     }
 
-    /// The span on the clipboard, when it holds a clip for the track the
-    /// caller is drawing. `None` means this track has nothing to place, so the
-    /// track falls back to its normal click-to-add behaviour.
-    pub fn clipboard_duration_for(&self, is_zoom_track: bool) -> Option<f64> {
-        match self.clipboard.as_ref()? {
-            ClipClipboard::Zoom(clip) if is_zoom_track => Some(clip.duration()),
-            ClipClipboard::Hide(clip) if !is_zoom_track => Some(clip.duration()),
-            _ => None,
-        }
+    /// The span on the clipboard, when there is a clip to place. `None` means
+    /// the lane falls back to its normal click-to-add behaviour.
+    pub fn clipboard_duration_for(&self) -> Option<f64> {
+        self.clipboard.as_ref().map(|clip| clip.duration())
     }
 
     /// Paste the clipboard so its start sits at `timeline_t`. Used by the
@@ -482,11 +378,8 @@ impl VideoEditState {
     /// rather than the playhead.
     pub fn paste_clipboard_at(&mut self, timeline_t: f64) -> Option<usize> {
         let start = timeline_t.max(0.0);
-        let duration = self.clipboard_duration_for(true).or_else(|| {
-            self.clipboard_duration_for(false)
-        })?;
-        let is_zoom_track = matches!(self.clipboard, Some(ClipClipboard::Zoom(_)));
-        if !self.paste_spot_is_free(start, duration, is_zoom_track) {
+        let duration = self.clipboard_duration_for()?;
+        if !self.paste_spot_is_free(start, duration) {
             return None;
         }
         let restore = self.playhead_seconds;
@@ -498,27 +391,21 @@ impl VideoEditState {
         pasted
     }
 
-    /// Whether a clip of `duration` starting at `start` would fit on the track
-    /// the clipboard is aimed at. The painter uses this to show a placeable
-    /// ghost differently from one that would collide.
-    pub fn paste_spot_is_free(&self, start: f64, duration: f64, is_zoom_track: bool) -> bool {
+    /// Whether a clip of `duration` starting at `start` would fit on the Zoom
+    /// track. The painter uses this to show a placeable ghost differently from
+    /// one that would collide.
+    pub fn paste_spot_is_free(&self, start: f64, duration: f64) -> bool {
         // A span that cannot fit before the video ends is not placeable, the
         // same as one that would collide.
         if fit_effect_span(self, start, start + duration).is_none() {
             return false;
         }
         let end = start + duration;
-        match (self.clipboard.as_ref(), is_zoom_track) {
-            (Some(ClipClipboard::Zoom(_)), true) => !self
+        self.clipboard.is_some()
+            && !self
                 .zoom_clips
                 .iter()
-                .any(|other| ranges_overlap(start, end, other.start, other.end)),
-            (Some(ClipClipboard::Hide(_)), false) => !self
-                .cursor_hide_clips
-                .iter()
-                .any(|other| ranges_overlap(start, end, other.start, other.end)),
-            _ => false,
-        }
+                .any(|other| ranges_overlap(start, end, other.start, other.end))
     }
 
     /// Whether a paste would land right now: something is on the clipboard and
@@ -530,69 +417,44 @@ impl VideoEditState {
             return false;
         };
         let start = self.playhead_seconds.max(0.0);
-        match clip {
-            ClipClipboard::Zoom(clip) => {
-                // A paste that cannot fit before the video ends is refused,
-                // just like one that would collide.
-                if fit_effect_span(self, start, start + clip.duration()).is_none() {
-                    return false;
-                }
-                !self.zoom_clips.iter().any(|other| {
-                    ranges_overlap(start, start + clip.duration(), other.start, other.end)
-                })
-            }
-            ClipClipboard::Hide(clip) => {
-                if fit_effect_span(self, start, start + clip.duration()).is_none() {
-                    return false;
-                }
-                !self.cursor_hide_clips.iter().any(|other| {
-                    ranges_overlap(start, start + clip.duration(), other.start, other.end)
-                })
-            }
+        // A paste that cannot fit before the video ends is refused, just like
+        // one that would collide.
+        if fit_effect_span(self, start, start + clip.duration()).is_none() {
+            return false;
         }
+        !self
+            .zoom_clips
+            .iter()
+            .any(|other| ranges_overlap(start, start + clip.duration(), other.start, other.end))
     }
 
     /// Duplicate the selected clip, placing the copy directly after it so the
     /// two read as one run rather than an overlap.
     pub fn duplicate_selected_clip(&mut self) -> Option<usize> {
-        if let Some(index) = self.selected_zoom {
-            let after = self.zoom_clips.get(index)?.end;
-            return self.duplicate_zoom_clip(index, after);
-        }
-        let index = self.selected_cursor_hide?;
-        let after = self.cursor_hide_clips.get(index)?.end;
-        self.duplicate_cursor_hide_clip(index, after)
+        let index = self.selected_zoom?;
+        let after = self.zoom_clips.get(index)?.end;
+        self.duplicate_zoom_clip(index, after)
     }
 
-    /// Flip the hidden flag on whichever clip is selected.
+    /// Flip the hidden flag on the selected zoom clip.
     pub fn toggle_selected_clip_hidden(&mut self) -> bool {
-        if let Some(index) = self.selected_zoom {
-            let Some(clip) = self.zoom_clips.get(index) else {
-                return false;
-            };
-            let hidden = !clip.hidden;
-            self.set_zoom_hidden(index, hidden);
-            return true;
-        }
-        if let Some(index) = self.selected_cursor_hide {
-            let Some(clip) = self.cursor_hide_clips.get(index) else {
-                return false;
-            };
-            let hidden = !clip.hidden;
-            self.set_cursor_hide_hidden(index, hidden);
-            return true;
-        }
-        false
+        let Some(index) = self.selected_zoom else {
+            return false;
+        };
+        let Some(clip) = self.zoom_clips.get(index) else {
+            return false;
+        };
+        let hidden = !clip.hidden;
+        self.set_zoom_hidden(index, hidden);
+        true
     }
 
-    /// Delete whichever track clip is selected. The video segment's own
+    /// Delete the selected zoom clip. The video segment's own
     /// `remove_selected_clip` is a separate thing — it drops a segment from the
-    /// composition — so this one is named for the two overlay tracks.
+    /// composition — so this one is named for the overlay track.
     pub fn remove_selected_track_clip(&mut self) {
         if self.selected_zoom.is_some() {
             self.remove_selected_zoom();
-        } else if self.selected_cursor_hide.is_some() {
-            self.remove_selected_cursor_hide();
         }
     }
 
@@ -994,7 +856,10 @@ impl VideoEditState {
             && self
                 .selected_zoom_clip()
                 .is_some_and(|clip| clip.mode == ZoomMode::Auto))
-        .then(|| self.eval_zoom_at(self.playhead_seconds, self.source_playhead()).1);
+        .then(|| {
+            self.eval_zoom_at(self.playhead_seconds, self.source_playhead())
+                .1
+        });
         let crop = self.crop_or_full();
         if let Some(index) = self.selected_zoom {
             self.record_zoom_command();
@@ -1260,11 +1125,7 @@ impl VideoEditState {
         } else {
             return target;
         };
-        lerp_transform(
-            MotionTransform::default(),
-            target,
-            clip.easing.apply(alpha),
-        )
+        lerp_transform(MotionTransform::default(), target, clip.easing.apply(alpha))
     }
 
     pub fn eval_zoom(&self, t: f64) -> (f64, (f64, f64)) {

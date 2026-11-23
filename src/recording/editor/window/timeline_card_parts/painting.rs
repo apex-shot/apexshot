@@ -179,9 +179,9 @@ pub fn draw_video_clip(
     if let Some((x0, x1)) = lifted {
         // A lifted clip is the one being dragged; if it is the last segment
         // its hold rides along, otherwise it trims as plain footage.
-        let hold = if state.freeze_applies_to_segment(
-            state.segment_order.last().copied().unwrap_or(usize::MAX),
-        ) {
+        let hold = if state
+            .freeze_applies_to_segment(state.segment_order.last().copied().unwrap_or(usize::MAX))
+        {
             state.freeze_tail_seconds()
         } else {
             0.0
@@ -468,7 +468,14 @@ pub fn draw_video_segment(
         }
     }
     if selected {
-        rounded_rect(cr, x0 + 0.5, y + 0.5, (clip_w - 1.0).max(0.0), (height - 1.0).max(0.0), 4.5);
+        rounded_rect(
+            cr,
+            x0 + 0.5,
+            y + 0.5,
+            (clip_w - 1.0).max(0.0),
+            (height - 1.0).max(0.0),
+            4.5,
+        );
         let (r, g, b, a) = tone.edge;
         cr.set_source_rgba(r, g, b, a);
         cr.set_line_width(1.5);
@@ -492,7 +499,10 @@ fn paint_cover_pixbuf(
     let _ = cr.save();
     cr.rectangle(x, y, width, height);
     cr.clip();
-    cr.translate(x + (width - painted_w) / 2.0, y + (height - painted_h) / 2.0);
+    cr.translate(
+        x + (width - painted_w) / 2.0,
+        y + (height - painted_h) / 2.0,
+    );
     cr.scale(scale, scale);
     cr.set_source_pixbuf(pixbuf, 0.0, 0.0);
     let _ = cr.paint();
@@ -534,7 +544,7 @@ pub fn draw_zoom_clips(
         // describing the wrong action — and at 1.8s it is narrower than most
         // pasted spans, so its dashed edge showed through the ghost as a stray
         // vertical line.
-        if state.clipboard_duration_for(true).is_none() {
+        if state.clipboard_duration_for().is_none() {
             if let Some((start, end)) = suggested_zoom_range(&state, start) {
                 draw_zoom_suggestion(&state, cr, w, h, start, end, light);
             }
@@ -583,17 +593,16 @@ pub fn draw_one_zoom(
     };
     let y = if lifted { 1.0 } else { 7.0 };
     let height = h - 14.0;
-    draw_translucent_clip(
-        cr,
-        x0,
-        y,
-        clip_w,
-        height,
-        blue,
-        lifted || selected,
-    );
+    draw_translucent_clip(cr, x0, y, clip_w, height, blue, lifted || selected);
     if selected {
-        rounded_rect(cr, x0 + 0.5, y + 0.5, (clip_w - 1.0).max(0.0), (height - 1.0).max(0.0), 4.5);
+        rounded_rect(
+            cr,
+            x0 + 0.5,
+            y + 0.5,
+            (clip_w - 1.0).max(0.0),
+            (height - 1.0).max(0.0),
+            4.5,
+        );
         let (r, g, b, a) = blue.edge;
         cr.set_source_rgba(r, g, b, a);
         cr.set_line_width(1.5);
@@ -613,7 +622,10 @@ pub fn draw_one_zoom(
                 crate::recording::editor::model::ZoomMode::Auto => t("Auto"),
                 crate::recording::editor::model::ZoomMode::Manual => t("Manual"),
             };
-            format!("{mode}  {}", format_zoom_scale(state.zoom_clips[index].scale))
+            format!(
+                "{mode}  {}",
+                format_zoom_scale(state.zoom_clips[index].scale)
+            )
         } else {
             t("Zoom")
         };
@@ -631,173 +643,6 @@ pub fn suggested_zoom_range(state: &VideoEditState, start: f64) -> Option<(f64, 
         .iter()
         .any(|clip| start < clip.end && end > clip.start);
     (!overlaps).then_some((start, end))
-}
-
-pub fn draw_cursor_hide_clips(
-    state: &Arc<Mutex<VideoEditState>>,
-    hover_time: Option<f64>,
-    dragging: Option<usize>,
-    light: bool,
-    cr: &gtk4::cairo::Context,
-    width: i32,
-    height: i32,
-) {
-    let state = state.lock().unwrap();
-    let w = width as f64;
-    let h = height as f64;
-    let clips: Vec<(usize, f64, f64)> = state
-        .cursor_hide_clips
-        .iter()
-        .enumerate()
-        .map(|(index, clip)| (index, clip.start, clip.end))
-        .collect();
-    for &(index, start, end) in &clips {
-        if dragging == Some(index) {
-            continue;
-        }
-        draw_one_hide(&state, cr, w, h, index, start, end, dragging, false, light);
-    }
-    if let Some(index) = dragging {
-        if let Some(&(_, start, end)) = clips.iter().find(|(i, _, _)| *i == index) {
-            draw_one_hide(&state, cr, w, h, index, start, end, dragging, true, light);
-        }
-    }
-    if let Some(start) = hover_time {
-        // Same rule as the Zoom lane: with a clip held for this track the click
-        // pastes, so the add-a-hide preview must stand down.
-        if state.clipboard_duration_for(false).is_none() {
-            if let Some((start, end)) = suggested_hide_range(&state, start) {
-                draw_hide_suggestion(&state, cr, w, h, start, end, light);
-            }
-        }
-    }
-}
-
-pub fn draw_one_hide(
-    state: &VideoEditState,
-    cr: &gtk4::cairo::Context,
-    w: f64,
-    h: f64,
-    index: usize,
-    start: f64,
-    end: f64,
-    dragging: Option<usize>,
-    lifted: bool,
-    light: bool,
-) {
-    let x0 = state.time_to_x(start, w);
-    let x1 = state.time_to_x(end, w);
-    let clip_w = (x1 - x0).max(22.0);
-    let selected = lifted || state.selected_cursor_hide == Some(index);
-    let faint =
-        !lifted && (dragging.is_some() || (state.selected_cursor_hide.is_some() && !selected));
-    // Solid #660033, opaque in both themes. Unselected clips recede by fading
-    // that same fill, so the hue never shifts between states.
-    let ring = if light {
-        (0.20, 0.0, 0.10)
-    } else {
-        (1.0, 0.80, 0.90)
-    };
-    // Same hollow treatment as a disabled zoom clip: the pill keeps its span
-    // and its handles, and only the fill drops away.
-    let disabled = state.cursor_hide_clips[index].hidden;
-    let rose = ClipTone {
-        fill: if disabled {
-            (0.4, 0.0, 0.2, 0.12)
-        } else {
-            (0.4, 0.0, 0.2, if faint { 0.55 } else { 1.0 })
-        },
-        edge: (ring.0, ring.1, ring.2, 0.95),
-        handle: (ring.0, ring.1, ring.2, if faint { 0.40 } else { 0.95 }),
-    };
-    let y = if lifted { 1.0 } else { 7.0 };
-    let height = h - 14.0;
-    draw_translucent_clip(
-        cr,
-        x0,
-        y,
-        clip_w,
-        height,
-        rose,
-        lifted || selected,
-    );
-    if selected {
-        rounded_rect(cr, x0 + 0.5, y + 0.5, (clip_w - 1.0).max(0.0), (height - 1.0).max(0.0), 4.5);
-        let (r, g, b, a) = rose.edge;
-        cr.set_source_rgba(r, g, b, a);
-        cr.set_line_width(1.5);
-        let _ = cr.stroke();
-    }
-    if clip_w > 40.0 {
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.92);
-        cr.select_font_face(
-            crate::typography::UI_FONT_FAMILY,
-            gtk4::cairo::FontSlant::Normal,
-            gtk4::cairo::FontWeight::Normal,
-        );
-        cr.set_font_size(11.0);
-        cr.move_to(x0 + 14.0, y + height * 0.62);
-        let hide_label = t("Hide");
-        let _ = cr.show_text(&hide_label);
-    }
-}
-
-pub fn suggested_hide_range(state: &VideoEditState, start: f64) -> Option<(f64, f64)> {
-    let start = start.max(0.0);
-    let end = start + DEFAULT_CURSOR_HIDE_DURATION_SECONDS;
-    let overlaps = state
-        .cursor_hide_clips
-        .iter()
-        .any(|clip| start < clip.end && end > clip.start);
-    (!overlaps).then_some((start, end))
-}
-
-pub fn draw_hide_suggestion(
-    state: &VideoEditState,
-    cr: &gtk4::cairo::Context,
-    w: f64,
-    h: f64,
-    start: f64,
-    end: f64,
-    light: bool,
-) {
-    let x0 = state.time_to_x(start, w);
-    let x1 = state.time_to_x(end, w);
-    let clip_w = (x1 - x0).max(22.0);
-    let y = 7.0;
-    let height = h - 14.0;
-    rounded_rect(cr, x0, y, clip_w, height, 5.0);
-    if light {
-        cr.set_source_rgba(0.66, 0.16, 0.23, 0.20);
-    } else {
-        cr.set_source_rgba(0.78, 0.32, 0.36, 0.12);
-    }
-    let _ = cr.fill_preserve();
-    if light {
-        cr.set_source_rgba(0.42, 0.05, 0.10, 0.58);
-    } else {
-        cr.set_source_rgba(1.0, 0.78, 0.80, 0.38);
-    }
-    cr.set_line_width(1.0);
-    cr.set_dash(&[4.0, 3.0], 0.0);
-    let _ = cr.stroke();
-    cr.set_dash(&[], 0.0);
-    if clip_w > 40.0 {
-        if light {
-            cr.set_source_rgba(0.30, 0.03, 0.07, 0.72);
-        } else {
-            cr.set_source_rgba(1.0, 1.0, 1.0, 0.42);
-        }
-        cr.select_font_face(
-            crate::typography::UI_FONT_FAMILY,
-            gtk4::cairo::FontSlant::Normal,
-            gtk4::cairo::FontWeight::Normal,
-        );
-        cr.set_font_size(11.0);
-        cr.move_to(x0 + 14.0, y + height * 0.62);
-        let hide_label = t("Hide");
-        let _ = cr.show_text(&hide_label);
-    }
 }
 
 pub fn draw_zoom_suggestion(
@@ -938,22 +783,6 @@ pub fn draw_thin_zoom_lane(
         .map(|clip| (clip.start, clip.end, (0.0, 0.0, 1.0, 0.95)))
         .collect();
     draw_thin_lane(state, &t("Zoom"), &bars, light, cr, width, height);
-}
-
-/// The Cursor lane resting: its hide clips as slim rose bars.
-pub fn draw_thin_cursor_lane(
-    state: &VideoEditState,
-    light: bool,
-    cr: &gtk4::cairo::Context,
-    width: i32,
-    height: i32,
-) {
-    let bars: Vec<(f64, f64, (f64, f64, f64, f64))> = state
-        .cursor_hide_clips
-        .iter()
-        .map(|clip| (clip.start, clip.end, (0.4, 0.0, 0.2, 0.95)))
-        .collect();
-    draw_thin_lane(state, &t("Cursor"), &bars, light, cr, width, height);
 }
 
 /// The Sound lane resting: one slim bar per kept piece, in its sound fill so a
@@ -1179,13 +1008,7 @@ pub fn draw_sound_lane(
 /// The recording's loudness between two x positions, mapped through the
 /// retained footage so a cut, a reordered piece or a speed change reads the
 /// source it actually plays.
-fn sound_level(
-    state: &VideoEditState,
-    peaks: &Peaks,
-    width: f64,
-    from_x: f64,
-    to_x: f64,
-) -> f32 {
+fn sound_level(state: &VideoEditState, peaks: &Peaks, width: f64, from_x: f64, to_x: f64) -> f32 {
     let source_at = |x: f64| {
         state
             .playback_position(state.x_to_time(x, width))
@@ -1220,9 +1043,11 @@ fn draw_label_chip(
     let chip_h = 16.0;
     // Centre the chip on the text's own box rather than on its baseline, so
     // the ink sits evenly inside it.
-    let centre = cr.font_extents().map_or(baseline - chip_h / 4.0, |extents| {
-        baseline + (extents.descent() - extents.ascent()) / 2.0
-    });
+    let centre = cr
+        .font_extents()
+        .map_or(baseline - chip_h / 4.0, |extents| {
+            baseline + (extents.descent() - extents.ascent()) / 2.0
+        });
     rounded_rect(
         cr,
         left,
@@ -1416,9 +1241,7 @@ pub fn rounded_rect(cr: &gtk4::cairo::Context, x: f64, y: f64, w: f64, h: f64, r
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::recording::editor::model::{
-        CursorHideClip, VideoEditState, VideoMetadata, ZoomClip, ZoomMode,
-    };
+    use crate::recording::editor::model::{VideoEditState, VideoMetadata, ZoomClip, ZoomMode};
     use gtk4::cairo::{Context, Format, ImageSurface};
     use std::path::PathBuf;
 
@@ -1476,48 +1299,6 @@ mod tests {
                 (r, g, b),
                 (0, 0, 255),
                 "the pill body must be solid #0000FF, not a translucent tint",
-            );
-        }
-    }
-
-    fn hide_pill_pixel(light: bool) -> [u8; 4] {
-        let mut state = VideoEditState::new(metadata());
-        state.timeline_scale = 0.0;
-        state.cursor_hide_clips.push(CursorHideClip {
-            start: 1.0,
-            end: 4.0,
-            hidden: false,
-        });
-        state.selected_cursor_hide = Some(0);
-
-        let mut surface = ImageSurface::create(Format::ARgb32, 400, 56).unwrap();
-        {
-            let cr = Context::new(&surface).unwrap();
-            draw_one_hide(&state, &cr, 400.0, 56.0, 0, 1.0, 4.0, None, false, light);
-        }
-        surface.flush();
-
-        let width = surface.width() as usize;
-        let x = state.time_to_x(2.0, 400.0).round() as usize;
-        let data = surface.data().unwrap();
-        let offset = (28 * width + x) * 4;
-        [
-            data[offset],
-            data[offset + 1],
-            data[offset + 2],
-            data[offset + 3],
-        ]
-    }
-
-    #[test]
-    fn hide_pills_are_solid_maroon_in_both_themes() {
-        for light in [false, true] {
-            let [b, g, r, a] = hide_pill_pixel(light);
-            assert_eq!(a, 255, "the pill body must be opaque (light: {light})");
-            assert_eq!(
-                (r, g, b),
-                (102, 0, 51),
-                "the pill body must be solid #660033, not a translucent tint",
             );
         }
     }

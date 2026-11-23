@@ -55,7 +55,12 @@ pub fn pause_playback(
     play_button: &Button,
     refresh: &Rc<dyn Fn()>,
 ) {
-    if !playing.get() && !media.borrow().as_ref().is_some_and(|media| media.is_playing()) {
+    if !playing.get()
+        && !media
+            .borrow()
+            .as_ref()
+            .is_some_and(|media| media.is_playing())
+    {
         return;
     }
     if let Some(media_file) = media.borrow().as_ref() {
@@ -438,7 +443,6 @@ pub fn bind_video_clip(
     dragging: Rc<Cell<Option<usize>>>,
     pause: Rc<dyn Fn()>,
     redraw: Rc<dyn Fn()>,
-    lanes: LaneControls,
 ) {
     let click = GestureClick::new();
     click.set_button(1);
@@ -489,7 +493,9 @@ pub fn bind_video_clip(
                 select_video(&mut guard, Some(seg));
             }
             resize_anchor.set(match (hit.segment, hit.drag) {
-                (Some(segment), Some(drag)) => ClipResizeAnchor::for_video(&guard, width, segment, drag),
+                (Some(segment), Some(drag)) => {
+                    ClipResizeAnchor::for_video(&guard, width, segment, drag)
+                }
                 _ => None,
             });
             let lift = matches!(
@@ -559,8 +565,7 @@ pub fn bind_video_clip(
                 }) => {
                     let mut guard = state.lock().unwrap();
                     let delta = (x - start_x) / pixels_per_second.max(1e-6);
-                    let duration = guard
-                        .segment_timeline_duration(index);
+                    let duration = guard.segment_timeline_duration(index);
                     let start =
                         snap_range_start_to_playhead(&guard, width, origin_start + delta, duration);
                     guard.set_segment_start(index, start);
@@ -626,7 +631,6 @@ pub fn bind_video_clip(
         let state = state.clone();
         let media = media.clone();
         let redraw = redraw.clone();
-        let lanes = lanes.clone();
         move |gesture, _, x, y| {
             let width = gesture
                 .widget()
@@ -680,7 +684,6 @@ pub fn bind_video_clip(
                         redraw();
                     }
                 }),
-                lanes.clone(),
             );
         }
     });
@@ -961,284 +964,6 @@ pub fn bind_zoom_track(
                 y,
                 state.clone(),
                 redraw.clone(),
-                lanes.clone(),
-            );
-        }
-    });
-    area.add_controller(menu);
-}
-
-pub fn bind_hide_track(
-    area: &DrawingArea,
-    state: Arc<Mutex<VideoEditState>>,
-    media: Rc<RefCell<Option<MediaFile>>>,
-    hover: Rc<Cell<Option<usize>>>,
-    hover_time: Rc<Cell<Option<f64>>>,
-    set_band_hover: Rc<dyn Fn(bool)>,
-    dragging: Rc<Cell<Option<usize>>>,
-    pause: Rc<dyn Fn()>,
-    redraw: Rc<dyn Fn()>,
-    lanes: LaneControls,
-) {
-    let click = GestureClick::new();
-    click.set_button(1);
-    // Same rule as the Zoom lane: a press on the resting strip opens the lane
-    // and the drag that may follow must not trim or move anything.
-    let resting_press = Rc::new(Cell::new(false));
-    click.connect_pressed({
-        let state = state.clone();
-        let redraw = redraw.clone();
-        let lanes = lanes.clone();
-        let resting_press = resting_press.clone();
-        move |gesture, _, x, _| {
-            let width = gesture
-                .widget()
-                .map(|widget| widget.allocated_width().max(1) as f64)
-                .unwrap_or(1.0);
-            let resting = !lanes.is_open(TimelineLane::Cursor);
-            resting_press.set(resting);
-            let mut guard = state.lock().unwrap();
-            if resting {
-                if let Some(index) = cursor_hide_clip_at(&guard, width, x) {
-                    select_cursor_hide(&mut guard, Some(index));
-                }
-                drop(guard);
-                lanes.open(TimelineLane::Cursor);
-                redraw();
-                return;
-            }
-            if near_playhead(&guard, width, x) {
-                return;
-            }
-            if let Some(index) = cursor_hide_clip_at(&guard, width, x) {
-                select_cursor_hide(&mut guard, Some(index));
-            } else if !in_extend_band(&guard, width, x) {
-                // The band is the video's extend affordance, not the hide
-                // lane: a click there must not add a hide or clear selection.
-                let at = snap_timeline_to_playhead(&guard, width, x_to_timeline(&guard, width, x));
-                // Same copy-takes-the-click rule as the Zoom track.
-                if guard.paste_clipboard_at(at).is_none() && guard.add_cursor_hide_at(at).is_none()
-                {
-                    select_cursor_hide(&mut guard, None);
-                }
-            }
-            drop(guard);
-            redraw();
-        }
-    });
-    area.add_controller(click);
-
-    let drag_kind = Rc::new(Cell::new(None::<HideDrag>));
-    let resize_anchor = Rc::new(Cell::new(None::<ClipResizeAnchor>));
-    let drag = GestureDrag::new();
-    drag.set_button(1);
-    drag.connect_drag_begin({
-        let state = state.clone();
-        let drag_kind = drag_kind.clone();
-        let resize_anchor = resize_anchor.clone();
-        let dragging = dragging.clone();
-        let pause = pause.clone();
-        let resting_press = resting_press.clone();
-        move |gesture, x, _| {
-            if resting_press.replace(false) {
-                dragging.set(None);
-                drag_kind.set(None);
-                return;
-            }
-            let width = gesture
-                .widget()
-                .map(|widget| widget.allocated_width().max(1) as f64)
-                .unwrap_or(1.0);
-            let mut guard = state.lock().unwrap();
-            if near_playhead(&guard, width, x) {
-                dragging.set(None);
-                drag_kind.set(Some(HideDrag::Seek));
-                return;
-            }
-            let kind = if let Some((index, is_start)) = cursor_hide_edge_at(&guard, width, x) {
-                select_cursor_hide(&mut guard, Some(index));
-                Some(HideDrag::Edge { index, is_start })
-            } else if let Some(index) = cursor_hide_clip_at(&guard, width, x) {
-                select_cursor_hide(&mut guard, Some(index));
-                let clip = &guard.cursor_hide_clips[index];
-                Some(HideDrag::Move {
-                    index,
-                    origin_start: clip.start,
-                    pixels_per_second: pixels_per_second(&guard, width),
-                })
-            } else if in_extend_band(&guard, width, x) {
-                // Same as the zoom lane: the band is the video's affordance.
-                Some(HideDrag::Extend)
-            } else {
-                None
-            };
-            if matches!(kind, Some(HideDrag::Extend)) {
-                resize_anchor.set(ClipResizeAnchor::for_extend(&guard, width));
-            }
-            dragging.set(match kind {
-                Some(HideDrag::Move { index, .. }) => Some(index),
-                _ => None,
-            });
-            drag_kind.set(kind);
-            let should_pause = !guard.video_locked && matches!(kind, Some(HideDrag::Extend));
-            drop(guard);
-            if should_pause {
-                pause();
-            }
-        }
-    });
-    drag.connect_drag_update({
-        let state = state.clone();
-        let media = media.clone();
-        let drag_kind = drag_kind.clone();
-        let resize_anchor = resize_anchor.clone();
-        let redraw = redraw.clone();
-        move |gesture, offset_x, _| {
-            let Some((start_x, _)) = gesture.start_point() else {
-                return;
-            };
-            let width = gesture
-                .widget()
-                .map(|widget| widget.allocated_width().max(1) as f64)
-                .unwrap_or(1.0);
-            match drag_kind.get() {
-                Some(HideDrag::Edge { index, is_start }) => {
-                    let mut guard = state.lock().unwrap();
-                    let seconds = snap_timeline_to_playhead(
-                        &guard,
-                        width,
-                        x_to_timeline(&guard, width, start_x + offset_x),
-                    );
-                    if let Some(clip) = guard.cursor_hide_clips.get(index).cloned() {
-                        if is_start {
-                            guard.set_cursor_hide_range(index, seconds, clip.end);
-                        } else {
-                            guard.set_cursor_hide_range(index, clip.start, seconds);
-                        }
-                    }
-                }
-                Some(HideDrag::Move {
-                    index,
-                    origin_start,
-                    pixels_per_second,
-                }) => {
-                    let mut guard = state.lock().unwrap();
-                    let duration = guard
-                        .cursor_hide_clips
-                        .get(index)
-                        .map(|clip| clip.duration())
-                        .unwrap_or(0.0);
-                    let delta = offset_x / pixels_per_second.max(1e-6);
-                    let start =
-                        snap_range_start_to_playhead(&guard, width, origin_start + delta, duration);
-                    guard.move_cursor_hide_clip(index, start);
-                }
-                Some(HideDrag::Seek) => {
-                    seek_to_x(&state, &media, width, start_x + offset_x);
-                }
-                Some(HideDrag::Extend) => {
-                    if let Some(anchor) = resize_anchor.get() {
-                        let mut guard = state.lock().unwrap();
-                        apply_clip_resize(&mut guard, width, &anchor, offset_x);
-                    }
-                }
-                None => {}
-            }
-            if matches!(drag_kind.get(), Some(HideDrag::Extend)) {
-                seek_to_reconciled_playhead(&state, &media);
-            }
-            redraw();
-        }
-    });
-    drag.connect_drag_end({
-        let dragging = dragging.clone();
-        let redraw = redraw.clone();
-        move |_, _, _| {
-            dragging.set(None);
-            redraw();
-        }
-    });
-    area.add_controller(drag);
-    bind_track_cursor(
-        area,
-        {
-            let state = state.clone();
-            let set_band_hover = set_band_hover.clone();
-            let lanes = lanes.clone();
-            Rc::new(move |width, x| {
-                // A resting lane shows no grips and offers no resize cursor.
-                if !lanes.is_open(TimelineLane::Cursor) {
-                    return (TrackCursor::None, None, None);
-                }
-                let guard = state.lock().unwrap();
-                if near_playhead(&guard, width, x) {
-                    set_band_hover(false);
-                    return (TrackCursor::Playhead, None, None);
-                }
-                set_band_hover(in_extend_band(&guard, width, x));
-                match cursor_hide_edge_at(&guard, width, x) {
-                    Some((index, true)) => (TrackCursor::ResizeStart, Some(index), None),
-                    Some((index, false)) => (TrackCursor::ResizeEnd, Some(index), None),
-                    None => match cursor_hide_clip_at(&guard, width, x) {
-                        Some(index) => (TrackCursor::Grab, Some(index), None),
-                        None if in_extend_band(&guard, width, x) => {
-                            (TrackCursor::ResizeEnd, None, None)
-                        }
-                        None => (
-                            TrackCursor::None,
-                            None,
-                            Some(x_to_timeline(&guard, width, x)),
-                        ),
-                    },
-                }
-            })
-        },
-        hover,
-        hover_time,
-        set_band_hover,
-    );
-
-    // Same in-place menu as the Zoom track; see the comment there.
-    let menu = GestureClick::new();
-    menu.set_button(3);
-    menu.connect_pressed({
-        let state = state.clone();
-        let redraw = redraw.clone();
-        let lanes = lanes.clone();
-        move |gesture, _, x, y| {
-            if !lanes.is_open(TimelineLane::Cursor) {
-                return;
-            }
-            let width = gesture
-                .widget()
-                .map(|widget| widget.allocated_width().max(1) as f64)
-                .unwrap_or(1.0);
-            let index = {
-                let guard = state.lock().unwrap();
-                cursor_hide_clip_at(&guard, width, x)
-            };
-            let Some(index) = index else {
-                return;
-            };
-            {
-                let mut guard = state.lock().unwrap();
-                select_cursor_hide(&mut guard, Some(index));
-            }
-            redraw();
-            let Some(area) = gesture
-                .widget()
-                .and_then(|widget| widget.downcast::<DrawingArea>().ok())
-            else {
-                return;
-            };
-            show_clip_menu(
-                &area,
-                ClipMenuTarget::Hide(index),
-                x,
-                y,
-                state.clone(),
-                redraw.clone(),
-                lanes.clone(),
             );
         }
     });

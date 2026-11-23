@@ -315,9 +315,9 @@ fn build_preview_inner(
             ) = {
                 let s = state.lock().unwrap();
                 let source_t = s.source_playhead();
-                // Zoom/hide clips are placed in composition seconds, so match
-                // them on the playhead's timeline position: during a freeze
-                // hold the source playhead is pinned and would freeze them.
+                // Zoom clips are placed in composition seconds, so match them
+                // on the playhead's timeline position: during a freeze hold the
+                // source playhead is pinned and would freeze them.
                 let timeline_t = s.playhead_seconds;
                 let (scale, _) = s.eval_zoom_at(timeline_t, source_t);
                 (
@@ -1328,7 +1328,7 @@ fn draw_preview_overlays(
     // stays transparent so footage shows through and only cursors paint here.
 
     let source_t = state.source_playhead();
-    // Match zoom/hide clips on the composition playhead: through a freeze hold
+    // Match zoom clips on the composition playhead: through a freeze hold
     // the source frame is pinned, but the effects still track the timeline.
     let timeline_t = state.playhead_seconds;
     let view = visible_source_view(&state, timeline_t, source_t, placing);
@@ -1345,7 +1345,7 @@ fn draw_preview_overlays(
             state.metadata.width as f64,
             state.metadata.height as f64,
         ) {
-            frame.alpha *= state.cursor_hide_alpha(timeline_t);
+            frame.alpha *= state.cursor_hide_alpha();
             let cursor = overlay_cursor(state.cursor, zoom);
             // Click effects are sized as fractions of the source video width,
             // mapped into the same zoomed space the click points use.
@@ -1703,7 +1703,7 @@ mod tests {
         assert!(source.contains("source_to_zoomed_point"));
         assert!(
             source.contains("cursor_hide_alpha("),
-            "the cursor layer must scale its alpha by the timeline hide state"
+            "the cursor layer must scale its alpha by the whole-edit hide switch"
         );
         assert!(
             !source.contains("cursor_layer.add_css_class(\"recording-editor-video-zoom-live\")")

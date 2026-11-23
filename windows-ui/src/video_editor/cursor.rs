@@ -21,9 +21,6 @@ struct State {
     caption_settings: keystrokes::Settings,
     captions: Vec<Caption>,
     captions_active: bool,
-    /// How much of the cursor the hide track leaves visible at the playhead:
-    /// 0 while a hide clip covers it, 1 otherwise.
-    hide_alpha: f64,
 }
 
 fn rebuild_captions(state: &mut State) {
@@ -53,7 +50,6 @@ impl CursorModel {
                 caption_settings: keystrokes::Settings::default(),
                 captions: Vec::new(),
                 captions_active: true,
-                hide_alpha: 1.0,
             })),
         }
     }
@@ -107,6 +103,16 @@ impl CursorModel {
                 cursor_id: None,
             });
         self.state.borrow_mut().sidecar = Some(sidecar);
+    }
+
+    /// Whether the open recording carries pointer samples, without cloning
+    /// them. The rendered cursor needs those samples to exist at all.
+    pub fn has_pointer(&self) -> bool {
+        self.state
+            .borrow()
+            .sidecar
+            .as_ref()
+            .is_some_and(|sidecar| !sidecar.pointer.is_empty())
     }
 
     /// Whether the open recording carries key presses, without cloning it.
@@ -198,14 +204,17 @@ impl CursorModel {
         self.state.borrow_mut().captions_active = active;
     }
 
-    /// How much of the cursor the hide track leaves visible at the playhead,
-    /// as the shared editor's hide coverage reports it.
-    pub fn set_hide_alpha(&self, alpha: f64) {
-        self.state.borrow_mut().hide_alpha = if alpha.is_finite() {
-            alpha.clamp(0.0, 1.0)
-        } else {
-            1.0
-        };
+    /// Whether the rendered cursor is hidden for the whole edit. The switch is
+    /// the shared model's own field, so the project and the export read the
+    /// same value the panel writes.
+    pub fn hidden(&self) -> bool {
+        self.state.borrow().settings.hidden
+    }
+
+    /// Hide or show the rendered cursor for the whole edit. The preview and
+    /// the export both follow it.
+    pub fn set_hidden(&self, hidden: bool) {
+        self.state.borrow_mut().settings.hidden = hidden;
     }
 
     /// Keyboard shortcut captions over the whole stage, outside the video
@@ -246,7 +255,7 @@ impl CursorModel {
             &sidecar.presses,
             source_seconds,
         );
-        if typing_alpha <= 0.001 {
+        if typing_alpha <= 0.001 || state.settings.hidden {
             return;
         }
         let settings = state.settings;
@@ -281,9 +290,6 @@ impl CursorModel {
             return;
         };
         frame.alpha *= typing_alpha;
-        // A hide clip takes the sprite and its click rings out together, so
-        // the coverage multiplies the one alpha both are drawn with.
-        frame.alpha *= state.hide_alpha;
         let map_point = |point| {
             let (x, y) = super::zoom::source_to_stage(point, view, rect.width, rect.height);
             (rect.x + x, rect.y + y)
@@ -542,7 +548,7 @@ mod tests {
     }
 
     #[test]
-    fn the_hide_track_takes_the_cursor_and_its_clicks_out_of_the_preview() {
+    fn hiding_the_cursor_takes_it_and_its_clicks_out_of_the_preview() {
         let Some((showing, hidden)) = crate::test_support::with_gtk(|| {
             use gtk4::cairo::{Context, Format, ImageSurface};
 
@@ -565,8 +571,11 @@ mod tests {
             };
             let cursor = rippling_cursor();
             let showing = paints(&cursor);
-            cursor.set_hide_alpha(0.0);
+            cursor.set_hidden(true);
             let hidden = paints(&cursor);
+            assert!(cursor.hidden());
+            cursor.set_hidden(false);
+            assert!(!cursor.hidden());
             (showing, hidden)
         }) else {
             return;

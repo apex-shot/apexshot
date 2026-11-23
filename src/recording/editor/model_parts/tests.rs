@@ -421,7 +421,11 @@ fn aspect_presets_fill_a_1080p_envelope() {
 #[test]
 fn every_aspect_preset_keeps_the_source_inside_its_frame() {
     let mut state = VideoEditState::new(metadata());
-    state.background = VideoBackground::Plain { r: 22, g: 22, b: 22 };
+    state.background = VideoBackground::Plain {
+        r: 22,
+        g: 22,
+        b: 22,
+    };
     let src_aspect = state.metadata.width as f64 / state.metadata.height as f64;
     for &(label, width, height) in &FRAME_ASPECT_RATIOS {
         state.apply_aspect_ratio(width, height);
@@ -436,7 +440,10 @@ fn every_aspect_preset_keeps_the_source_inside_its_frame() {
             vw <= width && vh <= height,
             "{label} keeps the video inside the frame"
         );
-        assert!(width > vw || height > vh, "{label} leaves room for the fill");
+        assert!(
+            width > vw || height > vh,
+            "{label} leaves room for the fill"
+        );
         let fit_aspect = vw as f64 / vh as f64;
         assert!(
             (fit_aspect - src_aspect).abs() < 0.01,
@@ -722,7 +729,9 @@ fn zoom_gaps_hold_the_framing_for_the_next_auto_zoom() {
 
 #[test]
 fn a_morph_gap_keeps_the_evaluated_camera_endpoint() {
-    use crate::recording::editor::sidecar::{CaptureRegion, CursorKind, PointerSample, PointerSidecar};
+    use crate::recording::editor::sidecar::{
+        CaptureRegion, CursorKind, PointerSample, PointerSidecar,
+    };
 
     let mut state = VideoEditState::new(metadata());
     // A pointer parked at the right edge pulls the first Auto zoom's camera
@@ -768,7 +777,10 @@ fn a_morph_gap_keeps_the_evaluated_camera_endpoint() {
          end={at_end:?} gap={in_gap:?}"
     );
     // Sanity: the pointer did pull the camera right of the stored center.
-    assert!(at_end.0 > 500.0, "expected following at the clip edge, got {at_end:?}");
+    assert!(
+        at_end.0 > 500.0,
+        "expected following at the clip edge, got {at_end:?}"
+    );
 }
 
 #[test]
@@ -883,13 +895,15 @@ fn follow_camera_keeps_its_viewport_inside_the_crop() {
     // export would show pixels the crop dropped.
     let crop = (100.0, 50.0, 800.0, 600.0);
     let points = vec![(0.0, 900.0, 650.0), (1.0, 900.0, 650.0)];
-    let budget = movement_group_budget(
-        (crop.2, crop.3),
-        2.0,
-        crop.2 / crop.3,
-        (crop.2, crop.3),
+    let budget = movement_group_budget((crop.2, crop.3), 2.0, crop.2 / crop.3, (crop.2, crop.3));
+    let followed = evaluate_spring_camera(
+        (500.0, 350.0),
+        &points,
+        0.0,
+        1.0,
+        budget,
+        CAMERA_FOLLOW_SPRING,
     );
-    let followed = evaluate_spring_camera((500.0, 350.0), &points, 0.0, 1.0, budget, CAMERA_FOLLOW_SPRING);
     let clamped = clamp_zoom_center(crop, 2.0, followed);
     let half_w = crop.2 / 2.0 / 2.0;
     let half_h = crop.3 / 2.0 / 2.0;
@@ -925,11 +939,21 @@ fn movement_groups_split_when_the_pointer_roams_far() {
         (0.6, 1520.0, 810.0),
     ];
     let groups = movement_groups(&points, (480.0, 270.0));
-    assert_eq!(groups.len(), 2, "far travel should open a new group: {groups:?}");
+    assert_eq!(
+        groups.len(),
+        2,
+        "far travel should open a new group: {groups:?}"
+    );
     let first = movement_group_center_at(&points, 0.2, (480.0, 270.0)).unwrap();
     let second = movement_group_center_at(&points, 0.5, (480.0, 270.0)).unwrap();
-    assert!(first.0 < 500.0, "early time follows the first group, got {first:?}");
-    assert!(second.0 > 1000.0, "later time follows the second group, got {second:?}");
+    assert!(
+        first.0 < 500.0,
+        "early time follows the first group, got {first:?}"
+    );
+    assert!(
+        second.0 > 1000.0,
+        "later time follows the second group, got {second:?}"
+    );
 }
 
 #[test]
@@ -1434,7 +1458,10 @@ fn zoom_camera_settles_to_its_target_once_the_spring_is_done() {
     state.zoom_clips[index].mode = ZoomMode::Manual;
 
     let start = state.zoom_clips[index].start;
-    let target = (state.zoom_clips[index].scale, state.zoom_clips[index].center);
+    let target = (
+        state.zoom_clips[index].scale,
+        state.zoom_clips[index].center,
+    );
     let samples: Vec<_> = (0..=90)
         .map(|frame| {
             let time = start + frame as f64 / 60.0;
@@ -1442,19 +1469,28 @@ fn zoom_camera_settles_to_its_target_once_the_spring_is_done() {
         })
         .collect();
     let settled_frame = (0..samples.len())
-        .find(|&frame| samples[frame..].iter().all(|sample| *sample == samples[frame]))
+        .find(|&frame| {
+            samples[frame..]
+                .iter()
+                .all(|sample| *sample == samples[frame])
+        })
         .expect("the camera should settle within 1.5 seconds of the zoom start");
 
     assert!(settled_frame <= 90, "settled at frame {settled_frame}");
     assert_eq!(samples[settled_frame], target);
-    assert!(samples[settled_frame..].iter().all(|sample| *sample == target));
+    assert!(samples[settled_frame..]
+        .iter()
+        .all(|sample| *sample == target));
 }
 
 #[test]
 fn spring_step_moves_toward_the_target() {
     let spring = CAMERA_FOLLOW_SPRING;
     let (value, velocity) = spring_step(0.0, 0.0, 100.0, spring, 1.0 / 120.0);
-    assert!(value > 0.0 && value < 100.0, "a step should advance, got {value}");
+    assert!(
+        value > 0.0 && value < 100.0,
+        "a step should advance, got {value}"
+    );
     assert!(velocity > 0.0, "velocity should build toward the target");
     // The clamp keeps a fast approach from swinging far past the target.
     let (settled, _) = spring_step(99.0, 200.0, 100.0, spring, 1.0 / 120.0);
@@ -1743,8 +1779,8 @@ fn follow_camera_matches_across_random_and_sequential_seeks() {
         let expected = sequential[times.iter().position(|x| *x == t).unwrap()];
         assert!(
             (evaluated.0 - expected.0).abs() < 1e-12
-                && (evaluated.1.0 - expected.1.0).abs() < 1e-12
-                && (evaluated.1.1 - expected.1.1).abs() < 1e-12,
+                && (evaluated.1 .0 - expected.1 .0).abs() < 1e-12
+                && (evaluated.1 .1 - expected.1 .1).abs() < 1e-12,
             "seek to {t} should match sequential evaluation"
         );
     }
@@ -1995,12 +2031,16 @@ fn attach_sidecar_with_clicks(state: &mut VideoEditState, clicks: &[(f64, f64, f
     for &(t, x, y) in clicks {
         sidecar
             .clicks
-            .push(crate::recording::editor::sidecar::ClickSample { t, x, y, button: 1, cursor_id: None });
+            .push(crate::recording::editor::sidecar::ClickSample {
+                t,
+                x,
+                y,
+                button: 1,
+                cursor_id: None,
+            });
     }
     state.sidecar = Some(sidecar);
 }
-
-
 
 #[test]
 fn suggest_zoom_clips_merges_nearby_clicks_into_one_shot() {
@@ -2023,11 +2063,6 @@ fn suggest_zoom_clips_clips_a_window_at_the_trim_boundary() {
     assert!((state.zoom_clips[0].start - 5.6).abs() < 1e-9);
     assert!((state.zoom_clips[0].end - 6.0).abs() < 1e-9);
 }
-
-
-
-
-
 
 #[test]
 fn a_generated_zoom_follows_its_footage_through_a_head_trim() {
@@ -2166,8 +2201,6 @@ fn suggest_zoom_clips_uses_cut_boundary_tolerance() {
     assert!((state.zoom_clips[0].start - 4.0).abs() < 1e-9);
 }
 
-
-
 #[test]
 fn suggest_zoom_clips_skips_clicks_outside_kept_segments() {
     let mut state = VideoEditState::new(metadata());
@@ -2178,10 +2211,6 @@ fn suggest_zoom_clips_skips_clicks_outside_kept_segments() {
     assert!((state.zoom_clips[0].start - 4.2).abs() < 1e-9);
     assert!((state.zoom_clips[0].end - 5.2).abs() < 1e-9);
 }
-
-
-
-
 
 #[test]
 fn suggest_zoom_clips_rejects_targets_outside_the_editor_crop() {
@@ -2229,7 +2258,6 @@ fn click_redetection_preserves_manual_zoom_clips() {
         .iter()
         .any(|clip| clip.mode == ZoomMode::Auto));
 }
-
 
 #[test]
 fn redetect_zoom_clips_replaces_generated_auto_zooms_for_this_video() {
@@ -2460,7 +2488,8 @@ fn undo_takes_back_the_pass_that_ran_on_open() {
 }
 
 #[test]
-fn a_reloaded_project_has_nothing_to_undo() {    let mut state = VideoEditState::new(metadata());
+fn a_reloaded_project_has_nothing_to_undo() {
+    let mut state = VideoEditState::new(metadata());
     attach_sidecar_with_clicks(&mut state, &[(4.0, 500.0, 400.0)]);
     assert_eq!(state.suggest_zoom_clips(), 1);
     let saved = state.to_project();
@@ -2624,36 +2653,24 @@ fn zoom_and_clip_moves_snap_start_to_playhead() {
 }
 
 #[test]
-fn cursor_hide_clips_reject_overlap_and_zero_alpha_inside() {
+fn the_hide_switch_zeroes_the_cursor_alpha_for_the_whole_edit() {
     let mut state = VideoEditState::new(metadata());
-    let index = state.add_cursor_hide_at_playhead().unwrap();
-    assert_eq!(index, 0);
-    assert_eq!(state.cursor_hide_clips.len(), 1);
-    assert!(
-        (state.cursor_hide_clips[0].duration() - DEFAULT_CURSOR_HIDE_DURATION_SECONDS).abs() < 1e-9
+    assert_eq!(
+        state.cursor_hide_alpha(),
+        1.0,
+        "the cursor shows by default"
     );
-    assert!(state.add_cursor_hide_at(0.2).is_none());
-    assert_eq!(state.cursor_hide_clips.len(), 1);
-    assert!((state.cursor_hide_alpha(0.5) - 0.0).abs() < 1e-12);
-    assert!((state.cursor_hide_alpha(4.0) - 1.0).abs() < 1e-12);
-    assert!((state.cursor_hide_alpha_for_source(0.5) - 0.0).abs() < 1e-12);
-
-    state.playhead_seconds = 5.0;
-    let later = state.add_cursor_hide_at_playhead().unwrap();
-    assert_eq!(later, 1);
-    let duration = state.cursor_hide_clips[later].duration();
-    let start = snap_range_to_target(2.94, duration, 3.0, 0.12);
-    state.move_cursor_hide_clip(later, start);
-    assert!((state.cursor_hide_clips[later].start - 3.0).abs() < 1e-9);
-
-    state.selected_zoom = Some(0);
-    state.selected_cursor_hide = Some(0);
-    assert!(state.selected_cursor_hide_clip().is_some());
+    state.cursor.hidden = true;
+    assert_eq!(
+        state.cursor_hide_alpha(),
+        0.0,
+        "the switch hides the rendered cursor for the whole edit",
+    );
 }
 
 #[test]
 fn effect_clip_spans_are_clamped_to_the_video() {
-    // The program is only as long as its media, so a zoom or hide block may
+    // The program is only as long as its media, so a zoom block may
     // never run into the empty canvas past the last frame.
     let state = VideoEditState::new(metadata());
     assert!((super::effect_clip_limit(&state) - 10.0).abs() < 1e-9);
@@ -2677,18 +2694,18 @@ fn a_zoom_cannot_be_placed_past_the_video_end() {
     assert!((state.zoom_clips[index].duration() - 0.5).abs() < 1e-9);
 
     // ...and placement is refused when too little of it would fit.
-    assert!(state.add_zoom_at(9.95).is_none(), "0.05s is below the minimum");
-    assert!(state.add_zoom_at(10.5).is_none(), "nothing fits past the end");
-    assert!(state.add_zoom_at(30.0).is_none(), "nothing fits past the end");
-}
-
-#[test]
-fn a_cursor_hide_clip_cannot_be_placed_past_the_video_end() {
-    let mut state = VideoEditState::new(metadata());
-    let index = state.add_cursor_hide_at(9.5).expect("a partial hide fits");
-    assert!((state.cursor_hide_clips[index].end - 10.0).abs() < 1e-9);
-    assert!(state.add_cursor_hide_at(9.95).is_none());
-    assert!(state.add_cursor_hide_at(12.0).is_none());
+    assert!(
+        state.add_zoom_at(9.95).is_none(),
+        "0.05s is below the minimum"
+    );
+    assert!(
+        state.add_zoom_at(10.5).is_none(),
+        "nothing fits past the end"
+    );
+    assert!(
+        state.add_zoom_at(30.0).is_none(),
+        "nothing fits past the end"
+    );
 }
 
 #[test]
@@ -2705,12 +2722,6 @@ fn moving_an_effect_clip_keeps_it_inside_the_video() {
         (state.zoom_clips[zoom].duration() - duration).abs() < 1e-9,
         "moving must not resize the clip"
     );
-
-    let hide = state.add_cursor_hide_at(0.5).unwrap();
-    let hide_duration = state.cursor_hide_clips[hide].duration();
-    state.move_cursor_hide_clip(hide, 20.0);
-    assert!((state.cursor_hide_clips[hide].end - 10.0).abs() < 1e-9);
-    assert!((state.cursor_hide_clips[hide].duration() - hide_duration).abs() < 1e-9);
 }
 
 #[test]
@@ -2737,7 +2748,7 @@ fn the_paste_ghost_and_paste_agree_past_the_video_end() {
     // A one-second clip at 9.9 leaves less than the minimum before the end.
     state.playhead_seconds = 9.9;
     assert!(
-        !state.paste_spot_is_free(9.9, 1.0, true),
+        !state.paste_spot_is_free(9.9, 1.0),
         "the ghost must read as unplaceable"
     );
     assert!(!state.can_paste_clipboard_at_playhead());
@@ -2764,17 +2775,6 @@ fn duplicating_a_clip_at_the_end_has_nowhere_to_go() {
 }
 
 #[test]
-fn adding_cursor_hide_clears_zoom_selection() {
-    let mut state = VideoEditState::new(metadata());
-    assert!(state.add_zoom_at_playhead().is_some());
-    assert!(state.selected_zoom.is_some());
-    state.playhead_seconds = 4.0;
-    assert!(state.add_cursor_hide_at_playhead().is_some());
-    assert!(state.selected_zoom.is_none());
-    assert!(state.selected_cursor_hide.is_some());
-}
-
-#[test]
 fn even_crop_stays_inside_frame() {
     let (x, y, w, h) = even_crop_rect(1.8, (10.0, 10.0), 1920, 1080);
     assert!(w.is_multiple_of(2) && h.is_multiple_of(2));
@@ -2792,7 +2792,10 @@ fn float_crop_preserves_fractional_dimensions_and_origin() {
     assert!((y - (540.0 - h / 2.0)).abs() < 1e-9);
 
     let (even_x, even_y, even_w, even_h) = even_crop_rect(1.7, (960.0, 540.0), 1920, 1080);
-    assert_ne!((x, y, w, h), (even_x as f64, even_y as f64, even_w as f64, even_h as f64));
+    assert_ne!(
+        (x, y, w, h),
+        (even_x as f64, even_y as f64, even_w as f64, even_h as f64)
+    );
 
     let integral = float_crop_rect(2.0, (960.0, 540.0), 1920, 1080);
     assert_eq!(integral, (480.0, 270.0, 960.0, 540.0));
@@ -2864,8 +2867,14 @@ fn estimate_size_follows_quality_tier() {
         state.quality = tier;
         state.estimated_size_bytes(true)
     };
-    assert_eq!(trim_estimate(ExportQuality::Balanced), trim_estimate(ExportQuality::High));
-    assert_eq!(trim_estimate(ExportQuality::High), trim_estimate(ExportQuality::Ultra));
+    assert_eq!(
+        trim_estimate(ExportQuality::Balanced),
+        trim_estimate(ExportQuality::High)
+    );
+    assert_eq!(
+        trim_estimate(ExportQuality::High),
+        trim_estimate(ExportQuality::Ultra)
+    );
 }
 
 #[test]
@@ -3032,8 +3041,7 @@ fn motion_blur_samples_span_the_exposure_and_grow_with_travel() {
     let exposure = settings.exposure_seconds(30.0);
     let slow = settings.temporal_offsets(30.0, 3.0, MotionBlurBudgetMode::FullQuality);
     let fast = settings.temporal_offsets(30.0, 200.0, MotionBlurBudgetMode::FullQuality);
-    let preview =
-        settings.temporal_offsets(30.0, 200.0, MotionBlurBudgetMode::LivePreviewPlayback);
+    let preview = settings.temporal_offsets(30.0, 200.0, MotionBlurBudgetMode::LivePreviewPlayback);
     assert!(slow.len() >= 2);
     assert!(fast.len() > slow.len());
     assert!(preview.len() < fast.len());
@@ -3085,14 +3093,16 @@ fn ease_timing_keeps_the_recovered_bezier_and_does_not_overshoot() {
     let peak = (0..=100)
         .map(|index| timing.apply(index as f64 / 100.0))
         .fold(f64::MIN, f64::max);
-    assert!(peak <= 1.0 + f64::EPSILON, "ease must not overshoot: {peak}");
+    assert!(
+        peak <= 1.0 + f64::EPSILON,
+        "ease must not overshoot: {peak}"
+    );
 }
 
 #[test]
 fn motion_ease_matches_parametric_bezier_reference_points() {
     let coordinate = |u: f64, p1: f64, p2: f64| {
-        ((1.0 - 3.0 * p2 + 3.0 * p1) * u + 3.0 * p2 - 6.0 * p1) * u * u
-            + 3.0 * p1 * u
+        ((1.0 - 3.0 * p2 + 3.0 * p1) * u + 3.0 * p2 - 6.0 * p1) * u * u + 3.0 * p1 * u
     };
     for (x1, y1, x2, y2) in [
         (0.42, 0.0, 0.58, 1.0),
@@ -3203,10 +3213,17 @@ fn motion_transition_duration_scales_the_complete_camera_response() {
 
 #[test]
 fn motion_edge_resizing_retimes_every_transform_without_changing_the_curve() {
-    let pose_values = |pose: MotionTransform| [
-        pose.scale, pose.rotation_x, pose.rotation_y, pose.rotation_z,
-        pose.perspective, pose.pos_x, pose.pos_y,
-    ];
+    let pose_values = |pose: MotionTransform| {
+        [
+            pose.scale,
+            pose.rotation_x,
+            pose.rotation_y,
+            pose.rotation_z,
+            pose.perspective,
+            pose.pos_x,
+            pose.pos_y,
+        ]
+    };
     for kind in [MotionTimingKind::Ease, MotionTimingKind::Spring] {
         let mut motion = MotionState::default();
         let clip = motion.add_segment_at(0.0).unwrap();
@@ -3218,12 +3235,16 @@ fn motion_edge_resizing_retimes_every_transform_without_changing_the_curve() {
         motion.set_selected_end_pos_y(-0.25);
         motion.set_selected_zoom_anchor(0.2, 0.8);
         motion.set_transform_timing(MotionEffectTransformTiming {
-            kind, spring_bounce: 0.35, transition_duration: 0.75,
+            kind,
+            spring_bounce: 0.35,
+            transition_duration: 0.75,
             ..MotionEffectTransformTiming::default()
         });
         let before = motion.segments[clip].clone();
         let samples: Vec<_> = [0.15, 0.3, 0.6, 0.9]
-            .into_iter().map(|time| (time, motion.sample(time))).collect();
+            .into_iter()
+            .map(|time| (time, motion.sample(time)))
+            .collect();
 
         motion.resize_segment_range(clip, 1.0, 5.0);
 
@@ -3249,7 +3270,10 @@ fn resizing_the_default_motion_clip_stretches_its_effective_transition() {
     let clip = motion.add_segment_at(0.0).unwrap();
     motion.resize_segment_range(clip, 0.0, 4.0);
     assert_eq!(motion.segments[clip].timing.transition_duration, 4.0);
-    assert_eq!(motion.segments[clip].timing.clamped().transition_duration, 4.0);
+    assert_eq!(
+        motion.segments[clip].timing.clamped().transition_duration,
+        4.0
+    );
     motion.resize_segment_range(clip, 0.0, 0.5);
     assert_eq!(motion.segments[clip].timing.transition_duration, 0.5);
 }
@@ -3273,8 +3297,19 @@ fn text_edge_resizing_preserves_each_animation_at_equivalent_local_times() {
         assert_eq!(resized.pos_y, before.pos_y);
         assert!((resized.transition_duration - before.transition_duration * 4.0).abs() < 1e-9);
         assert!((resized.typewriter_time - before.typewriter_time * 4.0).abs() < 1e-9);
-        for (actual, expected) in [actual.alpha, actual.offset_x, actual.offset_y, actual.reveal]
-            .into_iter().zip([expected.alpha, expected.offset_x, expected.offset_y, expected.reveal]) {
+        for (actual, expected) in [
+            actual.alpha,
+            actual.offset_x,
+            actual.offset_y,
+            actual.reveal,
+        ]
+        .into_iter()
+        .zip([
+            expected.alpha,
+            expected.offset_x,
+            expected.offset_y,
+            expected.reveal,
+        ]) {
             assert!((actual - expected).abs() < 1e-9, "{animation:?}");
         }
     }
@@ -3423,7 +3458,10 @@ fn spring_bounce_reads_as_the_first_overshoot() {
             .map(|index| timing.apply(index as f64 / 1000.0))
             .fold(f64::MIN, f64::max)
     };
-    assert!(response_peak(0.0) <= 1.0 + 1e-9, "critically damped overshot");
+    assert!(
+        response_peak(0.0) <= 1.0 + 1e-9,
+        "critically damped overshot"
+    );
     assert!(
         (response_peak(0.2) - 1.2).abs() < 0.02,
         "a 20% bounce should peak near 1.2, got {}",
@@ -3621,7 +3659,12 @@ fn suggested_zoom_easing_can_be_overridden() {
     state.selected_zoom = Some(0);
     state.set_selected_zoom_easing(ZoomEasing::Glide);
     assert_eq!(state.zoom_clips[0].easing, ZoomEasing::Glide);
-    let steps = zoom_scale_steps(&state.zoom_clips, state.zoom_clips[0].start, state.zoom_clips[0].end, 90);
+    let steps = zoom_scale_steps(
+        &state.zoom_clips,
+        state.zoom_clips[0].start,
+        state.zoom_clips[0].end,
+        90,
+    );
     let max_step = steps.iter().copied().fold(0.0_f64, f64::max);
     assert!(
         steps[0] > max_step * 0.5,
@@ -3712,7 +3755,10 @@ fn reset_zoom_animation_restores_the_modes_default() {
     assert_eq!(manual.selected_zoom_clip().unwrap().mode, ZoomMode::Manual);
     manual.set_selected_zoom_easing(ZoomEasing::Snappy);
     manual.reset_zoom_animation();
-    assert_eq!(manual.selected_zoom_clip().unwrap().easing, ZoomEasing::Glide);
+    assert_eq!(
+        manual.selected_zoom_clip().unwrap().easing,
+        ZoomEasing::Glide
+    );
 }
 
 #[test]
@@ -3832,7 +3878,10 @@ fn freeze_extends_the_composition_past_the_source_end() {
     assert_eq!(state.freeze_tail_seconds(), 0.0);
     assert!(state.extend_last_segment(1.0));
     assert!((state.freeze_tail_seconds() - 1.0).abs() < 1e-9);
-    assert!((state.trim_end_seconds - 10.0).abs() < 1e-9, "source end is untouched");
+    assert!(
+        (state.trim_end_seconds - 10.0).abs() < 1e-9,
+        "source end is untouched"
+    );
     assert!(
         (state.composition_duration() - 11.0).abs() < 1e-9,
         "the held frame lengthens the composition"
@@ -3904,22 +3953,6 @@ fn zoom_clips_keep_advancing_through_the_freeze_hold() {
         scale > 1.01,
         "the zoom must keep applying inside the hold, got {scale}"
     );
-}
-
-#[test]
-fn cursor_hide_clips_keep_working_through_the_freeze_hold() {
-    let mut state = VideoEditState::new(metadata());
-    state.extend_last_segment(2.0);
-    let index = state
-        .add_cursor_hide_at(10.5)
-        .expect("a hide placed over the hold must fit");
-    assert!(state.cursor_hide_clips[index].end <= 12.0 + 1e-9);
-    state.playhead_seconds = 11.0;
-    let source_t = state.source_playhead();
-    // The pinned source time sits before the hide...
-    assert!((state.cursor_hide_alpha_for_source(source_t) - 1.0).abs() < 1e-12);
-    // ...but the composition time lands inside it.
-    assert!((state.cursor_hide_alpha(state.playhead_seconds) - 0.0).abs() < 1e-12);
 }
 
 #[test]
@@ -4099,7 +4132,10 @@ fn gradient_normalizes_stops_into_a_usable_shape() {
     for pair in gradient.stops.windows(2) {
         assert!(pair[0].position <= pair[1].position);
     }
-    assert!(gradient.stops.iter().all(|s| (0.0..=1.0).contains(&s.position)));
+    assert!(gradient
+        .stops
+        .iter()
+        .all(|s| (0.0..=1.0).contains(&s.position)));
 }
 
 #[test]
@@ -4200,7 +4236,10 @@ fn a_hidden_zoom_stops_framing_the_preview_but_keeps_its_span() {
     let mut state = VideoEditState::new(metadata());
     state.zoom_clips.push(zoom_clip_at(1.0, 2.8));
     let zoomed = state.eval_zoom(1.9);
-    assert!(zoomed.0 > 1.01, "the clip frames the preview while it is on");
+    assert!(
+        zoomed.0 > 1.01,
+        "the clip frames the preview while it is on"
+    );
 
     state.set_zoom_hidden(0, true);
     let flat = state.eval_zoom(1.9);
@@ -4232,24 +4271,6 @@ fn a_hidden_clip_does_not_force_a_composite_on_its_own() {
         !state.needs_composite(),
         "a clip that changes nothing in the output must not drag in the \
          composite graph",
-    );
-}
-
-#[test]
-fn a_hidden_hide_stops_hiding_the_cursor() {
-    let mut state = VideoEditState::new(metadata());
-    state.cursor_hide_clips.push(CursorHideClip {
-        start: 1.0,
-        end: 2.8,
-        hidden: false,
-    });
-    assert_eq!(state.cursor_hide_alpha(1.9), 0.0);
-
-    state.set_cursor_hide_hidden(0, true);
-    assert_eq!(
-        state.cursor_hide_alpha(1.9),
-        1.0,
-        "a disabled hide must leave the cursor visible",
     );
 }
 
@@ -4293,10 +4314,10 @@ fn cut_then_paste_moves_a_clip_to_the_playhead() {
         "cut must take the clip off the timeline",
     );
     // The span is on the clipboard, so the paste has something to restore.
-    let span = match state.clipboard_clip().expect("cut fills the clipboard") {
-        ClipClipboard::Zoom(clip) => clip.duration(),
-        ClipClipboard::Hide(_) => panic!("a zoom was cut, so the clipboard holds a zoom"),
-    };
+    let span = state
+        .clipboard_clip()
+        .expect("cut fills the clipboard")
+        .duration();
     assert!((span - 1.0).abs() < 1e-9);
 
     state.playhead_seconds = 5.0;
@@ -4304,7 +4325,10 @@ fn cut_then_paste_moves_a_clip_to_the_playhead() {
     let pasted = state.paste_clipboard_at_playhead().expect("paste lands");
     assert_eq!(pasted, 0);
     let clip = &state.zoom_clips[0];
-    assert!((clip.start - 5.0).abs() < 1e-9, "paste lands at the playhead");
+    assert!(
+        (clip.start - 5.0).abs() < 1e-9,
+        "paste lands at the playhead"
+    );
     assert!((clip.end - 6.0).abs() < 1e-9);
 }
 
@@ -4333,27 +4357,6 @@ fn a_paste_that_would_overlap_is_refused_and_changes_nothing() {
     state.timeline_offset_seconds = 0.0;
     assert!(state.paste_clipboard_at_playhead().is_none());
     assert_eq!(state.zoom_clips.len(), 1, "a refused paste must be a no-op");
-}
-
-#[test]
-fn the_clipboard_remembers_which_track_the_clip_came_from() {
-    let mut state = VideoEditState::new(metadata());
-    state.cursor_hide_clips.push(CursorHideClip {
-        start: 1.0,
-        end: 2.0,
-        hidden: false,
-    });
-
-    assert!(state.copy_cursor_hide_clip(0));
-    state.playhead_seconds = 4.0;
-    state.paste_clipboard_at_playhead().expect("hide paste lands");
-
-    assert!(
-        state.zoom_clips.is_empty(),
-        "a copied hide must not paste as a zoom",
-    );
-    assert_eq!(state.cursor_hide_clips.len(), 2);
-    assert!((state.cursor_hide_clips[1].start - 4.0).abs() < 1e-9);
 }
 
 #[test]
@@ -4473,31 +4476,6 @@ fn cut_always_leaves_something_to_paste_back() {
 }
 
 #[test]
-fn the_ghost_only_shows_on_the_track_the_clip_came_from() {
-    // A zoom copied off the Zoom track must not offer a ghost on the Hide
-    // lane, or a click there would place a zoom into a hide.
-    let mut state = VideoEditState::new(metadata());
-    state.zoom_clips.push(zoom_clip_at(1.0, 2.0));
-    state.copy_zoom_clip(0);
-
-    assert_eq!(state.clipboard_duration_for(true), Some(1.0));
-    assert_eq!(
-        state.clipboard_duration_for(false),
-        None,
-        "a copied zoom must not ghost on the Hide track",
-    );
-
-    state.cursor_hide_clips.push(CursorHideClip {
-        start: 5.0,
-        end: 6.5,
-        hidden: false,
-    });
-    state.copy_cursor_hide_clip(0);
-    assert_eq!(state.clipboard_duration_for(false), Some(1.5));
-    assert_eq!(state.clipboard_duration_for(true), None);
-}
-
-#[test]
 fn click_to_place_pastes_at_the_pointer_and_leaves_the_playhead_alone() {
     // The ghost previews a paste at the pointer, so the click has to land
     // exactly there — and it must not drag the playhead along, or the first
@@ -4511,7 +4489,10 @@ fn click_to_place_pastes_at_the_pointer_and_leaves_the_playhead_alone() {
         .paste_clipboard_at(4.0)
         .expect("a free spot takes the paste");
     let clip = &state.zoom_clips[placed];
-    assert!((clip.start - 4.0).abs() < 1e-9, "the paste lands on the pointer");
+    assert!(
+        (clip.start - 4.0).abs() < 1e-9,
+        "the paste lands on the pointer"
+    );
     assert!((clip.end - 5.0).abs() < 1e-9);
     assert!(
         (state.playhead_seconds - 8.0).abs() < 1e-9,
@@ -4528,10 +4509,10 @@ fn the_ghost_reports_an_occupied_spot_before_the_click() {
     state.copy_zoom_clip(0);
 
     assert!(
-        !state.paste_spot_is_free(1.5, 1.0, true),
+        !state.paste_spot_is_free(1.5, 1.0),
         "a spot under an existing clip is not free",
     );
-    assert!(state.paste_spot_is_free(4.0, 1.0, true));
+    assert!(state.paste_spot_is_free(4.0, 1.0));
     // Offered and refused must match the paste itself.
     assert!(state.paste_clipboard_at(1.5).is_none());
     assert!(state.paste_clipboard_at(4.0).is_some());
@@ -4547,7 +4528,7 @@ fn placing_a_clip_ends_the_copy_state() {
     state.zoom_clips.push(zoom_clip_at(1.0, 2.0));
     state.copy_zoom_clip(0);
     assert!(state.is_pasting_clip(), "a copy holds the clip");
-    assert_eq!(state.clipboard_duration_for(true), Some(1.0));
+    assert_eq!(state.clipboard_duration_for(), Some(1.0));
 
     state.paste_clipboard_at(4.0).expect("the paste lands");
 
@@ -4556,7 +4537,7 @@ fn placing_a_clip_ends_the_copy_state() {
         "a successful paste must finish the copy",
     );
     assert_eq!(
-        state.clipboard_duration_for(true),
+        state.clipboard_duration_for(),
         None,
         "the ghost must go away once the clip is placed",
     );
@@ -4799,7 +4780,10 @@ fn cursor_spring_prefers_a_drag_over_an_imminent_click() {
         CURSOR_DRAG_SPRING
     );
     // The same moment without a drag is the click spring.
-    assert_eq!(cursor_spring_for_time(&clicks, &[], 1.0), CURSOR_CLICK_SPRING);
+    assert_eq!(
+        cursor_spring_for_time(&clicks, &[], 1.0),
+        CURSOR_CLICK_SPRING
+    );
     // Past the look-ahead window it falls back to the follow spring.
     assert_eq!(
         cursor_spring_for_time(&clicks, &[], 2.0),
@@ -4898,13 +4882,11 @@ fn orphan_effects_do_not_extend_the_deleted_tail() {
     state.add_cut(4.0);
     let zoom = state.add_zoom_at(3.0).unwrap();
     state.zoom_clips[zoom].end = 9.0;
-    let hide = state.add_cursor_hide_at(3.0).unwrap();
-    state.cursor_hide_clips[hide].end = 9.0;
     state.selected_segment = Some(1);
     state.remove_selected_clip();
     assert!(
         state.content_end_seconds() <= 4.0 + 1e-9,
-        "a zoom or hide past the retained footage must not keep playback running, got {}",
+        "a zoom past the retained footage must not keep playback running, got {}",
         state.content_end_seconds()
     );
 }
@@ -4990,9 +4972,13 @@ fn playback_follows_a_reordered_source() {
     state.add_cut(4.0);
     state.move_segment(1, 0);
     state.set_segment_start(1, 5.9);
-    for (time, expect_timeline, expect_source) in
-        [(0.0, 0.0, 0.0), (3.9, 3.9, 3.9), (5.9, 5.9, 4.0), (6.0, 6.0, 4.1), (6.5, 6.5, 4.6)]
-    {
+    for (time, expect_timeline, expect_source) in [
+        (0.0, 0.0, 0.0),
+        (3.9, 3.9, 3.9),
+        (5.9, 5.9, 4.0),
+        (6.0, 6.0, 4.1),
+        (6.5, 6.5, 4.6),
+    ] {
         let (timeline, source) = state
             .playback_position(time)
             .unwrap_or_else(|| panic!("time {time} has retained footage"));
@@ -5179,13 +5165,11 @@ fn the_add_zoom_tool_clears_the_selection_and_refuses_a_recording_without_video(
     });
     state.selected_zoom = Some(0);
     state.selected_segment = Some(0);
-    state.selected_cursor_hide = Some(0);
 
     assert!(state.set_add_zoom_tool(true));
     assert!(state.add_zoom_tool);
     assert_eq!(state.selected_zoom, None);
     assert_eq!(state.selected_segment, None);
-    assert_eq!(state.selected_cursor_hide, None);
     // Arming twice changes nothing, so the caller does not pause again.
     assert!(!state.set_add_zoom_tool(true));
     assert!(state.set_add_zoom_tool(false));

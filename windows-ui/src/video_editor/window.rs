@@ -328,6 +328,10 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
                 timeline.composition_duration(),
             );
             timeline.notify_typing_changed();
+            // The stage has just loaded the pointer sidecar, so the Cursor
+            // panel rebuilds with the switch enabled only when the recording
+            // carries samples to hide.
+            timeline.notify_cursor_changed();
         })
     };
     update_document(initial);
@@ -2325,7 +2329,7 @@ fn export_model_inner(
         zooms: footage.zooms,
         zoom_camera: footage.zoom_camera,
         effects: footage.effects,
-        cursor_hide_clips: footage.cursor_hide_clips,
+        cursor_hidden: footage.cursor_hidden,
         cursor: stage.cursor.settings(),
         sidecar,
         webcam: stage.webcam.export(),

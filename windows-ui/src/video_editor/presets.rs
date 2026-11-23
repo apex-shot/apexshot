@@ -71,9 +71,11 @@ const SHIPPED_CLICK_SOUND: &str = "soft";
 
 /// The cursor settings as a preset stores them.
 ///
-/// One key per field of the shared model, under the model's own names, so a
-/// reader can line the two up without a table. The three enums are strings for
-/// the reason the module explains; `click_color` stays a triple of channels
+/// One key per look field of the shared model, under the model's own names, so
+/// a reader can line the two up without a table. The whole-video "hide cursor"
+/// switch is deliberately absent: it belongs to the edit, not to a look, and
+/// the project stores it beside this block. The three enums are strings for the
+/// reason the module explains; `click_color` stays a triple of channels
 /// because that is what it is.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -146,6 +148,10 @@ impl CursorFile {
             speed: finite_or(self.speed, defaults.speed),
             shadow: finite_or(self.shadow, defaults.shadow),
             smooth: finite_or(self.smooth, defaults.smooth),
+            // The whole-video hide switch is stored beside the cursor look in
+            // the project, not as part of a preset, so reading a look leaves
+            // it to the caller.
+            hidden: false,
             hide_idle: self.hide_idle,
             idle_ms: finite_or(self.idle_ms, defaults.idle_ms),
             click_effect: click_effect_from_name(&self.click_effect),
@@ -696,7 +702,6 @@ mod tests {
             "zoom_clips": [
                 { "start": 0.5, "end": 2.5, "scale": 2.0, "center": [0.4, 0.6] }
             ],
-            "cursor_hide_clips": [ { "start": 3.0, "end": 4.0 } ],
             "webcam": {
                 "enabled": true,
                 "fullscreen": false,
@@ -757,6 +762,7 @@ mod tests {
             remove_shake_threshold: 45.0,
             stop_movement_in_last_part_ms: 1200.0,
             loop_position_before_end_ms: Some(750.0),
+            hidden: false,
         }
     }
 
@@ -910,7 +916,7 @@ mod tests {
             "freeze_tail",
             "zoom_clips",
             "zoom_camera",
-            "cursor_hide_clips",
+            "cursor_hidden",
             "playhead_seconds",
             "timeline_scale",
             "timeline_scroll_seconds",
@@ -1042,7 +1048,7 @@ mod tests {
         assert_eq!(file.freeze_tail, before.freeze_tail);
         assert_eq!(file.zoom_clips, before.zoom_clips);
         assert_eq!(file.zoom_camera, before.zoom_camera);
-        assert_eq!(file.cursor_hide_clips, before.cursor_hide_clips);
+        assert_eq!(file.cursor_hidden, before.cursor_hidden);
         assert_eq!(file.playhead_seconds, before.playhead_seconds);
         assert_eq!(file.timeline_scale, before.timeline_scale);
         assert_eq!(file.timeline_scroll_seconds, before.timeline_scroll_seconds);

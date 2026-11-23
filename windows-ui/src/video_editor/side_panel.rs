@@ -667,6 +667,22 @@ fn update_cursor_settings(
     repaint();
 }
 
+/// Set the whole-video cursor switch as one undo step. The preview redraws
+/// from the model, and the repaint marks the project so the autosave writes it.
+fn update_cursor_hidden(
+    timeline: &super::timeline::Timeline,
+    cursor: &super::cursor::CursorModel,
+    repaint: &Rc<dyn Fn()>,
+    hidden: bool,
+) {
+    if cursor.hidden() == hidden {
+        return;
+    }
+    timeline.record_cursor_look_edit();
+    cursor.set_hidden(hidden);
+    repaint();
+}
+
 /// Apply a cursor-look edit as one undo step, so Ctrl+Z takes it back instead
 /// of an earlier timeline edit.
 fn update_cursor_look(
@@ -1149,6 +1165,33 @@ fn build_cursor_follow_page(
     shake_row.append(&shake_label);
     shake_row.append(&remove_shake);
     movement.append(&shake_row);
+
+    let hide_row = GtkBox::new(Orientation::Horizontal, 8);
+    hide_row.add_css_class("recording-editor-zoom-classic");
+    let hide_label = Label::new(Some(&t("Hide cursor")));
+    hide_label.add_css_class("recording-editor-zoom-classic-label");
+    hide_label.set_hexpand(true);
+    hide_label.set_xalign(0.0);
+    let hide_switch = Switch::new();
+    hide_switch.add_css_class("recording-editor-zoom-switch");
+    hide_switch.set_active(cursor.hidden());
+    hide_switch.set_halign(Align::End);
+    // Hiding a cursor needs a cursor. A recording without pointer samples
+    // draws none, so the switch is offered disabled rather than pretending to
+    // change the picture.
+    hide_switch.set_sensitive(timeline.cursor_pointer_available());
+    hide_switch.connect_state_set({
+        let cursor = cursor.clone();
+        let repaint = repaint.clone();
+        let timeline = timeline.clone();
+        move |_, hidden| {
+            update_cursor_hidden(&timeline, &cursor, &repaint, hidden);
+            gtk4::glib::Propagation::Proceed
+        }
+    });
+    hide_row.append(&hide_label);
+    hide_row.append(&hide_switch);
+    visibility.append(&hide_row);
 
     let idle_row = GtkBox::new(Orientation::Horizontal, 8);
     idle_row.add_css_class("recording-editor-zoom-classic");

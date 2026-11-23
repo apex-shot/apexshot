@@ -95,7 +95,6 @@ impl RenderKey {
         project.timeline_scale = 0.0;
         project.timeline_scroll_seconds = 0.0;
         project.selected_zoom = None;
-        project.selected_cursor_hide = None;
 
         let mut paths = BTreeSet::from([state.metadata.path.clone()]);
         paths.extend(state.project_media.iter().map(|media| media.path.clone()));
@@ -308,7 +307,6 @@ mod tests {
         state.timeline_scale = 73.0;
         state.timeline_scroll_seconds = 1.5;
         state.selected_zoom = Some(2);
-        state.selected_cursor_hide = Some(1);
         assert_eq!(RenderKey::capture(&state).unwrap(), original);
         fs::remove_dir_all(dir).unwrap();
     }
