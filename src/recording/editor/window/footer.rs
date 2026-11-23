@@ -107,46 +107,6 @@ fn icon_action_button(icon_name: &str, tooltip: &str) -> Button {
     button
 }
 
-pub(super) fn build_upload_action(
-    window: &ApplicationWindow,
-    state: Arc<Mutex<VideoEditState>>,
-    exporting: Rc<Cell<bool>>,
-    export_cancellation: Arc<AtomicBool>,
-    export_flow_active: export_flow::FlowActive,
-) -> (Button, Spinner) {
-    let button = Button::new();
-    button.set_has_frame(false);
-    button.add_css_class("recording-editor-title-upload");
-    button.set_tooltip_text(Some(&t("Export with your current settings, then upload")));
-    button.set_valign(Align::Center);
-    let icon = Image::from_icon_name(
-        crate::capture::editor::window::icon_names::custom::CLOUD_OUTLINE_THIN_SYMBOLIC,
-    );
-    icon.set_pixel_size(20);
-    button.set_child(Some(&icon));
-
-    let spinner = Spinner::new();
-    spinner.set_size_request(12, 12);
-    spinner.set_visible(false);
-    spinner.set_valign(Align::Center);
-
-    wire_upload_button(
-        &button,
-        window,
-        state,
-        vec![
-            button.clone().upcast::<gtk4::Widget>(),
-            spinner.clone().upcast(),
-        ],
-        spinner.clone(),
-        exporting,
-        export_cancellation,
-        export_flow_active,
-    );
-
-    (button, spinner)
-}
-
 pub(super) fn build_export_action(
     window: &ApplicationWindow,
     state: Arc<Mutex<VideoEditState>>,

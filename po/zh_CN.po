@@ -5330,3 +5330,21 @@ msgstr "接下来的 3 次 Studio 导出免费。每次导出后，ApexShot 会�
 
 msgid "Choose Studio in ApexShot, sign in, and pay. ApexShot turns Studio on for you, with no licence file to copy or import."
 msgstr "在 ApexShot 中选择 Studio，登录并付款。ApexShot 会为你开启 Studio，无需复制或导入许可证文件。"
+
+msgid "Name"
+msgstr "名称"
+
+msgid "New preset"
+msgstr "新建预设"
+
+msgid "New recordings open with this look"
+msgstr "新录制将以此外观打开"
+
+msgid "Save current look"
+msgstr "保存当前外观"
+
+msgid "Save this project's background, cursor and click sound, then put them on any recording."
+msgstr "保存此项目的背景、光标和点击音效，然后将它们应用到任意录制。"
+
+msgid "Save this project's background, cursor, camera and captions, then put them on any recording."
+msgstr "保存此项目的背景、光标、摄像头和字幕，然后将它们应用到任意录制。"

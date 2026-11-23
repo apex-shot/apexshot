@@ -1,8 +1,10 @@
 //! The presets button beside Export, and the popover it opens.
 //!
-//! A preset is a saved look. Clicking one puts it on the open project as one
-//! undo step; the gear beside it keeps it as the default for new recordings,
-//! updates it from the current look, renames it, shows its file or deletes it.
+//! A preset is a saved look. The popover is three states in one card: an empty
+//! invitation, a create form that a rename reuses, and the list of saved looks.
+//! A row applies its preset to the open project as one undo step; its `⋯` menu
+//! keeps the look as the default for new recordings, updates it from the
+//! current look, renames it, shows its file or deletes it.
 
 use super::background;
 use super::presets::{self, Preset};
@@ -14,41 +16,70 @@ use crate::i18n::{t, tfmt};
 use gtk4::gdk_pixbuf::Pixbuf;
 use gtk4::prelude::*;
 use gtk4::{
-    gdk, glib, Align, Box as GtkBox, Button, CssProvider, DrawingArea, Entry, EventControllerFocus,
-    EventControllerKey, EventControllerLegacy, Image, Label, Orientation, PickFlags, Popover,
-    PositionType, Switch, Widget,
+    gdk, glib, pango, Align, Box as GtkBox, Button, CssProvider, DrawingArea, Entry,
+    EventControllerKey, EventControllerLegacy, Image, Label, Orientation, PickFlags, PolicyType,
+    Popover, PositionType, ScrolledWindow, Stack, StackTransitionType, Switch, Widget,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::Duration;
 
-/// The row the list is waiting on: one rename or one delete confirmation at a
-/// time, named by the id of the preset it belongs to.
-#[derive(Clone, PartialEq)]
+/// The editor's accent, the orange the Export button is filled with.
+const ACCENT: (f64, f64, f64) = (1.0, 0.404, 0.051);
+
+/// What the form and the delete page are acting on. The list itself never
+/// reads this: each state is a page of the card's stack, so the form and the
+/// delete question replace the list instead of sitting beside it.
+#[derive(Clone)]
 enum Pending {
     Idle,
     Rename(String),
-    Delete(String),
+    Delete(String, String),
 }
 
 /// The popover and everything its handlers reach. Each handler holds a clone,
-/// so they all see the same list, form and status line.
+/// so they all see the same stack, form and status lines.
 #[derive(Clone)]
 struct Panel {
     popover: Popover,
-    form: GtkBox,
-    plus: Button,
+    stack: Stack,
+    create_title: Label,
+    delete_title: Label,
     name: Entry,
+    default_card: GtkBox,
     default_switch: Switch,
+    form_status: Label,
+    form_actions: GtkBox,
+    create_button: Button,
     list: GtkBox,
-    status: Label,
+    list_status: Label,
     pending: Rc<RefCell<Pending>>,
     timeline: Timeline,
     applied: Rc<RefCell<Option<String>>>,
     scale: f64,
 }
 
-/// The editor's accent, the orange the Export button is filled with.
-const ACCENT: (f64, f64, f64) = (1.0, 0.404, 0.051);
+/// The widgets a card is built from, before its handlers are attached. Kept
+/// apart from [`attach`] so the state layout can be built and inspected
+/// without a timeline.
+struct States {
+    stack: Stack,
+    create_title: Label,
+    delete_title: Label,
+    name: Entry,
+    default_card: GtkBox,
+    default_switch: Switch,
+    form_status: Label,
+    form_actions: GtkBox,
+    create_button: Button,
+    cancel_create: Button,
+    list: GtkBox,
+    list_status: Label,
+    empty_save: Button,
+    add_preset: Button,
+    cancel_delete: Button,
+    confirm_delete: Button,
+}
 
 /// The bookmark button before Export in the title bar. It stays insensitive
 /// until a recording is open, as Export does, and fills with the accent while
@@ -104,8 +135,29 @@ fn install_style(scale: f64) {
     let Some(display) = gdk::Display::default() else {
         return;
     };
-    let px = |value: f64| (value * scale).round() as i32;
-    let css = format!(
+    let provider = CssProvider::new();
+    provider.load_from_data(&style_css(scale));
+    gtk4::style_context_add_provider_for_display(
+        &display,
+        &provider,
+        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION + 7,
+    );
+}
+
+/// The popover's sheet: the title button, the stripped popover frame, the card
+/// and one block per state. Authored at 100% and scaled here, including the
+/// hairlines, so the card keeps its proportions at every Windows UI scale.
+fn style_css(scale: f64) -> String {
+    let px = |value: f64| (value * scale).round().max(1.0) as i32;
+    let font = 14.0 * scale;
+    let muted = 13.0 * scale;
+    let note = 12.0 * scale;
+    let eyebrow = 11.0 * scale;
+    let pill_font = 11.0 * scale;
+    let title = 15.0 * scale;
+    let eyebrow_spacing = 0.8 * scale;
+    let menu_glyph = 16.0 * scale;
+    format!(
         r#"
         button.video-editor-title-presets {{
             min-height: 0; min-width: 0; padding: 0; border: none; box-shadow: none;
@@ -123,105 +175,199 @@ fn install_style(scale: f64) {
             padding: 0; border-radius: 0;
         }}
         .vep-card {{
-            background: #1c1c1c; color: #ececec;
-            border: 1px solid alpha(white, 0.10); border-radius: {r10}px;
-            box-shadow: none; padding: 0 0 {p8}px 0;
+            background: #171717; color: #e8e8e8;
+            border: {rim}px solid rgba(255, 255, 255, 0.06);
+            border-radius: {card_radius}px;
+            padding: {pad}px;
+            font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
+            font-size: {font}px;
+            box-shadow: none;
         }}
-        .vep-header {{ padding: {p8}px {p8}px {p6}px {p14}px; }}
-        .vep-title {{ font-size: {f13}px; font-weight: 600; color: alpha(white, 0.92); }}
-        button.vep-icon-tile {{
-            min-width: {s24}px; min-height: {s24}px; padding: 0; border: none; box-shadow: none;
-            border-radius: {r6}px; background: transparent; color: alpha(white, 0.78);
+        .vep-header {{ margin-bottom: {header_gap}px; }}
+        .vep-title {{ font-size: {title}px; font-weight: 600; color: #e8e8e8; }}
+        button.vep-close {{
+            min-width: {close}px; min-height: {close}px; padding: 0;
+            border: none; box-shadow: none; border-radius: {close_radius}px;
+            background: transparent; color: #999999;
         }}
-        button.vep-icon-tile:hover {{ background: alpha(white, 0.10); color: #ffffff; }}
-        button.vep-icon-tile.vep-open {{ background: alpha(#ff670d, 0.20); color: #ff9a5c; }}
-        button.vep-row {{
-            min-height: 0; padding: {p6}px; border: none; box-shadow: none;
-            border-radius: {r10}px; background: transparent; color: #ececec;
+        button.vep-close:hover {{ background: rgba(255, 255, 255, 0.08); color: #e8e8e8; }}
+        button.vep-close:focus-visible {{ outline: 2px solid #ff7c2f; outline-offset: 2px; }}
+
+        button.vep-btn {{
+            min-height: {btn_height}px; padding: 0 {btn_pad}px;
+            border: none; border-radius: {btn_radius}px; box-shadow: none;
+            background-image: none; text-shadow: none;
+            font-size: {font}px; font-weight: 500;
         }}
-        button.vep-row:hover {{ background: alpha(white, 0.06); }}
-        button.vep-row.vep-applied {{ background: alpha(#ff670d, 0.18); }}
-        button.vep-row.vep-applied:hover {{ background: alpha(#ff670d, 0.24); }}
-        .vep-name {{ font-size: {f14}px; font-weight: 600; }}
-        .vep-pill {{
-            font-size: {f11}px; font-weight: 700; color: #ff9a5c;
-            background: alpha(#ff670d, 0.18); border-radius: {r6}px; padding: {p3}px {p8}px;
-        }}
-        button.vep-gear {{
-            min-width: {s30}px; min-height: {s30}px; padding: 0; border: none; box-shadow: none;
-            border-radius: {r8}px; background: transparent; color: #8c8c8c;
-        }}
-        button.vep-gear:hover {{ background: alpha(white, 0.08); color: #ececec; }}
-        .vep-muted {{ color: #8f8f8f; font-size: {f12}px; }}
-        .vep-empty-title {{ font-size: {f14}px; font-weight: 600; }}
-        .vep-form {{ margin: 0 {p8}px {p8}px {p8}px; }}
-        .vep-form-label {{ font-size: {f13}px; color: alpha(white, 0.78); }}
-        entry.vep-entry {{
-            min-height: {s34}px; padding: 0 {p10}px; border-radius: {r8}px;
-            background: alpha(white, 0.06); color: alpha(white, 0.92); border: 1px solid transparent;
-            box-shadow: none; outline: none; font-size: {f13}px;
-        }}
-        entry.vep-entry:focus-within {{ border-color: alpha(white, 0.22); background: alpha(white, 0.08); }}
-        button.vep-secondary, button.vep-primary, button.vep-danger {{
-            min-height: {s32}px; padding: 0 {p18}px; border: none; box-shadow: none;
-            border-radius: {r8}px; font-weight: 600; font-size: {f13}px;
-        }}
-        button.vep-secondary {{ background: transparent; color: alpha(white, 0.78); }}
-        button.vep-secondary:hover {{ background: alpha(white, 0.08); color: #ffffff; }}
+        button.vep-btn:focus {{ outline: none; box-shadow: none; }}
+        button.vep-btn:focus-visible {{ outline: 2px solid #ff7c2f; outline-offset: 2px; }}
         button.vep-primary {{ background: #ff670d; color: #ffffff; }}
         button.vep-primary:hover {{ background: #ff7c2f; }}
-        button.vep-primary:disabled {{ background: alpha(white, 0.06); color: alpha(white, 0.35); }}
+        button.vep-primary:disabled {{ background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.35); }}
+        button.vep-ghost {{ background: transparent; color: #c6c6c6; }}
+        button.vep-ghost:hover {{ background: #202020; color: #e8e8e8; }}
         button.vep-danger {{ background: #e5484d; color: #ffffff; }}
-        button.vep-danger:hover {{ background: #ef5c60; }}
-        .vep-confirm {{ background: alpha(#e5484d, 0.10); border-radius: {r8}px; padding: {p10}px; margin: {p2}px {p8}px; }}
-        .vep-status {{ color: #a4a4a4; font-size: {f12}px; }}
+        button.vep-danger:hover {{ background: #f2555a; }}
+
+        .vep-muted {{ color: #858585; font-size: {muted}px; }}
+        .vep-eyebrow {{
+            color: #8a8a8a; font-size: {eyebrow}px; font-weight: 600;
+            letter-spacing: {eyebrow_spacing}px;
+        }}
+
+        entry.vep-entry {{
+            min-height: {entry_height}px; padding: 0 {entry_pad}px;
+            border: none; border-radius: {entry_radius}px;
+            background: rgba(255, 255, 255, 0.05); color: #e8e8e8;
+            box-shadow: none; outline: none; font-size: {font}px;
+        }}
+        entry.vep-entry:focus, entry.vep-entry:focus-within {{
+            box-shadow: inset 0 0 0 1px rgba(255, 122, 47, 0.6);
+            outline: none;
+        }}
+
+        .vep-toggle-card {{
+            background: rgba(255, 255, 255, 0.03);
+            border: {rim}px solid rgba(255, 255, 255, 0.06);
+            border-radius: {panel_radius}px;
+            padding: {panel_pad_y}px {panel_pad_x}px;
+        }}
+        .vep-toggle-title {{ font-size: {font}px; font-weight: 500; color: #e8e8e8; }}
+        .vep-toggle-note {{ font-size: {note}px; }}
+        switch.vep-switch {{
+            min-width: {switch_w}px; min-height: {switch_h}px; padding: 0;
+            background: rgba(255, 255, 255, 0.14); background-image: none;
+            border: none; border-radius: 999px; box-shadow: none;
+        }}
+        switch.vep-switch slider {{
+            min-width: {knob}px; min-height: {knob}px; margin: {knob_margin}px;
+            background: #ffffff; background-image: none; border: none;
+            border-radius: 999px; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+        }}
+        switch.vep-switch:checked {{ background: #ff670d; }}
+        switch.vep-switch:focus-visible {{ outline: 2px solid #ff7c2f; outline-offset: 2px; }}
+
+        .vep-empty-tile {{ background: rgba(255, 255, 255, 0.05); border-radius: {tile_radius}px; }}
+        .vep-empty-glyph {{ color: #bbbbbb; }}
+        .vep-empty-title {{ font-size: {title}px; font-weight: 600; color: #e8e8e8; }}
+
+        .vep-row {{ border-radius: {row_radius}px; }}
+        .vep-row:hover {{ background: rgba(255, 255, 255, 0.05); }}
+        .vep-row.vep-applied {{ background: rgba(255, 103, 13, 0.10); }}
+        .vep-row.vep-applied:hover {{ background: rgba(255, 103, 13, 0.14); }}
+        button.vep-pick {{
+            padding: {row_pad}px; border: none; box-shadow: none;
+            background: transparent; border-radius: {row_radius}px;
+            color: #e8e8e8; text-shadow: none;
+        }}
+        button.vep-pick:hover, button.vep-pick:active, button.vep-pick:focus {{
+            background: transparent; box-shadow: none; outline: none;
+        }}
+        button.vep-pick:focus-visible {{ outline: 2px solid #ff7c2f; outline-offset: -2px; }}
+        .vep-row-name {{ font-size: {font}px; font-weight: 500; color: #e8e8e8; }}
+        .vep-pill {{
+            font-size: {pill_font}px; font-weight: 600; color: #ff9a5c;
+            background: rgba(255, 103, 13, 0.14); border-radius: {pill_radius}px;
+            padding: {pill_y}px {pill_x}px;
+        }}
+        button.vep-menu {{
+            min-width: {menu}px; min-height: {menu}px; padding: 0;
+            border: none; box-shadow: none; border-radius: {close_radius}px;
+            background: transparent; color: #999999;
+        }}
+        button.vep-menu:hover {{ background: #2a2a2a; color: #e8e8e8; }}
+        button.vep-menu:focus {{ outline: none; box-shadow: none; }}
+        button.vep-menu:focus-visible {{ outline: 2px solid #ff7c2f; outline-offset: 2px; }}
+        .vep-menu-glyph {{ font-size: {menu_glyph}px; font-weight: 700; }}
+
+        .vep-divider {{ background: rgba(255, 255, 255, 0.06); min-height: {rim}px; }}
+        button.vep-add {{
+            padding: {row_pad}px; border: none; box-shadow: none;
+            background: transparent; border-radius: {row_radius}px; text-shadow: none;
+        }}
+        button.vep-add:hover {{ background: rgba(255, 255, 255, 0.05); }}
+        button.vep-add:focus {{ outline: none; box-shadow: none; }}
+        button.vep-add:focus-visible {{ outline: 2px solid #ff7c2f; outline-offset: 2px; }}
+        .vep-add-label {{ color: #c6c6c6; font-size: {font}px; font-weight: 500; }}
+        .vep-placeholder {{ color: rgba(255, 255, 255, 0.18); }}
+
+        .vep-status {{ color: #858585; font-size: {muted}px; }}
+        .vep-status.vep-error {{ color: #f2555a; }}
 
         .editor-theme-light .vep-card {{
-            background: #f2f3f4; color: #1f2328; border-color: alpha(#111827, 0.14);
+            background: #ffffff; color: #202020;
+            border-color: rgba(17, 24, 39, 0.08);
         }}
-        .editor-theme-light .vep-title {{ color: #1f2328; }}
-        .editor-theme-light button.vep-icon-tile {{ background: transparent; color: #3a3f45; }}
-        .editor-theme-light button.vep-icon-tile:hover {{ background: alpha(#111827, 0.08); }}
-        .editor-theme-light button.vep-row {{ color: #1f2328; }}
-        .editor-theme-light button.vep-row:hover {{ background: alpha(#111827, 0.05); }}
-        .editor-theme-light button.vep-row.vep-applied {{ background: alpha(#ff670d, 0.14); }}
-        .editor-theme-light .vep-pill {{ color: #b74809; background: alpha(#ff670d, 0.14); }}
-        .editor-theme-light button.vep-gear {{ color: #6b7076; }}
-        .editor-theme-light button.vep-gear:hover {{ background: alpha(#111827, 0.06); color: #1f2328; }}
-        .editor-theme-light .vep-muted, .editor-theme-light .vep-status {{ color: #6b7076; }}
-        .editor-theme-light .vep-form-label {{ color: #3a3f45; }}
-        .editor-theme-light entry.vep-entry {{ background: alpha(#111827, 0.06); color: #1f2328; }}
-        .editor-theme-light entry.vep-entry:focus-within {{ border-color: alpha(#111827, 0.32); }}
-        .editor-theme-light button.vep-primary:disabled {{ background: alpha(#111827, 0.06); color: alpha(#111827, 0.35); }}
-        .editor-theme-light button.vep-secondary {{ background: transparent; color: #3a3f45; }}
-        .editor-theme-light button.vep-secondary:hover {{ background: alpha(#111827, 0.08); color: #1f2328; }}
+        .editor-theme-light .vep-title,
+        .editor-theme-light .vep-empty-title,
+        .editor-theme-light .vep-toggle-title,
+        .editor-theme-light .vep-row-name {{ color: #202020; }}
+        .editor-theme-light .vep-eyebrow {{ color: #737373; }}
+        .editor-theme-light button.vep-close {{ color: #737373; }}
+        .editor-theme-light button.vep-close:hover {{ background: rgba(17, 24, 39, 0.06); color: #202020; }}
+        .editor-theme-light .vep-muted,
+        .editor-theme-light .vep-status {{ color: #737373; }}
+        .editor-theme-light .vep-status.vep-error {{ color: #d9383d; }}
+        .editor-theme-light button.vep-ghost {{ color: #454545; }}
+        .editor-theme-light button.vep-ghost:hover {{ background: rgba(17, 24, 39, 0.06); color: #202020; }}
+        .editor-theme-light button.vep-primary:disabled {{ background: rgba(17, 24, 39, 0.08); color: rgba(17, 24, 39, 0.35); }}
+        .editor-theme-light entry.vep-entry {{ background: rgba(17, 24, 39, 0.05); color: #202020; }}
+        .editor-theme-light .vep-toggle-card {{
+            background: rgba(17, 24, 39, 0.03);
+            border-color: rgba(17, 24, 39, 0.08);
+        }}
+        .editor-theme-light switch.vep-switch {{ background: rgba(17, 24, 39, 0.16); }}
+        .editor-theme-light switch.vep-switch:checked {{ background: #ff670d; }}
+        .editor-theme-light .vep-empty-tile {{ background: rgba(17, 24, 39, 0.04); }}
+        .editor-theme-light .vep-empty-glyph {{ color: #737373; }}
+        .editor-theme-light .vep-row:hover {{ background: rgba(17, 24, 39, 0.05); }}
+        .editor-theme-light .vep-row.vep-applied {{ background: rgba(255, 103, 13, 0.10); }}
+        .editor-theme-light .vep-row.vep-applied:hover {{ background: rgba(255, 103, 13, 0.14); }}
+        .editor-theme-light button.vep-menu {{ color: #737373; }}
+        .editor-theme-light button.vep-menu:hover {{ background: rgba(17, 24, 39, 0.06); color: #202020; }}
+        .editor-theme-light .vep-divider {{ background: rgba(17, 24, 39, 0.08); }}
+        .editor-theme-light button.vep-add {{ color: #454545; }}
+        .editor-theme-light button.vep-add:hover {{ background: rgba(17, 24, 39, 0.05); }}
+        .editor-theme-light .vep-add-label {{ color: #454545; }}
+        .editor-theme-light .vep-placeholder {{ color: rgba(17, 24, 39, 0.18); }}
+        .editor-theme-light .vep-pill {{ color: #b74809; background: rgba(255, 103, 13, 0.14); }}
         "#,
-        p2 = px(2.0),
-        p3 = px(3.0),
-        p6 = px(6.0),
-        p8 = px(8.0),
-        p10 = px(10.0),
-        p14 = px(14.0),
-        p18 = px(18.0),
-        r6 = px(6.0),
+        font = font,
+        muted = muted,
+        note = note,
+        eyebrow = eyebrow,
+        eyebrow_spacing = eyebrow_spacing,
+        pill_font = pill_font,
+        title = title,
+        menu_glyph = menu_glyph,
+        rim = px(1.0),
+        pad = px(18.0),
+        card_radius = px(14.0),
+        header_gap = px(14.0),
+        close = px(26.0),
+        close_radius = px(6.0),
+        btn_height = px(36.0),
+        btn_radius = px(5.0),
+        btn_pad = px(16.0),
+        entry_height = px(38.0),
+        entry_radius = px(8.0),
+        entry_pad = px(12.0),
+        panel_radius = px(10.0),
+        panel_pad_y = px(10.0),
+        panel_pad_x = px(12.0),
+        switch_w = px(36.0),
+        switch_h = px(20.0),
+        knob = px(16.0),
+        knob_margin = px(2.0),
+        tile_radius = px(10.0),
+        row_radius = px(8.0),
+        row_pad = px(8.0),
+        pill_radius = px(4.0),
+        pill_y = px(2.0),
+        pill_x = px(6.0),
+        menu = px(26.0),
         r8 = px(8.0),
-        r10 = px(10.0),
-        s24 = px(24.0),
-        s30 = px(30.0),
-        s32 = px(32.0),
-        s34 = px(34.0),
-        f11 = px(11.0),
-        f12 = px(12.0),
-        f13 = px(13.0),
-        f14 = px(14.0),
-    );
-    let provider = CssProvider::new();
-    provider.load_from_data(&css);
-    gtk4::style_context_add_provider_for_display(
-        &display,
-        &provider,
-        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION + 7,
-    );
+    )
 }
 
 /// A bookmark in a twenty-unit box: a rounded tab with a V notch at the
@@ -261,48 +407,48 @@ fn draw_bookmark(
     let _ = context.restore();
 }
 
-/// A plus sign drawn in the widget's own colour, so it follows hover and the
-/// open state of the tile it sits on.
-fn plus_glyph(scale: f64) -> DrawingArea {
-    let size = (12.0 * scale).round() as i32;
-    let glyph = DrawingArea::new();
-    glyph.set_content_width(size);
-    glyph.set_content_height(size);
-    glyph.set_halign(Align::Center);
-    glyph.set_valign(Align::Center);
-    glyph.set_can_target(false);
-    glyph.set_draw_func(|glyph, context, width, height| {
-        let color = glyph.style_context().color();
-        let (width, height) = (f64::from(width), f64::from(height));
-        let size = width.min(height);
-        context.set_source_rgba(
-            f64::from(color.red()),
-            f64::from(color.green()),
-            f64::from(color.blue()),
-            f64::from(color.alpha()),
-        );
-        context.set_line_width((size / 8.0).max(1.4));
-        context.set_line_cap(gtk4::cairo::LineCap::Round);
-        let (cx, cy, arm) = (width * 0.5, height * 0.5, size * 0.42);
-        context.move_to(cx - arm, cy);
-        context.line_to(cx + arm, cy);
-        context.move_to(cx, cy - arm);
-        context.line_to(cx, cy + arm);
-        let _ = context.stroke();
-    });
-    glyph
-}
-
 fn redraw_child(widget: &impl IsA<Widget>) {
     if let Some(child) = widget.as_ref().first_child() {
         child.queue_draw();
     }
 }
 
+/// A rounded rectangle as a path, used for the thumbnail mask and the dashed
+/// placeholder tile.
+fn rounded_rect(
+    context: &gtk4::cairo::Context,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    radius: f64,
+) {
+    use std::f64::consts::{FRAC_PI_2, PI};
+    let right = x + width;
+    let bottom = y + height;
+    let radius = radius.max(0.0).min(width.min(height) * 0.5);
+    context.new_sub_path();
+    context.arc(right - radius, y + radius, radius, -FRAC_PI_2, 0.0);
+    context.arc(right - radius, bottom - radius, radius, 0.0, FRAC_PI_2);
+    context.arc(x + radius, bottom - radius, radius, FRAC_PI_2, PI);
+    context.arc(x + radius, y + radius, radius, PI, PI * 1.5);
+    context.close_path();
+}
+
+fn style_color(widget: &impl IsA<Widget>) -> (f64, f64, f64, f64) {
+    let color = widget.as_ref().style_context().color();
+    (
+        f64::from(color.red()),
+        f64::from(color.green()),
+        f64::from(color.blue()),
+        f64::from(color.alpha()),
+    )
+}
+
 /// Close `popover` when a press lands on its window outside it. Autohide
-/// alone loses its grab once the nested gear menu has opened and closed, so
-/// the window watches presses itself. Presses inside the popover, inside a
-/// popover it owns (the gear menu, an entry's context menu), or on `button`
+/// alone loses its grab once a nested menu has opened and closed, so the
+/// window watches presses itself. Presses inside the popover, inside a
+/// popover it owns (the row menu, an entry's context menu), or on `button`
 /// (which toggles it) are left alone.
 fn close_on_outside_press(popover: &Popover, button: &Button) {
     let Some(root) = button.root() else {
@@ -347,6 +493,293 @@ fn close_on_outside_press(popover: &Popover, button: &Button) {
     window.add_controller(watcher);
 }
 
+/// The header every page shares: a title on the left, the close button on the
+/// right. The title is returned too, because the form and the delete question
+/// change it in place.
+fn header(title: &str, popover: &Popover, scale: f64) -> (GtkBox, Label) {
+    let px = |value: f64| (value * scale).round() as i32;
+    let row = GtkBox::new(Orientation::Horizontal, px(8.0));
+    row.add_css_class("vep-header");
+    let label = Label::new(Some(title));
+    label.add_css_class("vep-title");
+    label.set_xalign(0.0);
+    label.set_hexpand(true);
+    label.set_valign(Align::Center);
+    label.set_ellipsize(pango::EllipsizeMode::End);
+
+    let close = Button::new();
+    close.add_css_class("vep-close");
+    close.set_has_frame(false);
+    close.set_focus_on_click(false);
+    close.set_valign(Align::Center);
+    close.set_tooltip_text(Some(&t("Close")));
+    let icon = Image::from_icon_name("window-close-symbolic");
+    icon.set_pixel_size(px(12.0));
+    close.set_child(Some(&icon));
+    close.connect_clicked({
+        let popover = popover.clone();
+        move |_| popover.popdown()
+    });
+
+    row.append(&label);
+    row.append(&close);
+    (row, label)
+}
+
+/// The 52×34 dashed tile that stands in for a thumbnail on the add row. The
+/// dash and the plus both take the widget's colour, so the light theme only
+/// has to restate one colour.
+fn dashed_placeholder(scale: f64) -> DrawingArea {
+    let width = (52.0 * scale).round() as i32;
+    let height = (34.0 * scale).round() as i32;
+    let area = DrawingArea::new();
+    area.add_css_class("vep-placeholder");
+    area.set_content_width(width);
+    area.set_content_height(height);
+    area.set_valign(Align::Center);
+    area.set_can_target(false);
+    area.set_draw_func({
+        let scale = scale;
+        move |area, context, width, height| {
+            let (red, green, blue, alpha) = style_color(area);
+            let (width, height) = (f64::from(width), f64::from(height));
+            context.set_source_rgba(red, green, blue, alpha);
+            context.set_line_width((1.0 * scale).max(1.0));
+            rounded_rect(context, 0.5, 0.5, width - 1.0, height - 1.0, 6.0 * scale);
+            context.set_dash(&[3.0 * scale, 3.0 * scale], 0.0);
+            let _ = context.stroke();
+            context.set_dash(&[], 0.0);
+            context.set_line_width((1.6 * scale).max(1.0));
+            context.set_line_cap(gtk4::cairo::LineCap::Round);
+            let (cx, cy, arm) = (width * 0.5, height * 0.5, 6.0 * scale);
+            context.move_to(cx - arm, cy);
+            context.line_to(cx + arm, cy);
+            context.move_to(cx, cy - arm);
+            context.line_to(cx, cy + arm);
+            let _ = context.stroke();
+        }
+    });
+    area
+}
+
+/// Build the card's four pages and the widgets their handlers need. Nothing
+/// is wired here: [`attach`] owns the panel and connects the buttons once the
+/// panel exists.
+fn build_states(popover: &Popover, scale: f64) -> States {
+    let px = |value: f64| (value * scale).round() as i32;
+    let stack = Stack::new();
+    stack.add_css_class("vep-card");
+    stack.set_size_request(px(320.0), -1);
+    stack.set_transition_type(StackTransitionType::Crossfade);
+    stack.set_transition_duration(150);
+    stack.set_hhomogeneous(false);
+    stack.set_vhomogeneous(false);
+
+    // State 1: nothing saved yet.
+    let empty = GtkBox::new(Orientation::Vertical, 0);
+    let (empty_header, _) = header(&t("Presets"), popover, scale);
+    empty.append(&empty_header);
+    let empty_body = GtkBox::new(Orientation::Vertical, 0);
+    empty_body.set_margin_top(px(6.0));
+    let tile = GtkBox::new(Orientation::Vertical, 0);
+    tile.add_css_class("vep-empty-tile");
+    tile.set_size_request(px(40.0), px(40.0));
+    tile.set_halign(Align::Center);
+    tile.set_valign(Align::Center);
+    let glyph_size = px(18.0);
+    let glyph = DrawingArea::new();
+    glyph.add_css_class("vep-empty-glyph");
+    glyph.set_content_width(glyph_size);
+    glyph.set_content_height(glyph_size);
+    glyph.set_halign(Align::Center);
+    // A vertical box only centres a child that may take the spare height, so
+    // the glyph expands into the tile and centres itself inside it.
+    glyph.set_vexpand(true);
+    glyph.set_valign(Align::Center);
+    glyph.set_can_target(false);
+    glyph.set_draw_func(|glyph, context, width, height| {
+        draw_bookmark(
+            context,
+            f64::from(width),
+            f64::from(height),
+            style_color(glyph),
+            false,
+        );
+    });
+    tile.append(&glyph);
+    let empty_title = Label::new(Some(&t("No presets yet")));
+    empty_title.add_css_class("vep-empty-title");
+    empty_title.set_halign(Align::Center);
+    empty_title.set_margin_top(px(12.0));
+    let empty_hint = Label::new(Some(&t(
+        "Save this project's background, cursor, camera and captions, then put them on any recording.",
+    )));
+    empty_hint.add_css_class("vep-muted");
+    empty_hint.set_wrap(true);
+    empty_hint.set_justify(gtk4::Justification::Center);
+    empty_hint.set_max_width_chars(36);
+    empty_hint.set_halign(Align::Center);
+    empty_hint.set_margin_top(px(6.0));
+    let empty_save = Button::with_label(&t("Save current look"));
+    empty_save.add_css_class("vep-btn");
+    empty_save.add_css_class("vep-primary");
+    empty_save.set_has_frame(false);
+    empty_save.set_margin_top(px(18.0));
+    empty_save.set_hexpand(true);
+    empty_body.append(&tile);
+    empty_body.append(&empty_title);
+    empty_body.append(&empty_hint);
+    empty_body.append(&empty_save);
+    empty.append(&empty_body);
+
+    // State 2: create, and the rename that reuses it.
+    let form = GtkBox::new(Orientation::Vertical, 0);
+    let (form_header, create_title) = header(&t("New preset"), popover, scale);
+    form.append(&form_header);
+    let eyebrow = Label::new(Some(&t("Name").to_uppercase()));
+    eyebrow.add_css_class("vep-eyebrow");
+    eyebrow.set_xalign(0.0);
+    form.append(&eyebrow);
+    let name = Entry::new();
+    name.add_css_class("vep-entry");
+    name.set_max_length(120);
+    name.set_placeholder_text(Some(&t("Preset name")));
+    name.set_margin_top(px(6.0));
+    form.append(&name);
+    let form_status = Label::new(None);
+    form_status.add_css_class("vep-status");
+    form_status.set_xalign(0.0);
+    form_status.set_wrap(true);
+    form_status.set_margin_top(px(6.0));
+    form_status.set_visible(false);
+    form.append(&form_status);
+
+    let default_card = GtkBox::new(Orientation::Horizontal, px(12.0));
+    default_card.add_css_class("vep-toggle-card");
+    default_card.set_margin_top(px(12.0));
+    default_card.set_margin_bottom(px(16.0));
+    let default_text = GtkBox::new(Orientation::Vertical, px(2.0));
+    default_text.set_hexpand(true);
+    default_text.set_valign(Align::Center);
+    let default_title = Label::new(Some(&t("Default for new recordings")));
+    default_title.add_css_class("vep-toggle-title");
+    default_title.set_xalign(0.0);
+    let default_note = Label::new(Some(&t("New recordings open with this look")));
+    default_note.add_css_class("vep-muted");
+    default_note.add_css_class("vep-toggle-note");
+    default_note.set_xalign(0.0);
+    default_note.set_wrap(true);
+    default_text.append(&default_title);
+    default_text.append(&default_note);
+    let default_switch = Switch::new();
+    default_switch.add_css_class("vep-switch");
+    default_switch.set_valign(Align::Center);
+    default_switch.update_property(&[gtk4::accessible::Property::Label(&t(
+        "Default for new recordings",
+    ))]);
+    default_card.append(&default_text);
+    default_card.append(&default_switch);
+    form.append(&default_card);
+
+    let form_actions = GtkBox::new(Orientation::Horizontal, px(8.0));
+    form_actions.set_halign(Align::End);
+    let cancel_create = Button::with_label(&t("Cancel"));
+    cancel_create.add_css_class("vep-btn");
+    cancel_create.add_css_class("vep-ghost");
+    cancel_create.set_has_frame(false);
+    let create_button = Button::with_label(&t("Create"));
+    create_button.add_css_class("vep-btn");
+    create_button.add_css_class("vep-primary");
+    create_button.set_has_frame(false);
+    create_button.set_sensitive(false);
+    form_actions.append(&cancel_create);
+    form_actions.append(&create_button);
+    form.append(&form_actions);
+
+    // State 3: the list, with the add row fixed under its scrolling rows.
+    let list_page = GtkBox::new(Orientation::Vertical, 0);
+    let (list_header, _) = header(&t("Presets"), popover, scale);
+    list_page.append(&list_header);
+    let list = GtkBox::new(Orientation::Vertical, px(2.0));
+    let scroll = ScrolledWindow::new();
+    scroll.set_policy(PolicyType::Never, PolicyType::Automatic);
+    scroll.set_propagate_natural_height(true);
+    scroll.set_max_content_height(px(320.0));
+    scroll.set_child(Some(&list));
+    list_page.append(&scroll);
+    let divider = GtkBox::new(Orientation::Vertical, 0);
+    divider.add_css_class("vep-divider");
+    divider.set_size_request(-1, px(1.0));
+    divider.set_margin_top(px(10.0));
+    divider.set_margin_bottom(px(10.0));
+    divider.set_margin_start(px(10.0));
+    divider.set_margin_end(px(10.0));
+    list_page.append(&divider);
+    let add_preset = Button::new();
+    add_preset.add_css_class("vep-add");
+    add_preset.set_has_frame(false);
+    add_preset.set_focus_on_click(false);
+    let add_content = GtkBox::new(Orientation::Horizontal, px(12.0));
+    add_content.append(&dashed_placeholder(scale));
+    let add_label = Label::new(Some(&t("Save current look")));
+    add_label.add_css_class("vep-add-label");
+    add_label.set_xalign(0.0);
+    add_label.set_hexpand(true);
+    add_content.append(&add_label);
+    add_preset.set_child(Some(&add_content));
+    list_page.append(&add_preset);
+    let list_status = Label::new(None);
+    list_status.add_css_class("vep-status");
+    list_status.set_xalign(0.0);
+    list_status.set_wrap(true);
+    list_status.set_margin_top(px(8.0));
+    list_status.set_visible(false);
+    list_page.append(&list_status);
+
+    // The delete question: the shared header carries the question itself.
+    let delete_page = GtkBox::new(Orientation::Vertical, 0);
+    let (delete_header, delete_title) = header("", popover, scale);
+    delete_page.append(&delete_header);
+    let delete_actions = GtkBox::new(Orientation::Horizontal, px(8.0));
+    delete_actions.set_halign(Align::End);
+    let cancel_delete = Button::with_label(&t("Cancel"));
+    cancel_delete.add_css_class("vep-btn");
+    cancel_delete.add_css_class("vep-ghost");
+    cancel_delete.set_has_frame(false);
+    let confirm_delete = Button::with_label(&t("Delete"));
+    confirm_delete.add_css_class("vep-btn");
+    confirm_delete.add_css_class("vep-danger");
+    confirm_delete.set_has_frame(false);
+    delete_actions.append(&cancel_delete);
+    delete_actions.append(&confirm_delete);
+    delete_page.append(&delete_actions);
+
+    stack.add_named(&empty, Some("empty"));
+    stack.add_named(&form, Some("form"));
+    stack.add_named(&list_page, Some("list"));
+    stack.add_named(&delete_page, Some("delete"));
+    stack.set_visible_child_name("empty");
+
+    States {
+        stack,
+        create_title,
+        delete_title,
+        name,
+        default_card,
+        default_switch,
+        form_status,
+        form_actions,
+        create_button,
+        cancel_create,
+        list,
+        list_status,
+        empty_save,
+        add_preset,
+        cancel_delete,
+        confirm_delete,
+    }
+}
+
 /// Wire the title button to its popover for this timeline. The list is read
 /// when the popover opens and again after each action, never on a timer.
 pub(super) fn attach(button: &Button, timeline: &Timeline, scale: f64) {
@@ -360,110 +793,28 @@ pub(super) fn attach(button: &Button, timeline: &Timeline, scale: f64) {
     popover.set_offset(px(14.0), px(6.0));
     popover.set_parent(button);
 
-    let body = GtkBox::new(Orientation::Vertical, 0);
-    body.add_css_class("vep-card");
-    body.set_size_request(px(280.0), -1);
-
-    let header = GtkBox::new(Orientation::Horizontal, px(8.0));
-    header.add_css_class("vep-header");
-    let title = Label::new(Some(&t("Presets")));
-    title.add_css_class("vep-title");
-    title.set_xalign(0.0);
-    title.set_hexpand(true);
-    title.set_valign(Align::Center);
-    let plus = Button::new();
-    plus.add_css_class("vep-icon-tile");
-    plus.set_has_frame(false);
-    plus.set_focus_on_click(false);
-    plus.set_valign(Align::Center);
-    plus.set_tooltip_text(Some(&t("New preset from this project")));
-    plus.set_child(Some(&plus_glyph(scale)));
-    let close = Button::new();
-    close.add_css_class("vep-icon-tile");
-    close.set_has_frame(false);
-    close.set_focus_on_click(false);
-    close.set_valign(Align::Center);
-    close.set_tooltip_text(Some(&t("Close")));
-    let close_icon = Image::from_icon_name("window-close-symbolic");
-    close_icon.set_pixel_size(px(13.0));
-    close.set_child(Some(&close_icon));
-    close.connect_clicked({
-        let popover = popover.clone();
-        move |_| popover.popdown()
-    });
-    header.append(&title);
-    header.append(&plus);
-    header.append(&close);
-    body.append(&header);
-
-    let form = GtkBox::new(Orientation::Vertical, px(12.0));
-    form.add_css_class("vep-form");
-    form.set_visible(false);
-    let name = Entry::new();
-    name.add_css_class("vep-entry");
-    name.set_max_length(120);
-    name.set_placeholder_text(Some(&t("Preset name")));
-    form.append(&name);
-
-    let default_row = GtkBox::new(Orientation::Horizontal, px(8.0));
-    let default_label = Label::new(Some(&t("Default for new recordings")));
-    default_label.add_css_class("vep-form-label");
-    default_label.set_xalign(0.0);
-    default_label.set_hexpand(true);
-    let default_switch = Switch::new();
-    default_switch.add_css_class("recording-editor-zoom-switch");
-    default_switch.set_valign(Align::Center);
-    default_row.append(&default_label);
-    default_row.append(&default_switch);
-    form.append(&default_row);
-
-    let form_buttons = GtkBox::new(Orientation::Horizontal, 0);
-    form_buttons.set_margin_top(px(4.0));
-    let cancel = Button::with_label(&t("Cancel"));
-    cancel.add_css_class("vep-secondary");
-    cancel.set_has_frame(false);
-    cancel.set_halign(Align::Start);
-    cancel.set_hexpand(true);
-    let create = Button::with_label(&t("Create"));
-    create.add_css_class("vep-primary");
-    create.set_has_frame(false);
-    create.set_sensitive(false);
-    create.set_halign(Align::End);
-    form_buttons.append(&cancel);
-    form_buttons.append(&create);
-    form.append(&form_buttons);
-    body.append(&form);
-
-    let list = GtkBox::new(Orientation::Vertical, px(2.0));
-    list.set_margin_start(px(8.0));
-    list.set_margin_end(px(8.0));
-    body.append(&list);
-
-    let status = Label::new(None);
-    status.add_css_class("vep-status");
-    status.set_xalign(0.0);
-    status.set_margin_start(px(14.0));
-    status.set_margin_end(px(14.0));
-    status.set_margin_top(px(8.0));
-    status.set_wrap(true);
-    status.set_max_width_chars(38);
-    status.set_visible(false);
-    body.append(&status);
-    popover.set_child(Some(&body));
+    let states = build_states(&popover, scale);
+    popover.set_child(Some(&states.stack));
 
     let panel = Panel {
         popover: popover.clone(),
-        form,
-        plus: plus.clone(),
-        name: name.clone(),
-        default_switch,
-        list,
-        status,
+        stack: states.stack.clone(),
+        create_title: states.create_title.clone(),
+        delete_title: states.delete_title.clone(),
+        name: states.name.clone(),
+        default_card: states.default_card.clone(),
+        default_switch: states.default_switch.clone(),
+        form_status: states.form_status.clone(),
+        form_actions: states.form_actions.clone(),
+        create_button: states.create_button.clone(),
+        list: states.list.clone(),
+        list_status: states.list_status.clone(),
         pending: Rc::new(RefCell::new(Pending::Idle)),
         timeline: timeline.clone(),
         applied: Rc::new(RefCell::new(None)),
         scale,
     };
+
     let watching = Rc::new(Cell::new(false));
     popover.connect_show({
         let panel = panel.clone();
@@ -492,39 +843,72 @@ pub(super) fn attach(button: &Button, timeline: &Timeline, scale: f64) {
             popover.popup();
         }
     });
-    plus.connect_clicked({
+
+    states.empty_save.connect_clicked({
         let panel = panel.clone();
-        move |_| {
-            let showing = !panel.form.is_visible();
-            if showing {
-                panel.form.set_visible(true);
-                panel.plus.add_css_class("vep-open");
-                panel.name.grab_focus();
+        move |_| panel.begin_create()
+    });
+    states.add_preset.connect_clicked({
+        let panel = panel.clone();
+        move |_| panel.begin_create()
+    });
+    states.cancel_create.connect_clicked({
+        let panel = panel.clone();
+        move |_| panel.back()
+    });
+    states.cancel_delete.connect_clicked({
+        let panel = panel.clone();
+        move |_| panel.back()
+    });
+    states.create_button.connect_clicked({
+        let panel = panel.clone();
+        move |_| panel.submit()
+    });
+    states.confirm_delete.connect_clicked({
+        let panel = panel.clone();
+        move |_| panel.confirm_delete()
+    });
+    states.name.connect_activate({
+        let panel = panel.clone();
+        move |_| panel.submit()
+    });
+    states.name.connect_changed({
+        let create_button = states.create_button.clone();
+        move |entry| create_button.set_sensitive(!entry.text().trim().is_empty())
+    });
+
+    // Escape leaves the form or the delete question and returns to the list;
+    // anywhere else it is left to the popover, which closes.
+    let keys = EventControllerKey::new();
+    keys.set_propagation_phase(gtk4::PropagationPhase::Capture);
+    keys.connect_key_pressed({
+        let panel = panel.clone();
+        move |_, key, _, _| {
+            if key != gdk::Key::Escape {
+                return glib::Propagation::Proceed;
+            }
+            let leaving = panel
+                .stack
+                .visible_child_name()
+                .is_some_and(|page| page.as_str() == "form" || page.as_str() == "delete");
+            if leaving {
+                panel.back();
+                glib::Propagation::Stop
             } else {
-                panel.close_form();
+                glib::Propagation::Proceed
             }
         }
     });
-    name.connect_changed({
-        let create = create.clone();
-        move |name| create.set_sensitive(!name.text().trim().is_empty())
-    });
-    cancel.connect_clicked({
-        let panel = panel.clone();
-        move |_| panel.close_form()
-    });
-    create.connect_clicked({
-        let panel = panel.clone();
-        move |_| panel.create()
-    });
-    name.connect_activate(move |_| panel.create());
+    panel.stack.add_controller(keys);
 }
 
 impl Panel {
     fn open(&self) {
         *self.pending.borrow_mut() = Pending::Idle;
-        self.close_form();
-        self.say("");
+        self.clear_form_status();
+        self.name.set_text("");
+        self.default_switch.set_active(false);
+        self.say_list("");
         // An undo, a document swap or a later edit can leave the highlighted
         // preset no longer applied. The popover has no history listener, so it
         // checks the highlight against the open project whenever it opens.
@@ -539,16 +923,78 @@ impl Panel {
         self.fill();
     }
 
-    fn close_form(&self) {
-        self.form.set_visible(false);
-        self.plus.remove_css_class("vep-open");
+    fn begin_create(&self) {
+        *self.pending.borrow_mut() = Pending::Idle;
+        self.create_title.set_text(&t("New preset"));
+        self.create_button.set_label(&t("Create"));
         self.name.set_text("");
         self.default_switch.set_active(false);
+        self.default_card.set_visible(true);
+        self.form_actions.set_margin_top(0);
+        self.clear_form_status();
+        self.stack.set_visible_child_name("form");
+        self.focus_name();
     }
 
-    fn say(&self, text: &str) {
-        self.status.set_text(text);
-        self.status.set_visible(!text.is_empty());
+    fn begin_rename(&self, preset: &Preset) {
+        *self.pending.borrow_mut() = Pending::Rename(preset.id.clone());
+        self.create_title.set_text(&t("Rename"));
+        self.create_button.set_label(&t("Rename"));
+        self.name.set_text(&preset.name);
+        self.default_card.set_visible(false);
+        self.form_actions
+            .set_margin_top((16.0 * self.scale).round() as i32);
+        self.clear_form_status();
+        self.stack.set_visible_child_name("form");
+        self.focus_name();
+    }
+
+    fn begin_delete(&self, preset: &Preset) {
+        *self.pending.borrow_mut() = Pending::Delete(preset.id.clone(), preset.name.clone());
+        self.delete_title
+            .set_text(&tfmt("Delete {name}?", &[("name", &preset.name)]));
+        self.stack.set_visible_child_name("delete");
+    }
+
+    /// Leave the form or the delete question. The list (or the empty state,
+    /// when the last preset is gone) is rebuilt on the way back.
+    fn back(&self) {
+        *self.pending.borrow_mut() = Pending::Idle;
+        self.clear_form_status();
+        self.fill();
+    }
+
+    fn focus_name(&self) {
+        let name = self.name.clone();
+        glib::idle_add_local_once(move || name.grab_focus());
+    }
+
+    fn clear_form_status(&self) {
+        self.form_status.set_text("");
+        self.form_status.remove_css_class("vep-error");
+        self.form_status.set_visible(false);
+    }
+
+    fn form_error(&self, text: &str) {
+        self.form_status.set_text(text);
+        self.form_status.add_css_class("vep-error");
+        self.form_status.set_visible(true);
+    }
+
+    fn say_list(&self, text: &str) {
+        self.list_status.set_text(text);
+        self.list_status.set_visible(!text.is_empty());
+        if text.is_empty() {
+            return;
+        }
+        let status = self.list_status.clone();
+        let text = text.to_owned();
+        glib::timeout_add_local_once(Duration::from_secs(3), move || {
+            if status.text().as_str() == text.as_str() {
+                status.set_text("");
+                status.set_visible(false);
+            }
+        });
     }
 
     fn refresh_later(&self) {
@@ -556,85 +1002,33 @@ impl Panel {
         glib::idle_add_local_once(move || panel.fill());
     }
 
-    fn begin(&self, pending: Pending) {
-        *self.pending.borrow_mut() = pending;
-        self.refresh_later();
-    }
-
-    /// Rebuild the rows. Called from an idle callback when a row triggered it,
-    /// because the row's own button is among the widgets being replaced.
+    /// Rebuild the rows and show the list, or the empty state when nothing is
+    /// saved. Called from an idle callback when a row triggered it, because
+    /// the row's own widgets are among the ones being replaced.
     fn fill(&self) {
         while let Some(child) = self.list.first_child() {
             self.list.remove(&child);
         }
         let presets = presets::list();
-        if presets.is_empty() {
-            self.list.append(&self.empty_state());
-            return;
-        }
         let configured = load_config().rec_video_default_preset;
-        let pending = self.pending.borrow().clone();
         for preset in &presets {
             let is_default = configured.as_deref() == Some(preset.id.as_str());
-            let row = match &pending {
-                Pending::Delete(id) if *id == preset.id => self.confirm_row(preset),
-                Pending::Rename(id) if *id == preset.id => self.rename_row(preset),
-                _ => self.preset_row(preset, is_default),
-            };
-            self.list.append(&row);
+            self.list.append(&self.preset_row(preset, is_default));
         }
-    }
-
-    fn empty_state(&self) -> GtkBox {
-        let px = |value: f64| (value * self.scale).round() as i32;
-        let empty = GtkBox::new(Orientation::Vertical, px(6.0));
-        empty.set_margin_top(px(14.0));
-        empty.set_margin_bottom(px(14.0));
-        let glyph_size = px(28.0);
-        let glyph = DrawingArea::new();
-        glyph.set_content_width(glyph_size);
-        glyph.set_content_height(glyph_size);
-        glyph.set_halign(Align::Center);
-        glyph.add_css_class("vep-muted");
-        glyph.set_draw_func(|glyph, context, width, height| {
-            let color = glyph.style_context().color();
-            draw_bookmark(
-                context,
-                f64::from(width),
-                f64::from(height),
-                (
-                    f64::from(color.red()),
-                    f64::from(color.green()),
-                    f64::from(color.blue()),
-                    f64::from(color.alpha()),
-                ),
-                false,
-            );
-        });
-        let title = Label::new(Some(&t("No presets yet")));
-        title.add_css_class("vep-empty-title");
-        let hint = Label::new(Some(&t(
-            "Press + to save this project's background, cursor, camera and captions as a preset.",
-        )));
-        hint.add_css_class("vep-muted");
-        hint.set_justify(gtk4::Justification::Center);
-        hint.set_wrap(true);
-        hint.set_max_width_chars(34);
-        empty.append(&glyph);
-        empty.append(&title);
-        empty.append(&hint);
-        empty
+        self.stack
+            .set_visible_child_name(if presets.is_empty() { "empty" } else { "list" });
     }
 
     fn preset_row(&self, preset: &Preset, is_default: bool) -> GtkBox {
         let px = |value: f64| (value * self.scale).round() as i32;
-        let row = GtkBox::new(Orientation::Horizontal, px(4.0));
+        let row = GtkBox::new(Orientation::Horizontal, 0);
+        row.add_css_class("vep-row");
+        if self.applied.borrow().as_deref() == Some(preset.id.as_str()) {
+            row.add_css_class("vep-applied");
+        }
 
         let pick = Button::new();
-        pick.add_css_class("vep-row");
-        if self.applied.borrow().as_deref() == Some(preset.id.as_str()) {
-            pick.add_css_class("vep-applied");
-        }
+        pick.add_css_class("vep-pick");
         pick.set_has_frame(false);
         pick.set_focus_on_click(false);
         pick.set_hexpand(true);
@@ -642,15 +1036,16 @@ impl Panel {
         let content = GtkBox::new(Orientation::Horizontal, px(12.0));
         content.append(&thumbnail(preset, self.scale));
         let name = Label::new(Some(&preset.name));
-        name.add_css_class("vep-name");
+        name.add_css_class("vep-row-name");
         name.set_xalign(0.0);
         name.set_hexpand(true);
-        name.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        name.set_ellipsize(pango::EllipsizeMode::End);
         content.append(&name);
         if is_default {
             let pill = Label::new(Some(&t("Default")));
             pill.add_css_class("vep-pill");
             pill.set_valign(Align::Center);
+            pill.set_margin_start(px(6.0));
             content.append(&pill);
         }
         pick.set_child(Some(&content));
@@ -665,20 +1060,21 @@ impl Panel {
         });
 
         row.append(&pick);
-        row.append(&self.gear_button(preset, is_default));
+        row.append(&self.menu_button(preset, is_default));
         row
     }
 
-    fn gear_button(&self, preset: &Preset, is_default: bool) -> Button {
-        let gear = Button::new();
-        gear.add_css_class("vep-gear");
-        gear.set_has_frame(false);
-        gear.set_focus_on_click(false);
-        gear.set_valign(Align::Center);
-        gear.set_tooltip_text(Some(&t("Preset options")));
-        let icon = Image::from_icon_name(icon_names::custom::SETTINGS_SYMBOLIC);
-        icon.set_pixel_size((17.0 * self.scale).round() as i32);
-        gear.set_child(Some(&icon));
+    fn menu_button(&self, preset: &Preset, is_default: bool) -> Button {
+        let menu_button = Button::new();
+        menu_button.add_css_class("vep-menu");
+        menu_button.set_has_frame(false);
+        menu_button.set_focus_on_click(false);
+        menu_button.set_valign(Align::Center);
+        menu_button.set_margin_end((8.0 * self.scale).round() as i32);
+        menu_button.set_tooltip_text(Some(&t("Preset options")));
+        let glyph = Label::new(Some("\u{22ef}"));
+        glyph.add_css_class("vep-menu-glyph");
+        menu_button.set_child(Some(&glyph));
 
         let menu = Popover::new();
         menu.add_css_class("history-action-popover");
@@ -688,7 +1084,7 @@ impl Panel {
         menu.set_position(PositionType::Bottom);
         menu.set_halign(Align::End);
         menu.set_offset(0, (4.0 * self.scale).round() as i32);
-        menu.set_parent(&gear);
+        menu.set_parent(&menu_button);
 
         // Drawn at its authored size like the timeline's clip menu, so a
         // high-DPI display does not inflate rows the shared sheet already sizes.
@@ -731,8 +1127,8 @@ impl Panel {
             &t("Rename"),
             {
                 let panel = self.clone();
-                let id = preset.id.clone();
-                move || panel.begin(Pending::Rename(id.clone()))
+                let preset = preset.clone();
+                move || panel.begin_rename(&preset)
             },
         ));
         items.append(&menu_item(
@@ -753,111 +1149,28 @@ impl Panel {
             &t("Delete"),
             {
                 let panel = self.clone();
-                let id = preset.id.clone();
-                move || panel.begin(Pending::Delete(id.clone()))
+                let preset = preset.clone();
+                move || panel.begin_delete(&preset)
             },
         ));
         menu.set_child(Some(&items));
 
-        gear.connect_clicked(move |_| menu.popup());
-        gear
+        menu_button.connect_clicked(move |_| menu.popup());
+        menu_button
     }
 
-    fn rename_row(&self, preset: &Preset) -> GtkBox {
-        let row = GtkBox::new(Orientation::Horizontal, (12.0 * self.scale).round() as i32);
-        row.set_margin_start((6.0 * self.scale).round() as i32);
-        row.set_margin_end((6.0 * self.scale).round() as i32);
-        row.set_margin_top((4.0 * self.scale).round() as i32);
-        row.set_margin_bottom((4.0 * self.scale).round() as i32);
-        row.append(&thumbnail(preset, self.scale));
-        let entry = Entry::new();
-        entry.add_css_class("vep-entry");
-        entry.set_valign(Align::Center);
-        entry.set_max_length(120);
-        entry.set_text(&preset.name);
-        entry.set_hexpand(true);
-        entry.connect_activate({
-            let panel = self.clone();
-            let id = preset.id.clone();
-            move |entry| panel.commit_rename(&id, &entry.text())
-        });
-
-        let keys = EventControllerKey::new();
-        keys.connect_key_pressed({
-            let panel = self.clone();
-            let id = preset.id.clone();
-            move |_, key, _, _| {
-                if key != gdk::Key::Escape {
-                    return glib::Propagation::Proceed;
-                }
-                if panel.end_rename(&id) {
-                    panel.refresh_later();
-                }
-                glib::Propagation::Stop
-            }
-        });
-        entry.add_controller(keys);
-
-        let focus = EventControllerFocus::new();
-        focus.connect_leave({
-            let panel = self.clone();
-            let id = preset.id.clone();
-            let entry = entry.clone();
-            move |_| panel.commit_rename(&id, &entry.text())
-        });
-        entry.add_controller(focus);
-
-        row.append(&entry);
-        glib::idle_add_local_once({
-            let entry = entry.clone();
-            move || {
-                entry.grab_focus();
-            }
-        });
-        row
-    }
-
-    fn confirm_row(&self, preset: &Preset) -> GtkBox {
-        let row = GtkBox::new(Orientation::Vertical, (10.0 * self.scale).round() as i32);
-        row.add_css_class("vep-confirm");
-        let question = Label::new(Some(&tfmt("Delete {name}?", &[("name", &preset.name)])));
-        question.set_xalign(0.0);
-        question.set_hexpand(true);
-        question.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-
-        question.add_css_class("vep-form-label");
-        let buttons = GtkBox::new(Orientation::Horizontal, 0);
-        let cancel = Button::with_label(&t("Cancel"));
-        cancel.add_css_class("vep-secondary");
-        cancel.set_has_frame(false);
-        cancel.set_halign(Align::Start);
-        cancel.set_hexpand(true);
-        cancel.connect_clicked({
-            let panel = self.clone();
-            move |_| panel.begin(Pending::Idle)
-        });
-        let delete = Button::with_label(&t("Delete"));
-        delete.add_css_class("vep-danger");
-        delete.set_has_frame(false);
-        delete.set_halign(Align::End);
-        delete.connect_clicked({
-            let panel = self.clone();
-            let id = preset.id.clone();
-            let name = preset.name.clone();
-            move |_| panel.delete(&id, &name)
-        });
-
-        buttons.append(&cancel);
-        buttons.append(&delete);
-        row.append(&question);
-        row.append(&buttons);
-        row
+    fn submit(&self) {
+        let pending = self.pending.borrow().clone();
+        match pending {
+            Pending::Rename(id) => self.commit_rename(&id),
+            _ => self.create(),
+        }
     }
 
     fn create(&self) {
         let name = self.name.text().trim().to_owned();
         if name.is_empty() {
-            self.say(&t("Name the preset before saving it."));
+            self.form_error(&t("Name the preset before saving it."));
             return;
         }
         match self.timeline.save_preset(&name) {
@@ -867,15 +1180,60 @@ impl Panel {
                 } else {
                     Ok(())
                 };
+                *self.pending.borrow_mut() = Pending::Idle;
+                self.name.set_text("");
+                self.default_switch.set_active(false);
+                self.clear_form_status();
                 match defaulted {
-                    Ok(()) => {
-                        self.close_form();
-                        self.say(&tfmt("{name} saved.", &[("name", &preset.name)]));
-                    }
-                    Err(err) => self.say(&err),
+                    Ok(()) => self.say_list(&tfmt("{name} saved.", &[("name", &preset.name)])),
+                    Err(err) => self.say_list(&err),
                 }
+                self.refresh_later();
             }
-            Err(err) => self.say(&err),
+            Err(err) => self.form_error(&err),
+        }
+    }
+
+    fn commit_rename(&self, id: &str) {
+        let name = self.name.text().trim().to_owned();
+        if name.is_empty() {
+            self.form_error(&t("Name the preset before saving it."));
+            return;
+        }
+        let Some(mut preset) = presets::load(id) else {
+            *self.pending.borrow_mut() = Pending::Idle;
+            self.clear_form_status();
+            self.say_list(&t("That preset is no longer on disk."));
+            self.refresh_later();
+            return;
+        };
+        preset.name = name.to_owned();
+        match presets::save(&preset) {
+            Ok(()) => {
+                *self.pending.borrow_mut() = Pending::Idle;
+                self.clear_form_status();
+                self.say_list(&tfmt("Renamed to {name}.", &[("name", &name)]));
+                self.refresh_later();
+            }
+            Err(err) => self.form_error(&err),
+        }
+    }
+
+    fn confirm_delete(&self) {
+        let target = match &*self.pending.borrow() {
+            Pending::Delete(id, name) => Some((id.clone(), name.clone())),
+            _ => None,
+        };
+        let Some((id, name)) = target else {
+            return;
+        };
+        *self.pending.borrow_mut() = Pending::Idle;
+        if self.applied.borrow().as_deref() == Some(id.as_str()) {
+            *self.applied.borrow_mut() = None;
+        }
+        match presets::delete(&id).and_then(|()| forget_default(&id)) {
+            Ok(()) => self.say_list(&tfmt("{name} deleted.", &[("name", &name)])),
+            Err(err) => self.say_list(&err),
         }
         self.refresh_later();
     }
@@ -883,75 +1241,33 @@ impl Panel {
     fn toggle_default(&self, id: &str, is_default: bool) {
         let next = if is_default { "" } else { id };
         if let Err(err) = set_default_video_preset(next) {
-            self.say(&err);
+            self.say_list(&err);
         }
         self.refresh_later();
     }
 
     fn update(&self, preset: &Preset) {
         match self.timeline.update_preset(preset) {
-            Ok(_) => self.say(&tfmt(
+            Ok(_) => self.say_list(&tfmt(
                 "{name} now holds the current look.",
                 &[("name", &preset.name)],
             )),
-            Err(err) => self.say(&err),
+            Err(err) => self.say_list(&err),
         }
         self.refresh_later();
     }
 
     fn show_in_folder(&self, id: &str) {
         let Some(path) = presets::path_of(id) else {
-            self.say(&t("That preset is no longer on disk."));
+            self.say_list(&t("That preset is no longer on disk."));
             return;
         };
         let opened = std::process::Command::new("explorer.exe")
             .arg(format!("/select,{}", path.display()))
             .spawn();
         if opened.is_err() {
-            self.say(&t("Could not open the preset's folder."));
+            self.say_list(&t("Could not open the preset's folder."));
         }
-    }
-
-    /// Take the rename pending on `id`, if that is the one pending. Returns
-    /// whether it was, so a second end of the same rename does nothing.
-    fn end_rename(&self, id: &str) -> bool {
-        let mut pending = self.pending.borrow_mut();
-        if *pending == Pending::Rename(id.to_owned()) {
-            *pending = Pending::Idle;
-            return true;
-        }
-        false
-    }
-
-    fn commit_rename(&self, id: &str, text: &str) {
-        if !self.end_rename(id) {
-            return;
-        }
-        let name = text.trim();
-        if name.is_empty() {
-            self.say(&t("Name the preset before saving it."));
-        } else if let Some(mut preset) = presets::load(id) {
-            preset.name = name.to_owned();
-            match presets::save(&preset) {
-                Ok(()) => self.say(&tfmt("Renamed to {name}.", &[("name", name)])),
-                Err(err) => self.say(&err),
-            }
-        } else {
-            self.say(&t("That preset is no longer on disk."));
-        }
-        self.refresh_later();
-    }
-
-    fn delete(&self, id: &str, name: &str) {
-        *self.pending.borrow_mut() = Pending::Idle;
-        if self.applied.borrow().as_deref() == Some(id) {
-            *self.applied.borrow_mut() = None;
-        }
-        match presets::delete(id).and_then(|()| forget_default(id)) {
-            Ok(()) => self.say(&tfmt("{name} deleted.", &[("name", name)])),
-            Err(err) => self.say(&err),
-        }
-        self.refresh_later();
     }
 }
 
@@ -986,11 +1302,12 @@ fn menu_item(
     button
 }
 
-/// The preset's wallpaper as the Background grid draws it, or a neutral swatch
-/// when the look has no wallpaper picked.
+/// The preset's wallpaper as the Background grid draws it, clipped to the
+/// row's six-pixel corners, or a neutral swatch when the look has no wallpaper
+/// picked.
 fn thumbnail(preset: &Preset, scale: f64) -> DrawingArea {
-    let width = (54.0 * scale).round() as i32;
-    let height = (38.0 * scale).round() as i32;
+    let width = (52.0 * scale).round() as i32;
+    let height = (34.0 * scale).round() as i32;
     let pixbuf = preset
         .stage
         .selection
@@ -1002,9 +1319,23 @@ fn thumbnail(preset: &Preset, scale: f64) -> DrawingArea {
     area.set_content_height(height);
     area.set_valign(Align::Center);
     area.set_can_target(false);
-    area.set_draw_func(move |_, context, width, height| match &pixbuf {
-        Some(pixbuf) => draw_wallpaper_thumbnail(context, width, height, pixbuf),
-        None => draw_wallpaper_fallback(context, width, height),
+    let radius = 6.0 * scale;
+    area.set_draw_func(move |_, context, width, height| {
+        let _ = context.save();
+        rounded_rect(
+            context,
+            0.0,
+            0.0,
+            f64::from(width),
+            f64::from(height),
+            radius,
+        );
+        context.clip();
+        match &pixbuf {
+            Some(pixbuf) => draw_wallpaper_thumbnail(context, width, height, pixbuf),
+            None => draw_wallpaper_fallback(context, width, height),
+        }
+        let _ = context.restore();
     });
     area
 }
@@ -1029,4 +1360,98 @@ fn set_default_video_preset(id: &str) -> Result<(), String> {
     save_config(&config)
         .map(|_| ())
         .map_err(|err| err.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gtk4::prelude::*;
+    use gtk4::{CssProvider, Label, Popover, Widget};
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    fn collect_labels(root: &impl IsA<Widget>) -> Vec<String> {
+        let root = root.as_ref();
+        let mut found = Vec::new();
+        if let Some(label) = root.downcast_ref::<Label>() {
+            found.push(label.text().to_string());
+        }
+        let mut child = root.first_child();
+        while let Some(widget) = child {
+            found.extend(collect_labels(&widget));
+            child = widget.next_sibling();
+        }
+        found
+    }
+
+    #[test]
+    fn the_presets_sheet_parses_at_every_windows_scale() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            for scale in [1.0, 1.25, 1.5, 2.0] {
+                let errors = Rc::new(Cell::new(0));
+                let provider = CssProvider::new();
+                provider.connect_parsing_error({
+                    let errors = errors.clone();
+                    move |_, _, _| errors.set(errors.get() + 1)
+                });
+                provider.load_from_data(&style_css(scale));
+                assert_eq!(errors.get(), 0, "scale {scale}");
+            }
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
+    }
+
+    #[test]
+    fn the_card_opens_empty_and_carries_one_page_per_state() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let popover = Popover::new();
+            let states = build_states(&popover, 1.0);
+            assert_eq!(states.stack.visible_child_name().as_deref(), Some("empty"));
+
+            let mut pages = Vec::new();
+            let mut child = states.stack.first_child();
+            while let Some(page) = child {
+                if let Some(name) = states.stack.page(&page).name() {
+                    pages.push(name.to_string());
+                }
+                child = page.next_sibling();
+            }
+            pages.sort();
+            assert_eq!(pages, ["delete", "empty", "form", "list"]);
+
+            assert_eq!(
+                states.create_title.text().as_str(),
+                t("New preset").as_str()
+            );
+            assert_eq!(
+                states.name.placeholder_text().as_deref(),
+                Some(t("Preset name").as_str())
+            );
+            assert!(!states.default_switch.is_active());
+            assert!(states.default_card.is_visible());
+            assert!(!states.list_status.is_visible());
+
+            let labels = collect_labels(&states.stack);
+            for expected in [
+                t("Presets"),
+                t("No presets yet"),
+                t("Save this project's background, cursor, camera and captions, then put them on any recording."),
+                t("Save current look"),
+                t("Name").to_uppercase(),
+                t("Default for new recordings"),
+                t("New recordings open with this look"),
+                t("Cancel"),
+                t("Create"),
+                t("Delete"),
+            ] {
+                assert!(labels.contains(&expected), "missing label: {expected}");
+            }
+            assert!(!labels.contains(&t("New preset from this project")));
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
+    }
 }

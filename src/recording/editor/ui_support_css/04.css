@@ -358,13 +358,23 @@
                 background: transparent;
             }
 
-            .editor-theme-light button.recording-editor-title-upload {
+            .editor-theme-light button.recording-editor-title-presets {
                 color: alpha(#1d2129, 0.55);
             }
 
-            .editor-theme-light button.recording-editor-title-upload:hover {
+            .editor-theme-light button.recording-editor-title-presets:hover {
                 background: alpha(#111827, 0.06);
                 color: #ff670d;
+            }
+
+            .editor-theme-light button.recording-editor-title-presets:disabled {
+                color: alpha(#1d2129, 0.30);
+            }
+
+            .editor-theme-light
+                button.recording-editor-title-presets.recording-editor-presets-open {
+                background: alpha(#ff670d, 0.14);
+                color: #b74809;
             }
 
             .editor-theme-light .recording-editor-title-entry {

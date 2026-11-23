@@ -299,23 +299,29 @@
                 font-size: 12px;
             }
 
-            button.recording-editor-title-upload {
+            button.recording-editor-title-presets {
                 min-width: 32px;
                 min-height: 32px;
                 padding: 0;
+                margin-right: 6px;
                 border: none;
                 border-radius: 5px;
                 background: transparent;
                 color: alpha(white, 0.62);
             }
 
-            button.recording-editor-title-upload:hover {
+            button.recording-editor-title-presets:hover {
                 background: alpha(white, 0.08);
                 color: #d5794e;
             }
 
-            button.recording-editor-title-upload image {
-                -gtk-icon-size: 20px;
+            button.recording-editor-title-presets.recording-editor-presets-open {
+                background: alpha(#ff670d, 0.14);
+                color: #ff9a5c;
+            }
+
+            button.recording-editor-title-presets:disabled {
+                color: alpha(white, 0.35);
             }
 
             .recording-editor-traffic-lights {

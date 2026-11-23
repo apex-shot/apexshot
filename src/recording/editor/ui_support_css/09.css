@@ -876,3 +876,488 @@
                 background: alpha(#b3261e, 0.12);
                 color: #8a2822;
             }
+
+            /* Saved looks: the title-bar popover, in the Export modal's visual
+             * language. One card holds three exclusive states — the empty
+             * prompt, the list, and the create or rename form — plus the delete
+             * confirmation. The popover surface stays transparent so only the
+             * card paints, the same strip-then-paint step the other editor
+             * popovers use. */
+
+            popover.recording-editor-presets-popover,
+            popover.recording-editor-presets-popover > contents,
+            popover.recording-editor-presets-popover > arrow {
+                background: transparent;
+                border: none;
+                outline: none;
+                box-shadow: none;
+                padding: 0;
+                margin: 0;
+                border-radius: 0;
+            }
+
+            .recording-editor-presets-card {
+                background: #171717;
+                color: #e8e8e8;
+                border: 1px solid alpha(white, 0.06);
+                border-radius: 14px;
+                padding: 18px;
+                box-shadow: none;
+                font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
+                font-size: 14px;
+            }
+
+            .recording-editor-presets-card .rep-header {
+                margin-bottom: 14px;
+            }
+
+            .recording-editor-presets-card .rep-title {
+                color: #e8e8e8;
+                font-size: 15px;
+                font-weight: 600;
+            }
+
+            .recording-editor-presets-card button.rep-close {
+                min-width: 26px;
+                min-height: 26px;
+                padding: 0;
+                border: none;
+                border-radius: 6px;
+                background: transparent;
+                color: #999999;
+                box-shadow: none;
+            }
+
+            .recording-editor-presets-card button.rep-close:hover {
+                background: alpha(white, 0.08);
+                color: #e8e8e8;
+            }
+
+            /* ── Shared type ── */
+
+            .recording-editor-presets-card .rep-muted {
+                color: #858585;
+                font-size: 13px;
+                line-height: 1.45;
+            }
+
+            .recording-editor-presets-card .rep-eyebrow {
+                color: #8a8a8a;
+                font-size: 11px;
+                font-weight: 600;
+                letter-spacing: 0.8px;
+            }
+
+            /* ── Buttons ── */
+
+            .recording-editor-presets-card button.rep-primary,
+            .recording-editor-presets-card button.rep-ghost,
+            .recording-editor-presets-card button.rep-danger {
+                min-width: 0;
+                min-height: 36px;
+                padding: 0 16px;
+                border: none;
+                border-radius: 5px;
+                background-image: none;
+                box-shadow: none;
+                text-shadow: none;
+                -gtk-icon-shadow: none;
+                outline: none;
+                font-size: 14px;
+                font-weight: 500;
+            }
+
+            .recording-editor-presets-card button.rep-primary label,
+            .recording-editor-presets-card button.rep-ghost label,
+            .recording-editor-presets-card button.rep-danger label {
+                color: inherit;
+                font-size: 14px;
+                font-weight: 500;
+            }
+
+            .recording-editor-presets-card button.rep-primary {
+                background: #ff670d;
+                color: #ffffff;
+            }
+
+            .recording-editor-presets-card button.rep-primary:hover {
+                background: #ff7c2f;
+            }
+
+            .recording-editor-presets-card button.rep-ghost {
+                background: transparent;
+                color: #c6c6c6;
+            }
+
+            .recording-editor-presets-card button.rep-ghost:hover {
+                background: #202020;
+                color: #ffffff;
+            }
+
+            .recording-editor-presets-card button.rep-danger {
+                background: #e5484d;
+                color: #ffffff;
+            }
+
+            .recording-editor-presets-card button.rep-danger:hover {
+                background: #f2555a;
+            }
+
+            /* A click leaves no ring; the keyboard gets the accent outline. */
+            .recording-editor-presets-card button:focus {
+                outline: none;
+                box-shadow: none;
+            }
+
+            .recording-editor-presets-card button:focus-visible {
+                outline: 2px solid #ff7c2f;
+                outline-offset: 2px;
+            }
+
+            /* ── Empty state ── */
+
+            .recording-editor-presets-card .rep-empty {
+                margin: 8px 0 2px 0;
+            }
+
+            .recording-editor-presets-card .rep-empty-tile {
+                min-width: 40px;
+                min-height: 40px;
+                border-radius: 10px;
+                background: alpha(white, 0.05);
+            }
+
+            .recording-editor-presets-card .rep-empty-glyph {
+                color: #bbbbbb;
+            }
+
+            .recording-editor-presets-card .rep-empty-title {
+                color: #e8e8e8;
+                font-size: 15px;
+                font-weight: 600;
+                margin-top: 14px;
+            }
+
+            .recording-editor-presets-card .rep-empty-hint {
+                margin-top: 4px;
+            }
+
+            /* ── List state ── */
+
+            .recording-editor-presets-card scrolledwindow.rep-scroll,
+            .recording-editor-presets-card scrolledwindow.rep-scroll > viewport {
+                background: transparent;
+                border: none;
+                box-shadow: none;
+            }
+
+            .recording-editor-presets-card button.rep-row {
+                min-height: 0;
+                padding: 8px;
+                border: none;
+                border-radius: 8px;
+                background: transparent;
+                color: #e8e8e8;
+                box-shadow: none;
+            }
+
+            .recording-editor-presets-card button.rep-row:hover {
+                background: alpha(white, 0.05);
+            }
+
+            .recording-editor-presets-card button.rep-row.rep-applied {
+                background: alpha(#ff670d, 0.10);
+            }
+
+            .recording-editor-presets-card button.rep-row.rep-applied:hover {
+                background: alpha(#ff670d, 0.14);
+            }
+
+            .recording-editor-presets-card .rep-name {
+                color: #e8e8e8;
+                font-size: 14px;
+                font-weight: 500;
+            }
+
+            .recording-editor-presets-card .rep-pill {
+                color: #ff9a5c;
+                background: alpha(#ff670d, 0.14);
+                border-radius: 4px;
+                padding: 2px 6px;
+                margin-left: 6px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+
+            .recording-editor-presets-card button.rep-more {
+                min-width: 26px;
+                min-height: 26px;
+                margin: 0 4px 0 0;
+                padding: 0;
+                border: none;
+                border-radius: 6px;
+                background: transparent;
+                color: #999999;
+                box-shadow: none;
+            }
+
+            .recording-editor-presets-card button.rep-more:hover {
+                background: alpha(white, 0.08);
+                color: #e8e8e8;
+            }
+
+            .recording-editor-presets-card separator.rep-divider {
+                min-height: 1px;
+                margin: 10px 0;
+                background: alpha(white, 0.06);
+            }
+
+            .recording-editor-presets-card button.rep-add-row {
+                min-height: 0;
+                padding: 8px;
+                border: none;
+                border-radius: 8px;
+                background: transparent;
+                box-shadow: none;
+            }
+
+            .recording-editor-presets-card button.rep-add-row:hover {
+                background: alpha(white, 0.05);
+            }
+
+            /* The 52x34 box includes the dashed rim, so the widget asks for
+             * 50x32 and the 1px border brings it up to size. */
+            .recording-editor-presets-card .rep-add-tile {
+                border: 1px dashed alpha(white, 0.18);
+                border-radius: 6px;
+            }
+
+            .recording-editor-presets-card .rep-add-plus {
+                color: #c6c6c6;
+            }
+
+            .recording-editor-presets-card .rep-add-label {
+                color: #c6c6c6;
+                font-size: 14px;
+                font-weight: 500;
+            }
+
+            .recording-editor-presets-card .rep-list-status {
+                color: #858585;
+                font-size: 13px;
+                margin-top: 8px;
+            }
+
+            /* ── Form state ── */
+
+            .recording-editor-presets-card entry.rep-entry {
+                min-height: 38px;
+                padding: 0 12px;
+                border: none;
+                border-radius: 8px;
+                background: alpha(white, 0.05);
+                background-image: none;
+                color: #e8e8e8;
+                box-shadow: none;
+                outline: none;
+                font-size: 14px;
+            }
+
+            .recording-editor-presets-card entry.rep-entry text {
+                color: #e8e8e8;
+                caret-color: #e8e8e8;
+                font-size: 14px;
+            }
+
+            .recording-editor-presets-card entry.rep-entry:focus,
+            .recording-editor-presets-card entry.rep-entry:focus-within {
+                background: alpha(white, 0.05);
+                box-shadow: inset 0 0 0 1px alpha(#ff7a2f, 0.6);
+            }
+
+            .recording-editor-presets-card .rep-form-status {
+                color: #858585;
+                font-size: 13px;
+                margin-top: 6px;
+            }
+
+            .recording-editor-presets-card .rep-error {
+                color: #f2555a;
+            }
+
+            .recording-editor-presets-card .rep-toggle-card {
+                background: alpha(white, 0.03);
+                border: 1px solid alpha(white, 0.06);
+                border-radius: 10px;
+                padding: 10px 12px;
+                margin: 12px 0 16px 0;
+            }
+
+            .recording-editor-presets-card .rep-toggle-title {
+                color: #e8e8e8;
+                font-size: 14px;
+            }
+
+            .recording-editor-presets-card .rep-toggle-sub {
+                font-size: 12px;
+            }
+
+            /* The export modal's switch, scaled into this card. */
+            .recording-editor-presets-card switch.recording-editor-export-switch {
+                min-width: 36px;
+                min-height: 20px;
+                padding: 0;
+                background: alpha(white, 0.14);
+                background-image: none;
+                border: none;
+                border-radius: 999px;
+                box-shadow: none;
+            }
+
+            .recording-editor-presets-card switch.recording-editor-export-switch slider {
+                min-width: 16px;
+                min-height: 16px;
+                margin: 2px;
+                background: #ffffff;
+                background-image: none;
+                border: none;
+                border-radius: 999px;
+                box-shadow: 0 1px 2px alpha(black, 0.3);
+            }
+
+            .recording-editor-presets-card switch.recording-editor-export-switch:checked {
+                background: #ff670d;
+            }
+
+            .recording-editor-presets-card switch.recording-editor-export-switch:focus-visible {
+                outline: 2px solid #ff7c2f;
+                outline-offset: 2px;
+            }
+
+            /* ── Light theme ── */
+
+            .editor-theme-light .recording-editor-presets-card {
+                background: #ffffff;
+                color: #202020;
+                border-color: alpha(#111827, 0.08);
+            }
+
+            .editor-theme-light .recording-editor-presets-card .rep-title,
+            .editor-theme-light .recording-editor-presets-card .rep-empty-title,
+            .editor-theme-light .recording-editor-presets-card .rep-name,
+            .editor-theme-light .recording-editor-presets-card .rep-toggle-title {
+                color: #202020;
+            }
+
+            .editor-theme-light .recording-editor-presets-card .rep-muted,
+            .editor-theme-light .recording-editor-presets-card .rep-list-status,
+            .editor-theme-light .recording-editor-presets-card .rep-form-status,
+            .editor-theme-light .recording-editor-presets-card .rep-eyebrow {
+                color: #737373;
+            }
+
+            .editor-theme-light .recording-editor-presets-card .rep-error {
+                color: #b3261e;
+            }
+
+            .editor-theme-light .recording-editor-presets-card button.rep-close {
+                color: #737373;
+            }
+
+            .editor-theme-light .recording-editor-presets-card button.rep-close:hover {
+                background: alpha(#111827, 0.06);
+                color: #202020;
+            }
+
+            .editor-theme-light .recording-editor-presets-card button.rep-ghost {
+                color: #454545;
+            }
+
+            .editor-theme-light .recording-editor-presets-card button.rep-ghost:hover {
+                background: alpha(#111827, 0.06);
+                color: #202020;
+            }
+
+            .editor-theme-light .recording-editor-presets-card .rep-empty-tile {
+                background: alpha(#111827, 0.05);
+            }
+
+            .editor-theme-light .recording-editor-presets-card .rep-empty-glyph {
+                color: #737373;
+            }
+
+            .editor-theme-light .recording-editor-presets-card button.rep-row {
+                color: #202020;
+            }
+
+            .editor-theme-light .recording-editor-presets-card button.rep-row:hover {
+                background: alpha(#111827, 0.05);
+            }
+
+            .editor-theme-light .recording-editor-presets-card button.rep-row.rep-applied {
+                background: alpha(#ff670d, 0.10);
+            }
+
+            .editor-theme-light .recording-editor-presets-card button.rep-row.rep-applied:hover {
+                background: alpha(#ff670d, 0.14);
+            }
+
+            .editor-theme-light .recording-editor-presets-card .rep-pill {
+                color: #b74809;
+                background: alpha(#ff670d, 0.14);
+            }
+
+            .editor-theme-light .recording-editor-presets-card button.rep-more {
+                color: #6b7076;
+            }
+
+            .editor-theme-light .recording-editor-presets-card button.rep-more:hover {
+                background: alpha(#111827, 0.06);
+                color: #202020;
+            }
+
+            .editor-theme-light .recording-editor-presets-card separator.rep-divider {
+                background: alpha(#111827, 0.08);
+            }
+
+            .editor-theme-light .recording-editor-presets-card button.rep-add-row:hover {
+                background: alpha(#111827, 0.05);
+            }
+
+            .editor-theme-light .recording-editor-presets-card .rep-add-tile {
+                border-color: alpha(#111827, 0.18);
+            }
+
+            .editor-theme-light .recording-editor-presets-card .rep-add-plus,
+            .editor-theme-light .recording-editor-presets-card .rep-add-label {
+                color: #454545;
+            }
+
+            .editor-theme-light .recording-editor-presets-card entry.rep-entry {
+                background: alpha(#111827, 0.05);
+                color: #202020;
+            }
+
+            .editor-theme-light .recording-editor-presets-card entry.rep-entry text {
+                color: #202020;
+                caret-color: #202020;
+            }
+
+            .editor-theme-light .recording-editor-presets-card entry.rep-entry:focus,
+            .editor-theme-light .recording-editor-presets-card entry.rep-entry:focus-within {
+                background: alpha(#111827, 0.05);
+                box-shadow: inset 0 0 0 1px alpha(#ff7a2f, 0.6);
+            }
+
+            .editor-theme-light .recording-editor-presets-card .rep-toggle-card {
+                background: alpha(#111827, 0.03);
+                border-color: alpha(#111827, 0.08);
+            }
+
+            .editor-theme-light .recording-editor-presets-card switch.recording-editor-export-switch {
+                background: alpha(#111827, 0.16);
+            }
+
+            .editor-theme-light .recording-editor-presets-card switch.recording-editor-export-switch:checked {
+                background: #ff670d;
+            }
