@@ -10,13 +10,13 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use super::model::{
-    AudioMode, ClickEffect, CropSelection, CursorHideClip, CursorRotationMode, CursorSettings,
-    CursorTheme, DimensionPreset, ExportQuality, GradientKind, GradientStop, ProjectMedia,
-    ProjectMediaKind, VideoBackground, VideoEditState, VideoGradient, ZoomAnchor,
-    ZoomCameraSettings, ZoomClip, ZoomEasing, ZoomMode, ZoomOrigin, ZoomStyle, DEFAULT_CLICK_COLOR,
-    DEFAULT_CLICK_DURATION_MS, DEFAULT_CLICK_INTENSITY, DEFAULT_CLICK_OPACITY, DEFAULT_CLICK_SCALE,
-    DEFAULT_CURSOR_IDLE_MS, DEFAULT_CURSOR_SHADOW, DEFAULT_CURSOR_SIZE, DEFAULT_CURSOR_SMOOTH,
-    DEFAULT_CURSOR_SPEED, DEFAULT_ROTATE_ON_X_MOVEMENT_RATIO,
+    AudioMode, ClickEffect, CropSelection, CursorRotationMode, CursorSettings, CursorTheme,
+    DimensionPreset, ExportQuality, GradientKind, GradientStop, ProjectMedia, ProjectMediaKind,
+    VideoBackground, VideoEditState, VideoGradient, ZoomAnchor, ZoomCameraSettings, ZoomClip,
+    ZoomEasing, ZoomMode, ZoomOrigin, ZoomStyle, DEFAULT_CLICK_COLOR, DEFAULT_CLICK_DURATION_MS,
+    DEFAULT_CLICK_INTENSITY, DEFAULT_CLICK_OPACITY, DEFAULT_CLICK_SCALE, DEFAULT_CURSOR_IDLE_MS,
+    DEFAULT_CURSOR_SHADOW, DEFAULT_CURSOR_SIZE, DEFAULT_CURSOR_SMOOTH, DEFAULT_CURSOR_SPEED,
+    DEFAULT_ROTATE_ON_X_MOVEMENT_RATIO,
 };
 use super::sound::SoundSettings;
 
@@ -46,8 +46,6 @@ pub struct VideoProjectFile {
     pub zoom_clips: Vec<ZoomClipFile>,
     #[serde(default)]
     pub zoom_camera: ZoomCameraSettings,
-    #[serde(default)]
-    pub cursor_hide_clips: Vec<CursorHideClipFile>,
     pub zoom_classic: bool,
     pub zoom_hidden: bool,
     pub zoom_locked: bool,
@@ -90,8 +88,6 @@ pub struct VideoProjectFile {
     #[serde(default)]
     pub selected_zoom: Option<usize>,
     #[serde(default)]
-    pub selected_cursor_hide: Option<usize>,
-    #[serde(default)]
     pub cursor_theme: CursorThemeFile,
     #[serde(default = "default_cursor_size")]
     pub cursor_size: f64,
@@ -101,6 +97,8 @@ pub struct VideoProjectFile {
     pub cursor_shadow: f64,
     #[serde(default = "default_cursor_smooth")]
     pub cursor_smooth: f64,
+    #[serde(default)]
+    pub cursor_hidden: bool,
     #[serde(default)]
     pub cursor_hide_idle: bool,
     #[serde(default = "default_cursor_idle_ms")]
@@ -133,12 +131,63 @@ pub struct VideoProjectFile {
     pub cursor_loop_position_before_end_ms: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CursorHideClipFile {
-    pub start: f64,
-    pub end: f64,
-    #[serde(default)]
-    pub hidden: bool,
+/// What a window's autosave tick has to do, decided from that window's own
+/// baseline rather than the file on disk.
+#[derive(Debug, PartialEq)]
+pub enum ProjectPersistAction {
+    Idle,
+    Write(VideoProjectFile),
+    Delete,
+}
+
+/// The project this window last loaded or wrote.
+///
+/// The autosave compares the live state against this baseline instead of the
+/// project file on disk. Two editors open on one recording therefore cannot
+/// mistake each other's save for a local change and write their stale state
+/// back: an editor that has not changed anything since it loaded is idle,
+/// whatever another window wrote meanwhile.
+#[derive(Debug, Clone, Default)]
+pub struct ProjectSync {
+    baseline: Option<VideoProjectFile>,
+}
+
+impl ProjectSync {
+    /// The project last loaded or written by this window, if any.
+    pub fn baseline(&self) -> Option<&VideoProjectFile> {
+        self.baseline.as_ref()
+    }
+
+    /// Take `file` as the baseline: nothing is worth writing until the state
+    /// changes again. `None` when nothing was ever written for this window.
+    pub fn adopt(&mut self, file: Option<VideoProjectFile>) {
+        self.baseline = file;
+    }
+
+    /// Decide what the persist tick should do, without touching the disk.
+    pub fn plan(&self, state: &VideoEditState) -> ProjectPersistAction {
+        plan_project_persist(self.baseline.as_ref(), state)
+    }
+}
+
+/// The persist decision. The baseline belongs to the window, so an idle editor
+/// stays idle even when another editor changed the file on disk.
+pub fn plan_project_persist(
+    baseline: Option<&VideoProjectFile>,
+    state: &VideoEditState,
+) -> ProjectPersistAction {
+    let current = state.to_project();
+    if baseline == Some(&current) {
+        return ProjectPersistAction::Idle;
+    }
+    if state.session_is_default() {
+        return if baseline.is_some() {
+            ProjectPersistAction::Delete
+        } else {
+            ProjectPersistAction::Idle
+        };
+    }
+    ProjectPersistAction::Write(current)
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -559,22 +608,6 @@ fn zoom_to_file(clip: &ZoomClip) -> ZoomClipFile {
     }
 }
 
-fn hide_to_file(clip: &CursorHideClip) -> CursorHideClipFile {
-    CursorHideClipFile {
-        start: clip.start,
-        end: clip.end,
-        hidden: clip.hidden,
-    }
-}
-
-fn hide_from_file(clip: &CursorHideClipFile) -> CursorHideClip {
-    CursorHideClip {
-        start: clip.start,
-        end: clip.end,
-        hidden: clip.hidden,
-    }
-}
-
 fn zoom_from_file(clip: &ZoomClipFile) -> ZoomClip {
     ZoomClip {
         start: clip.start,
@@ -983,7 +1016,6 @@ impl VideoEditState {
             timeline_offset_seconds: self.timeline_offset_seconds,
             zoom_clips: self.zoom_clips.iter().map(zoom_to_file).collect(),
             zoom_camera: self.zoom_camera.clamped(),
-            cursor_hide_clips: self.cursor_hide_clips.iter().map(hide_to_file).collect(),
             zoom_classic: self.zoom_classic,
             zoom_hidden: self.zoom_hidden,
             zoom_locked: self.zoom_locked,
@@ -1008,12 +1040,12 @@ impl VideoEditState {
             timeline_scale: self.timeline_scale,
             timeline_scroll_seconds: self.timeline_scroll_seconds,
             selected_zoom: self.selected_zoom,
-            selected_cursor_hide: self.selected_cursor_hide,
             cursor_theme: cursor_theme_to_file(self.cursor.theme),
             cursor_size: self.cursor.size,
             cursor_speed: self.cursor.speed,
             cursor_shadow: self.cursor.shadow,
             cursor_smooth: self.cursor.smooth,
+            cursor_hidden: self.cursor.hidden,
             cursor_hide_idle: self.cursor.hide_idle,
             cursor_idle_ms: self.cursor.idle_ms,
             cursor_click_effect: click_effect_to_file(self.cursor.click_effect),
@@ -1053,7 +1085,6 @@ impl VideoEditState {
         self.timeline_offset_seconds = file.timeline_offset_seconds;
         self.zoom_clips = file.zoom_clips.iter().map(zoom_from_file).collect();
         self.zoom_camera = file.zoom_camera.clamped();
-        self.cursor_hide_clips = file.cursor_hide_clips.iter().map(hide_from_file).collect();
         self.zoom_classic = file.zoom_classic;
         self.zoom_hidden = file.zoom_hidden;
         self.zoom_locked = file.zoom_locked;
@@ -1079,15 +1110,13 @@ impl VideoEditState {
         self.selected_zoom = file
             .selected_zoom
             .filter(|index| *index < self.zoom_clips.len());
-        self.selected_cursor_hide = file
-            .selected_cursor_hide
-            .filter(|index| *index < self.cursor_hide_clips.len());
         self.cursor = CursorSettings {
             theme: cursor_theme_from_file(file.cursor_theme),
             size: file.cursor_size,
             speed: file.cursor_speed,
             shadow: file.cursor_shadow,
             smooth: file.cursor_smooth,
+            hidden: file.cursor_hidden,
             hide_idle: file.cursor_hide_idle,
             idle_ms: file.cursor_idle_ms,
             click_effect: click_effect_from_file(file.cursor_click_effect),
@@ -1116,6 +1145,10 @@ impl VideoEditState {
         // The same goes for the cursor's shake filter and tail behaviours: the
         // project is the only place they are stored.
         self.sync_sidecar_cursor_filters();
+        // This window's baseline is the project it just applied, so an open
+        // the user never touches writes nothing back.
+        let baseline = self.to_project();
+        self.project_sync.adopt(Some(baseline));
     }
 
     pub fn session_is_default(&self) -> bool {
@@ -1140,29 +1173,32 @@ impl VideoEditState {
 /// reopened edit.
 pub fn restore_into(state: &mut VideoEditState) -> bool {
     let Some(project) = load_project(&state.metadata.path) else {
+        state.project_sync.adopt(None);
         return false;
     };
     state.apply_project(project);
     true
 }
 
-pub fn persist_video_session(state: &VideoEditState) {
+pub fn persist_video_session(state: &mut VideoEditState) {
     if !state.has_source_video() {
         return;
     }
-    let last = load_project(&state.metadata.path);
-    if !state.session_is_dirty(last.as_ref()) {
-        return;
-    }
-    if state.session_is_default() {
-        delete_project(&state.metadata.path);
-        return;
-    }
-    if let Err(err) = save_project(&state.metadata.path, &state.to_project()) {
-        eprintln!(
-            "[recording-editor] failed to save project for {}: {err}",
-            state.metadata.path.display()
-        );
+    match plan_project_persist(state.project_sync.baseline(), state) {
+        ProjectPersistAction::Idle => {}
+        ProjectPersistAction::Delete => {
+            delete_project(&state.metadata.path);
+            state.project_sync.adopt(None);
+        }
+        ProjectPersistAction::Write(file) => match save_project(&state.metadata.path, &file) {
+            Ok(()) => state.project_sync.adopt(Some(file)),
+            Err(err) => {
+                eprintln!(
+                    "[recording-editor] failed to save project for {}: {err}",
+                    state.metadata.path.display()
+                );
+            }
+        },
     }
 }
 
@@ -1266,11 +1302,7 @@ mod tests {
         state.cursor.size = 1.5;
         state.cursor.speed = 2.0;
         state.cursor.shadow = 0.7;
-        state.cursor_hide_clips.push(CursorHideClip {
-            start: 4.0,
-            end: 5.5,
-            hidden: false,
-        });
+        state.cursor.hidden = true;
         state.add_project_media(ProjectMedia {
             path: extra.clone(),
             display_name: "B-roll".into(),
@@ -1281,8 +1313,10 @@ mod tests {
         save_project(&video, &project).unwrap();
 
         let loaded = load_project(&video).expect("project should load");
+        assert!(loaded.cursor_hidden, "the hide switch must be saved");
         let mut restored = VideoEditState::new(metadata_for(&video, 32));
         restored.apply_project(loaded);
+        assert!(restored.cursor.hidden);
         assert_eq!(
             edits_for_compare(&restored.to_project()),
             edits_for_compare(&state.to_project())
@@ -1444,6 +1478,12 @@ mod tests {
         });
         assert!(zoomed.session_is_dirty(None));
 
+        // The whole-edit hide is an edit of its own.
+        let mut hidden = state.clone();
+        hidden.cursor.hidden = true;
+        assert!(!hidden.session_is_default());
+        assert!(hidden.session_is_dirty(None));
+
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -1462,7 +1502,7 @@ mod tests {
             mode: ZoomMode::Manual,
             ..Default::default()
         });
-        persist_video_session(&state);
+        persist_video_session(&mut state);
 
         state.zoom_clips.clear();
         state.zoom_clips.push(ZoomClip {
@@ -1475,7 +1515,7 @@ mod tests {
             mode: ZoomMode::Auto,
             ..Default::default()
         });
-        persist_video_session(&state);
+        persist_video_session(&mut state);
 
         let mut restored = VideoEditState::new(metadata_for(&video, 16));
         restore_into(&mut restored);
@@ -1484,6 +1524,94 @@ mod tests {
         assert!((restored.zoom_clips[0].start - 4.0).abs() < 1e-9);
 
         cleanup_project(&video);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_old_project_that_recorded_hide_ranges_still_loads() {
+        let dir = scratch("old-hide-clips");
+        let video = write_video(&dir, "clip.mp4", 16);
+        let state = VideoEditState::new(metadata_for(&video, 16));
+        let mut json = serde_json::to_value(state.to_project()).unwrap();
+        // Projects saved before the whole-edit switch carried the ranges as a
+        // list. They are dropped on load rather than failing the parse.
+        json["cursor_hide_clips"] = serde_json::json!([
+            {"start": 1.0, "end": 2.0, "hidden": false}
+        ]);
+        json.as_object_mut().unwrap().remove("cursor_hidden");
+        let file: VideoProjectFile =
+            serde_json::from_value(json).expect("old projects still parse");
+        assert!(!file.cursor_hidden, "the switch defaults to off");
+
+        let mut restored = VideoEditState::new(metadata_for(&video, 16));
+        restored.apply_project(file);
+        assert!(!restored.cursor.hidden);
+        assert!(restored.session_is_default());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_persist_decision_uses_this_windows_baseline_not_the_disk() {
+        let dir = scratch("baseline-decision");
+        let video = write_video(&dir, "clip.mp4", 16);
+        let mut state = VideoEditState::new(metadata_for(&video, 16));
+        state.trim_start_seconds = 1.0;
+        state.project_sync.adopt(Some(state.to_project()));
+
+        // Another window saves a different edit to the same recording.
+        let mut other = VideoEditState::new(metadata_for(&video, 16));
+        other.trim_end_seconds = 7.0;
+        save_project(&video, &other.to_project()).unwrap();
+
+        assert_eq!(state.project_sync.plan(&state), ProjectPersistAction::Idle);
+        persist_video_session(&mut state);
+        assert_eq!(
+            load_project(&video)
+                .expect("the other window's save stays")
+                .trim_end_seconds,
+            7.0,
+            "an unchanged window must not overwrite another window's save"
+        );
+
+        // A real edit is written, and becomes the new baseline.
+        state.trim_start_seconds = 2.0;
+        assert!(matches!(
+            state.project_sync.plan(&state),
+            ProjectPersistAction::Write(_)
+        ));
+        persist_video_session(&mut state);
+        assert_eq!(
+            load_project(&video)
+                .expect("the edit was saved")
+                .trim_start_seconds,
+            2.0
+        );
+        assert_eq!(state.project_sync.plan(&state), ProjectPersistAction::Idle);
+
+        cleanup_project(&video);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn returning_to_the_default_session_deletes_the_file() {
+        let dir = scratch("baseline-default");
+        let video = write_video(&dir, "clip.mp4", 16);
+        let mut state = VideoEditState::new(metadata_for(&video, 16));
+        state.trim_start_seconds = 2.0;
+        persist_video_session(&mut state);
+        assert!(load_project(&video).is_some());
+
+        // Back to a freshly opened edit: the file has nothing left to hold.
+        state.trim_start_seconds = 0.0;
+        assert!(state.session_is_default());
+        assert_eq!(
+            state.project_sync.plan(&state),
+            ProjectPersistAction::Delete
+        );
+        persist_video_session(&mut state);
+        assert!(load_project(&video).is_none());
+
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -2060,7 +2188,7 @@ mod tests {
         let video = write_video(&dir, "clip.mp4", 8);
         let mut state = VideoEditState::new(metadata_for(&video, 8));
         state.trim_start_seconds = 1.0;
-        persist_video_session(&state);
+        persist_video_session(&mut state);
 
         let listed = list_projects();
         assert!(
@@ -2080,7 +2208,7 @@ mod tests {
         let video = write_video(&dir, "clip.mp4", 8);
         let mut state = VideoEditState::new(metadata_for(&video, 8));
         state.trim_start_seconds = 1.0;
-        persist_video_session(&state);
+        persist_video_session(&mut state);
 
         fs::write(&video, vec![b'v'; 64]).unwrap();
         let touched = SystemTime::now() + Duration::from_secs(2);

@@ -119,7 +119,11 @@ pub fn is_video_resize_hit(state: &VideoEditState, hit: &VideoHit) -> bool {
         )
 }
 
-pub fn segment_edge_drag(state: &VideoEditState, seg_idx: usize, is_start: bool) -> Option<ClipDrag> {
+pub fn segment_edge_drag(
+    state: &VideoEditState,
+    seg_idx: usize,
+    is_start: bool,
+) -> Option<ClipDrag> {
     let Some(&(start, end)) = state.segment_boundaries().get(seg_idx) else {
         return Some(if is_start {
             ClipDrag::Start
@@ -145,7 +149,6 @@ pub fn select_video(state: &mut VideoEditState, segment: Option<usize>) {
     state.selected_segment = segment;
     if segment.is_some() {
         state.selected_zoom = None;
-        state.selected_cursor_hide = None;
         state.selected_tool = crate::recording::editor::model::EditorTool::Timeline;
     }
 }
@@ -154,16 +157,6 @@ pub fn select_zoom(state: &mut VideoEditState, index: Option<usize>) {
     state.selected_zoom = index;
     if index.is_some() {
         state.selected_segment = None;
-        state.selected_cursor_hide = None;
-        state.selected_tool = crate::recording::editor::model::EditorTool::Timeline;
-    }
-}
-
-pub fn select_cursor_hide(state: &mut VideoEditState, index: Option<usize>) {
-    state.selected_cursor_hide = index;
-    if index.is_some() {
-        state.selected_segment = None;
-        state.selected_zoom = None;
         state.selected_tool = crate::recording::editor::model::EditorTool::Timeline;
     }
 }
@@ -194,26 +187,6 @@ pub fn zoom_edge_at(state: &VideoEditState, width: f64, x: f64) -> Option<(usize
 
 pub fn zoom_clip_at(state: &VideoEditState, width: f64, x: f64) -> Option<usize> {
     state.zoom_clips.iter().position(|clip| {
-        let start_x = state.time_to_x(clip.start, width);
-        let end_x = state.time_to_x(clip.end, width);
-        x >= start_x && x <= end_x
-    })
-}
-
-pub fn cursor_hide_edge_at(state: &VideoEditState, width: f64, x: f64) -> Option<(usize, bool)> {
-    state
-        .cursor_hide_clips
-        .iter()
-        .enumerate()
-        .find_map(|(index, clip)| {
-            let start_x = state.time_to_x(clip.start, width);
-            let end_x = state.time_to_x(clip.end, width);
-            clip_edge_at(x, start_x, end_x).map(|is_start| (index, is_start))
-        })
-}
-
-pub fn cursor_hide_clip_at(state: &VideoEditState, width: f64, x: f64) -> Option<usize> {
-    state.cursor_hide_clips.iter().position(|clip| {
         let start_x = state.time_to_x(clip.start, width);
         let end_x = state.time_to_x(clip.end, width);
         x >= start_x && x <= end_x
@@ -364,8 +337,8 @@ pub fn apply_clip_resize(
                 return;
             };
             if state.segments_kept.get(right).copied().unwrap_or(true) {
-                let start = before_comp
-                    + (new_cut - before_cut) / state.segment_speed(right).max(1e-6);
+                let start =
+                    before_comp + (new_cut - before_cut) / state.segment_speed(right).max(1e-6);
                 state.set_segment_start(right, start);
             }
         }
@@ -399,7 +372,6 @@ pub fn in_extend_band(state: &VideoEditState, width: f64, x: f64) -> bool {
     let end_x = video_end_x(state, width);
     end_x > 0.0 && x >= end_x - EXTEND_HANDLE_HIT
 }
-
 
 pub fn pixels_per_second(state: &VideoEditState, width: f64) -> f64 {
     width.max(1.0) / state.visible_span_seconds().max(0.001)
@@ -438,14 +410,15 @@ pub fn filmstrip_tile_times(duration: f64, count: usize) -> Vec<(f64, f64)> {
 
 /// Pixel spans for each filmstrip tile in the current view.
 pub fn filmstrip_tile_spans(state: &VideoEditState, width: f64) -> Vec<(f64, f64)> {
-    let count =
-        crate::recording::editor::ffmpeg::thumbnail_count(state.metadata.duration_seconds);
+    let count = crate::recording::editor::ffmpeg::thumbnail_count(state.metadata.duration_seconds);
     filmstrip_tile_times(state.metadata.duration_seconds, count)
         .into_iter()
         .map(|(start, end)| {
             (
                 state.source_to_x(start, width),
-                state.source_to_x(end, width).max(state.source_to_x(start, width)),
+                state
+                    .source_to_x(end, width)
+                    .max(state.source_to_x(start, width)),
             )
         })
         .collect()
@@ -535,22 +508,6 @@ pub enum ZoomDrag {
 }
 
 #[derive(Clone, Copy)]
-pub enum HideDrag {
-    Edge {
-        index: usize,
-        is_start: bool,
-    },
-    Move {
-        index: usize,
-        origin_start: f64,
-        pixels_per_second: f64,
-    },
-    Seek,
-    /// Same as `ZoomDrag::Extend`: the band spans every lane.
-    Extend,
-}
-
-#[derive(Clone, Copy)]
 pub enum TrackCursor {
     None,
     ResizeStart,
@@ -585,9 +542,15 @@ mod tests {
         }
         let last = tiles.last().unwrap();
         assert!(last.0 < last.1);
-        assert!(last.0 < duration, "last tile must start from a pre-EOF sample");
+        assert!(
+            last.0 < duration,
+            "last tile must start from a pre-EOF sample"
+        );
         assert!(last.1 <= duration, "last tile must not run past EOF");
-        assert!(last.1 > duration * 0.9, "last tile must still reach near the end");
+        assert!(
+            last.1 > duration * 0.9,
+            "last tile must still reach near the end"
+        );
     }
 
     #[test]
@@ -799,8 +762,8 @@ mod freeze_edge_tests {
     }
 
     /// The band and its mover are matched on every lane, so a drag over the
-    /// zoom or hide rows extends the clip instead of depending on the video
-    /// lane's own ending edge.
+    /// zoom lane extends the clip instead of depending on the video lane's
+    /// own ending edge.
     #[test]
     fn the_extend_band_covers_the_mover_and_the_space_past_the_clip() {
         let mut state = state();
@@ -808,7 +771,10 @@ mod freeze_edge_tests {
         state.set_trim_end(8.0);
         let end_x = video_end_x(&state, width);
         assert!(!in_extend_band(&state, width, end_x - 10.0));
-        assert!(in_extend_band(&state, width, end_x - 2.0), "left half of the mover");
+        assert!(
+            in_extend_band(&state, width, end_x - 2.0),
+            "left half of the mover"
+        );
         assert!(in_extend_band(&state, width, end_x + 50.0), "past the clip");
     }
 }
@@ -816,8 +782,8 @@ mod freeze_edge_tests {
 #[cfg(test)]
 mod resize_anchor_tests {
     use super::{
-        apply_clip_resize, rightmost_video_segment, video_end_x, video_hit,
-        ClipResizeAnchor, ClipResizeKind, ClipDrag,
+        apply_clip_resize, rightmost_video_segment, video_end_x, video_hit, ClipDrag,
+        ClipResizeAnchor, ClipResizeKind,
     };
     use crate::recording::editor::model::{VideoEditState, VideoMetadata};
     use std::path::PathBuf;

@@ -482,6 +482,22 @@ fn build_cursor_motion_tab(
 
     let visibility_section = sidebar_section(&t("Visibility"), true, false);
 
+    // The whole-edit hide: one switch that takes the rendered cursor out of
+    // the preview and the export, with no timeline range to place or manage.
+    let hidden_row = GtkBox::new(Orientation::Horizontal, 8);
+    hidden_row.add_css_class("recording-editor-zoom-classic");
+    hidden_row.set_hexpand(true);
+    let hidden_label = Label::new(Some(&t("Hide cursor")));
+    hidden_label.add_css_class("recording-editor-zoom-classic-label");
+    hidden_label.set_xalign(0.0);
+    hidden_label.set_hexpand(true);
+    let hidden_switch = Switch::new();
+    hidden_switch.add_css_class("recording-editor-zoom-switch");
+    hidden_switch.set_valign(Align::Center);
+    hidden_switch.set_halign(Align::End);
+    hidden_row.append(&hidden_label);
+    hidden_row.append(&hidden_switch);
+
     let idle_row = GtkBox::new(Orientation::Horizontal, 8);
     idle_row.add_css_class("recording-editor-zoom-classic");
     idle_row.set_hexpand(true);
@@ -499,6 +515,7 @@ fn build_cursor_motion_tab(
     let idle_delay_row = cursor_slider_row(&t("Idle delay"));
     idle_delay_row.scale.set_range(120.0, 5000.0);
     idle_delay_row.scale.set_increments(40.0, 200.0);
+    visibility_section.body.append(&hidden_row);
     visibility_section.body.append(&idle_row);
     visibility_section.body.append(&idle_delay_row.widget);
 
@@ -588,6 +605,16 @@ fn build_cursor_motion_tab(
         state.clone(),
         on_change.clone(),
         |cursor, value| cursor.idle_ms = value,
+    );
+    bind_switch(
+        &hidden_switch,
+        syncing.clone(),
+        pause_playback.clone(),
+        on_change.clone(),
+        {
+            let state = state.clone();
+            move |active| state.lock().unwrap().cursor.hidden = active
+        },
     );
     bind_switch(
         &idle_switch,
@@ -698,6 +725,7 @@ fn build_cursor_motion_tab(
         let smooth_btn = smooth_btn.clone();
         let smooth_scale = smooth_row.scale.clone();
         let speed_scale = speed_row.scale.clone();
+        let hidden_switch = hidden_switch.clone();
         let idle_switch = idle_switch.clone();
         let idle_delay_scale = idle_delay_row.scale.clone();
         let velocity_btn = velocity_btn.clone();
@@ -728,6 +756,7 @@ fn build_cursor_motion_tab(
             }
             smooth_scale.set_value(cursor.smooth);
             speed_scale.set_value(cursor.speed);
+            sync_switch(&hidden_switch, cursor.hidden);
             sync_switch(&idle_switch, cursor.hide_idle);
             idle_delay_scale.set_value(cursor.idle_ms);
             idle_delay_scale.set_sensitive(cursor.hide_idle);
@@ -1201,7 +1230,10 @@ pub(crate) struct FillSlider {
 impl FillSlider {
     pub(crate) fn new(label: &str) -> Self {
         Self::new_with_value_text(label, |value, min, max| {
-            format!("{:.0}", ((value - min) / (max - min).max(1e-9) * 100.0).round())
+            format!(
+                "{:.0}",
+                ((value - min) / (max - min).max(1e-9) * 100.0).round()
+            )
         })
     }
 

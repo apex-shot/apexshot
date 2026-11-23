@@ -29,11 +29,6 @@ mod zoom {
     include!("model_parts/zoom_impl.rs");
 }
 
-mod cursor_hide {
-    use super::*;
-    include!("model_parts/cursor_hide_impl.rs");
-}
-
 pub mod background_render {
     include!("model_parts/background_render.rs");
 }

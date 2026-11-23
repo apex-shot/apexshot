@@ -9,7 +9,7 @@
 //! The file carries what the Windows editor models, under the names the shared
 //! editor's `VideoProjectFile` already uses for the same concepts —
 //! `trim_start_seconds`, `cuts`, `segment_starts`, `freeze_tail`, `zoom_clips`,
-//! `zoom_camera`, `cursor_hide_clips`, and the three view fields. The stage is
+//! `zoom_camera`, `cursor_hidden`, and the three view fields. The stage is
 //! three plain keys: the wallpaper the user picked, the inset around the video
 //! and its corner radius, plus the panel's own fill when the background is a
 //! colour, gradient or picked picture. A fill is stored as its shape rather
@@ -176,8 +176,10 @@ pub(super) struct EditorProjectFile {
     pub zoom_clips: Vec<ZoomClipFile>,
     #[serde(default)]
     pub zoom_camera: ZoomCameraFile,
+    /// Hides the rendered cursor for the whole edit, in preview and export.
+    /// Absent in files written before the switch existed, which show it.
     #[serde(default)]
-    pub cursor_hide_clips: Vec<HideClipFile>,
+    pub cursor_hidden: bool,
     /// The camera layer once it has been moved away from what the recording
     /// captured. Absent means the recording's own placement is still in use.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -390,14 +392,6 @@ impl Default for ZoomCameraFile {
             motion_blur: default_motion_blur(),
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub(super) struct HideClipFile {
-    pub start: f64,
-    pub end: f64,
-    #[serde(default)]
-    pub hidden: bool,
 }
 
 /// Where this build keeps saved edits. Beside the pointer sidecars the recorder
@@ -632,11 +626,7 @@ mod tests {
                 start_early: true,
                 motion_blur: 0.7,
             },
-            cursor_hide_clips: vec![HideClipFile {
-                start: 3.0,
-                end: 4.0,
-                hidden: false,
-            }],
+            cursor_hidden: true,
             webcam: Some(WebcamLayerFile {
                 enabled: true,
                 fullscreen: false,
@@ -721,6 +711,54 @@ mod tests {
         assert_eq!(layouts.cues[2].layout, CameraLayout::ScreenOnly);
         assert_eq!(layouts.default_layout, CameraLayout::SplitScreen);
         assert_eq!(loaded, file);
+    }
+
+    #[test]
+    fn hiding_the_cursor_round_trips_and_counts_as_content() {
+        let directory = scratch("cursor-hidden");
+        let video = recording(&directory);
+        let path = directory.join("cursor-hidden.json");
+        let file = EditorProjectFile {
+            cursor_hidden: true,
+            ..project(&video)
+        };
+
+        write_at(&path, &file).unwrap();
+        let loaded = read_at(&path, &video).expect("project loads");
+        assert!(loaded.cursor_hidden);
+        assert_eq!(loaded, file);
+
+        // The switch is an edit, so a file that differs only there is a
+        // different document. The view still is not.
+        assert!(!file.same_content(&EditorProjectFile {
+            cursor_hidden: false,
+            ..file.clone()
+        }));
+        assert!(file.same_content(&EditorProjectFile {
+            playhead_seconds: 9.0,
+            ..file.clone()
+        }));
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn an_old_project_with_a_retired_hide_key_still_opens() {
+        let directory = scratch("hide-legacy");
+        let video = recording(&directory);
+        let path = directory.join("hide-legacy.json");
+        let mut json: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&project(&video)).unwrap()).unwrap();
+        let object = json.as_object_mut().unwrap();
+        object.remove("cursor_hidden");
+        object.insert(
+            "cursor_hide_clips".to_owned(),
+            serde_json::json!([{ "start": 1.0, "end": 2.0, "hidden": false }]),
+        );
+        fs::write(&path, serde_json::to_string(&json).unwrap()).unwrap();
+
+        let loaded = read_at(&path, &video).expect("an old project still loads");
+        assert!(!loaded.cursor_hidden, "an old file shows the cursor");
+        let _ = fs::remove_dir_all(&directory);
     }
 
     #[test]

@@ -77,12 +77,10 @@ pub(super) fn build_tool_sidebar(
     let cursor_panel = build_cursor_panel(state.clone(), on_change.clone(), pause_playback.clone());
     let background_panel = build_background_panel(state.clone(), on_change.clone());
     let zoom_panel = build_zoom_panel(state.clone(), on_change.clone(), pause_playback.clone());
-    let hide_panel = build_hide_panel(state.clone(), on_change.clone(), pause_playback.clone());
     let clip_panel = build_clip_panel(state.clone(), on_change, pause_playback);
     root.append(&cursor_panel.widget);
     root.append(&background_panel.widget);
     root.append(&zoom_panel.widget);
-    root.append(&hide_panel.widget);
     root.append(&clip_panel.widget);
     root.set_visible(true);
     let last_zoom = Rc::new(Cell::new(false));
@@ -92,43 +90,37 @@ pub(super) fn build_tool_sidebar(
         let refresh_cursor = cursor_panel.refresh;
         let refresh_background = background_panel.refresh;
         let refresh_zoom = zoom_panel.refresh;
-        let refresh_hide = hide_panel.refresh;
         let refresh_clip = clip_panel.refresh;
         let last_zoom = last_zoom.clone();
         Rc::new(move || {
             let guard = state.lock().unwrap();
             let tool = guard.selected_tool;
             let zoom = guard.selected_zoom.is_some();
-            let hide = guard.selected_cursor_hide.is_some();
             let clip = guard.selected_segment.is_some();
             let pointer_data = guard.supports_auto_zoom();
             drop(guard);
             if zoom {
                 last_zoom.set(true);
-            } else if clip || hide {
+            } else if clip {
                 last_zoom.set(false);
             }
             let show_cursor = tool == EditorTool::Cursor;
             let show_background = tool == EditorTool::Background;
             let show_zoom = !show_cursor
                 && !show_background
-                && (zoom || (!clip && !hide && (last_zoom.get() || pointer_data)));
-            let show_hide = !show_cursor && !show_background && !show_zoom && hide;
+                && (zoom || (!clip && (last_zoom.get() || pointer_data)));
             cursor_panel.widget.set_visible(show_cursor);
             background_panel.widget.set_visible(show_background);
             zoom_panel.widget.set_visible(show_zoom);
-            hide_panel.widget.set_visible(show_hide);
             clip_panel
                 .widget
-                .set_visible(!show_cursor && !show_background && !show_zoom && !show_hide);
+                .set_visible(!show_cursor && !show_background && !show_zoom);
             if show_cursor {
                 refresh_cursor();
             } else if show_background {
                 refresh_background();
             } else if show_zoom {
                 refresh_zoom();
-            } else if show_hide {
-                refresh_hide();
             } else {
                 refresh_clip();
             }
@@ -1214,138 +1206,6 @@ pub(crate) fn format_clip_length(seconds: f64) -> String {
     format!("{}:{:02}", total / 60, total % 60)
 }
 
-struct HidePanel {
-    widget: GtkBox,
-    refresh: Rc<dyn Fn()>,
-}
-
-fn build_hide_panel(
-    state: Arc<Mutex<VideoEditState>>,
-    on_change: Rc<dyn Fn()>,
-    pause_playback: PausePlayback,
-) -> HidePanel {
-    let panel = GtkBox::new(Orientation::Vertical, 0);
-    panel.add_css_class("recording-editor-zoom-panel");
-    panel.set_hexpand(true);
-    panel.set_vexpand(true);
-
-    let header = GtkBox::new(Orientation::Horizontal, 8);
-    header.add_css_class("recording-editor-zoom-header");
-    header.set_hexpand(true);
-    let title = Label::new(Some(&t("Hide cursor")));
-    title.add_css_class("recording-editor-zoom-title");
-    title.set_xalign(0.0);
-    title.set_hexpand(true);
-    header.append(&title);
-
-    let body = GtkBox::new(Orientation::Vertical, 8);
-    body.add_css_class("recording-editor-zoom-body");
-    body.set_hexpand(true);
-    let hint = Label::new(Some(&t(
-        "Cursor is hidden for this range in preview and export",
-    )));
-    hint.add_css_class("recording-editor-zoom-hint");
-    hint.set_wrap(true);
-    hint.set_xalign(0.0);
-    hint.set_max_width_chars(34);
-    body.append(&hint);
-
-    // The context menu already offers these two actions on the hide clip; the
-    // panel repeats them so selecting the range is not a dead end.
-    let section = sidebar_section(&t("Visibility"), true, false);
-
-    let hidden_row = GtkBox::new(Orientation::Horizontal, 8);
-    hidden_row.add_css_class("recording-editor-zoom-classic");
-    hidden_row.set_hexpand(true);
-    let hidden_label = Label::new(Some(&t("Hide cursor")));
-    hidden_label.add_css_class("recording-editor-zoom-classic-label");
-    hidden_label.set_xalign(0.0);
-    hidden_label.set_hexpand(true);
-    hidden_label.set_valign(Align::Center);
-    let hidden_switch = Switch::new();
-    hidden_switch.add_css_class("recording-editor-zoom-switch");
-    hidden_switch.set_valign(Align::Center);
-    hidden_switch.set_halign(Align::End);
-    hidden_row.append(&hidden_label);
-    hidden_row.append(&hidden_switch);
-    section.body.append(&hidden_row);
-
-    let remove = Button::with_label(&t("Remove"));
-    remove.add_css_class("recording-editor-zoom-reset");
-    remove.set_has_frame(false);
-    remove.set_halign(Align::Start);
-    section.body.append(&remove);
-
-    body.append(&section.root);
-
-    let scroll = ScrolledWindow::new();
-    scroll.add_css_class("recording-editor-zoom-scroll");
-    scroll.set_policy(PolicyType::Never, PolicyType::Automatic);
-    scroll.set_vexpand(true);
-    scroll.set_hexpand(true);
-    scroll.set_child(Some(&body));
-
-    panel.append(&header);
-    panel.append(&scroll);
-
-    let syncing = Rc::new(Cell::new(false));
-    bind_switch(
-        &hidden_switch,
-        syncing.clone(),
-        pause_playback.clone(),
-        on_change.clone(),
-        {
-            let state = state.clone();
-            move |active| {
-                let mut guard = state.lock().unwrap();
-                if let Some(index) = guard.selected_cursor_hide {
-                    // The switch reads as "the cursor is hidden here", while
-                    // the model's flag disables the range.
-                    guard.set_cursor_hide_hidden(index, !active);
-                }
-            }
-        },
-    );
-    remove.connect_clicked({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        let pause_playback = pause_playback.clone();
-        move |_| {
-            let index = state.lock().unwrap().selected_cursor_hide;
-            let Some(index) = index else {
-                return;
-            };
-            pause_playback();
-            state.lock().unwrap().remove_cursor_hide_clip(index);
-            on_change();
-        }
-    });
-
-    let refresh = {
-        let panel = panel.clone();
-        let hidden_switch = hidden_switch.clone();
-        let remove = remove.clone();
-        let syncing = syncing.clone();
-        Rc::new(move || {
-            panel.set_visible(true);
-            let guard = state.lock().unwrap();
-            let selected = guard.selected_cursor_hide_clip();
-            let hiding = selected.is_some_and(|clip| !clip.hidden);
-            let can_remove = selected.is_some();
-            drop(guard);
-            syncing.set(true);
-            sync_switch(&hidden_switch, hiding);
-            remove.set_sensitive(can_remove);
-            syncing.set(false);
-        }) as Rc<dyn Fn()>
-    };
-
-    HidePanel {
-        widget: panel,
-        refresh,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     #[test]
@@ -2082,10 +1942,16 @@ mod tests {
             "the rotation controls belong to Rotation"
         );
         assert!(
-            panel.contains("visibility_section.body.append(&idle_row);")
+            panel.contains("visibility_section.body.append(&hidden_row);")
+                && panel.contains("visibility_section.body.append(&idle_row);")
                 && panel.contains("visibility_section.body.append(&loop_row);")
                 && panel.contains("visibility_section.body.append(&stop_row.widget());"),
-            "the idle and tail controls belong to Visibility"
+            "the hide, idle and tail controls belong to Visibility"
+        );
+        assert!(
+            panel.contains("state.lock().unwrap().cursor.hidden = active")
+                && panel.contains("sync_switch(&hidden_switch, cursor.hidden)"),
+            "the Hide cursor switch must write the setting and read it back"
         );
         assert!(
             !panel.contains("recording-editor-zoom-kicker")
@@ -2142,32 +2008,6 @@ mod tests {
         assert!(
             style.contains("sync_switch(&always_default, cursor.always_use_default)"),
             "the Style refresh must show the stored value"
-        );
-    }
-
-    #[test]
-    fn the_hide_panel_offers_the_switch_and_the_remove_button() {
-        let source = include_str!("tool_sidebar.rs");
-        let start = source
-            .find("fn build_hide_panel(")
-            .expect("the Hide panel is built by build_hide_panel");
-        let end = source
-            .find("\n#[cfg(test)]")
-            .expect("the tests close the file");
-        let panel = &source[start..end];
-        assert!(
-            panel.contains("sidebar_section(&t(\"Visibility\")"),
-            "the hide actions live in a card, not loose on the page"
-        );
-        assert!(
-            panel.contains("set_cursor_hide_hidden(index, !active)")
-                && panel.contains("sync_switch(&hidden_switch, hiding)"),
-            "the switch must hide or show the selected range and read it back"
-        );
-        assert!(
-            panel.contains("remove_cursor_hide_clip(index)")
-                && panel.contains("selected_cursor_hide_clip()"),
-            "Remove must delete the selected hide range"
         );
     }
 
@@ -2738,8 +2578,8 @@ mod tests {
             .find("fn build_clip_panel(")
             .expect("the Clip panel is built by build_clip_panel");
         let end = source
-            .find("struct HidePanel")
-            .expect("the Hide panel follows the Clip panel");
+            .find("\nfn build_sound_scope_page(")
+            .expect("the Sound scope follows the Clip panel and its scope page");
         let clip = &source[start..end];
         assert!(
             clip.contains("FillSlider::new_with_value_text(&t(\"Speed\")")

@@ -4,13 +4,11 @@ pub enum TimelineLane {
     #[default]
     Zoom,
     Sound,
-    /// The cursor's Hide clips. The row shows once the recording has one.
-    Cursor,
 }
 
 impl TimelineLane {
     /// Every lane, in stacking order.
-    pub const ALL: [Self; 3] = [Self::Zoom, Self::Sound, Self::Cursor];
+    pub const ALL: [Self; 2] = [Self::Zoom, Self::Sound];
 
     /// The lane's slot in the stack, which is also its slot in the per-lane
     /// arrays.
@@ -18,7 +16,6 @@ impl TimelineLane {
         match self {
             Self::Zoom => 0,
             Self::Sound => 1,
-            Self::Cursor => 2,
         }
     }
 }
@@ -28,23 +25,23 @@ pub const LANE_OPEN_HEIGHT: f64 = 42.0;
 pub const LANE_THIN_HEIGHT: f64 = 18.0;
 
 /// Which secondary lane is open (drawn at full height) and how far each lane
-/// is through its ease. Progress is `[zoom, sound, cursor]`, 0 resting .. 1
-/// open, and always sums to one expanded lane, so the stack keeps one height
-/// while the lanes trade it.
+/// is through its ease. Progress is `[zoom, sound]`, 0 resting .. 1 open, and
+/// always sums to one expanded lane, so the stack keeps one height while the
+/// lanes trade it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TimelineLanes {
     open: TimelineLane,
-    progress: [f64; 3],
+    progress: [f64; 2],
     /// The selection last seen, so a new selection brings its lane forward.
-    seen_selection: (Option<usize>, Option<usize>),
+    seen_selection: Option<usize>,
 }
 
 impl Default for TimelineLanes {
     fn default() -> Self {
         Self {
             open: TimelineLane::default(),
-            progress: [1.0, 0.0, 0.0],
-            seen_selection: (None, None),
+            progress: [1.0, 0.0],
+            seen_selection: None,
         }
     }
 }
@@ -62,33 +59,29 @@ impl TimelineLanes {
         changed
     }
 
-    /// Fall back to the Zoom lane when the open one is no longer present: the
-    /// last Hide clip going away must not leave the stack with nothing open.
+    /// Fall back to the Zoom lane when the open one is no longer present.
     /// Returns whether the open lane changed.
-    pub fn retain_present(&mut self, present: [bool; 3]) -> bool {
+    pub fn retain_present(&mut self, present: [bool; 2]) -> bool {
         if present[self.open.index()] {
             return false;
         }
         self.open(TimelineLane::Zoom)
     }
 
-    /// A newly selected clip opens its lane, so a selection made from the
-    /// clip menu, the panel or by adding a clip is always in view.
-    pub fn follow_selection(&mut self, zoom: Option<usize>, cursor: Option<usize>) {
-        let now = (zoom, cursor);
-        if self.seen_selection == now {
+    /// A newly selected zoom opens its lane, so a selection made from the
+    /// clip menu or by adding a clip is always in view.
+    pub fn follow_selection(&mut self, zoom: Option<usize>) {
+        if self.seen_selection == zoom {
             return;
         }
-        self.seen_selection = now;
-        if cursor.is_some() {
-            self.open(TimelineLane::Cursor);
-        } else if zoom.is_some() {
+        self.seen_selection = zoom;
+        if zoom.is_some() {
             self.open(TimelineLane::Zoom);
         }
     }
 
-    fn targets(&self) -> [f64; 3] {
-        let mut targets = [0.0; 3];
+    fn targets(&self) -> [f64; 2] {
+        let mut targets = [0.0; 2];
         for lane in TimelineLane::ALL {
             targets[lane.index()] = f64::from(u8::from(self.is_open(lane)));
         }
@@ -96,7 +89,7 @@ impl TimelineLanes {
     }
 
     /// How far each lane is drawn toward full height, 0 resting .. 1 open.
-    pub fn progress(&self) -> [f64; 3] {
+    pub fn progress(&self) -> [f64; 2] {
         self.progress
     }
 
@@ -112,12 +105,12 @@ impl TimelineLanes {
         let amount = 1.0 - (-dt.max(0.0) / 0.045).exp();
         let targets = self.targets();
         let mut next = self.progress;
-        for index in 0..3 {
+        for index in 0..2 {
             next[index] += (targets[index] - next[index]) * amount;
         }
         // Snap only once every lane has arrived: snapping one early would
         // break their sum, which is what keeps the stack's height fixed.
-        let arrived = (0..3).all(|index| (targets[index] - next[index]).abs() < 0.002);
+        let arrived = (0..2).all(|index| (targets[index] - next[index]).abs() < 0.002);
         self.progress = if arrived { targets } else { next };
         !arrived
     }
@@ -133,9 +126,9 @@ impl TimelineLanes {
     /// the rounded running totals, so a pixel one lane loses to rounding the
     /// next one gains. Rounding each lane on its own made the total wobble by
     /// a pixel a frame, and the preview above resized with it.
-    pub fn heights(&self, present: [bool; 3]) -> [i32; 3] {
-        let mut heights = [0; 3];
-        let shown: Vec<usize> = (0..3).filter(|&index| present[index]).collect();
+    pub fn heights(&self, present: [bool; 2]) -> [i32; 2] {
+        let mut heights = [0; 2];
+        let shown: Vec<usize> = (0..2).filter(|&index| present[index]).collect();
         // The resting total: one lane full and the rest thin, in whole pixels.
         // Pinning the sum to it keeps a total that lands on half a pixel from
         // flipping between frames on floating-point noise.
@@ -154,7 +147,7 @@ impl TimelineLanes {
             heights[index] = rounded - placed;
             placed = rounded;
         }
-        for index in 0..3 {
+        for index in 0..2 {
             if !present[index] {
                 heights[index] = Self::height_exact(self.progress[index]).round() as i32;
             }
@@ -202,67 +195,62 @@ mod tests {
             .filter(|&&lane| lanes.is_open(lane))
             .count();
         assert_eq!(open, 1);
-        assert_eq!(lanes.progress(), [1.0, 0.0, 0.0]);
+        assert_eq!(lanes.progress(), [1.0, 0.0]);
         assert!(lanes.settled());
     }
 
     #[test]
     fn a_new_selection_opens_its_lane_and_a_repeat_does_not() {
         let mut lanes = TimelineLanes::default();
-        lanes.follow_selection(None, Some(2));
-        assert!(lanes.is_open(TimelineLane::Cursor));
+        lanes.follow_selection(Some(2));
+        assert!(lanes.is_open(TimelineLane::Zoom));
 
         // The same selection seen again must not drag the stack back.
         lanes.open(TimelineLane::Sound);
-        lanes.follow_selection(None, Some(2));
+        lanes.follow_selection(Some(2));
         assert!(lanes.is_open(TimelineLane::Sound));
 
         // A different selection does.
-        lanes.follow_selection(Some(1), None);
+        lanes.follow_selection(Some(1));
         assert!(lanes.is_open(TimelineLane::Zoom));
 
         // Clearing the selection changes nothing about which lane is open.
         lanes.open(TimelineLane::Sound);
-        lanes.follow_selection(None, None);
+        lanes.follow_selection(None);
         assert!(lanes.is_open(TimelineLane::Sound));
     }
 
     #[test]
     fn the_ease_reaches_its_targets_and_settles() {
         let mut lanes = TimelineLanes::default();
-        lanes.open(TimelineLane::Cursor);
+        lanes.open(TimelineLane::Sound);
         assert!(!lanes.settled());
         let mut steps = 0;
         while lanes.step(0.016) {
             steps += 1;
             assert!(steps < 200, "the ease must arrive rather than asymptote");
         }
-        assert_eq!(lanes.progress(), [0.0, 0.0, 1.0]);
+        assert_eq!(lanes.progress(), [0.0, 1.0]);
         assert!(lanes.settled());
         assert!(!lanes.step(0.016), "a settled stack costs no frames");
     }
 
     #[test]
     fn the_lane_stack_keeps_one_height_while_the_lanes_trade() {
-        for present in [
-            [true, false, false],
-            [true, true, false],
-            [true, false, true],
-            [true, true, true],
-        ] {
+        for present in [[true, false], [true, true]] {
             let shown = present.iter().filter(|&&visible| visible).count();
             let total = LANE_OPEN_HEIGHT.round() as i32
                 + LANE_THIN_HEIGHT.round() as i32 * (shown as i32 - 1);
             let mut lanes = TimelineLanes::default();
-            lanes.open(TimelineLane::Cursor);
+            lanes.open(TimelineLane::Sound);
             loop {
                 let heights = lanes.heights(present);
-                let sum: i32 = (0..3)
+                let sum: i32 = (0..2)
                     .filter(|&index| present[index])
                     .map(|index| heights[index])
                     .sum();
                 assert_eq!(sum, total, "present {present:?} wobbled to {heights:?}");
-                for index in 0..3 {
+                for index in 0..2 {
                     if present[index] {
                         assert!(heights[index] >= LANE_THIN_HEIGHT.round() as i32);
                         assert!(heights[index] <= LANE_OPEN_HEIGHT.round() as i32);
@@ -278,14 +266,14 @@ mod tests {
     #[test]
     fn an_open_lane_that_goes_away_falls_back_to_zoom() {
         let mut lanes = TimelineLanes::default();
-        lanes.open(TimelineLane::Cursor);
-        assert!(lanes.retain_present([true, true, false]));
+        lanes.open(TimelineLane::Sound);
+        assert!(lanes.retain_present([true, false]));
         assert!(lanes.is_open(TimelineLane::Zoom));
-        assert!(!lanes.retain_present([true, true, false]));
+        assert!(!lanes.retain_present([true, false]));
 
         // A lane that is still there stays open.
         lanes.open(TimelineLane::Sound);
-        assert!(!lanes.retain_present([true, true, true]));
+        assert!(!lanes.retain_present([true, true]));
         assert!(lanes.is_open(TimelineLane::Sound));
     }
 

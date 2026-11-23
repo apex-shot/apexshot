@@ -1,33 +1,5 @@
+use crate::recording::editor::project::ProjectSync;
 use crate::recording::editor::sound::SoundSettings;
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct CursorHideClip {
-    pub start: f64,
-    pub end: f64,
-    /// Disabled from the clip's context menu: the clip stays on the timeline
-    /// but stops hiding the cursor, so a hide can be muted without losing its
-    /// span.
-    pub hidden: bool,
-}
-
-/// One copied or cut timeline clip, held until it is pasted at the playhead.
-/// The two track kinds share a single slot so Cut then Paste behaves like the
-/// menu suggests on either one.
-#[derive(Debug, Clone, PartialEq)]
-pub enum ClipClipboard {
-    Zoom(ZoomClip),
-    Hide(CursorHideClip),
-}
-
-impl CursorHideClip {
-    pub fn duration(&self) -> f64 {
-        (self.end - self.start).max(0.0)
-    }
-
-    pub fn contains(&self, t: f64) -> bool {
-        t >= self.start && t <= self.end
-    }
-}
 
 pub fn format_zoom_scale(scale: f64) -> String {
     for &(label, preset) in &ZOOM_SCALE_PRESETS {
@@ -111,13 +83,11 @@ pub struct VideoEditState {
     pub zoom_camera: ZoomCameraSettings,
     pub(super) zoom_camera_cache: std::sync::Arc<std::sync::Mutex<ZoomCameraCache>>,
     pub selected_zoom: Option<usize>,
-    pub cursor_hide_clips: Vec<CursorHideClip>,
-    pub selected_cursor_hide: Option<usize>,
     pub selected_segment: Option<usize>,
     /// Session-only clip clipboard for the timeline's context menu. Never
     /// persisted: a paste target is the live playhead, which has no meaning in
     /// a saved project.
-    pub clipboard: Option<ClipClipboard>,
+    pub clipboard: Option<ZoomClip>,
     /// The Add zoom tool is armed: the next click on the preview places a
     /// Manual zoom at the playhead, aimed at the point clicked. Session-only
     /// like the clipboard — it is a gesture in progress, not an edit.
@@ -154,6 +124,11 @@ pub struct VideoEditState {
     /// Undo/redo steps for the zoom track. Runtime-only: not written to the
     /// project, so a reopened recording starts with nothing to undo.
     pub zoom_history: ZoomHistory,
+    /// The project this window last loaded or wrote. Runtime-only and
+    /// per-window: the autosave compares against it instead of the file on
+    /// disk, so a second editor on the same recording cannot mistake the
+    /// other window's save for a local change.
+    pub project_sync: ProjectSync,
     /// Classic animation keeps a fixed focus point even when the clip is Auto.
     pub zoom_classic: bool,
     /// 0 = fit the whole clip, 100 = 8× time-axis zoom on the editor ruler.

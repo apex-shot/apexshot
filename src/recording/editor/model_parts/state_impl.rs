@@ -25,8 +25,6 @@ impl VideoEditState {
             zoom_camera: ZoomCameraSettings::default(),
             zoom_camera_cache: Default::default(),
             selected_zoom: None,
-            cursor_hide_clips: Vec::new(),
-            selected_cursor_hide: None,
             selected_segment: None,
             clipboard: None,
             add_zoom_tool: false,
@@ -54,12 +52,24 @@ impl VideoEditState {
             zoom_suggestions_reviewed: false,
             last_edited_zoom_style: None,
             zoom_history: ZoomHistory::default(),
+            project_sync: Default::default(),
             zoom_classic: false,
             timeline_scale: 0.0,
             timeline_offset_seconds: 0.0,
             timeline_scroll_seconds: 0.0,
             export_settings: Default::default(),
             export_progress: None,
+        }
+    }
+
+    /// The alpha the rendered cursor takes: 0 when the whole-edit hide switch
+    /// is on, otherwise fully visible. The preview and the exporter both read
+    /// this, so the switch reaches both.
+    pub fn cursor_hide_alpha(&self) -> f64 {
+        if self.cursor.hidden {
+            0.0
+        } else {
+            1.0
         }
     }
 
