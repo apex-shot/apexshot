@@ -762,6 +762,7 @@ mod tests {
             remove_shake_threshold: 45.0,
             stop_movement_in_last_part_ms: 1200.0,
             loop_position_before_end_ms: Some(750.0),
+            hidden: false,
         }
     }
 
