@@ -606,7 +606,7 @@ impl Default for QualityTier {
 
 impl QualityTier {
     /// How the project file names this tier. A missing or unknown name reads
-    /// as High, the default the chip starts on.
+    /// as High, the default a project starts on.
     pub(super) fn id(self) -> &'static str {
         match self {
             Self::Balanced => "balanced",
@@ -857,7 +857,7 @@ fn estimated_size_bytes(
         .max(0.0) as u64
 }
 
-/// The muted readout next to the quality chip: "~12.4 MB", never a bare 0.0
+/// The muted readout next to the aspect chip: "~12.4 MB", never a bare 0.0
 /// while a recording is loaded.
 fn format_size(bytes: u64) -> String {
     let mb = bytes as f64 / 1024.0 / 1024.0;
@@ -870,7 +870,7 @@ fn format_size(bytes: u64) -> String {
 
 /// Live export estimate for the stage. It follows the document, the quality
 /// tier, the frame pick and the timeline's current length, so the number
-/// beside the chip always describes what an export would write now.
+/// beside the aspect chip always describes what an export would write now.
 #[derive(Clone)]
 struct Estimate {
     label: Label,
@@ -950,8 +950,6 @@ struct Stage {
     preview: Rc<super::preview::Preview>,
     estimate: Estimate,
     quality: Rc<Cell<QualityTier>>,
-    /// The chip's label, so a project load can show the tier it restored.
-    quality_label: Label,
     export_button: Button,
     presets_button: Button,
     background: super::background::BackgroundState,
@@ -1482,11 +1480,9 @@ impl Stage {
         self.canvas.add_controller(click);
     }
 
-    /// Show the tier the open document carries. The chip's cell is shared with
-    /// the timeline, which restores it from the project file on load, so this
-    /// only has to redraw the label and the estimate that reads it.
+    /// The timeline restores the export tier from the project file on load, so
+    /// this refreshes the estimate that reads it.
     fn sync_quality(&self) {
-        self.quality_label.set_text(&self.quality.get().label());
         self.estimate.refresh();
     }
 
@@ -2001,26 +1997,7 @@ fn build_stage(
     crop_row.append(&crop_label);
     crop.set_child(Some(&crop_row));
 
-    let quality_label = Label::new(Some(&quality.get().label()));
-    quality_label.add_css_class("recording-editor-stage-chip-label");
-    let quality_button = Button::new();
-    quality_button.set_has_frame(false);
-    quality_button.add_css_class("recording-editor-stage-chip");
-    quality_button.set_tooltip_text(Some(&t("Export quality")));
-    quality_button.set_child(Some(&quality_label));
-    wire_quality_menu(&quality_button, quality.clone(), {
-        let quality_label = quality_label.clone();
-        let estimate = estimate.clone();
-        Rc::new(move |tier| {
-            quality_label.set_text(&tier.label());
-            // The tier brackets the exported size, so the readout moves too.
-            estimate.refresh();
-        })
-    });
-
     tools.append(&aspect_chip);
-    tools.append(&stage_rule());
-    tools.append(&quality_button);
     tools.append(&stage_rule());
     tools.append(&estimate_label);
     root.append(&tools);
@@ -2035,7 +2012,6 @@ fn build_stage(
         preview,
         estimate: estimate.clone(),
         quality: quality.clone(),
-        quality_label: quality_label.clone(),
         export_button: export_button.clone(),
         presets_button: presets_button.clone(),
         background: background.state(),
@@ -2176,34 +2152,6 @@ fn wire_aspect_menu(
         let active = aspect.get();
         for (choice, check) in &rows {
             check.set_opacity(if *choice == active { 1.0 } else { 0.0 });
-        }
-        popover.popup();
-    });
-}
-
-fn wire_quality_menu(
-    button: &Button,
-    quality: Rc<Cell<QualityTier>>,
-    on_change: Rc<dyn Fn(QualityTier)>,
-) {
-    let choose = {
-        let quality = quality.clone();
-        let on_change = on_change.clone();
-        Rc::new(move |tier| {
-            quality.set(tier);
-            on_change(tier);
-        })
-    };
-    let (popover, rows) = choice_menu(
-        button,
-        &[QualityTier::Balanced, QualityTier::High, QualityTier::Ultra],
-        QualityTier::label,
-        choose,
-    );
-    button.connect_clicked(move |_| {
-        let active = quality.get();
-        for (tier, check) in &rows {
-            check.set_opacity(if *tier == active { 1.0 } else { 0.0 });
         }
         popover.popup();
     });

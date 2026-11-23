@@ -13,6 +13,7 @@ pub mod gst_warp;
 pub(crate) mod hardware_encode;
 pub mod imported_pointer;
 pub mod model;
+pub mod presets;
 pub mod project;
 pub mod recording_id;
 pub(crate) mod ripple_preview;

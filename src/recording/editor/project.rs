@@ -739,7 +739,7 @@ fn bundled_wallpaper_name(path: &Path) -> Option<String> {
         .map(|name| name.to_owned())
 }
 
-fn background_from_file(bg: BackgroundFile) -> VideoBackground {
+pub(crate) fn background_from_file(bg: BackgroundFile) -> VideoBackground {
     match bg {
         BackgroundFile::None => VideoBackground::None,
         BackgroundFile::Plain { r, g, b } => VideoBackground::Plain { r, g, b },

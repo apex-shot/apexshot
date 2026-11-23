@@ -15,6 +15,7 @@ mod footer;
 mod inspector;
 #[allow(dead_code)]
 mod media_library;
+mod presets_popover;
 #[allow(dead_code)]
 mod preview;
 #[allow(dead_code)]
@@ -28,6 +29,7 @@ mod toolbar;
 
 use super::ffmpeg;
 use super::model::{EditorTool, VideoEditState, VideoMetadata, DEFAULT_FRAME_RATE};
+use super::presets;
 use super::project::{self, persist_video_session};
 use super::ui_support::install_recording_editor_css;
 use gtk4::{
@@ -179,6 +181,13 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
             Ok(metadata) => {
                 let mut state = VideoEditState::new(metadata);
                 let has_saved_project = project::restore_into(&mut state);
+                // A recording with no saved project opens on the look the user
+                // chose as every new recording's default, before the first
+                // autosave sees it, so it is the opening document rather than
+                // an edit made after the fact. A saved project keeps its look.
+                if !has_saved_project {
+                    presets::apply_default_preset(&mut state);
+                }
                 // Runs at most once per recording, and never again after the
                 // user has reviewed the result — including after deleting
                 // every suggestion. A saved project keeps whatever it holds.
@@ -213,7 +222,7 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
     let export_flow_active: export_flow::FlowActive = Rc::new(Cell::new(false));
     let export_cancellation = Arc::new(AtomicBool::new(false));
     let close_after_export = Rc::new(Cell::new(false));
-    let (title_bar, title_label, upload_btn, export_btn) = build_window_controls(
+    let (title_bar, title_label, presets_btn, export_btn) = build_window_controls(
         &window,
         state.clone(),
         exporting.clone(),
@@ -240,7 +249,7 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
         let refresh_slot = refresh_slot.clone();
         let state = state.clone();
         let title_label = title_label.clone();
-        let upload_btn = upload_btn.clone();
+        let presets_btn = presets_btn.clone();
         let export_btn = export_btn.clone();
         let exporting = exporting.clone();
         let estimate_label = estimate_label.clone();
@@ -252,7 +261,7 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
             title_label.set_text(&name);
             title_label.set_tooltip_text(Some(&name));
             let enabled = has_video && !exporting.get();
-            upload_btn.set_sensitive(enabled);
+            presets_btn.set_sensitive(enabled);
             export_btn.set_sensitive(enabled);
             footer::update_estimate(&estimate_label, &state, false);
             if let Some(paint) = paint_slot.borrow().clone() {
@@ -263,6 +272,8 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
             }
         }) as Rc<dyn Fn()>
     };
+
+    presets_popover::attach(&presets_btn, state.clone(), ping.clone());
 
     let workspace = GtkBox::new(Orientation::Horizontal, 0);
     workspace.add_css_class("recording-editor-workspace");
@@ -643,9 +654,12 @@ fn load_preview_video(
     };
     let mut next = VideoEditState::new(metadata.clone());
     let has_saved_project = project::restore_into(&mut next);
-    // Opening another video is the same first open a launch performs, so the
-    // automatic pass runs under the same setting and the same "no saved
-    // project" rule.
+    // Opening another video is the same first open a launch performs: the
+    // default look lands under the same rule, and the automatic pass runs
+    // under the same setting and the same "no saved project" rule.
+    if !has_saved_project {
+        presets::apply_default_preset(&mut next);
+    }
     next.suggest_zooms_on_open(
         crate::config::load_config().rec_video_auto_zoom_on_import,
         has_saved_project,
@@ -831,23 +845,29 @@ fn build_window_controls(
 
     let (export, export_spinner) = footer::build_export_action(
         window,
-        state.clone(),
-        exporting.clone(),
-        export_cancellation.clone(),
-        export_flow_active.clone(),
-    );
-    let (upload, upload_spinner) = footer::build_upload_action(
-        window,
         state,
         exporting,
         export_cancellation,
         export_flow_active,
     );
+    // The presets button takes the spot the cloud button used to hold. Upload
+    // stays reachable from the export page, so the title bar keeps one action
+    // beside Export rather than two.
+    let presets = presets_popover::title_button();
+    // Export goes insensitive while it encodes, and a preset cannot land on a
+    // recording that is being written, so the bookmark follows it. The edit
+    // refresh below sets both again whenever the document changes.
+    presets.set_sensitive(export.is_sensitive());
+    {
+        let presets = presets.clone();
+        export.connect_sensitive_notify(move |export| {
+            presets.set_sensitive(export.is_sensitive());
+        });
+    }
     let actions = GtkBox::new(Orientation::Horizontal, 8);
     actions.add_css_class("recording-editor-title-actions");
     actions.set_valign(Align::Center);
-    actions.append(&upload_spinner);
-    actions.append(&upload);
+    actions.append(&presets);
     actions.append(&export_spinner);
     actions.append(&export);
     let lights = toolbar::build_traffic_lights(window);
@@ -867,7 +887,7 @@ fn build_window_controls(
     bar.append(&right_balance);
 
     crate::capture::editor::ui_support::install_window_drag(&bar, window);
-    (bar, title, upload, export)
+    (bar, title, presets, export)
 }
 
 #[cfg(test)]

@@ -5339,3 +5339,21 @@ msgstr "次の 3 回の Studio 書き出しは無料です。書き出すたび�
 
 msgid "Choose Studio in ApexShot, sign in, and pay. ApexShot turns Studio on for you, with no licence file to copy or import."
 msgstr "ApexShot で Studio を選び、サインインして支払うだけ。ApexShot が Studio を有効にするので、ライセンスファイルのコピーやインポートは不要です。"
+
+msgid "Name"
+msgstr "名前"
+
+msgid "New preset"
+msgstr "新しいプリセット"
+
+msgid "New recordings open with this look"
+msgstr "新しい録画はこの外観で開きます"
+
+msgid "Save current look"
+msgstr "現在の外観を保存"
+
+msgid "Save this project's background, cursor and click sound, then put them on any recording."
+msgstr "このプロジェクトの背景・カーソル・クリック音を保存して、どの録画にも適用できます。"
+
+msgid "Save this project's background, cursor, camera and captions, then put them on any recording."
+msgstr "このプロジェクトの背景・カーソル・カメラ・キャプションを保存して、どの録画にも適用できます。"

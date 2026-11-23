@@ -5442,3 +5442,21 @@ msgstr "Deine nächsten 3 Studio-Exporte gehen auf uns. Nach jedem zeigt ApexSho
 
 msgid "Choose Studio in ApexShot, sign in, and pay. ApexShot turns Studio on for you, with no licence file to copy or import."
 msgstr "Wähle Studio in ApexShot, melde dich an und bezahle. ApexShot schaltet Studio für dich frei, ohne Lizenzdatei zum Kopieren oder Importieren."
+
+msgid "Name"
+msgstr "Name"
+
+msgid "New preset"
+msgstr "Neue Voreinstellung"
+
+msgid "New recordings open with this look"
+msgstr "Neue Aufnahmen öffnen mit diesem Aussehen"
+
+msgid "Save current look"
+msgstr "Aktuelles Aussehen speichern"
+
+msgid "Save this project's background, cursor and click sound, then put them on any recording."
+msgstr "Speichere Hintergrund, Cursor und Klickton dieses Projekts und lege sie auf jede Aufnahme."
+
+msgid "Save this project's background, cursor, camera and captions, then put them on any recording."
+msgstr "Speichere Hintergrund, Cursor, Kamera und Untertitel dieses Projekts und lege sie auf jede Aufnahme."
