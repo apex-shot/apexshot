@@ -4,58 +4,104 @@
                 background: transparent;
             }
 
-            /* This card is the image editor's Motion confirm card: one
-               near-black surface, one 12px radius, the same 1px rim. */
-            .recording-editor-dialog-bg {
-                background: @recording-editor-surface;
-                border-radius: 12px;
-                border: 1px solid alpha(white, 0.16);
-            }
-
-            /* Same weights as that card's title, which is an inspector title. */
-            .recording-editor-dialog-title {
-                color: rgba(255, 255, 255, 0.92);
-                font-size: 13px;
-                font-weight: 600;
-                letter-spacing: -0.1px;
-            }
-
-            /* Same weights as that card's body, an inspector hint — including
-               the indent that sets the body in from the title's left edge. */
-            .recording-editor-dialog-body {
-                color: rgba(255, 255, 255, 0.52);
-                font-size: 11px;
-                line-height: 1.4;
-                padding: 10px 12px;
-            }
-
-            /* The dialog's actions carry that card's weights: a bare-text
-               secondary beside one filled #ff670d primary. */
-            .recording-editor-dialog-root .recording-editor-primary-button {
-                min-width: 72px;
-                min-height: 26px;
-                padding: 0 14px;
-                border-radius: 6px;
-                background: #ff670d;
+            /* The notice dialogs follow the editor's export card: one
+               near-black surface, the same 14px radius with no rim, and the
+               same type ramp. No drop shadow: the popover
+               clips it into a hard dark box around the card. The crop
+               dialog brings its own surface below, so none of this reaches
+               it. */
+            popover.recording-editor-dialog:not(.recording-editor-crop-dialog) .recording-editor-dialog-bg {
+                background: #171717;
                 border: none;
-                color: white;
-                font-size: 12px;
-                font-weight: 600;
+                border-radius: 14px;
                 box-shadow: none;
+                font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
             }
 
-            .recording-editor-dialog-root .recording-editor-primary-button label {
-                color: white;
-                font-size: 12px;
+            popover.recording-editor-dialog:not(.recording-editor-crop-dialog) .recording-editor-dialog-title {
+                color: #e8e8e8;
+                font-size: 18px;
                 font-weight: 600;
             }
 
-            .recording-editor-dialog-root .recording-editor-primary-button:hover {
-                background: #c06a44;
+            /* Flush with the title: the export card's body carries no indent. */
+            popover.recording-editor-dialog:not(.recording-editor-crop-dialog) .recording-editor-dialog-body {
+                color: #858585;
+                font-size: 14px;
+                line-height: 1.45;
+                padding: 0;
             }
 
-            .recording-editor-dialog-root .recording-editor-primary-button:active {
-                background: #8a4a2d;
+            /* The dialog's actions carry the export card's weights: one filled
+               #ff670d primary, a #202020 secondary and a bare-text ghost. */
+            popover.recording-editor-dialog:not(.recording-editor-crop-dialog) .recording-editor-dialog-root .recording-editor-primary-button,
+            popover.recording-editor-dialog:not(.recording-editor-crop-dialog) .recording-editor-dialog-root .recording-editor-secondary-button,
+            popover.recording-editor-dialog:not(.recording-editor-crop-dialog) .recording-editor-dialog-root .recording-editor-ghost-button {
+                min-width: 0;
+                min-height: 36px;
+                padding: 0 16px;
+                border: none;
+                border-radius: 5px;
+                background-image: none;
+                text-shadow: none;
+                box-shadow: none;
+                font-size: 14px;
+                font-weight: 500;
+            }
+
+            popover.recording-editor-dialog:not(.recording-editor-crop-dialog) .recording-editor-dialog-root .recording-editor-primary-button label,
+            popover.recording-editor-dialog:not(.recording-editor-crop-dialog) .recording-editor-dialog-root .recording-editor-secondary-button label,
+            popover.recording-editor-dialog:not(.recording-editor-crop-dialog) .recording-editor-dialog-root .recording-editor-ghost-button label {
+                font-size: 14px;
+                font-weight: 500;
+            }
+
+            popover.recording-editor-dialog:not(.recording-editor-crop-dialog) .recording-editor-dialog-root .recording-editor-primary-button {
+                background: #ff670d;
+                color: white;
+            }
+
+            popover.recording-editor-dialog:not(.recording-editor-crop-dialog) .recording-editor-dialog-root .recording-editor-primary-button label {
+                color: white;
+            }
+
+            popover.recording-editor-dialog:not(.recording-editor-crop-dialog) .recording-editor-dialog-root .recording-editor-primary-button:hover {
+                background: #ff7c2f;
+            }
+
+            popover.recording-editor-dialog:not(.recording-editor-crop-dialog) .recording-editor-dialog-root .recording-editor-primary-button:active {
+                background: #e85c08;
+            }
+
+            popover.recording-editor-dialog:not(.recording-editor-crop-dialog) .recording-editor-dialog-root .recording-editor-secondary-button {
+                background: #202020;
+                color: #c6c6c6;
+            }
+
+            popover.recording-editor-dialog:not(.recording-editor-crop-dialog) .recording-editor-dialog-root .recording-editor-secondary-button label {
+                color: #c6c6c6;
+            }
+
+            popover.recording-editor-dialog:not(.recording-editor-crop-dialog) .recording-editor-dialog-root .recording-editor-secondary-button:hover {
+                background: #292929;
+            }
+
+            popover.recording-editor-dialog:not(.recording-editor-crop-dialog) .recording-editor-dialog-root .recording-editor-ghost-button {
+                background: transparent;
+                color: #c6c6c6;
+            }
+
+            popover.recording-editor-dialog:not(.recording-editor-crop-dialog) .recording-editor-dialog-root .recording-editor-ghost-button label {
+                color: #c6c6c6;
+            }
+
+            popover.recording-editor-dialog:not(.recording-editor-crop-dialog) .recording-editor-dialog-root .recording-editor-ghost-button:hover {
+                background: #202020;
+            }
+
+            popover.recording-editor-dialog:not(.recording-editor-crop-dialog) .recording-editor-dialog-root button:focus-visible {
+                outline: 2px solid #ff7c2f;
+                outline-offset: 2px;
             }
 
             .recording-editor-crop-dialog {
