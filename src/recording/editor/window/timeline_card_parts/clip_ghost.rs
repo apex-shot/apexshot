@@ -13,9 +13,8 @@ pub fn draw_clipboard_ghost(
     h: f64,
     start: f64,
     light: bool,
-    is_zoom_track: bool,
 ) {
-    let Some(duration) = state.clipboard_duration_for(is_zoom_track) else {
+    let Some(duration) = state.clipboard_duration_for() else {
         return;
     };
     let placed = start.max(0.0);
@@ -28,25 +27,15 @@ pub fn draw_clipboard_ghost(
     // A placeable ghost reads as the real pill, so what the click will produce
     // is obvious. One that would collide keeps the outline and drops the fill,
     // matching the hollow treatment a disabled clip already uses.
-    let free = state.paste_spot_is_free(placed, duration, is_zoom_track);
-    let base = if is_zoom_track {
-        (0.0, 0.0, 1.0)
-    } else {
-        (0.4, 0.0, 0.2)
-    };
+    let free = state.paste_spot_is_free(placed, duration);
     let fill_alpha = if free { 0.45 } else { 0.10 };
     rounded_rect(cr, x0, y, clip_w, height, 5.0);
     if light {
-        let ring = if is_zoom_track {
-            (0.0, 0.0, 0.45)
-        } else {
-            (0.20, 0.0, 0.10)
-        };
-        cr.set_source_rgba(base.0, base.1, base.2, fill_alpha);
+        cr.set_source_rgba(0.0, 0.0, 1.0, fill_alpha);
         let _ = cr.fill_preserve();
-        cr.set_source_rgba(ring.0, ring.1, ring.2, 0.85);
+        cr.set_source_rgba(0.0, 0.0, 0.45, 0.85);
     } else {
-        cr.set_source_rgba(base.0, base.1, base.2, fill_alpha + 0.15);
+        cr.set_source_rgba(0.0, 0.0, 1.0, fill_alpha + 0.15);
         let _ = cr.fill_preserve();
         cr.set_source_rgba(1.0, 1.0, 1.0, 0.85);
     }

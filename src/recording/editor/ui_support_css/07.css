@@ -261,8 +261,7 @@
              * height: the floor rounds down so the animation's whole-pixel
              * heights all fit inside it. */
             .recording-editor-card-zoom-track,
-            .recording-editor-card-sound-track,
-            .recording-editor-card-hide-track {
+            .recording-editor-card-sound-track {
                 min-height: 18px;
             }
 

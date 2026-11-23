@@ -27,7 +27,6 @@ use gtk4::{
     Scrollbar,
 };
 
-use super::export::CursorHideClip;
 use crate::capture::editor::window::icon_names;
 use crate::i18n::t;
 use crate::recording::editor::auto_zoom;
@@ -51,7 +50,6 @@ pub(super) const MIN_TYPING_SPEED: f64 = 1.5;
 pub(super) const MAX_TYPING_SPEED: f64 = 8.0;
 const DEFAULT_ZOOM_SCALE: f64 = 2.0;
 const DEFAULT_ZOOM_SECONDS: f64 = 3.0;
-const DEFAULT_EFFECT_SECONDS: f64 = 1.8;
 const MIN_ZOOM_SCALE: f64 = 1.2;
 const MAX_ZOOM_SCALE: f64 = 5.0;
 
@@ -96,12 +94,6 @@ const LAYOUT_CHIP_HIT: f64 = 9.0;
 /// share a step, matching the history's own burst window.
 const LAYOUT_EDIT_COALESCE: Duration = Duration::from_millis(350);
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum EffectTrack {
-    Zoom,
-    Hide,
-}
-
 /// The secondary lane that is drawn at full height. The others rest as thin
 /// strips, so the timeline keeps one height whichever lane is in use.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -110,26 +102,16 @@ enum TimelineLane {
     Zoom,
     Sound,
     Layout,
-    /// The cursor's Hide clips. The row shows once the recording has one.
-    Cursor,
 }
 
 impl TimelineLane {
-    const ALL: [Self; 4] = [Self::Zoom, Self::Sound, Self::Layout, Self::Cursor];
-
-    fn of_effect(track: EffectTrack) -> Self {
-        match track {
-            EffectTrack::Zoom => Self::Zoom,
-            EffectTrack::Hide => Self::Cursor,
-        }
-    }
+    const ALL: [Self; 3] = [Self::Zoom, Self::Sound, Self::Layout];
 
     fn index(self) -> usize {
         match self {
             Self::Zoom => 0,
             Self::Sound => 1,
             Self::Layout => 2,
-            Self::Cursor => 3,
         }
     }
 }
@@ -141,7 +123,6 @@ struct LaneState {
     camera: bool,
     zoom: bool,
     sound: bool,
-    cursor: bool,
     expanded: TimelineLane,
 }
 
@@ -176,18 +157,10 @@ pub(super) struct ZoomClip {
     pub(super) anchor: Option<(f64, f64)>,
 }
 
-#[derive(Clone, Copy, PartialEq)]
-struct HideClip {
-    start: f64,
-    end: f64,
-    hidden: bool,
-}
-
-/// One cut or copied effect, waiting for Paste. The paste lands at the
-/// playhead on the track it came from, as the source editor's clipboard does.
+/// One cut or copied zoom clip, waiting for Paste. The paste lands at the
+/// playhead on the zoom lane, as the source editor's clipboard does.
 #[derive(Clone, Copy, PartialEq)]
 struct ClipTemplate {
-    track: EffectTrack,
     duration: f64,
     scale: f64,
     center: (f64, f64),
@@ -225,13 +198,11 @@ struct Data {
     /// The export tier the stage's chip shows. Shared with the stage, so a
     /// pick reaches the project file and a load reaches the chip.
     quality: Option<Rc<Cell<super::window::QualityTier>>>,
-    hide_clips: Vec<HideClip>,
     selected_zoom: Option<usize>,
     /// Bumped every time a zoom clip is selected. The panel reveals itself on
     /// a new selection, and a counter is what tells a repeated click on the
     /// pill that is already selected apart from no click at all.
     zoom_selection_epoch: u64,
-    selected_hide: Option<usize>,
     clipboard: Option<ClipTemplate>,
     /// The scale and instant flag of the zoom the user last edited; new zooms
     /// start from it, as in the studied build.
@@ -247,7 +218,6 @@ struct Data {
     /// Cut put a clip aside invisibly, so the lane draws that clip under the
     /// pointer as a ghost to show what a click would place.
     hover_zoom: Option<f64>,
-    hover_hide: Option<f64>,
     /// True while a pill drag is in flight; the ghost is hidden then, because
     /// the pointer is moving a clip rather than placing one.
     dragging_effect: bool,
@@ -316,7 +286,7 @@ struct Data {
     /// The secondary lane drawn at full height; the others rest thin.
     expanded_lane: TimelineLane,
     /// How expanded each lane is drawn right now, 0 thin .. 1 full.
-    lane_progress: [f64; 4],
+    lane_progress: [f64; 3],
 }
 
 impl Default for Data {
@@ -341,17 +311,14 @@ impl Default for Data {
             zoom_camera: super::zoom::ZoomCameraSettings::default(),
             effects: super::project::EffectsSettings::default(),
             quality: None,
-            hide_clips: Vec::new(),
             selected_zoom: None,
             zoom_selection_epoch: 0,
-            selected_hide: None,
             clipboard: None,
             last_zoom_style: None,
             pointer_available: false,
             recording_marks: Default::default(),
             add_zoom_tool: false,
             hover_zoom: None,
-            hover_hide: None,
             dragging_effect: false,
             cuts: Vec::new(),
             segment_starts: Vec::new(),
@@ -374,7 +341,7 @@ impl Default for Data {
             layout_selection_epoch: 0,
             layout_burst: None,
             expanded_lane: TimelineLane::Zoom,
-            lane_progress: [1.0, 0.0, 0.0, 0.0],
+            lane_progress: [1.0, 0.0, 0.0],
         }
     }
 }
@@ -404,7 +371,6 @@ struct EditSnapshot {
     typing_suggestions_resolved: Vec<f64>,
     freeze_tail: f64,
     zoom_clips: Vec<ZoomClip>,
-    hide_clips: Vec<HideClip>,
     zoom_camera: super::zoom::ZoomCameraSettings,
     effects: super::project::EffectsSettings,
     /// The camera layer, which lives in the webcam model rather than here;
@@ -415,7 +381,6 @@ struct EditSnapshot {
     webcam_layouts: Option<super::webcam::LayoutSettings>,
     selected: bool,
     selected_zoom: Option<usize>,
-    selected_hide: Option<usize>,
     selected_layout: Option<usize>,
     clipboard: Option<ClipTemplate>,
     /// The stage and cursor look, carried only by a step that applied a preset.
@@ -431,6 +396,9 @@ pub(crate) struct Look {
     stage: (Option<String>, f64, f64),
     stage_aspect: Option<String>,
     cursor: super::presets::CursorFile,
+    /// Hides the rendered cursor for the whole edit. It travels with the look
+    /// so one undo puts the switch back with the rest of the cursor panel.
+    cursor_hidden: bool,
     /// The custom fill, when the look was taken from the open stage. A preset
     /// carries no fill (`None`), so applying one keeps the fill on screen; an
     /// undo step carries the fill it saw (`Some`), so it can put that back.
@@ -971,9 +939,7 @@ impl Data {
         self.hover = None;
         self.frames.clear();
         self.zoom_clips.clear();
-        self.hide_clips.clear();
         self.selected_zoom = None;
-        self.selected_hide = None;
         self.zoom_selection_epoch = 0;
         self.clipboard = None;
         self.last_zoom_style = None;
@@ -981,7 +947,6 @@ impl Data {
         self.recording_marks = Default::default();
         self.add_zoom_tool = false;
         self.hover_zoom = None;
-        self.hover_hide = None;
         self.dragging_effect = false;
         self.zoom_camera = super::zoom::ZoomCameraSettings::default();
         self.effects = super::project::EffectsSettings::default();
@@ -999,7 +964,7 @@ impl Data {
         self.layout_burst = None;
         self.pending_look_edit = None;
         self.expanded_lane = TimelineLane::Zoom;
-        self.lane_progress = [1.0, 0.0, 0.0, 0.0];
+        self.lane_progress = [1.0, 0.0, 0.0];
     }
 
     /// The editable state, as one undo step keeps it.
@@ -1019,14 +984,12 @@ impl Data {
             typing_suggestions_resolved: self.typing_suggestions_resolved.clone(),
             freeze_tail: self.freeze_tail,
             zoom_clips: self.zoom_clips.clone(),
-            hide_clips: self.hide_clips.clone(),
             zoom_camera: self.zoom_camera,
             effects: self.effects.clone(),
             webcam: self.webcam.as_ref().and_then(|model| model.settings()),
             webcam_layouts: self.webcam_layouts(),
             selected: self.selected,
             selected_zoom: self.selected_zoom,
-            selected_hide: self.selected_hide,
             selected_layout: self.selected_layout,
             clipboard: self.clipboard,
             look: None,
@@ -1150,6 +1113,7 @@ impl Data {
             stage: background.snapshot(),
             stage_aspect: background.aspect(),
             cursor: super::presets::CursorFile::from_settings(cursor.settings()),
+            cursor_hidden: cursor.hidden(),
             fill: Some(background.fill_spec()),
         })
     }
@@ -1176,7 +1140,6 @@ impl Data {
         self.typing_suggestions_resolved = snapshot.typing_suggestions_resolved;
         self.freeze_tail = snapshot.freeze_tail;
         self.zoom_clips = snapshot.zoom_clips;
-        self.hide_clips = snapshot.hide_clips;
         self.zoom_camera = snapshot.zoom_camera;
         self.effects = snapshot.effects;
         if let (Some(webcam), Some(layer)) = (self.webcam.as_ref(), snapshot.webcam) {
@@ -1187,7 +1150,6 @@ impl Data {
         }
         self.selected = snapshot.selected;
         self.selected_zoom = snapshot.selected_zoom;
-        self.selected_hide = snapshot.selected_hide;
         self.selected_layout = snapshot.selected_layout;
         self.clipboard = snapshot.clipboard;
         self.restored_look = snapshot.look;
@@ -1238,6 +1200,10 @@ impl Data {
                 let layouts = layouts.clone().unwrap_or_default();
                 super::project::WebcamLayerFile::from_layer(layer, &layouts)
             });
+        let cursor_hidden = self
+            .cursor
+            .as_ref()
+            .is_some_and(super::cursor::CursorModel::hidden);
         let pristine = !stage_edited
             && webcam.is_none()
             && self.cuts.is_empty()
@@ -1247,7 +1213,7 @@ impl Data {
                 .all(|speed| (speed - 1.0).abs() <= 1e-9)
             && self.typing_suggestions_resolved.is_empty()
             && self.zoom_clips.is_empty()
-            && self.hide_clips.is_empty()
+            && !cursor_hidden
             && self.freeze_tail <= f64::EPSILON
             && self.trim_start.abs() <= 0.001
             && (self.duration - self.trim_end).abs() <= 0.001
@@ -1280,15 +1246,7 @@ impl Data {
                 start_early: self.zoom_camera.start_early,
                 motion_blur: self.zoom_camera.motion_blur,
             },
-            cursor_hide_clips: self
-                .hide_clips
-                .iter()
-                .map(|clip| super::project::HideClipFile {
-                    start: clip.start,
-                    end: clip.end,
-                    hidden: clip.hidden,
-                })
-                .collect(),
+            cursor_hidden,
             webcam,
             background: super::project::StageFile {
                 selection: stage_selection,
@@ -1375,20 +1333,9 @@ impl Data {
             .iter()
             .filter_map(ZoomClip::from_file)
             .collect();
-        self.hide_clips = file
-            .cursor_hide_clips
-            .iter()
-            .filter_map(|clip| {
-                let span_ok = clip.start.is_finite()
-                    && clip.end.is_finite()
-                    && clip.end - clip.start >= MIN_CLIP_SECONDS;
-                span_ok.then(|| HideClip {
-                    start: clip.start.max(0.0),
-                    end: clip.end,
-                    hidden: clip.hidden,
-                })
-            })
-            .collect();
+        if let Some(cursor) = &self.cursor {
+            cursor.set_hidden(file.cursor_hidden);
+        }
         self.zoom_camera = super::zoom::ZoomCameraSettings {
             speed: file.zoom_camera.speed,
             smoothness: file.zoom_camera.smoothness,
@@ -1749,30 +1696,16 @@ impl Data {
         self.normalize_clip_sounds();
     }
 
-    fn effect_count(&self, track: EffectTrack) -> usize {
-        match track {
-            EffectTrack::Zoom => self.zoom_clips.len(),
-            EffectTrack::Hide => self.hide_clips.len(),
-        }
+    fn effect_span(&self, index: usize) -> Option<(f64, f64)> {
+        self.zoom_clips
+            .get(index)
+            .map(|clip| (clip.start, clip.end))
     }
 
-    fn effect_span(&self, track: EffectTrack, index: usize) -> Option<(f64, f64)> {
-        match track {
-            EffectTrack::Zoom => self
-                .zoom_clips
-                .get(index)
-                .map(|clip| (clip.start, clip.end)),
-            EffectTrack::Hide => self
-                .hide_clips
-                .get(index)
-                .map(|clip| (clip.start, clip.end)),
-        }
-    }
-
-    fn effect_spans(&self, track: EffectTrack) -> Vec<(usize, f64, f64)> {
-        (0..self.effect_count(track))
+    fn effect_spans(&self) -> Vec<(usize, f64, f64)> {
+        (0..self.zoom_clips.len())
             .filter_map(|index| {
-                self.effect_span(track, index)
+                self.effect_span(index)
                     .map(|(start, end)| (index, start, end))
             })
             .collect()
@@ -1785,59 +1718,35 @@ impl Data {
             .unwrap_or(DEFAULT_ZOOM_SCALE)
     }
 
-    fn effect_hidden(&self, track: EffectTrack, index: usize) -> bool {
-        match track {
-            EffectTrack::Zoom => self.zoom_clips.get(index).is_some_and(|clip| clip.hidden),
-            EffectTrack::Hide => self.hide_clips.get(index).is_some_and(|clip| clip.hidden),
-        }
+    fn effect_hidden(&self, index: usize) -> bool {
+        self.zoom_clips.get(index).is_some_and(|clip| clip.hidden)
     }
 
-    fn set_effect_hidden(&mut self, track: EffectTrack, index: usize, hidden: bool) {
-        if self.effect_span(track, index).is_none() {
+    fn set_effect_hidden(&mut self, index: usize, hidden: bool) {
+        if self.effect_span(index).is_none() {
             return;
         }
         let before = self.snapshot();
-        match track {
-            EffectTrack::Zoom => {
-                if let Some(clip) = self.zoom_clips.get_mut(index) {
-                    clip.hidden = hidden;
-                }
-            }
-            EffectTrack::Hide => {
-                if let Some(clip) = self.hide_clips.get_mut(index) {
-                    clip.hidden = hidden;
-                }
-            }
+        if let Some(clip) = self.zoom_clips.get_mut(index) {
+            clip.hidden = hidden;
         }
         self.record_edit(before);
     }
 
-    fn selected_effect(&self, track: EffectTrack) -> Option<usize> {
-        match track {
-            EffectTrack::Zoom => self.selected_zoom,
-            EffectTrack::Hide => self.selected_hide,
-        }
-    }
-
-    fn select_effect(&mut self, track: EffectTrack, index: Option<usize>) {
-        match track {
-            EffectTrack::Zoom => self.selected_zoom = index,
-            EffectTrack::Hide => self.selected_hide = index,
-        }
+    fn select_effect(&mut self, index: Option<usize>) {
+        self.selected_zoom = index;
         if index.is_some() {
             self.selected = false;
             self.selected_segment = None;
             // Selecting a clip puts the Add zoom tool away, as in the studied build.
             self.add_zoom_tool = false;
-            self.expanded_lane = TimelineLane::of_effect(track);
-        }
-        if track == EffectTrack::Zoom && index.is_some() {
+            self.expanded_lane = TimelineLane::Zoom;
             self.zoom_selection_epoch = self.zoom_selection_epoch.wrapping_add(1);
         }
     }
 
-    fn add_effect(&mut self, track: EffectTrack, start: f64) -> Option<usize> {
-        self.add_effect_at(track, start, None)
+    fn add_effect(&mut self, start: f64) -> Option<usize> {
+        self.add_effect_at(start, None)
     }
 
     /// Drop a default-length effect at `start`, in composition time.
@@ -1846,19 +1755,14 @@ impl Data {
     /// two halves keep their framing instead of stacking pills on one span. A
     /// new zoom starts from the scale and snap flag the user last edited, and
     /// it follows the pointer only when the recording has samples for it.
-    /// A hide is refused when there is no room left or it would overlap a
+    /// A zoom is refused when there is no room left or it would overlap a
     /// sibling, which is what the studied build does instead of stacking
     /// pills.
     ///
     /// A target point, in source pixels, makes the zoom Manual and aims it
     /// there; that is what a click on the preview with the Add zoom tool
     /// places.
-    fn add_effect_at(
-        &mut self,
-        track: EffectTrack,
-        start: f64,
-        target: Option<(f64, f64)>,
-    ) -> Option<usize> {
+    fn add_effect_at(&mut self, start: f64, target: Option<(f64, f64)>) -> Option<usize> {
         if !self.has_media() {
             return None;
         }
@@ -1868,91 +1772,70 @@ impl Data {
         }
         let start = start.clamp(0.0, (limit - MIN_CLIP_SECONDS).max(0.0));
         let before = self.snapshot();
-        match track {
-            EffectTrack::Zoom => {
-                let target = match (target, self.frame_size) {
-                    (None, _) => None,
-                    (Some((x, y)), Some((width, height))) if x.is_finite() && y.is_finite() => {
-                        Some((
-                            x.clamp(0.0, f64::from(width)),
-                            y.clamp(0.0, f64::from(height)),
-                        ))
-                    }
-                    _ => return None,
-                };
-                if let Some(index) = self
-                    .zoom_clips
-                    .iter()
-                    .position(|clip| clip.start < start && start < clip.end)
-                {
-                    let clip = self.zoom_clips[index];
-                    if start - clip.start < MIN_CLIP_SECONDS || clip.end - start < MIN_CLIP_SECONDS
-                    {
-                        return None;
-                    }
-                    self.zoom_clips[index].end = start;
-                    let mut right = ZoomClip { start, ..clip };
-                    if let Some(center) = target {
-                        right.mode = ZoomMode::Manual;
-                        right.center = center;
-                    }
-                    self.zoom_clips.insert(index + 1, right);
-                    self.select_effect(track, Some(index + 1));
-                    self.record_edit(before);
-                    return Some(index + 1);
-                }
-                let next_start = self
-                    .zoom_clips
-                    .iter()
-                    .filter(|clip| clip.start >= start)
-                    .map(|clip| clip.start)
-                    .reduce(f64::min)
-                    .unwrap_or(limit);
-                let end = (start + DEFAULT_ZOOM_SECONDS).min(next_start).min(limit);
-                if end - start < MIN_CLIP_SECONDS {
-                    return None;
-                }
-                let scale = self
-                    .last_zoom_style
-                    .map(|(scale, _)| scale)
-                    .unwrap_or(DEFAULT_ZOOM_SCALE)
-                    .clamp(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE);
-                let instant = self.last_zoom_style.is_some_and(|(_, instant)| instant);
-                let mode = if target.is_none() && self.pointer_available {
-                    ZoomMode::Auto
-                } else {
-                    ZoomMode::Manual
-                };
-                let index = self.insert_effect(track, start, end, scale, false)?;
-                self.zoom_clips[index].mode = mode;
-                self.zoom_clips[index].instant = instant;
-                if let Some(center) = target {
-                    self.zoom_clips[index].center = center;
-                }
-                self.select_effect(track, Some(index));
-                self.record_edit(before);
-                Some(index)
+        let target = match (target, self.frame_size) {
+            (None, _) => None,
+            (Some((x, y)), Some((width, height))) if x.is_finite() && y.is_finite() => Some((
+                x.clamp(0.0, f64::from(width)),
+                y.clamp(0.0, f64::from(height)),
+            )),
+            _ => return None,
+        };
+        if let Some(index) = self
+            .zoom_clips
+            .iter()
+            .position(|clip| clip.start < start && start < clip.end)
+        {
+            let clip = self.zoom_clips[index];
+            if start - clip.start < MIN_CLIP_SECONDS || clip.end - start < MIN_CLIP_SECONDS {
+                return None;
             }
-            EffectTrack::Hide => {
-                let end = (start + DEFAULT_EFFECT_SECONDS).min(limit);
-                let index = self.insert_effect(track, start, end, DEFAULT_ZOOM_SCALE, false)?;
-                self.select_effect(track, Some(index));
-                self.record_edit(before);
-                Some(index)
+            self.zoom_clips[index].end = start;
+            let mut right = ZoomClip { start, ..clip };
+            if let Some(center) = target {
+                right.mode = ZoomMode::Manual;
+                right.center = center;
             }
+            self.zoom_clips.insert(index + 1, right);
+            self.select_effect(Some(index + 1));
+            self.record_edit(before);
+            return Some(index + 1);
         }
+        let next_start = self
+            .zoom_clips
+            .iter()
+            .filter(|clip| clip.start >= start)
+            .map(|clip| clip.start)
+            .reduce(f64::min)
+            .unwrap_or(limit);
+        let end = (start + DEFAULT_ZOOM_SECONDS).min(next_start).min(limit);
+        if end - start < MIN_CLIP_SECONDS {
+            return None;
+        }
+        let scale = self
+            .last_zoom_style
+            .map(|(scale, _)| scale)
+            .unwrap_or(DEFAULT_ZOOM_SCALE)
+            .clamp(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE);
+        let instant = self.last_zoom_style.is_some_and(|(_, instant)| instant);
+        let mode = if target.is_none() && self.pointer_available {
+            ZoomMode::Auto
+        } else {
+            ZoomMode::Manual
+        };
+        let index = self.insert_effect(start, end, scale, false)?;
+        self.zoom_clips[index].mode = mode;
+        self.zoom_clips[index].instant = instant;
+        if let Some(center) = target {
+            self.zoom_clips[index].center = center;
+        }
+        self.select_effect(Some(index));
+        self.record_edit(before);
+        Some(index)
     }
 
-    /// Insert one effect somewhere in the lane, keeping the lane sorted and
+    /// Insert one zoom clip somewhere in the lane, keeping the lane sorted and
     /// refusing spans that leave the composition or touch a neighbour.
-    fn insert_effect(
-        &mut self,
-        track: EffectTrack,
-        start: f64,
-        end: f64,
-        scale: f64,
-        hidden: bool,
-    ) -> Option<usize> {
+    fn insert_effect(&mut self, start: f64, end: f64, scale: f64, hidden: bool) -> Option<usize> {
         if !self.has_media() {
             return None;
         }
@@ -1961,56 +1844,47 @@ impl Data {
             return None;
         }
         if self
-            .effect_spans(track)
+            .effect_spans()
             .iter()
             .any(|&(_, other_start, other_end)| ranges_overlap(start, end, other_start, other_end))
         {
             return None;
         }
         let index = self
-            .effect_spans(track)
+            .effect_spans()
             .iter()
             .position(|&(_, other_start, _)| other_start > start)
-            .unwrap_or_else(|| self.effect_count(track));
-        match track {
-            EffectTrack::Zoom => self.zoom_clips.insert(
-                index,
-                ZoomClip {
-                    start,
-                    end,
-                    scale,
-                    center: self.frame_center(),
-                    hidden,
-                    mode: ZoomMode::Manual,
-                    instant: false,
-                    // The user dropped this one where they wanted it.
-                    anchor: None,
-                },
-            ),
-            EffectTrack::Hide => self
-                .hide_clips
-                .insert(index, HideClip { start, end, hidden }),
-        }
+            .unwrap_or(self.zoom_clips.len());
+        self.zoom_clips.insert(
+            index,
+            ZoomClip {
+                start,
+                end,
+                scale,
+                center: self.frame_center(),
+                hidden,
+                mode: ZoomMode::Manual,
+                instant: false,
+                // The user dropped this one where they wanted it.
+                anchor: None,
+            },
+        );
         Some(index)
     }
 
-    /// Copy one clip onto the menu clipboard without removing it.
-    fn copy_effect(&mut self, track: EffectTrack, index: usize) -> bool {
-        let Some((start, end)) = self.effect_span(track, index) else {
+    /// Copy one zoom clip onto the menu clipboard without removing it.
+    fn copy_effect(&mut self, index: usize) -> bool {
+        let Some((start, end)) = self.effect_span(index) else {
             return false;
         };
-        let clip = self
-            .zoom_clips
-            .get(index)
-            .filter(|_| track == EffectTrack::Zoom);
+        let clip = self.zoom_clips.get(index);
         self.clipboard = Some(ClipTemplate {
-            track,
             duration: (end - start).max(0.0),
             scale: self.zoom_scale_at(index),
             center: clip
                 .map(|clip| clip.center)
                 .unwrap_or_else(|| self.frame_center()),
-            hidden: self.effect_hidden(track, index),
+            hidden: self.effect_hidden(index),
             mode: clip.map(|clip| clip.mode).unwrap_or(ZoomMode::Manual),
             instant: clip.is_some_and(|clip| clip.instant),
         });
@@ -2018,18 +1892,18 @@ impl Data {
     }
 
     /// Cut is copy-then-remove: the clipboard keeps the clip for Paste.
-    fn cut_effect(&mut self, track: EffectTrack, index: usize) -> bool {
-        if self.effect_span(track, index).is_none() {
+    fn cut_effect(&mut self, index: usize) -> bool {
+        if self.effect_span(index).is_none() {
             return false;
         }
         // The clipboard travels with the step, so undoing the cut drops the
         // paste it was waiting for instead of leaving the lane dimmed for an
         // action the user just took back.
         let before = self.snapshot();
-        if !self.copy_effect(track, index) {
+        if !self.copy_effect(index) {
             return false;
         }
-        self.remove_effect_at(track, index);
+        self.remove_effect_at(index);
         self.record_edit(before);
         true
     }
@@ -2038,13 +1912,14 @@ impl Data {
         let Some(template) = self.clipboard else {
             return false;
         };
-        self.paste_spot_free(template.track, self.playhead, template.duration)
+        self.paste_spot_free(self.playhead, template.duration)
     }
 
-    /// Whether a clip of `duration` starting at `start` would fit on `track`.
-    /// The painter uses this to show a placeable ghost differently from one
-    /// that would collide, so it has to answer exactly what a paste would do.
-    fn paste_spot_free(&self, track: EffectTrack, start: f64, duration: f64) -> bool {
+    /// Whether a clip of `duration` starting at `start` would fit on the zoom
+    /// lane. The painter uses this to show a placeable ghost differently from
+    /// one that would collide, so it has to answer exactly what a paste would
+    /// do.
+    fn paste_spot_free(&self, start: f64, duration: f64) -> bool {
         if !self.has_media() {
             return false;
         }
@@ -2053,53 +1928,44 @@ impl Data {
         end <= self.total_duration() + 1e-6
             && end - start >= MIN_CLIP_SECONDS
             && !self
-                .effect_spans(track)
+                .effect_spans()
                 .iter()
                 .any(|&(_, other_start, other_end)| {
                     ranges_overlap(start, end, other_start, other_end)
                 })
     }
 
-    /// Paste the clipboard at the playhead, on the track it came from.
+    /// Paste the clipboard at the playhead.
     fn paste_effect(&mut self) -> Option<usize> {
-        let template = self.clipboard?;
-        self.paste_effect_at(template.track, self.playhead)
+        self.paste_effect_at(self.playhead)
     }
 
-    /// Place the copied clip at `start` on `track`. A mismatch, a collision or
-    /// an overrun refuses the placement. Landing it finishes the copy, so the
-    /// ghost leaves the lane and the next click adds a clip again.
-    fn paste_effect_at(&mut self, track: EffectTrack, start: f64) -> Option<usize> {
+    /// Place the copied clip at `start`. A collision or an overrun refuses the
+    /// placement. Landing it finishes the copy, so the ghost leaves the lane
+    /// and the next click adds a clip again.
+    fn paste_effect_at(&mut self, start: f64) -> Option<usize> {
         let template = self.clipboard?;
-        if template.track != track {
-            return None;
-        }
         let before = self.snapshot();
         let index = self.insert_effect(
-            track,
             start,
             start + template.duration,
             template.scale,
             template.hidden,
         )?;
-        if track == EffectTrack::Zoom {
-            self.zoom_clips[index].center = template.center;
-            self.zoom_clips[index].mode = template.mode;
-            self.zoom_clips[index].instant = template.instant;
-            self.zoom_clips[index].anchor = None;
-        }
+        self.zoom_clips[index].center = template.center;
+        self.zoom_clips[index].mode = template.mode;
+        self.zoom_clips[index].instant = template.instant;
+        self.zoom_clips[index].anchor = None;
         self.clipboard = None;
-        self.select_effect(track, Some(index));
+        self.select_effect(Some(index));
         self.record_edit(before);
         Some(index)
     }
 
-    /// Length of the clip waiting on the clipboard, but only for the track the
-    /// caller is drawing. `None` means this lane has nothing to place.
-    fn clipboard_span(&self, track: EffectTrack) -> Option<f64> {
-        self.clipboard
-            .filter(|template| template.track == track)
-            .map(|template| template.duration)
+    /// Length of the clip waiting on the clipboard. `None` means the lane has
+    /// nothing to place.
+    fn clipboard_span(&self) -> Option<f64> {
+        self.clipboard.map(|template| template.duration)
     }
 
     /// The lane flags come from one snapshot, so the rows cannot disagree
@@ -2114,7 +1980,6 @@ impl Data {
                 .is_some_and(|webcam| webcam.has_track()),
             zoom: true,
             sound: self.has_microphone || self.has_system || self.effects.sound.background_active(),
-            cursor: !self.hide_clips.is_empty(),
             expanded: self.expanded_lane,
         }
     }
@@ -2142,7 +2007,7 @@ impl Data {
         // About 180 ms to settle: an exponential ease with a 45 ms constant.
         let amount = 1.0 - (-dt.max(0.0) / 0.045).exp();
         let mut next = self.lane_progress;
-        let mut targets = [0.0; 4];
+        let mut targets = [0.0; 3];
         for lane in TimelineLane::ALL {
             let index = lane.index();
             targets[index] = if self.expanded_lane == lane { 1.0 } else { 0.0 };
@@ -2150,101 +2015,53 @@ impl Data {
         }
         // Snap only once every lane has arrived: snapping one early would
         // break their sum, which is what keeps the timeline's height fixed.
-        let arrived = (0..4).all(|index| (targets[index] - next[index]).abs() < 0.002);
+        let arrived = (0..3).all(|index| (targets[index] - next[index]).abs() < 0.002);
         self.lane_progress = if arrived { targets } else { next };
         !arrived
     }
 
-    /// How much of the cursor the hide track leaves visible at `time`: 0
-    /// while a hide clip that is not muted covers it, 1 otherwise. This is the
-    /// shared editor's coverage rule, applied on the composition clock.
-    fn cursor_hide_alpha(&self, time: f64) -> f64 {
-        if self
-            .hide_clips
-            .iter()
-            .any(|clip| !clip.hidden && time >= clip.start && time <= clip.end)
-        {
-            0.0
-        } else {
-            1.0
-        }
-    }
-
-    fn hover_time(&self, track: EffectTrack) -> Option<f64> {
-        match track {
-            EffectTrack::Zoom => self.hover_zoom,
-            EffectTrack::Hide => self.hover_hide,
-        }
-    }
-
-    fn set_hover_time(&mut self, track: EffectTrack, time: Option<f64>) {
-        match track {
-            EffectTrack::Zoom => self.hover_zoom = time,
-            EffectTrack::Hide => self.hover_hide = time,
-        }
-    }
-
     /// A duplicate lands directly after the clip it copies, the way the
     /// source editor's pair reads as one run.
-    fn duplicate_effect(&mut self, track: EffectTrack, index: usize) -> Option<usize> {
-        let (start, end) = self.effect_span(track, index)?;
+    fn duplicate_effect(&mut self, index: usize) -> Option<usize> {
+        let (start, end) = self.effect_span(index)?;
         let duration = (end - start).max(0.0);
-        let source = self
-            .zoom_clips
-            .get(index)
-            .filter(|_| track == EffectTrack::Zoom)
-            .copied();
+        let source = self.zoom_clips.get(index).copied();
         let before = self.snapshot();
         let new_index = self.insert_effect(
-            track,
             end,
             end + duration,
             self.zoom_scale_at(index),
-            self.effect_hidden(track, index),
+            self.effect_hidden(index),
         )?;
-        if track == EffectTrack::Zoom {
-            self.zoom_clips[new_index].center = source
-                .map(|clip| clip.center)
-                .unwrap_or_else(|| self.frame_center());
-            self.zoom_clips[new_index].mode =
-                source.map(|clip| clip.mode).unwrap_or(ZoomMode::Manual);
-            self.zoom_clips[new_index].instant = source.is_some_and(|clip| clip.instant);
-            // The copy sits where the user dropped it, not on the original's
-            // footage.
-            self.zoom_clips[new_index].anchor = None;
-        }
-        self.select_effect(track, Some(new_index));
+        self.zoom_clips[new_index].center = source
+            .map(|clip| clip.center)
+            .unwrap_or_else(|| self.frame_center());
+        self.zoom_clips[new_index].mode = source.map(|clip| clip.mode).unwrap_or(ZoomMode::Manual);
+        self.zoom_clips[new_index].instant = source.is_some_and(|clip| clip.instant);
+        // The copy sits where the user dropped it, not on the original's
+        // footage.
+        self.zoom_clips[new_index].anchor = None;
+        self.select_effect(Some(new_index));
         self.record_edit(before);
         Some(new_index)
     }
 
-    fn remove_effect(&mut self, track: EffectTrack, index: usize) {
-        if self.effect_span(track, index).is_none() {
+    fn remove_effect(&mut self, index: usize) {
+        if self.effect_span(index).is_none() {
             return;
         }
         let before = self.snapshot();
-        self.remove_effect_at(track, index);
+        self.remove_effect_at(index);
         self.record_edit(before);
     }
 
     /// Remove one clip without taking a step; the caller owns the step.
-    fn remove_effect_at(&mut self, track: EffectTrack, index: usize) {
-        match track {
-            EffectTrack::Zoom => {
-                if index >= self.zoom_clips.len() {
-                    return;
-                }
-                self.zoom_clips.remove(index);
-                self.selected_zoom = shift_selection(self.selected_zoom, index);
-            }
-            EffectTrack::Hide => {
-                if index >= self.hide_clips.len() {
-                    return;
-                }
-                self.hide_clips.remove(index);
-                self.selected_hide = shift_selection(self.selected_hide, index);
-            }
+    fn remove_effect_at(&mut self, index: usize) {
+        if index >= self.zoom_clips.len() {
+            return;
         }
+        self.zoom_clips.remove(index);
+        self.selected_zoom = shift_selection(self.selected_zoom, index);
     }
 
     /// The outline the preview draws while a Manual zoom is being placed: the
@@ -2276,7 +2093,6 @@ impl Data {
             self.selected = false;
             self.selected_segment = None;
             self.selected_zoom = None;
-            self.selected_hide = None;
         }
         true
     }
@@ -2771,66 +2587,56 @@ impl Data {
     ///
     /// Resizing a zoom pill by hand takes it off its anchor: the user said
     /// where it belongs.
-    fn set_effect_range(&mut self, track: EffectTrack, index: usize, start: f64, end: f64) {
-        if self.effect_span(track, index).is_none() {
+    fn set_effect_range(&mut self, index: usize, start: f64, end: f64) {
+        if self.effect_span(index).is_none() {
             return;
         }
         self.record_continuous_edit("effect-range");
         let limit = self.total_duration();
         let lower = if index > 0 {
-            self.effect_span(track, index - 1)
+            self.effect_span(index - 1)
                 .map(|(_, previous_end)| previous_end)
                 .unwrap_or(0.0)
         } else {
             0.0
         };
         let upper = self
-            .effect_span(track, index + 1)
+            .effect_span(index + 1)
             .map(|(next_start, _)| next_start)
             .unwrap_or(limit)
             .min(limit);
         let start = start.clamp(lower, (upper - MIN_CLIP_SECONDS).max(lower));
         let end = end.clamp((start + MIN_CLIP_SECONDS).min(upper), upper);
-        match track {
-            EffectTrack::Zoom => {
-                if let Some(clip) = self.zoom_clips.get_mut(index) {
-                    clip.start = start;
-                    clip.end = end;
-                    // The user said where this one belongs; no later
-                    // composition edit may pull it back to the footage.
-                    clip.anchor = None;
-                }
-            }
-            EffectTrack::Hide => {
-                if let Some(clip) = self.hide_clips.get_mut(index) {
-                    clip.start = start;
-                    clip.end = end;
-                }
-            }
+        if let Some(clip) = self.zoom_clips.get_mut(index) {
+            clip.start = start;
+            clip.end = end;
+            // The user said where this one belongs; no later composition
+            // edit may pull it back to the footage.
+            clip.anchor = None;
         }
     }
 
     /// Slide one pill to `start`, keeping its length and its neighbours' space.
-    fn move_effect(&mut self, track: EffectTrack, index: usize, start: f64) {
-        let Some((clip_start, clip_end)) = self.effect_span(track, index) else {
+    fn move_effect(&mut self, index: usize, start: f64) {
+        let Some((clip_start, clip_end)) = self.effect_span(index) else {
             return;
         };
         let duration = (clip_end - clip_start).max(0.0);
         let limit = self.total_duration();
         let lower = if index > 0 {
-            self.effect_span(track, index - 1)
+            self.effect_span(index - 1)
                 .map(|(_, previous_end)| previous_end)
                 .unwrap_or(0.0)
         } else {
             0.0
         };
         let upper = self
-            .effect_span(track, index + 1)
+            .effect_span(index + 1)
             .map(|(next_start, _)| next_start)
             .unwrap_or(limit)
             .min(limit);
         let start = start.clamp(lower, (upper - duration).max(lower));
-        self.set_effect_range(track, index, start, start + duration);
+        self.set_effect_range(index, start, start + duration);
     }
 
     /// Video trims shorten the composition, so effects past the new end are
@@ -2842,22 +2648,11 @@ impl Data {
             clip.end = clip.end.min(limit);
             clip.end - clip.start >= MIN_CLIP_SECONDS
         });
-        self.hide_clips.retain_mut(|clip| {
-            clip.start = clip.start.min(limit);
-            clip.end = clip.end.min(limit);
-            clip.end - clip.start >= MIN_CLIP_SECONDS
-        });
         if self
             .selected_zoom
             .is_some_and(|index| index >= self.zoom_clips.len())
         {
             self.selected_zoom = None;
-        }
-        if self
-            .selected_hide
-            .is_some_and(|index| index >= self.hide_clips.len())
-        {
-            self.selected_hide = None;
         }
         self.clamp_layout_cues();
     }
@@ -3066,7 +2861,7 @@ impl Data {
         true
     }
 
-    /// Select a layout change where it is, the way a zoom or hide clip is
+    /// Select a layout change where it is, the way a zoom clip is
     /// selected on its lane: the playhead and playback stay as they are, so
     /// grabbing a change to move or resize it never jumps the playhead.
     fn select_layout_cue_in_place(&mut self, index: usize) -> bool {
@@ -3465,9 +3260,8 @@ pub(super) struct ExportFootage {
     pub zooms: Vec<ZoomClip>,
     pub zoom_camera: super::zoom::ZoomCameraSettings,
     pub effects: super::project::EffectsSettings,
-    /// The hide clips, in composition time, so the exporter drops the cursor
-    /// where the preview does.
-    pub cursor_hide_clips: Vec<CursorHideClip>,
+    /// Hides the rendered cursor for the whole edit, in preview and export.
+    pub cursor_hidden: bool,
 }
 
 type PreviewFrameSink = Rc<RefCell<Option<Rc<dyn Fn(PreviewFrame)>>>>;
@@ -3539,8 +3333,6 @@ impl Timeline {
         let data = self.data.borrow();
         self.cursor.set_cuts(&data.cuts);
         self.cursor.set_end(data.trim_end);
-        self.cursor
-            .set_hide_alpha(data.cursor_hide_alpha(data.playhead));
         self.cursor.set_caption_settings(data.effects.captions);
         let placement = data.placement();
         let add_zoom = data.add_zoom_tool();
@@ -3643,15 +3435,10 @@ impl Timeline {
             zooms: data.zoom_clips.clone(),
             zoom_camera: data.zoom_camera,
             effects: data.effects.clone(),
-            cursor_hide_clips: data
-                .hide_clips
-                .iter()
-                .map(|clip| CursorHideClip {
-                    start: clip.start,
-                    end: clip.end,
-                    hidden: clip.hidden,
-                })
-                .collect(),
+            cursor_hidden: data
+                .cursor
+                .as_ref()
+                .is_some_and(super::cursor::CursorModel::hidden),
         })
     }
 
@@ -4060,6 +3847,20 @@ impl Timeline {
         listener();
     }
 
+    /// Tell the Cursor panel the document's pointer track has changed, so a
+    /// control that needs pointer samples can enable or disable itself.
+    pub fn notify_cursor_changed(&self) {
+        if let Some(listener) = self.cursor_listener.borrow().as_ref() {
+            listener();
+        }
+    }
+
+    /// Whether the open recording carries pointer samples, the data the
+    /// rendered cursor is drawn from.
+    pub fn cursor_pointer_available(&self) -> bool {
+        self.cursor.has_pointer()
+    }
+
     /// The camera layer's layout timeline, or `None` when this recording has
     /// no camera track to place.
     pub fn webcam_layouts(&self) -> Option<super::webcam::LayoutSettings> {
@@ -4368,7 +4169,7 @@ impl Timeline {
                 .sidecar()
                 .is_some_and(|sidecar| !sidecar.pointer.is_empty());
             let at = data.playhead;
-            data.add_effect_at(EffectTrack::Zoom, at, target);
+            data.add_effect_at(at, target);
         }
         (self.repaint)();
         self.publish_frame();
@@ -4553,6 +4354,7 @@ impl Timeline {
                 ),
                 stage_aspect: file.background.aspect.clone(),
                 cursor: file.cursor,
+                cursor_hidden: file.cursor_hidden,
                 fill: None,
             }
         };
@@ -4602,6 +4404,7 @@ impl Timeline {
             .apply(selection.as_deref(), *padding, *radius, fill.as_ref());
         self.background.set_aspect(look.stage_aspect.clone());
         self.cursor.set_settings(look.cursor.settings());
+        self.cursor.set_hidden(look.cursor_hidden);
         self.look_watch.borrow_mut().restoring = false;
         self.look_watch.borrow_mut().last = self.data.borrow().live_look();
         if let Some(listener) = self.cursor_listener.borrow().as_ref() {
@@ -4680,6 +4483,10 @@ impl Timeline {
 
         let mut data = self.data.borrow_mut();
         data.reset_media();
+        // The switch is part of the document: a recording that brings no
+        // project starts with the cursor showing, and a saved one puts its own
+        // answer back below.
+        self.cursor.set_hidden(false);
         // Steps belong to the recording they were taken on; the incoming one
         // starts with nothing to take back.
         data.history.clear();
@@ -4745,6 +4552,10 @@ impl Timeline {
         self.project.adopt(restored.clone());
         let incoming = restored.or(imported.clone());
         self.cursor.set_settings(incoming_cursor(incoming.as_ref()));
+        // A document that brings no project shows the cursor, so the switch
+        // never carries the previous recording's answer into a new one.
+        self.cursor
+            .set_hidden(incoming.as_ref().is_some_and(|file| file.cursor_hidden));
         // The cursor model draws the captions, so it takes the opened
         // project's caption settings now rather than at the next edit.
         let captions = self.data.borrow().effects.captions;
@@ -5031,18 +4842,13 @@ pub(super) fn build(
         let data = data.clone();
         move |_, context, width, height| {
             let data = data.borrow();
-            let lane = TimelineLane::of_effect(EffectTrack::Zoom);
-            let progress = data.lane_progress(lane);
+            let progress = data.lane_progress(TimelineLane::Zoom);
             let thin = |context: &Context| {
                 let bars: Vec<_> = data
-                    .effect_spans(EffectTrack::Zoom)
+                    .effect_spans()
                     .into_iter()
                     .map(|(index, start, end)| {
-                        let tone = effect_tone(
-                            EffectTrack::Zoom,
-                            prefers_dark,
-                            data.effect_hidden(EffectTrack::Zoom, index),
-                        );
+                        let tone = effect_tone(prefers_dark, data.effect_hidden(index));
                         (start, end, tone.fill)
                     })
                     .collect();
@@ -5058,79 +4864,7 @@ pub(super) fn build(
                 );
             };
             let full = |context: &Context| {
-                draw_effect_clips(
-                    context,
-                    width,
-                    height,
-                    &data,
-                    EffectTrack::Zoom,
-                    prefers_dark,
-                    scale,
-                );
-            };
-            if progress >= 0.999 {
-                full(context);
-            } else if progress <= 0.001 {
-                thin(context);
-            } else {
-                context.push_group();
-                thin(context);
-                let _ = context.pop_group_to_source();
-                let _ = context.paint_with_alpha(1.0 - progress);
-                context.push_group();
-                full(context);
-                let _ = context.pop_group_to_source();
-                let _ = context.paint_with_alpha(progress);
-            }
-        }
-    });
-
-    // The cursor's Hide clips, drawn and edited like zoom clips.
-    let hide_track_lane = DrawingArea::new();
-    hide_track_lane.set_visible(false);
-    hide_track_lane.add_css_class("recording-editor-card-zoom-track");
-    hide_track_lane.set_hexpand(true);
-    hide_track_lane.set_size_request(-1, (THIN_LANE_HEIGHT * scale).round() as i32);
-    hide_track_lane.set_draw_func({
-        let data = data.clone();
-        move |_, context, width, height| {
-            let data = data.borrow();
-            let lane = TimelineLane::of_effect(EffectTrack::Hide);
-            let progress = data.lane_progress(lane);
-            let thin = |context: &Context| {
-                let bars: Vec<_> = data
-                    .effect_spans(EffectTrack::Hide)
-                    .into_iter()
-                    .map(|(index, start, end)| {
-                        let tone = effect_tone(
-                            EffectTrack::Hide,
-                            prefers_dark,
-                            data.effect_hidden(EffectTrack::Hide, index),
-                        );
-                        (start, end, tone.fill)
-                    })
-                    .collect();
-                draw_thin_lane(
-                    context,
-                    width,
-                    height,
-                    &data,
-                    &t("Cursor"),
-                    &bars,
-                    prefers_dark,
-                    scale,
-                );
-            };
-            let full = |context: &Context| {
-                draw_effect_clips(
-                    context,
-                    width,
-                    height,
-                    &data,
-                    EffectTrack::Hide,
-                    prefers_dark,
-                    scale,
-                );
+                draw_effect_clips(context, width, height, &data, prefers_dark, scale);
             };
             if progress >= 0.999 {
                 full(context);
@@ -5267,19 +5001,17 @@ pub(super) fn build(
     lanes.append(&zoom_track_lane);
     lanes.append(&sound_track);
     lanes.append(&layout_track);
-    lanes.append(&hide_track_lane);
 
     lanes.add_tick_callback({
         let data = data.clone();
         let zoom = zoom_track_lane.clone();
         let sound = sound_track.clone();
         let layout = layout_track.clone();
-        let hide = hide_track_lane.clone();
         let last = Rc::new(Cell::new(None::<i64>));
         // The heights on screen. Every tick derives them from the progress
         // and which lanes show, and applies them only when they change, so a
         // lane appearing or the first switch never jumps the total a pixel.
-        let applied = Rc::new(Cell::new([0i32; 4]));
+        let applied = Rc::new(Cell::new([0i32; 3]));
         move |_, clock| {
             let now = clock.frame_time();
             let dt = last
@@ -5295,12 +5027,7 @@ pub(super) fn build(
             };
             let heights = lane_heights(
                 progress,
-                [
-                    zoom.is_visible(),
-                    sound.is_visible(),
-                    layout.is_visible(),
-                    hide.is_visible(),
-                ],
+                [zoom.is_visible(), sound.is_visible(), layout.is_visible()],
                 scale,
             );
             if heights != applied.get() {
@@ -5308,13 +5035,11 @@ pub(super) fn build(
                 zoom.set_size_request(-1, heights[0]);
                 sound.set_size_request(-1, heights[1]);
                 layout.set_size_request(-1, heights[2]);
-                hide.set_size_request(-1, heights[3]);
             }
             if moving {
                 zoom.queue_draw();
                 sound.queue_draw();
                 layout.queue_draw();
-                hide.queue_draw();
             }
             gtk4::glib::ControlFlow::Continue
         }
@@ -5417,7 +5142,6 @@ pub(super) fn build(
         let zoom_track_lane = zoom_track_lane.clone();
         let sound_track = sound_track.clone();
         let layout_track = layout_track.clone();
-        let hide_track_lane = hide_track_lane.clone();
         let playhead = playhead.clone();
         let extend = extend.clone();
         let playhead_clock = playhead_clock.clone();
@@ -5448,7 +5172,6 @@ pub(super) fn build(
             zoom_track_lane.queue_draw();
             sound_track.queue_draw();
             layout_track.queue_draw();
-            hide_track_lane.queue_draw();
             extend.queue_draw();
             playhead.queue_draw();
             // The camera and sound rows follow the track; the zoom row never
@@ -5456,13 +5179,7 @@ pub(super) fn build(
             // lane heights.
             if lane_state.get() != Some(state) {
                 lane_state.set(Some(state));
-                apply_lane_state(
-                    state,
-                    &layout_track,
-                    &zoom_track_lane,
-                    &sound_track,
-                    &hide_track_lane,
-                );
+                apply_lane_state(state, &layout_track, &zoom_track_lane, &sound_track);
             }
             if let Some(listener) = zoom_listener.borrow().as_ref() {
                 listener();
@@ -5544,17 +5261,6 @@ pub(super) fn build(
     bind_clip_cursor(&video_track, data.clone(), scale);
     bind_effect_lane(
         &zoom_track_lane,
-        EffectTrack::Zoom,
-        data.clone(),
-        cursor.clone(),
-        source_size.clone(),
-        repaint.clone(),
-        sync_play_icon.clone(),
-        scale,
-    );
-    bind_effect_lane(
-        &hide_track_lane,
-        EffectTrack::Hide,
         data.clone(),
         cursor.clone(),
         source_size.clone(),
@@ -5645,7 +5351,6 @@ pub(super) fn build(
                 for placement in placements {
                     let anchor = data.source_anchor(placement.start, placement.end);
                     if let Some(index) = data.insert_effect(
-                        EffectTrack::Zoom,
                         placement.start,
                         placement.end,
                         placement.scale,
@@ -5996,9 +5701,9 @@ fn lane_height(progress: f64, scale: f64) -> i32 {
 /// running totals, so a pixel one lane loses to rounding the next one gains.
 /// Rounding each lane alone made the total wobble by a pixel a frame, and
 /// the preview above resized with it.
-fn lane_heights(progress: [f64; 4], visible: [bool; 4], scale: f64) -> [i32; 4] {
-    let mut heights = [0; 4];
-    let shown: Vec<usize> = (0..4).filter(|&index| visible[index]).collect();
+fn lane_heights(progress: [f64; 3], visible: [bool; 3], scale: f64) -> [i32; 3] {
+    let mut heights = [0; 3];
+    let shown: Vec<usize> = (0..3).filter(|&index| visible[index]).collect();
     // The resting total: one lane full and the rest thin, in whole pixels.
     // Pinning the sum to it keeps a total that lands on half a pixel from
     // flipping between frames on floating-point noise.
@@ -6017,7 +5722,7 @@ fn lane_heights(progress: [f64; 4], visible: [bool; 4], scale: f64) -> [i32; 4] 
         heights[index] = rounded - placed;
         placed = rounded;
     }
-    for index in 0..4 {
+    for index in 0..3 {
         if !visible[index] {
             heights[index] = lane_height(progress[index], scale);
         }
@@ -6032,14 +5737,12 @@ fn apply_lane_state(
     layout_track: &DrawingArea,
     zoom_track: &DrawingArea,
     sound_track: &DrawingArea,
-    hide_track: &DrawingArea,
 ) {
     layout_track.set_visible(state.camera);
     // The zoom lane is a permanent drop target, so its row never collapses,
     // even while empty.
     zoom_track.set_visible(state.zoom);
     sound_track.set_visible(state.sound);
-    hide_track.set_visible(state.cursor);
 }
 
 /// The one stylesheet this card adds on top of the shared editor sheet.
@@ -6434,7 +6137,6 @@ fn bind_clip(
                     data.selected_segment = segment;
                     data.segment_selection_epoch += 1;
                     data.selected_zoom = None;
-                    data.selected_hide = None;
                 } else if near_playhead(&data, width, x, scale) && edge.is_none() {
                     seek_to_x(&mut data, width, x);
                 } else if edge.is_some() || inside_clip(&data, width, x, scale) {
@@ -6442,7 +6144,6 @@ fn bind_clip(
                     data.selected_segment = segment;
                     data.segment_selection_epoch += 1;
                     data.selected_zoom = None;
-                    data.selected_hide = None;
                 } else {
                     data.selected = false;
                     data.selected_segment = None;
@@ -6472,7 +6173,6 @@ fn bind_clip(
                 data.selected_segment = segment;
                 data.segment_selection_epoch += 1;
                 data.selected_zoom = None;
-                data.selected_hide = None;
             }
             repaint();
             show_clip_menu(
@@ -6523,7 +6223,6 @@ fn bind_clip(
                         data.selected_segment = segment;
                         data.segment_selection_epoch += 1;
                         data.selected_zoom = None;
-                        data.selected_hide = None;
                         DragKind::None
                     }
                     None => DragKind::None,
@@ -6535,7 +6234,6 @@ fn bind_clip(
                     data.selected_segment = segment;
                     data.segment_selection_epoch += 1;
                     data.selected_zoom = None;
-                    data.selected_hide = None;
                     data.playing = false;
                     anchor.set(match kind {
                         DragKind::TrimStart => data.trim_start,
@@ -6547,7 +6245,6 @@ fn bind_clip(
                     data.selected_segment = Some(index);
                     data.segment_selection_epoch += 1;
                     data.selected_zoom = None;
-                    data.selected_hide = None;
                     data.playing = false;
                     data.moving_segment = Some(index);
                     anchor.set(data.segment_start(index));
@@ -6808,14 +6505,8 @@ fn shift_selection(selected: Option<usize>, removed: usize) -> Option<usize> {
     }
 }
 
-fn effect_edge_at(
-    data: &Data,
-    track: EffectTrack,
-    width: f64,
-    x: f64,
-    scale: f64,
-) -> Option<(usize, bool)> {
-    for (index, start, end) in data.effect_spans(track) {
+fn effect_edge_at(data: &Data, width: f64, x: f64, scale: f64) -> Option<(usize, bool)> {
+    for (index, start, end) in data.effect_spans() {
         let x0 = data.time_to_x(start, width);
         let x1 = data.time_to_x(end, width).max(x0 + 22.0 * scale);
         let left = x0 + HANDLE_INSET * scale;
@@ -6831,8 +6522,8 @@ fn effect_edge_at(
     None
 }
 
-fn effect_at(data: &Data, track: EffectTrack, width: f64, x: f64, scale: f64) -> Option<usize> {
-    data.effect_spans(track)
+fn effect_at(data: &Data, width: f64, x: f64, scale: f64) -> Option<usize> {
+    data.effect_spans()
         .into_iter()
         .find(|&(_, start, end)| {
             let x0 = data.time_to_x(start, width);
@@ -6875,7 +6566,6 @@ fn bind_sound_lane(lane: &DrawingArea, data: Rc<RefCell<Data>>, repaint: Rc<dyn 
                     data.selected_segment = Some(index);
                     data.segment_selection_epoch += 1;
                     data.selected_zoom = None;
-                    data.selected_hide = None;
                 }
             }
             repaint();
@@ -6887,7 +6577,6 @@ fn bind_sound_lane(lane: &DrawingArea, data: Rc<RefCell<Data>>, repaint: Rc<dyn 
 #[allow(clippy::too_many_arguments)]
 fn bind_effect_lane(
     lane: &DrawingArea,
-    track: EffectTrack,
     data: Rc<RefCell<Data>>,
     cursor: super::cursor::CursorModel,
     source_size: Rc<Cell<Option<(u32, u32)>>>,
@@ -6914,11 +6603,10 @@ fn bind_effect_lane(
             {
                 let mut data = data.borrow_mut();
                 data.set_frame_size(source_size.get());
-                let lane = TimelineLane::of_effect(track);
-                if !data.lane_expanded(lane) {
-                    data.expand_lane(lane);
-                    if let Some(index) = effect_at(&data, track, width, x, scale) {
-                        data.select_effect(track, Some(index));
+                if !data.lane_expanded(TimelineLane::Zoom) {
+                    data.expand_lane(TimelineLane::Zoom);
+                    if let Some(index) = effect_at(&data, width, x, scale) {
+                        data.select_effect(Some(index));
                     }
                     drop(data);
                     sync_play_icon();
@@ -6930,21 +6618,21 @@ fn bind_effect_lane(
                     // lane: a click there must not add a clip.
                 } else if near_playhead(&data, width, x, scale) {
                     seek_to_x(&mut data, width, x);
-                } else if let Some((index, _)) = effect_edge_at(&data, track, width, x, scale) {
-                    data.select_effect(track, Some(index));
-                } else if let Some(index) = effect_at(&data, track, width, x, scale) {
-                    data.select_effect(track, Some(index));
+                } else if let Some((index, _)) = effect_edge_at(&data, width, x, scale) {
+                    data.select_effect(Some(index));
+                } else if let Some(index) = effect_at(&data, width, x, scale) {
+                    data.select_effect(Some(index));
                 } else {
                     // A copied clip takes the click; otherwise the click adds
                     // a clip the way it always has. Placing first means a click
                     // that lands the ghost never leaves an extra clip behind.
                     let at = snap_time_to_playhead(&data, width, data.x_to_time(x, width), scale);
-                    if data.paste_effect_at(track, at).is_none() {
+                    if data.paste_effect_at(at).is_none() {
                         data.pointer_available = cursor
                             .sidecar()
                             .is_some_and(|sidecar| !sidecar.pointer.is_empty());
-                        if data.add_effect(track, at).is_none() {
-                            data.select_effect(track, None);
+                        if data.add_effect(at).is_none() {
+                            data.select_effect(None);
                         }
                     }
                 }
@@ -6964,19 +6652,16 @@ fn bind_effect_lane(
         let repaint = repaint.clone();
         let lane = lane.clone();
         move |_, _, x, y| {
-            if !data.borrow().lane_expanded(TimelineLane::of_effect(track)) {
+            if !data.borrow().lane_expanded(TimelineLane::Zoom) {
                 return;
             }
             let width = lane.allocated_width().max(1) as f64;
-            let Some(index) = effect_at(&data.borrow(), track, width, x, scale) else {
+            let Some(index) = effect_at(&data.borrow(), width, x, scale) else {
                 return;
             };
-            data.borrow_mut().select_effect(track, Some(index));
+            data.borrow_mut().select_effect(Some(index));
             repaint();
-            let target = match track {
-                EffectTrack::Zoom => MenuTarget::Zoom(index),
-                EffectTrack::Hide => MenuTarget::Hide(index),
-            };
+            let target = MenuTarget::Zoom(index);
             show_clip_menu(
                 &lane,
                 target,
@@ -7002,7 +6687,7 @@ fn bind_effect_lane(
         let repaint = repaint.clone();
         let sync_play_icon = sync_play_icon.clone();
         move |gesture, x, _| {
-            if !data.borrow().lane_expanded(TimelineLane::of_effect(track)) {
+            if !data.borrow().lane_expanded(TimelineLane::Zoom) {
                 drag_kind.set(EffectDrag::None);
                 return;
             }
@@ -7018,10 +6703,10 @@ fn bind_effect_lane(
             } else if near_playhead(&data, width, x, scale) {
                 seek_to_x(&mut data, width, x);
                 EffectDrag::Seek
-            } else if let Some((index, is_start)) = effect_edge_at(&data, track, width, x, scale) {
-                data.select_effect(track, Some(index));
+            } else if let Some((index, is_start)) = effect_edge_at(&data, width, x, scale) {
+                data.select_effect(Some(index));
                 data.playing = false;
-                if let Some((start, _)) = data.effect_span(track, index) {
+                if let Some((start, _)) = data.effect_span(index) {
                     origin.set(start);
                 }
                 if is_start {
@@ -7029,10 +6714,10 @@ fn bind_effect_lane(
                 } else {
                     EffectDrag::TrimEnd(index)
                 }
-            } else if let Some(index) = effect_at(&data, track, width, x, scale) {
-                data.select_effect(track, Some(index));
+            } else if let Some(index) = effect_at(&data, width, x, scale) {
+                data.select_effect(Some(index));
                 data.playing = false;
-                if let Some((start, _)) = data.effect_span(track, index) {
+                if let Some((start, _)) = data.effect_span(index) {
                     origin.set(start);
                 }
                 EffectDrag::Move(index)
@@ -7043,7 +6728,7 @@ fn bind_effect_lane(
             // Dragging is not placing: the ghost would sit under the pointer
             // that is moving a clip, so hide it for the length of the drag.
             data.dragging_effect = true;
-            data.set_hover_time(track, None);
+            data.hover_zoom = None;
             drop(data);
             sync_play_icon();
             repaint();
@@ -7069,18 +6754,18 @@ fn bind_effect_lane(
                 match drag_kind.get() {
                     EffectDrag::Seek => seek_to_x(&mut data, width, start_x + offset_x),
                     EffectDrag::TrimStart(index) => {
-                        if let Some((_, end)) = data.effect_span(track, index) {
-                            data.set_effect_range(track, index, time, end);
+                        if let Some((_, end)) = data.effect_span(index) {
+                            data.set_effect_range(index, time, end);
                         }
                     }
                     EffectDrag::TrimEnd(index) => {
-                        if let Some((start, _)) = data.effect_span(track, index) {
-                            data.set_effect_range(track, index, start, time);
+                        if let Some((start, _)) = data.effect_span(index) {
+                            data.set_effect_range(index, start, time);
                         }
                     }
                     EffectDrag::Move(index) => {
                         let delta = offset_x / data.pixels_per_second(width).max(1e-6);
-                        data.move_effect(track, index, origin.get() + delta);
+                        data.move_effect(index, origin.get() + delta);
                     }
                     EffectDrag::Extend => {
                         let delta = offset_x / data.pixels_per_second(width).max(1e-6);
@@ -7110,16 +6795,16 @@ fn bind_effect_lane(
         let data = data.clone();
         let lane = lane.clone();
         move |_, x, _| {
-            if !data.borrow().lane_expanded(TimelineLane::of_effect(track)) {
-                data.borrow_mut().set_hover_time(track, None);
+            if !data.borrow().lane_expanded(TimelineLane::Zoom) {
+                data.borrow_mut().hover_zoom = None;
                 lane.set_cursor_from_name(Some("pointer"));
                 lane.queue_draw();
                 return;
             }
             let width = lane.allocated_width().max(1) as f64;
             let mut data = data.borrow_mut();
-            let edge = effect_edge_at(&data, track, width, x, scale).is_some();
-            let over_pill = edge || effect_at(&data, track, width, x, scale).is_some();
+            let edge = effect_edge_at(&data, width, x, scale).is_some();
+            let over_pill = edge || effect_at(&data, width, x, scale).is_some();
             let near = near_playhead(&data, width, x, scale);
             let band = in_extend_band(&data, width, x, scale);
             // The ghost only shows over empty lane space, where a click would
@@ -7129,7 +6814,7 @@ fn bind_effect_lane(
             } else {
                 Some(data.x_to_time(x, width))
             };
-            data.set_hover_time(track, hover);
+            data.hover_zoom = hover;
             drop(data);
             lane.set_cursor_from_name(Some(if edge || band { "ew-resize" } else { "default" }));
             lane.queue_draw();
@@ -7139,7 +6824,7 @@ fn bind_effect_lane(
         let data = data.clone();
         let lane = lane.clone();
         move |_| {
-            data.borrow_mut().set_hover_time(track, None);
+            data.borrow_mut().hover_zoom = None;
             lane.set_cursor_from_name(None);
             lane.queue_draw();
         }
@@ -7277,8 +6962,8 @@ fn bind_layout_lane(
     lane.add_controller(drag);
 
     // Right-click acts on the chip or the default band under the pointer, the
-    // same way the Zoom and Hide lanes act on their pills. A miss opens
-    // nothing rather than acting on whatever happened to be selected.
+    // same way the Zoom lane acts on its pills. A miss opens nothing rather
+    // than acting on whatever happened to be selected.
     let menu = GestureClick::new();
     menu.set_button(3);
     menu.connect_pressed({
@@ -7374,7 +7059,6 @@ enum LayoutGrab {
 enum MenuTarget {
     Video,
     Zoom(usize),
-    Hide(usize),
     /// The camera lane: one of its layout changes, or the row's default.
     Layout(Option<usize>),
 }
@@ -7446,32 +7130,9 @@ fn show_clip_menu(
                     })
                 },
             });
-            // The cursor's Hide track has no tool button: a clip starts here,
-            // at the playhead, and its row appears with it.
-            items.push(MenuItem {
-                icon: icon_names::shipped::EYE_OFF_REGULAR,
-                label: t("Hide cursor here"),
-                action: {
-                    let data = data.clone();
-                    let repaint = repaint.clone();
-                    Rc::new(move || {
-                        {
-                            let mut data = data.borrow_mut();
-                            let at = data.playhead;
-                            if data.add_effect(EffectTrack::Hide, at).is_some() {
-                                data.expand_lane(TimelineLane::Cursor);
-                            }
-                        }
-                        repaint();
-                    })
-                },
-            });
         }
         MenuTarget::Zoom(index) => {
-            offer_paste = effect_menu_items(EffectTrack::Zoom, index, &data, &repaint, &mut items);
-        }
-        MenuTarget::Hide(index) => {
-            offer_paste = effect_menu_items(EffectTrack::Hide, index, &data, &repaint, &mut items);
+            offer_paste = effect_menu_items(index, &data, &repaint, &mut items);
         }
         MenuTarget::Layout(cue) => {
             items = layout_menu_items(cue, timeline, &data);
@@ -7510,10 +7171,9 @@ fn show_clip_menu(
     popover.popup();
 }
 
-/// Build the Zoom/Hide rows. Returns whether Paste would land for this
-/// clipboard; the caller inserts that row itself.
+/// Build the Zoom rows. Returns whether Paste would land for this clipboard;
+/// the caller inserts that row itself.
 fn effect_menu_items(
-    track: EffectTrack,
     index: usize,
     data: &Rc<RefCell<Data>>,
     repaint: &Rc<dyn Fn()>,
@@ -7521,7 +7181,7 @@ fn effect_menu_items(
 ) -> bool {
     let (hidden_now, can_paste) = {
         let data = data.borrow();
-        (data.effect_hidden(track, index), data.can_paste())
+        (data.effect_hidden(index), data.can_paste())
     };
 
     items.push(MenuItem {
@@ -7531,7 +7191,7 @@ fn effect_menu_items(
             let data = data.clone();
             let repaint = repaint.clone();
             Rc::new(move || {
-                data.borrow_mut().duplicate_effect(track, index);
+                data.borrow_mut().duplicate_effect(index);
                 repaint();
             })
         },
@@ -7543,7 +7203,7 @@ fn effect_menu_items(
             let data = data.clone();
             let repaint = repaint.clone();
             Rc::new(move || {
-                data.borrow_mut().copy_effect(track, index);
+                data.borrow_mut().copy_effect(index);
                 repaint();
             })
         },
@@ -7555,7 +7215,7 @@ fn effect_menu_items(
             let data = data.clone();
             let repaint = repaint.clone();
             Rc::new(move || {
-                data.borrow_mut().cut_effect(track, index);
+                data.borrow_mut().cut_effect(index);
                 repaint();
             })
         },
@@ -7571,8 +7231,7 @@ fn effect_menu_items(
             let data = data.clone();
             let repaint = repaint.clone();
             Rc::new(move || {
-                data.borrow_mut()
-                    .set_effect_hidden(track, index, !hidden_now);
+                data.borrow_mut().set_effect_hidden(index, !hidden_now);
                 repaint();
             })
         },
@@ -7584,7 +7243,7 @@ fn effect_menu_items(
             let data = data.clone();
             let repaint = repaint.clone();
             Rc::new(move || {
-                data.borrow_mut().remove_effect(track, index);
+                data.borrow_mut().remove_effect(index);
                 repaint();
             })
         },
@@ -7893,20 +7552,19 @@ fn draw_effect_clips(
     width: i32,
     height: i32,
     data: &Data,
-    track: EffectTrack,
     prefers_dark: bool,
     scale: f64,
 ) {
     let width = width.max(1) as f64;
     let height = height.max(1) as f64;
-    let selected = data.selected_effect(track);
-    for (index, start, end) in data.effect_spans(track) {
+    let selected = data.selected_zoom;
+    for (index, start, end) in data.effect_spans() {
         let x0 = data.time_to_x(start, width);
         let x1 = data.time_to_x(end, width).max(x0 + 22.0 * scale);
         let pill_w = x1 - x0;
         let y = 2.0 * scale;
         let pill_h = (height - 4.0 * scale).max(10.0);
-        let tone = effect_tone(track, prefers_dark, data.effect_hidden(track, index));
+        let tone = effect_tone(prefers_dark, data.effect_hidden(index));
 
         rounded_rect(context, x0, y, pill_w, pill_h, 8.0 * scale);
         context.set_source_rgba(tone.fill.0, tone.fill.1, tone.fill.2, tone.fill.3);
@@ -7940,12 +7598,7 @@ fn draw_effect_clips(
             let _ = context.stroke();
         }
 
-        let labels = match track {
-            EffectTrack::Zoom => {
-                zoom_clip_labels(data.zoom_clips[index].mode, data.zoom_scale_at(index))
-            }
-            EffectTrack::Hide => vec![t("Hide")],
-        };
+        let labels = zoom_clip_labels(data.zoom_clips[index].mode, data.zoom_scale_at(index));
         context.select_font_face("DM Sans", FontSlant::Normal, FontWeight::Normal);
         context.set_font_size((11.0 * scale).round());
         let padding = EFFECT_LABEL_PADDING * scale;
@@ -7960,14 +7613,12 @@ fn draw_effect_clips(
     // other trace, so the ghost shows both that something is waiting and where
     // a click would drop it.
     if !data.dragging_effect {
-        if let (Some(start), Some(duration)) = (data.hover_time(track), data.clipboard_span(track))
-        {
+        if let (Some(start), Some(duration)) = (data.hover_zoom, data.clipboard_span()) {
             draw_effect_ghost(
                 context,
                 width,
                 height,
                 data,
-                track,
                 start,
                 duration,
                 prefers_dark,
@@ -8229,7 +7880,6 @@ fn draw_effect_ghost(
     width: f64,
     height: f64,
     data: &Data,
-    track: EffectTrack,
     start: f64,
     duration: f64,
     prefers_dark: bool,
@@ -8241,18 +7891,14 @@ fn draw_effect_ghost(
     let pill_w = (x1 - x0).max(22.0 * scale);
     let y = 2.0 * scale;
     let pill_h = (height - 4.0 * scale).max(10.0);
-    let free = data.paste_spot_free(track, placed, duration);
-    let (base_r, base_g, base_b) = match track {
-        EffectTrack::Zoom => (0.0, 0.0, 1.0),
-        EffectTrack::Hide => (0.4, 0.0, 0.2),
-    };
+    let free = data.paste_spot_free(placed, duration);
     let fill_alpha = if free { 0.45 } else { 0.10 };
 
     rounded_rect(context, x0, y, pill_w, pill_h, 8.0 * scale);
     context.set_source_rgba(
-        base_r,
-        base_g,
-        base_b,
+        0.0,
+        0.0,
+        1.0,
         if prefers_dark {
             fill_alpha + 0.15
         } else {
@@ -8263,11 +7909,7 @@ fn draw_effect_ghost(
     if prefers_dark {
         context.set_source_rgba(1.0, 1.0, 1.0, 0.85);
     } else {
-        let (ring_r, ring_g, ring_b) = match track {
-            EffectTrack::Zoom => (0.0, 0.0, 0.45),
-            EffectTrack::Hide => (0.20, 0.0, 0.10),
-        };
-        context.set_source_rgba(ring_r, ring_g, ring_b, 0.85);
+        context.set_source_rgba(0.0, 0.0, 0.45, 0.85);
     }
     context.set_line_width(1.0);
     context.set_dash(&[4.0 * scale, 3.0 * scale], 0.0);
@@ -8285,36 +7927,24 @@ fn draw_effect_ghost(
     }
 }
 
-fn effect_tone(track: EffectTrack, prefers_dark: bool, hidden: bool) -> ClipTone {
-    let mut tone = match (track, prefers_dark) {
-        (EffectTrack::Zoom, true) => ClipTone {
+fn effect_tone(prefers_dark: bool, hidden: bool) -> ClipTone {
+    let mut tone = if prefers_dark {
+        ClipTone {
             fill: (0.0, 0.0, 1.0, 1.0),
             edge: (1.0, 1.0, 1.0, 0.95),
             handle: (1.0, 1.0, 1.0, 0.95),
-        },
-        (EffectTrack::Zoom, false) => ClipTone {
+        }
+    } else {
+        ClipTone {
             fill: (0.0, 0.0, 1.0, 1.0),
             edge: (0.0, 0.0, 0.45, 0.95),
             handle: (0.0, 0.0, 0.45, 0.95),
-        },
-        (EffectTrack::Hide, true) => ClipTone {
-            fill: (0.4, 0.0, 0.2, 1.0),
-            edge: (1.0, 0.8, 0.9, 0.95),
-            handle: (1.0, 0.8, 0.9, 0.95),
-        },
-        (EffectTrack::Hide, false) => ClipTone {
-            fill: (0.4, 0.0, 0.2, 1.0),
-            edge: (0.2, 0.0, 0.1, 0.95),
-            handle: (0.2, 0.0, 0.1, 0.95),
-        },
+        }
     };
     if hidden {
         // A disabled clip keeps its span, ring and handles; only the fill
         // drops away, so "off" reads differently from "not selected".
-        tone.fill = match track {
-            EffectTrack::Zoom => (0.0, 0.0, 1.0, 0.12),
-            EffectTrack::Hide => (0.4, 0.0, 0.2, 0.12),
-        };
+        tone.fill = (0.0, 0.0, 1.0, 0.12);
     }
     tone
 }
@@ -8674,8 +8304,8 @@ fn draw_layout_lane(
     // A switched-off layer keeps its chips on the row, painted back so the row
     // still says what is stored while the picture shows the screen alone.
     let fade = if data.webcam_shown() { 1.0 } else { 0.45 };
-    // The same pill inset, height and radius as the Zoom and Hide lanes, so
-    // the camera row reads as one of the same family of tracks.
+    // The same pill inset, height and radius as the Zoom lane, so the camera
+    // row reads as one of the same family of tracks.
     let y = LAYOUT_CHIP_INSET * scale;
     let pill_height = (height - LAYOUT_CHIP_INSET * 2.0 * scale).max(10.0);
     let radius = LAYOUT_CHIP_RADIUS * scale;
@@ -9407,7 +9037,7 @@ mod tests {
 
         assert!(data.project_file(&background).is_none());
 
-        assert!(data.add_effect(EffectTrack::Zoom, 2.0).is_some());
+        assert!(data.add_effect(2.0).is_some());
         let file = data
             .project_file(&background)
             .expect("an edited session is saved");
@@ -9539,7 +9169,7 @@ mod tests {
             freeze_tail: 0.0,
             zoom_clips: Vec::new(),
             zoom_camera: project::ZoomCameraFile::default(),
-            cursor_hide_clips: Vec::new(),
+            cursor_hidden: false,
             webcam: None,
             background: project::StageFile::default(),
             background_padding: DEFAULT_PADDING,
@@ -9608,7 +9238,7 @@ mod tests {
         let video = recording(name);
         let mut data = loaded();
         data.path = Some(video);
-        assert!(data.add_effect(EffectTrack::Zoom, 2.0).is_some());
+        assert!(data.add_effect(2.0).is_some());
         (data, Background::default())
     }
 
@@ -9733,7 +9363,7 @@ mod tests {
             freeze_tail: 0.0,
             zoom_clips: Vec::new(),
             zoom_camera: project::ZoomCameraFile::default(),
-            cursor_hide_clips: Vec::new(),
+            cursor_hidden: false,
             webcam: None,
             background: project::StageFile::default(),
             background_padding: DEFAULT_PADDING,
@@ -9802,11 +9432,7 @@ mod tests {
                 start_early: true,
                 motion_blur: 1.0,
             },
-            cursor_hide_clips: vec![project::HideClipFile {
-                start: 1.0,
-                end: 4.0,
-                hidden: false,
-            }],
+            cursor_hidden: false,
             webcam: None,
             background: project::StageFile::default(),
             background_padding: DEFAULT_PADDING,
@@ -9835,7 +9461,6 @@ mod tests {
         assert_eq!(data.zoom_clips[0].mode, ZoomMode::Auto);
         assert!(data.zoom_clips[0].instant);
         assert_eq!(data.zoom_clips[0].anchor, Some((2.5, 4.0)));
-        assert_eq!(data.hide_clips.len(), 1);
         assert!((data.zoom_camera.speed - 3.0).abs() < 1e-9);
         assert!(data.zoom_camera.smoothness.abs() < 1e-9);
         assert!(data.zoom_camera.start_early);
@@ -9861,30 +9486,28 @@ mod tests {
     }
 
     #[test]
-    fn zoom_and_hide_land_at_the_playhead_at_their_default_length() {
+    fn a_zoom_lands_at_the_playhead_at_its_default_length() {
         let mut data = loaded();
-        assert_eq!(data.add_effect(EffectTrack::Zoom, 2.0), Some(0));
-        assert_eq!(data.add_effect(EffectTrack::Hide, 2.0), Some(0));
+        assert_eq!(data.add_effect(2.0), Some(0));
         let zoom = data.zoom_clips[0];
         assert!((zoom.start - 2.0).abs() < 1e-9);
         assert!((zoom.end - 5.0).abs() < 1e-9);
         assert!((zoom.scale - DEFAULT_ZOOM_SCALE).abs() < 1e-9);
         assert_eq!(zoom.center, (960.0, 540.0));
         assert_eq!(data.selected_zoom, Some(0));
-        assert_eq!(data.selected_hide, Some(0));
         assert!(!data.selected);
     }
 
     #[test]
     fn effects_do_not_stack_on_each_other() {
         let mut data = loaded();
-        assert_eq!(data.add_effect(EffectTrack::Zoom, 1.0), Some(0));
+        assert_eq!(data.add_effect(1.0), Some(0));
         assert!((data.zoom_clips[0].start - 1.0).abs() < 1e-9);
         assert!((data.zoom_clips[0].end - 4.0).abs() < 1e-9);
 
         // A drop inside the zoom splits it at the playhead and selects the
         // right half instead of stacking a second pill on the same span.
-        assert_eq!(data.add_effect(EffectTrack::Zoom, 2.0), Some(1));
+        assert_eq!(data.add_effect(2.0), Some(1));
         assert_eq!(data.zoom_clips.len(), 2);
         assert!((data.zoom_clips[0].start - 1.0).abs() < 1e-9);
         assert!((data.zoom_clips[0].end - 2.0).abs() < 1e-9);
@@ -9893,24 +9516,20 @@ mod tests {
         assert_eq!(data.selected_zoom, Some(1));
 
         // Past the split zoom, a new one runs its default length.
-        assert_eq!(data.add_effect(EffectTrack::Zoom, 4.0), Some(2));
+        assert_eq!(data.add_effect(4.0), Some(2));
         assert!((data.zoom_clips[2].start - 4.0).abs() < 1e-9);
         assert!((data.zoom_clips[2].end - 7.0).abs() < 1e-9);
-
-        // Hide still refuses a drop on top of another hide.
-        assert!(data.add_effect(EffectTrack::Hide, 1.0).is_some());
-        assert!(data.add_effect(EffectTrack::Hide, 2.0).is_none());
     }
 
     #[test]
     fn a_new_zoom_runs_three_seconds_or_to_the_next_zoom() {
         let mut data = loaded();
-        assert!(data.add_effect(EffectTrack::Zoom, 5.0).is_some());
+        assert!(data.add_effect(5.0).is_some());
         assert!((data.zoom_clips[0].start - 5.0).abs() < 1e-9);
         assert!((data.zoom_clips[0].end - 8.0).abs() < 1e-9);
 
         // The next zoom's start caps the new clip's length.
-        assert!(data.add_effect(EffectTrack::Zoom, 3.0).is_some());
+        assert!(data.add_effect(3.0).is_some());
         assert_eq!(data.zoom_clips.len(), 2);
         assert!((data.zoom_clips[0].start - 3.0).abs() < 1e-9);
         assert!((data.zoom_clips[0].end - 5.0).abs() < 1e-9);
@@ -9919,9 +9538,9 @@ mod tests {
     #[test]
     fn adding_inside_a_zoom_splits_it_at_the_playhead() {
         let mut data = loaded();
-        assert!(data.add_effect(EffectTrack::Zoom, 1.0).is_some());
+        assert!(data.add_effect(1.0).is_some());
         data.set_selected_zoom_scale(2.5);
-        assert_eq!(data.add_effect(EffectTrack::Zoom, 2.5), Some(1));
+        assert_eq!(data.add_effect(2.5), Some(1));
         assert_eq!(data.zoom_clips.len(), 2);
         assert!((data.zoom_clips[0].start - 1.0).abs() < 1e-9);
         assert!((data.zoom_clips[0].end - 2.5).abs() < 1e-9);
@@ -9935,11 +9554,11 @@ mod tests {
     #[test]
     fn new_zooms_inherit_the_last_edited_scale_and_instant_flag() {
         let mut data = loaded();
-        assert!(data.add_effect(EffectTrack::Zoom, 1.0).is_some());
+        assert!(data.add_effect(1.0).is_some());
         data.set_selected_zoom_scale(3.0);
         data.set_selected_zoom_instant(true);
 
-        assert!(data.add_effect(EffectTrack::Zoom, 6.0).is_some());
+        assert!(data.add_effect(6.0).is_some());
         let clip = data.zoom_clips[1];
         assert!((clip.scale - 3.0).abs() < 1e-9);
         assert!(clip.instant);
@@ -9948,11 +9567,11 @@ mod tests {
     #[test]
     fn new_zooms_are_automatic_only_with_pointer_data() {
         let mut data = loaded();
-        assert!(data.add_effect(EffectTrack::Zoom, 1.0).is_some());
+        assert!(data.add_effect(1.0).is_some());
         assert_eq!(data.zoom_clips[0].mode, ZoomMode::Manual);
 
         data.pointer_available = true;
-        assert!(data.add_effect(EffectTrack::Zoom, 5.0).is_some());
+        assert!(data.add_effect(5.0).is_some());
         assert_eq!(data.zoom_clips[1].mode, ZoomMode::Auto);
     }
 
@@ -10083,9 +9702,9 @@ mod tests {
     #[test]
     fn moving_a_pill_keeps_its_length_and_its_neighbours_space() {
         let mut data = loaded();
-        assert!(data.add_effect(EffectTrack::Zoom, 0.0).is_some());
-        assert!(data.add_effect(EffectTrack::Zoom, 5.0).is_some());
-        data.move_effect(EffectTrack::Zoom, 1, 3.0);
+        assert!(data.add_effect(0.0).is_some());
+        assert!(data.add_effect(5.0).is_some());
+        data.move_effect(1, 3.0);
         let first = data.zoom_clips[0];
         let second = data.zoom_clips[1];
         assert!((second.start - 3.0).abs() < 1e-9);
@@ -10096,39 +9715,32 @@ mod tests {
     #[test]
     fn trimming_a_pill_cannot_swallow_its_neighbour() {
         let mut data = loaded();
-        assert!(data.add_effect(EffectTrack::Hide, 0.0).is_some());
-        assert!(data.add_effect(EffectTrack::Hide, 5.0).is_some());
-        data.set_effect_range(EffectTrack::Hide, 0, 0.0, 8.0);
-        let first = data.hide_clips[0];
+        assert!(data.add_effect(0.0).is_some());
+        assert!(data.add_effect(5.0).is_some());
+        data.set_effect_range(0, 0.0, 8.0);
+        let first = data.zoom_clips[0];
         assert!((first.end - 5.0).abs() < 1e-9);
         assert!(first.end - first.start >= MIN_CLIP_SECONDS);
     }
 
-    fn pill_pixel(track: EffectTrack) -> [u8; 4] {
+    fn pill_pixel() -> [u8; 4] {
         let mut data = loaded();
-        match track {
-            EffectTrack::Zoom => data.zoom_clips.push(ZoomClip {
-                start: 1.0,
-                end: 4.0,
-                scale: 1.5,
-                center: (320.0, 240.0),
-                hidden: false,
-                mode: ZoomMode::Manual,
-                instant: false,
-                anchor: None,
-            }),
-            EffectTrack::Hide => data.hide_clips.push(HideClip {
-                start: 1.0,
-                end: 4.0,
-                hidden: false,
-            }),
-        }
-        data.select_effect(track, Some(0));
+        data.zoom_clips.push(ZoomClip {
+            start: 1.0,
+            end: 4.0,
+            scale: 1.5,
+            center: (320.0, 240.0),
+            hidden: false,
+            mode: ZoomMode::Manual,
+            instant: false,
+            anchor: None,
+        });
+        data.select_effect(Some(0));
 
         let mut surface = ImageSurface::create(Format::ARgb32, 400, 56).unwrap();
         {
             let context = Context::new(&surface).unwrap();
-            draw_effect_clips(&context, 400, 56, &data, track, true, 1.0);
+            draw_effect_clips(&context, 400, 56, &data, true, 1.0);
         }
         surface.flush();
 
@@ -10146,25 +9758,18 @@ mod tests {
 
     #[test]
     fn zoom_pills_are_solid_blue() {
-        let [b, g, r, a] = pill_pixel(EffectTrack::Zoom);
+        let [b, g, r, a] = pill_pixel();
         assert_eq!(a, 255);
         assert_eq!((r, g, b), (0, 0, 255));
     }
 
     #[test]
-    fn hide_pills_are_solid_maroon() {
-        let [b, g, r, a] = pill_pixel(EffectTrack::Hide);
-        assert_eq!(a, 255);
-        assert_eq!((r, g, b), (102, 0, 51));
-    }
-
-    #[test]
     fn copy_then_paste_lands_at_the_playhead() {
         let mut data = loaded();
-        assert!(data.add_effect(EffectTrack::Zoom, 1.0).is_some());
+        assert!(data.add_effect(1.0).is_some());
         data.playhead = 6.0;
         assert!(!data.can_paste());
-        assert!(data.copy_effect(EffectTrack::Zoom, 0));
+        assert!(data.copy_effect(0));
         assert!(data.can_paste());
         let pasted = data.paste_effect().expect("the paste should land");
         let clip = data.zoom_clips[pasted];
@@ -10177,8 +9782,8 @@ mod tests {
     #[test]
     fn a_paste_that_would_leave_the_clip_is_not_offered() {
         let mut data = loaded();
-        assert!(data.add_effect(EffectTrack::Hide, 1.0).is_some());
-        assert!(data.copy_effect(EffectTrack::Hide, 0));
+        assert!(data.add_effect(1.0).is_some());
+        assert!(data.copy_effect(0));
         data.playhead = 9.0;
         assert!(!data.can_paste());
         assert!(data.paste_effect().is_none());
@@ -10187,8 +9792,8 @@ mod tests {
     #[test]
     fn cut_takes_the_clip_off_the_lane_and_keeps_it_for_paste() {
         let mut data = loaded();
-        assert!(data.add_effect(EffectTrack::Zoom, 1.0).is_some());
-        assert!(data.cut_effect(EffectTrack::Zoom, 0));
+        assert!(data.add_effect(1.0).is_some());
+        assert!(data.cut_effect(0));
         assert!(data.zoom_clips.is_empty());
         assert_eq!(data.selected_zoom, None);
         data.playhead = 5.0;
@@ -10200,8 +9805,8 @@ mod tests {
     #[test]
     fn duplicate_lands_after_the_clip_and_refuses_a_crowded_spot() {
         let mut data = loaded();
-        assert!(data.add_effect(EffectTrack::Zoom, 0.0).is_some());
-        assert!(data.duplicate_effect(EffectTrack::Zoom, 0).is_some());
+        assert!(data.add_effect(0.0).is_some());
+        assert!(data.duplicate_effect(0).is_some());
         assert_eq!(data.zoom_clips.len(), 2);
         assert!((data.zoom_clips[1].start - 3.0).abs() < 1e-9);
         assert_eq!(data.selected_zoom, Some(1));
@@ -10209,21 +9814,21 @@ mod tests {
         // A span that runs past the ten-second composition is refused, as is
         // one that would overlap a neighbour.
         assert!(data
-            .insert_effect(EffectTrack::Zoom, 8.5, 10.3, DEFAULT_ZOOM_SCALE, false)
+            .insert_effect(8.5, 10.3, DEFAULT_ZOOM_SCALE, false)
             .is_none());
         assert!(data
-            .insert_effect(EffectTrack::Zoom, 1.0, 2.0, DEFAULT_ZOOM_SCALE, false)
+            .insert_effect(1.0, 2.0, DEFAULT_ZOOM_SCALE, false)
             .is_none());
     }
 
     #[test]
-    fn hide_toggles_without_losing_the_span() {
+    fn a_zoom_toggles_without_losing_the_span() {
         let mut data = loaded();
-        assert!(data.add_effect(EffectTrack::Hide, 2.0).is_some());
-        let before = data.hide_clips[0];
-        data.set_effect_hidden(EffectTrack::Hide, 0, true);
-        assert!(data.effect_hidden(EffectTrack::Hide, 0));
-        let after = data.hide_clips[0];
+        assert!(data.add_effect(2.0).is_some());
+        let before = data.zoom_clips[0];
+        data.set_effect_hidden(0, true);
+        assert!(data.effect_hidden(0));
+        let after = data.zoom_clips[0];
         assert_eq!((after.start, after.end), (before.start, before.end));
     }
 
@@ -10879,39 +10484,39 @@ mod tests {
         let mut data = loaded();
         data.set_visible_length(12.0);
         data.playhead = 10.5;
-        assert!(data.add_effect(EffectTrack::Hide, data.playhead).is_some());
-        let clip = data.hide_clips[0];
+        assert!(data.add_effect(data.playhead).is_some());
+        let clip = data.zoom_clips[0];
         assert!((clip.start - 10.5).abs() < 1e-9);
         assert!((clip.end - 12.0).abs() < 1e-9);
 
         // Pulling the clip back inside the source drops the tail and with it
         // the piece of the pill that sat on it.
         data.set_visible_length(6.0);
-        assert!(data.hide_clips.is_empty());
+        assert!(data.zoom_clips.is_empty());
     }
 
     #[test]
     fn a_click_places_the_copied_clip_where_the_ghost_sat() {
         let mut data = loaded();
-        assert!(data.add_effect(EffectTrack::Zoom, 0.0).is_some());
-        assert!(data.copy_effect(EffectTrack::Zoom, 0));
+        assert!(data.add_effect(0.0).is_some());
+        assert!(data.copy_effect(0));
         // The ghost only offers a spot the paste would take.
-        assert!(data.paste_spot_free(EffectTrack::Zoom, 4.0, 1.8));
-        assert!(!data.paste_spot_free(EffectTrack::Zoom, 0.5, 1.8));
+        assert!(data.paste_spot_free(4.0, 1.8));
+        assert!(!data.paste_spot_free(0.5, 1.8));
 
         let placed = data
-            .paste_effect_at(EffectTrack::Zoom, 4.0)
+            .paste_effect_at(4.0)
             .expect("the ghost's spot should place");
         assert!((data.zoom_clips[placed].start - 4.0).abs() < 1e-9);
         // Landing the clip finishes the copy, so the ghost leaves the lane.
         assert!(data.clipboard.is_none());
-        assert_eq!(data.clipboard_span(EffectTrack::Zoom), None);
+        assert_eq!(data.clipboard_span(), None);
     }
 
     #[test]
     fn a_detected_zoom_keeps_its_origin_through_copy_paste_and_duplicate() {
         let mut data = loaded();
-        assert!(data.add_effect(EffectTrack::Zoom, 0.0).is_some());
+        assert!(data.add_effect(0.0).is_some());
         assert_eq!(
             data.zoom_clips[0].mode,
             ZoomMode::Manual,
@@ -10919,10 +10524,8 @@ mod tests {
         );
         data.zoom_clips[0].mode = ZoomMode::Auto;
 
-        assert!(data.copy_effect(EffectTrack::Zoom, 0));
-        let pasted = data
-            .paste_effect_at(EffectTrack::Zoom, 4.0)
-            .expect("copy should place");
+        assert!(data.copy_effect(0));
+        let pasted = data.paste_effect_at(4.0).expect("copy should place");
         assert_eq!(
             data.zoom_clips[pasted].mode,
             ZoomMode::Auto,
@@ -10930,7 +10533,7 @@ mod tests {
         );
 
         let duplicate = data
-            .duplicate_effect(EffectTrack::Zoom, pasted)
+            .duplicate_effect(pasted)
             .expect("the clip after the pasted one is free");
         assert_eq!(
             data.zoom_clips[duplicate].mode,
@@ -10942,7 +10545,7 @@ mod tests {
     #[test]
     fn the_zoom_panel_scale_edits_the_selected_clip_within_range() {
         let mut data = loaded();
-        assert!(data.add_effect(EffectTrack::Zoom, 1.0).is_some());
+        assert!(data.add_effect(1.0).is_some());
         data.set_selected_zoom_scale(2.2);
         assert!((data.zoom_clips[0].scale - 2.2).abs() < 1e-9);
         data.set_selected_zoom_scale(99.0);
@@ -10954,7 +10557,7 @@ mod tests {
     #[test]
     fn switching_to_manual_keeps_the_framing_the_preview_shows() {
         let mut data = loaded();
-        assert!(data.add_effect(EffectTrack::Zoom, 1.0).is_some());
+        assert!(data.add_effect(1.0).is_some());
         data.set_selected_zoom_mode(ZoomMode::Auto, None);
         assert_eq!(data.zoom_clips[0].mode, ZoomMode::Auto);
         data.set_selected_zoom_mode(ZoomMode::Manual, Some((1420.0, 200.0)));
@@ -10969,7 +10572,7 @@ mod tests {
     #[test]
     fn instant_and_reset_move_the_clip_between_snap_and_glide() {
         let mut data = loaded();
-        assert!(data.add_effect(EffectTrack::Zoom, 1.0).is_some());
+        assert!(data.add_effect(1.0).is_some());
         data.set_selected_zoom_instant(true);
         assert!(data.zoom_clips[0].instant);
         data.update_zoom_camera(|settings| {
@@ -10990,7 +10593,7 @@ mod tests {
     fn a_manual_zoom_shows_its_placement_outline_while_paused() {
         let mut data = loaded();
         assert_eq!(data.placement(), None);
-        assert!(data.add_effect(EffectTrack::Zoom, 1.0).is_some());
+        assert!(data.add_effect(1.0).is_some());
         assert_eq!(data.placement(), Some((DEFAULT_ZOOM_SCALE, (960.0, 540.0))));
         data.playing = true;
         assert_eq!(data.placement(), None);
@@ -10999,7 +10602,7 @@ mod tests {
         assert_eq!(data.placement(), None);
         data.set_selected_zoom_mode(ZoomMode::Manual, None);
         assert!(data.placement().is_some());
-        data.select_effect(EffectTrack::Zoom, None);
+        data.select_effect(None);
         assert_eq!(data.placement(), None);
     }
 
@@ -11015,10 +10618,7 @@ mod tests {
                 automatic: true
             })
         );
-        assert_eq!(
-            data.add_effect_at(EffectTrack::Zoom, 2.0, Some((300.0, 5000.0))),
-            Some(0)
-        );
+        assert_eq!(data.add_effect_at(2.0, Some((300.0, 5000.0))), Some(0));
         let zoom = data.zoom_clips[0];
         assert_eq!(zoom.mode, ZoomMode::Manual);
         assert_eq!(zoom.center, (300.0, 1080.0));
@@ -11035,14 +10635,11 @@ mod tests {
     fn a_preview_click_inside_a_zoom_splits_it_into_a_manual_half() {
         let mut data = loaded();
         data.pointer_available = true;
-        assert!(data.add_effect(EffectTrack::Zoom, 1.0).is_some());
+        assert!(data.add_effect(1.0).is_some());
         assert_eq!(data.zoom_clips[0].mode, ZoomMode::Auto);
         assert!(data.set_add_zoom_tool(true));
         assert_eq!(data.selected_zoom, None);
-        assert_eq!(
-            data.add_effect_at(EffectTrack::Zoom, 2.0, Some((100.0, 200.0))),
-            Some(1)
-        );
+        assert_eq!(data.add_effect_at(2.0, Some((100.0, 200.0))), Some(1));
         assert_eq!(data.zoom_clips[0].mode, ZoomMode::Auto);
         assert_eq!(data.zoom_clips[1].mode, ZoomMode::Manual);
         assert_eq!(data.zoom_clips[1].center, (100.0, 200.0));
@@ -11066,7 +10663,7 @@ mod tests {
     #[test]
     fn placing_a_focus_point_moves_only_a_manual_zoom() {
         let mut data = loaded();
-        assert!(data.add_effect(EffectTrack::Zoom, 1.0).is_some());
+        assert!(data.add_effect(1.0).is_some());
         data.set_selected_zoom_center((400.0, 300.0));
         assert_eq!(data.zoom_clips[0].center, (400.0, 300.0));
         // A point outside the frame clamps to its edge.
@@ -11081,12 +10678,10 @@ mod tests {
     /// A zoom the way Detect leaves it: framing its footage and anchored to it.
     fn anchored_zoom(data: &mut Data, start: f64, end: f64) {
         let anchor = data.source_anchor(start, end);
-        assert!(data
-            .insert_effect(EffectTrack::Zoom, start, end, 2.0, false)
-            .is_some());
+        assert!(data.insert_effect(start, end, 2.0, false).is_some());
         let index = data.zoom_clips.len() - 1;
         data.zoom_clips[index].anchor = anchor;
-        data.select_effect(EffectTrack::Zoom, Some(index));
+        data.select_effect(Some(index));
     }
 
     #[test]
@@ -11129,7 +10724,7 @@ mod tests {
     fn a_dragged_zoom_stops_following_its_footage() {
         let mut data = loaded();
         anchored_zoom(&mut data, 2.0, 4.0);
-        data.set_effect_range(EffectTrack::Zoom, 0, 2.5, 4.5);
+        data.set_effect_range(0, 2.5, 4.5);
         assert!(data.zoom_clips[0].anchor.is_none());
         data.set_trim_start(1.0);
         let clip = data.zoom_clips[0];
@@ -11188,13 +10783,11 @@ mod tests {
     }
 
     #[test]
-    fn a_paste_never_crosses_to_the_other_lane() {
+    fn a_copied_clip_waits_on_the_zoom_lane() {
         let mut data = loaded();
-        assert!(data.add_effect(EffectTrack::Zoom, 0.0).is_some());
-        assert!(data.copy_effect(EffectTrack::Zoom, 0));
-        assert_eq!(data.clipboard_span(EffectTrack::Hide), None);
-        assert!(data.paste_effect_at(EffectTrack::Hide, 4.0).is_none());
-        // The copy is still waiting for its own lane.
+        assert!(data.add_effect(0.0).is_some());
+        assert!(data.copy_effect(0));
+        assert!(data.clipboard_span().is_some());
         assert!(data.clipboard.is_some());
     }
 
@@ -11238,7 +10831,7 @@ mod tests {
     #[test]
     fn undoing_a_delete_brings_the_recording_and_its_edits_back() {
         let mut data = loaded();
-        assert!(data.add_effect(EffectTrack::Zoom, 2.0).is_some());
+        assert!(data.add_effect(2.0).is_some());
         data.remove_video_clip();
         assert!(data.path.is_none());
         assert_eq!(data.duration, 0.0);
@@ -11253,10 +10846,10 @@ mod tests {
     #[test]
     fn a_refused_edit_leaves_nothing_to_undo() {
         let mut data = loaded();
-        assert!(data.add_effect(EffectTrack::Zoom, 2.0).is_some());
+        assert!(data.add_effect(2.0).is_some());
         // The lane has no room here; the refused drop must not bury the add
         // under a step that changed nothing.
-        assert!(data.add_effect(EffectTrack::Zoom, 2.0).is_none());
+        assert!(data.add_effect(2.0).is_none());
 
         assert!(data.undo_edit());
         assert!(data.zoom_clips.is_empty());
@@ -11266,8 +10859,8 @@ mod tests {
     #[test]
     fn undoing_a_cut_drops_the_pending_paste() {
         let mut data = loaded();
-        assert!(data.add_effect(EffectTrack::Zoom, 2.0).is_some());
-        assert!(data.cut_effect(EffectTrack::Zoom, 0));
+        assert!(data.add_effect(2.0).is_some());
+        assert!(data.cut_effect(0));
         assert!(data.zoom_clips.is_empty());
         assert!(data.can_paste());
 
@@ -11281,7 +10874,7 @@ mod tests {
     #[test]
     fn a_zoom_slider_sweep_is_one_undo_step() {
         let mut data = loaded();
-        assert!(data.add_effect(EffectTrack::Zoom, 2.0).is_some());
+        assert!(data.add_effect(2.0).is_some());
         data.selected_zoom = Some(0);
         let original = data.zoom_clips[0].scale;
         for step in 1..=5 {
@@ -11653,7 +11246,7 @@ mod tests {
             freeze_tail: 0.0,
             zoom_clips: Vec::new(),
             zoom_camera: project::ZoomCameraFile::default(),
-            cursor_hide_clips: Vec::new(),
+            cursor_hidden: false,
             webcam: Some(project::WebcamLayerFile {
                 enabled: false,
                 fullscreen: false,
@@ -11938,7 +11531,7 @@ mod tests {
             timeline
                 .data
                 .borrow_mut()
-                .add_effect(EffectTrack::Zoom, 2.0)
+                .add_effect(2.0)
                 .expect("a zoom lands on the recording");
 
             assert!(timeline.undo());
@@ -12251,10 +11844,8 @@ mod tests {
 
     #[test]
     fn a_clip_still_draws_in_its_lane() {
-        for track in [EffectTrack::Zoom, EffectTrack::Hide] {
-            let [_, _, _, alpha] = pill_pixel(track);
-            assert_eq!(alpha, 255, "the pill covers the lane pixel");
-        }
+        let [_, _, _, alpha] = pill_pixel();
+        assert_eq!(alpha, 255, "the pill covers the lane pixel");
     }
 
     #[test]
@@ -12272,7 +11863,7 @@ mod tests {
         for at in [1.0, 4.0, 7.0] {
             data.add_layout_cue(at).expect("the track takes a cue");
         }
-        assert!(data.add_effect(EffectTrack::Zoom, 0.0).is_some());
+        assert!(data.add_effect(0.0).is_some());
         // What a lane actually gets: the full width of the content column.
         let width = 900.0;
 
@@ -12284,10 +11875,7 @@ mod tests {
                 (data.time_to_x(data.segment_start(0), width) - origin).abs() < 1e-9,
                 "the filmstrip starts on the ruler's origin"
             );
-            let effect_start = data
-                .effect_span(EffectTrack::Zoom, 0)
-                .expect("the zoom pill is there")
-                .0;
+            let effect_start = data.effect_span(0).expect("the zoom pill is there").0;
             assert!(
                 (data.time_to_x(effect_start, width) - origin).abs() < 1e-9,
                 "the pill lane uses the same origin"
@@ -12428,7 +12016,6 @@ mod tests {
 
         let accent = (1.0, 0.404, 0.051, 1.0);
         let zoom = (0.0, 0.0, 1.0, 1.0);
-        let hide = (0.4, 0.0, 0.2, 1.0);
         for (theme, selected) in [("dark", selected_dark), ("light", selected_light)] {
             assert_ne!(
                 selected, accent,
@@ -12437,10 +12024,6 @@ mod tests {
             assert_ne!(
                 selected, zoom,
                 "the camera lane stays clear of the Zoom lane's blue ({theme})"
-            );
-            assert_ne!(
-                selected, hide,
-                "the camera lane stays clear of the Hide lane's red ({theme})"
             );
         }
     }
@@ -12506,7 +12089,7 @@ mod tests {
         assert!(data.expand_lane(TimelineLane::Sound));
         assert!(!data.expand_lane(TimelineLane::Sound), "already expanded");
         assert!(data.lane_expanded(TimelineLane::Sound) && !data.lane_expanded(TimelineLane::Zoom));
-        data.select_effect(EffectTrack::Zoom, Some(0));
+        data.select_effect(Some(0));
         assert!(
             data.lane_expanded(TimelineLane::Zoom),
             "selecting a zoom expands its lane"
@@ -12517,7 +12100,7 @@ mod tests {
     #[test]
     fn the_lanes_keep_one_total_height_while_they_trade() {
         let mut data = Data::default();
-        let resting: i32 = lane_heights(data.lane_progress, [true; 4], 1.25)
+        let resting: i32 = lane_heights(data.lane_progress, [true; 3], 1.25)
             .iter()
             .sum();
         data.expand_lane(TimelineLane::Sound);
@@ -12527,7 +12110,7 @@ mod tests {
                 data.expand_lane(TimelineLane::Layout);
             }
             data.step_lane_progress(0.016);
-            let total: i32 = lane_heights(data.lane_progress, [true; 4], 1.25)
+            let total: i32 = lane_heights(data.lane_progress, [true; 3], 1.25)
                 .iter()
                 .sum();
             assert_eq!(total, resting, "frame {frame}: {:?}", data.lane_progress);
@@ -12537,7 +12120,7 @@ mod tests {
     #[test]
     fn a_lane_eases_to_its_new_height_and_settles() {
         let mut data = Data::default();
-        assert_eq!(data.lane_progress, [1.0, 0.0, 0.0, 0.0]);
+        assert_eq!(data.lane_progress, [1.0, 0.0, 0.0]);
         data.expand_lane(TimelineLane::Sound);
         assert!(data.step_lane_progress(0.016), "a change starts moving");
         let zoom = data.lane_progress(TimelineLane::Zoom);
@@ -12549,7 +12132,7 @@ mod tests {
             steps += 1;
             assert!(steps < 100, "it settles");
         }
-        assert_eq!(data.lane_progress, [0.0, 1.0, 0.0, 0.0]);
+        assert_eq!(data.lane_progress, [0.0, 1.0, 0.0]);
         assert!(steps > 5, "it takes several frames, not a jump: {steps}");
         assert_eq!(lane_height(0.0, 1.0), THIN_LANE_HEIGHT as i32);
         assert_eq!(lane_height(1.0, 1.0), EFFECT_LANE_HEIGHT as i32);

@@ -109,9 +109,9 @@ pub(super) struct ExportModel {
     /// same camera.
     pub zoom_camera: zoom::ZoomCameraSettings,
     pub cursor: CursorSettings,
-    /// The cursor hide clips, in composition time, so the exporter drops the
-    /// cursor and its click effects where the preview does.
-    pub cursor_hide_clips: Vec<CursorHideClip>,
+    /// Hides the rendered cursor, with its click effects, for the whole export,
+    /// exactly as the preview's switch does.
+    pub cursor_hidden: bool,
     pub sidecar: Option<PointerSidecar>,
     /// The camera layer to bake, when the recording has one.
     pub webcam: Option<webcam::WebcamExport>,
@@ -947,35 +947,6 @@ fn render_with_workers(
     result
 }
 
-/// How much of the cursor the hide track leaves visible at `timeline_t`: 0
-/// while a hide clip that is not muted covers it, 1 otherwise. The shared
-/// editor's cursor export multiplies the cursor alpha by the same coverage.
-/// One span of the cursor's Hide track, in composition seconds. A muted
-/// clip stays on the timeline but no longer hides the cursor.
-#[derive(Debug, Clone, PartialEq)]
-pub(super) struct CursorHideClip {
-    pub start: f64,
-    pub end: f64,
-    pub hidden: bool,
-}
-
-impl CursorHideClip {
-    pub(super) fn contains(&self, t: f64) -> bool {
-        t >= self.start && t <= self.end
-    }
-}
-
-fn cursor_hide_alpha(clips: &[CursorHideClip], timeline_t: f64) -> f64 {
-    if clips
-        .iter()
-        .any(|clip| !clip.hidden && clip.contains(timeline_t))
-    {
-        0.0
-    } else {
-        1.0
-    }
-}
-
 /// Compositor frames an export range. Every range opens its own decoder,
 /// compositor, and encoder, so ranges run on separate cores and join later.
 #[allow(clippy::too_many_arguments)]
@@ -1370,7 +1341,7 @@ fn render_range(
             let source_time = frame_source_time(&plan.spans, done_index, fps)
                 .ok_or_else(|| End::Failed("the frame plan ran out of frames".to_string()))?;
             let composition_time = done_index as f64 / fps;
-            let hide_alpha = cursor_hide_alpha(&model.cursor_hide_clips, composition_time);
+            let hide_alpha = if model.cursor_hidden { 0.0 } else { 1.0 };
             let camera_value = camera.evaluate(
                 &model.zooms,
                 source,
@@ -2681,8 +2652,8 @@ fn draw_cursor(
         return;
     };
     frame.alpha *= typing_alpha;
-    // The hide track takes the sprite and its click rings out together, as in
-    // the preview, so the coverage multiplies the one alpha both use.
+    // The whole-video switch takes the sprite and its click rings out
+    // together, as in the preview, so one alpha carries both.
     frame.alpha *= hide_alpha;
     let settings = settings.clamped();
     let map = |point| zoom::source_to_stage(point, view, f64::from(size.0), f64::from(size.1));
@@ -2972,40 +2943,16 @@ struct CursorScratch {
 #[cfg(test)]
 mod tests {
     use super::{
-        clip_cursor_box, cursor_hide_alpha, decoder_command, frame_plan, frame_plan_with_starts,
-        frame_source_time, h264_level, output_size, plan_render, rate, render, render_with_workers,
-        retry_on_software, split_ranges, start_export, start_export_with_settings, total_frames,
-        zoom, Codec, Encoder, End, ExportModel, ExportSettings, ExportUpdate, SourceSpan,
+        clip_cursor_box, decoder_command, frame_plan, frame_plan_with_starts, frame_source_time,
+        h264_level, output_size, plan_render, rate, render, render_with_workers, retry_on_software,
+        split_ranges, start_export, start_export_with_settings, total_frames, zoom, Codec, Encoder,
+        End, ExportModel, ExportSettings, ExportUpdate, SourceSpan,
     };
     use crate::recording::editor::ffmpeg;
     use crate::recording::editor::model::{CursorRotationMode, CursorSettings};
     use std::path::{Path, PathBuf};
     use std::sync::{atomic::AtomicBool, mpsc, Arc};
     use std::time::Duration;
-
-    #[test]
-    fn a_hide_clip_takes_the_cursor_out_of_the_export() {
-        use super::CursorHideClip;
-        let clips = [
-            CursorHideClip {
-                start: 1.0,
-                end: 2.0,
-                hidden: false,
-            },
-            CursorHideClip {
-                start: 4.0,
-                end: 5.0,
-                hidden: true,
-            },
-        ];
-        assert_eq!(cursor_hide_alpha(&clips, 0.5), 1.0);
-        assert_eq!(cursor_hide_alpha(&clips, 1.0), 0.0);
-        assert_eq!(cursor_hide_alpha(&clips, 1.5), 0.0);
-        assert_eq!(cursor_hide_alpha(&clips, 2.0), 0.0);
-        assert_eq!(cursor_hide_alpha(&clips, 2.5), 1.0);
-        // A muted clip stays on the track but leaves the cursor visible.
-        assert_eq!(cursor_hide_alpha(&clips, 4.5), 1.0);
-    }
 
     #[test]
     fn the_decoder_asks_for_d3d11_only_when_hardware_decoding() {
@@ -3304,7 +3251,7 @@ mod tests {
             crf: 20,
             audio: Vec::new(),
             effects: Default::default(),
-            cursor_hide_clips: Vec::new(),
+            cursor_hidden: false,
         };
         let plan = plan_render(
             &model,
@@ -3350,7 +3297,7 @@ mod tests {
             crf: 20,
             audio: Vec::new(),
             effects: Default::default(),
-            cursor_hide_clips: Vec::new(),
+            cursor_hidden: false,
         };
         let plan = plan_render(
             &model,
@@ -3484,7 +3431,7 @@ mod tests {
                 crf: 28,
                 audio: Vec::new(),
                 effects: Default::default(),
-                cursor_hide_clips: Vec::new(),
+                cursor_hidden: false,
             };
             let output = dir.join(format!("out-{speed}.mp4"));
             let (sender, _receiver) = mpsc::channel();
@@ -3723,7 +3670,7 @@ mod tests {
             crf: 24,
             audio: Vec::new(),
             effects: Default::default(),
-            cursor_hide_clips: Vec::new(),
+            cursor_hidden: false,
         };
         let output = dir.join("out.mp4");
         let handle = start_export_with_settings(
@@ -3777,7 +3724,7 @@ mod tests {
             crf: 24,
             audio: Vec::new(),
             effects: Default::default(),
-            cursor_hide_clips: Vec::new(),
+            cursor_hidden: false,
         };
         let joined = dir.join("joined.mp4");
         let (sender, _receiver) = mpsc::channel();
@@ -3880,7 +3827,7 @@ mod tests {
             crf: 0,
             audio: Vec::new(),
             effects: Default::default(),
-            cursor_hide_clips: Vec::new(),
+            cursor_hidden: false,
         };
         let settings = ExportSettings {
             fps: Some(30),
@@ -3987,7 +3934,7 @@ mod tests {
             crf: 18,
             audio: Vec::new(),
             effects: Default::default(),
-            cursor_hide_clips: Vec::new(),
+            cursor_hidden: false,
         };
         for fps in [24, 60] {
             let mut videos = Vec::new();
@@ -4094,7 +4041,7 @@ mod tests {
             crf: 20,
             audio: Vec::new(),
             effects: Default::default(),
-            cursor_hide_clips: Vec::new(),
+            cursor_hidden: false,
         };
         for fps in [24, 60] {
             let settings = ExportSettings {
@@ -4290,7 +4237,7 @@ mod tests {
             crf: 20,
             audio: Vec::new(),
             effects: Default::default(),
-            cursor_hide_clips: Vec::new(),
+            cursor_hidden: false,
         };
         let handle = start_export(model, output.clone());
         loop {
@@ -4416,7 +4363,7 @@ mod tests {
             crf: 20,
             audio: Vec::new(),
             effects: Default::default(),
-            cursor_hide_clips: Vec::new(),
+            cursor_hidden: false,
         };
         let handle = start_export(model, output.clone());
         loop {
@@ -4499,7 +4446,7 @@ mod tests {
             crf: 23,
             audio: Vec::new(),
             effects: Default::default(),
-            cursor_hide_clips: Vec::new(),
+            cursor_hidden: false,
         };
         let handle = start_export(model, output.clone());
         loop {
@@ -4557,7 +4504,7 @@ mod tests {
             crf: 23,
             audio: Vec::new(),
             effects: Default::default(),
-            cursor_hide_clips: Vec::new(),
+            cursor_hidden: false,
         };
         let handle = start_export(model, output.clone());
         let progress = handle
@@ -5147,7 +5094,7 @@ mod tests {
                 crf: 20,
                 audio: Vec::new(),
                 effects: Default::default(),
-                cursor_hide_clips: Vec::new(),
+                cursor_hidden: false,
             };
             let started = std::time::Instant::now();
             let handle = start_export(model, output.clone());
@@ -5459,7 +5406,7 @@ mod webcam_export_tests {
             crf: 30,
             audio: Vec::new(),
             effects: Default::default(),
-            cursor_hide_clips: Vec::new(),
+            cursor_hidden: false,
         };
         let handle = start_export(model, output.clone());
         loop {
@@ -6365,7 +6312,7 @@ mod webcam_export_tests {
             crf: 30,
             audio: Vec::new(),
             effects: Default::default(),
-            cursor_hide_clips: Vec::new(),
+            cursor_hidden: false,
         };
         let handle = start_export(model, output.clone());
         loop {
@@ -6530,7 +6477,7 @@ mod webcam_export_tests {
             crf: 30,
             audio: Vec::new(),
             effects: Default::default(),
-            cursor_hide_clips: Vec::new(),
+            cursor_hidden: false,
         };
         let handle = start_export(model, output.clone());
         loop {
@@ -6694,7 +6641,7 @@ mod webcam_export_tests {
                 crf: 30,
                 audio: Vec::new(),
                 effects: Default::default(),
-                cursor_hide_clips: Vec::new(),
+                cursor_hidden: false,
             };
             let handle = start_export(model, output.clone());
             loop {
@@ -7057,7 +7004,7 @@ mod webcam_export_tests {
                 crf: 30,
                 audio: Vec::new(),
                 effects: Default::default(),
-                cursor_hide_clips: Vec::new(),
+                cursor_hidden: false,
             };
             let handle = start_export(model, output.clone());
             loop {
@@ -7232,7 +7179,7 @@ mod webcam_export_tests {
                 crf: 30,
                 audio: Vec::new(),
                 effects: Default::default(),
-                cursor_hide_clips: Vec::new(),
+                cursor_hidden: false,
             };
             let handle = start_export(model, output.clone());
             loop {
@@ -7329,7 +7276,7 @@ mod webcam_export_tests {
             crf: 18,
             audio: Vec::new(),
             effects: Default::default(),
-            cursor_hide_clips: Vec::new(),
+            cursor_hidden: false,
         };
         let settings = ExportSettings {
             fps: Some(30),
@@ -7407,7 +7354,7 @@ mod webcam_export_tests {
             crf: 18,
             audio: Vec::new(),
             effects: Default::default(),
-            cursor_hide_clips: Vec::new(),
+            cursor_hidden: false,
         };
         let settings = ExportSettings {
             fps: Some(30),
@@ -7510,7 +7457,7 @@ mod webcam_export_tests {
             crf: 18,
             audio: Vec::new(),
             effects: Default::default(),
-            cursor_hide_clips: Vec::new(),
+            cursor_hidden: false,
         };
         let settings = ExportSettings {
             fps: Some(30),
@@ -7655,7 +7602,7 @@ mod webcam_export_tests {
                 crf: 30,
                 audio: Vec::new(),
                 effects: Default::default(),
-                cursor_hide_clips: Vec::new(),
+                cursor_hidden: false,
             };
             let handle = start_export(model, output.clone());
             loop {
@@ -7863,7 +7810,7 @@ mod webcam_export_tests {
                 crf: 30,
                 audio: Vec::new(),
                 effects: Default::default(),
-                cursor_hide_clips: Vec::new(),
+                cursor_hidden: false,
             };
             let handle = start_export(model, output.clone());
             loop {

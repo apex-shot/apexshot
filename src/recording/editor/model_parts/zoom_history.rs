@@ -24,7 +24,7 @@ struct ZoomSnapshot {
     camera: ZoomCameraSettings,
     classic: bool,
     selected: Option<usize>,
-    clipboard: Option<ClipClipboard>,
+    clipboard: Option<ZoomClip>,
 }
 
 impl ZoomSnapshot {

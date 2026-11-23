@@ -155,12 +155,8 @@ impl ClickEffect {
     /// they fall back to the project's persisted duration.
     pub fn visible_duration_ms(self, fallback_ms: u32) -> f64 {
         match self {
-            Self::Ripple => {
-                crate::recording::editor::click_effect::RIPPLE_VISIBLE_DURATION_MS
-            }
-            Self::Circle => {
-                crate::recording::editor::click_effect::CIRCLE_VISIBLE_DURATION_MS
-            }
+            Self::Ripple => crate::recording::editor::click_effect::RIPPLE_VISIBLE_DURATION_MS,
+            Self::Circle => crate::recording::editor::click_effect::CIRCLE_VISIBLE_DURATION_MS,
             Self::None => 0.0,
             Self::Spotlight | Self::Echo => fallback_ms as f64,
         }
@@ -271,6 +267,8 @@ pub struct CursorSettings {
     pub speed: f64,
     pub shadow: f64,
     pub smooth: f64,
+    /// Hide the rendered cursor for the whole edit, in preview and export.
+    pub hidden: bool,
     pub hide_idle: bool,
     pub idle_ms: f64,
     pub click_effect: ClickEffect,
@@ -305,6 +303,7 @@ impl Default for CursorSettings {
             speed: DEFAULT_CURSOR_SPEED,
             shadow: DEFAULT_CURSOR_SHADOW,
             smooth: DEFAULT_CURSOR_SMOOTH,
+            hidden: false,
             hide_idle: false,
             idle_ms: DEFAULT_CURSOR_IDLE_MS,
             click_effect: ClickEffect::Ripple,
@@ -333,6 +332,7 @@ impl CursorSettings {
             speed: self.speed.clamp(MIN_CURSOR_SPEED, MAX_CURSOR_SPEED),
             shadow: self.shadow.clamp(0.0, 1.0),
             smooth: self.smooth.clamp(0.0, 1.0),
+            hidden: self.hidden,
             hide_idle: self.hide_idle,
             idle_ms: self.idle_ms.clamp(120.0, 5000.0),
             click_effect: self.click_effect,

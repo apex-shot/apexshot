@@ -1,4 +1,4 @@
-/// Right-click menu for a clip on the video, Zoom or Hide track.
+/// Right-click menu for a clip on the video or Zoom track.
 ///
 /// This replaces the sidebar's footer Delete button: a clip is acted on where
 /// it sits instead of being selected and then deleted from across the window.
@@ -8,24 +8,17 @@
 pub enum ClipMenuTarget {
     Video(usize),
     Zoom(usize),
-    Hide(usize),
 }
 
 impl ClipMenuTarget {
     fn index(self) -> usize {
         match self {
-            ClipMenuTarget::Video(index)
-            | ClipMenuTarget::Zoom(index)
-            | ClipMenuTarget::Hide(index) => index,
+            ClipMenuTarget::Video(index) | ClipMenuTarget::Zoom(index) => index,
         }
-    }
-
-    fn is_zoom(self) -> bool {
-        matches!(self, ClipMenuTarget::Zoom(_))
     }
 }
 
-/// One row in the menu.
+/// One row in the menu. Every row, Delete included, is drawn the same way.
 struct MenuItem {
     icon: &'static str,
     label: String,
@@ -40,7 +33,6 @@ pub fn show_clip_menu(
     y: f64,
     state: Arc<Mutex<VideoEditState>>,
     on_change: Rc<dyn Fn()>,
-    lanes: LaneControls,
 ) -> Popover {
     let popover = Popover::new();
     popover.add_css_class("recording-editor-clip-menu-popover");
@@ -56,7 +48,6 @@ pub fn show_clip_menu(
     card.set_size_request(160, -1);
 
     let index = target.index();
-    let is_zoom = target.is_zoom();
     let is_video = matches!(target, ClipMenuTarget::Video(_));
 
     // The hide item names what the click will do, so a clip that is already
@@ -64,14 +55,7 @@ pub fn show_clip_menu(
     // the model says a paste would actually land.
     let (hidden_now, can_paste) = {
         let guard = state.lock().unwrap();
-        let hidden = if is_zoom {
-            guard.zoom_clips.get(index).is_some_and(|clip| clip.hidden)
-        } else {
-            guard
-                .cursor_hide_clips
-                .get(index)
-                .is_some_and(|clip| clip.hidden)
-        };
+        let hidden = guard.zoom_clips.get(index).is_some_and(|clip| clip.hidden);
         (hidden, guard.can_paste_clipboard_at_playhead())
     };
 
@@ -110,37 +94,6 @@ pub fn show_clip_menu(
             });
         }
         items.push(MenuItem {
-            icon: "view-conceal-symbolic",
-            label: t("Hide cursor here"),
-            action: {
-                let state = state.clone();
-                let on_change = on_change.clone();
-                let lanes = lanes.clone();
-                Rc::new(move || {
-                    {
-                        let mut guard = state.lock().unwrap();
-                        if !guard.video_locked {
-                            // Place a hide at the playhead, or select the one
-                            // already covering it. Either way the row comes
-                            // forward, since it appears with the first clip.
-                            if guard.add_cursor_hide_at_playhead().is_none() {
-                                let playhead = guard.playhead_seconds;
-                                if let Some(index) =
-                                    guard.cursor_hide_clips.iter().position(|clip| {
-                                        playhead >= clip.start && playhead <= clip.end
-                                    })
-                                {
-                                    select_cursor_hide(&mut guard, Some(index));
-                                }
-                            }
-                            lanes.open(TimelineLane::Cursor);
-                        }
-                    }
-                    on_change();
-                })
-            },
-        });
-        items.push(MenuItem {
             icon: icon_names::custom::USER_TRASH_SYMBOLIC,
             label: t("Delete"),
             action: {
@@ -159,110 +112,90 @@ pub fn show_clip_menu(
         items
     } else {
         vec![
-        MenuItem {
-            icon: icon_names::shipped::COPY_ARROW_RIGHT_REGULAR,
-            label: t("Duplicate"),
-            action: {
-                let state = state.clone();
-                let on_change = on_change.clone();
-                Rc::new(move || {
-                    {
-                        let mut guard = state.lock().unwrap();
-                        let start = duplicate_start(&guard, index, is_zoom);
-                        if is_zoom {
+            MenuItem {
+                icon: icon_names::shipped::COPY_ARROW_RIGHT_REGULAR,
+                label: t("Duplicate"),
+                action: {
+                    let state = state.clone();
+                    let on_change = on_change.clone();
+                    Rc::new(move || {
+                        {
+                            let mut guard = state.lock().unwrap();
+                            let start = duplicate_start(&guard, index);
                             let _ = guard.duplicate_zoom_clip(index, start);
-                        } else {
-                            let _ = guard.duplicate_cursor_hide_clip(index, start);
                         }
-                    }
-                    on_change();
-                })
+                        on_change();
+                    })
+                },
             },
-        },
-        MenuItem {
-            icon: icon_names::shipped::COPY_REGULAR,
-            label: t("Copy"),
-            action: {
-                let state = state.clone();
-                let on_change = on_change.clone();
-                Rc::new(move || {
-                    {
-                        let mut guard = state.lock().unwrap();
-                        if is_zoom {
+            MenuItem {
+                icon: icon_names::shipped::COPY_REGULAR,
+                label: t("Copy"),
+                action: {
+                    let state = state.clone();
+                    let on_change = on_change.clone();
+                    Rc::new(move || {
+                        {
+                            let mut guard = state.lock().unwrap();
                             guard.copy_zoom_clip(index);
-                        } else {
-                            guard.copy_cursor_hide_clip(index);
                         }
-                    }
-                    // Copy changes nothing on the timeline, so without this the
-                    // dim and the ghost would not appear until some later
-                    // repaint — the copy would look like a no-op again.
-                    on_change();
-                })
+                        // Copy changes nothing on the timeline, so without this the
+                        // dim and the ghost would not appear until some later
+                        // repaint — the copy would look like a no-op again.
+                        on_change();
+                    })
+                },
             },
-        },
-        MenuItem {
-            icon: icon_names::shipped::CUT_REGULAR,
-            label: t("Cut"),
-            action: {
-                let state = state.clone();
-                let on_change = on_change.clone();
-                Rc::new(move || {
-                    {
-                        let mut guard = state.lock().unwrap();
-                        if is_zoom {
+            MenuItem {
+                icon: icon_names::shipped::CUT_REGULAR,
+                label: t("Cut"),
+                action: {
+                    let state = state.clone();
+                    let on_change = on_change.clone();
+                    Rc::new(move || {
+                        {
+                            let mut guard = state.lock().unwrap();
                             guard.cut_zoom_clip(index);
-                        } else {
-                            guard.cut_cursor_hide_clip(index);
                         }
-                    }
-                    on_change();
-                })
+                        on_change();
+                    })
+                },
             },
-        },
-        MenuItem {
-            icon: if hidden_now {
-                icon_names::shipped::EYE_REGULAR
-            } else {
-                icon_names::shipped::EYE_OFF_REGULAR
-            },
-            label: if hidden_now { t("Show") } else { t("Hide") },
-            action: {
-                let state = state.clone();
-                let on_change = on_change.clone();
-                Rc::new(move || {
-                    {
-                        let mut guard = state.lock().unwrap();
-                        if is_zoom {
+            MenuItem {
+                icon: if hidden_now {
+                    icon_names::shipped::EYE_REGULAR
+                } else {
+                    icon_names::shipped::EYE_OFF_REGULAR
+                },
+                label: if hidden_now { t("Show") } else { t("Hide") },
+                action: {
+                    let state = state.clone();
+                    let on_change = on_change.clone();
+                    Rc::new(move || {
+                        {
+                            let mut guard = state.lock().unwrap();
                             guard.set_zoom_hidden(index, !hidden_now);
-                        } else {
-                            guard.set_cursor_hide_hidden(index, !hidden_now);
                         }
-                    }
-                    on_change();
-                })
+                        on_change();
+                    })
+                },
             },
-        },
-        MenuItem {
-            icon: icon_names::custom::USER_TRASH_SYMBOLIC,
-            label: t("Delete"),
-            action: {
-                let state = state.clone();
-                let on_change = on_change.clone();
-                Rc::new(move || {
-                    {
-                        let mut guard = state.lock().unwrap();
-                        if is_zoom {
+            MenuItem {
+                icon: icon_names::custom::USER_TRASH_SYMBOLIC,
+                label: t("Delete"),
+                action: {
+                    let state = state.clone();
+                    let on_change = on_change.clone();
+                    Rc::new(move || {
+                        {
+                            let mut guard = state.lock().unwrap();
                             guard.remove_zoom_clip(index);
-                        } else {
-                            guard.remove_cursor_hide_clip(index);
                         }
-                    }
-                    on_change();
-                })
+                        on_change();
+                    })
+                },
             },
-        },
-    ]
+        ]
     };
 
     // Paste is offered only when a paste would actually land: something is on
@@ -302,20 +235,12 @@ pub fn show_clip_menu(
 
 /// Where a duplicate of `index` should land: directly after the clip it copies,
 /// so the pair read as one run.
-fn duplicate_start(state: &VideoEditState, index: usize, is_zoom: bool) -> f64 {
-    if is_zoom {
-        state
-            .zoom_clips
-            .get(index)
-            .map(|clip| clip.end)
-            .unwrap_or(0.0)
-    } else {
-        state
-            .cursor_hide_clips
-            .get(index)
-            .map(|clip| clip.end)
-            .unwrap_or(0.0)
-    }
+fn duplicate_start(state: &VideoEditState, index: usize) -> f64 {
+    state
+        .zoom_clips
+        .get(index)
+        .map(|clip| clip.end)
+        .unwrap_or(0.0)
 }
 
 fn menu_row(item: MenuItem, popover: &Popover) -> Button {
@@ -390,55 +315,6 @@ mod tests {
         assert!(
             source.contains("if can_paste && !is_video {"),
             "paste must stay out of the video menu while the overlays keep it"
-        );
-    }
-
-    #[test]
-    fn the_cursor_hide_row_lives_in_the_video_menu_not_the_tool_row() {
-        let menu = include_str!("clip_menu.rs");
-        let source = menu
-            .split("#[cfg(test)]")
-            .next()
-            .expect("the menu's production source");
-        let start = source
-            .find("let mut items: Vec<MenuItem> = if is_video {")
-            .expect("the video branch of the item list");
-        let video = {
-            let rest = &source[start + 1..];
-            let end = rest
-                .find("\n    } else {")
-                .expect("the overlay branch follows the video branch");
-            &source[start..start + 1 + end]
-        };
-        assert!(
-            video.contains("label: t(\"Hide cursor here\")"),
-            "the video clip must offer the cursor hide where the clip is"
-        );
-        assert!(
-            video.contains("guard.add_cursor_hide_at_playhead()"),
-            "the row places its hide clip at the playhead"
-        );
-        assert!(
-            video.contains("lanes.open(TimelineLane::Cursor)"),
-            "and brings the Cursor lane forward, since the row appears with it"
-        );
-
-        let shell = include_str!("shell.rs");
-        let toolbar = shell
-            .split("#[cfg(test)]")
-            .next()
-            .expect("the card's production source");
-        assert!(
-            !toolbar.contains("labeled_tool_button(\"view-conceal-symbolic\""),
-            "the tool row keeps Zoom, Split and Detect only"
-        );
-        assert!(
-            !toolbar.contains("hide.connect_clicked"),
-            "the Hide button and its handler are gone"
-        );
-        assert!(
-            !toolbar.contains("selected_cursor_hide.is_some()"),
-            "nothing on the tool row is left to mark active for a hide clip"
         );
     }
 

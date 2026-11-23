@@ -105,7 +105,7 @@ pub(super) fn write_rgba_track_with_view<W: Write>(
             state.metadata.width as f64,
             state.metadata.height as f64,
         ) {
-            frame.alpha *= state.cursor_hide_alpha(timeline_t);
+            frame.alpha *= state.cursor_hide_alpha();
             for (x, y, progress) in sidecar.click_ripples_in_video_at(
                 source_t,
                 overlay_cursor.click_window_seconds(),

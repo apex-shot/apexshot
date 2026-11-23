@@ -3,7 +3,6 @@ use std::path::PathBuf;
 pub const MIN_TRIM_DURATION_SECONDS: f64 = 0.25;
 pub(super) const MIN_DIMENSION: u32 = 64;
 pub const DEFAULT_ZOOM_DURATION_SECONDS: f64 = 1.8;
-pub const DEFAULT_CURSOR_HIDE_DURATION_SECONDS: f64 = 1.8;
 pub const DEFAULT_ZOOM_SCALE: f64 = 1.8;
 /// Length and scale of a zoom the user adds to the timeline. They are longer
 /// and tighter than the clip defaults above because a zoom the user placed by
@@ -113,7 +112,11 @@ impl ExportQuality {
 #[derive(Debug, Clone, PartialEq)]
 pub enum VideoBackground {
     None,
-    Plain { r: u8, g: u8, b: u8 },
+    Plain {
+        r: u8,
+        g: u8,
+        b: u8,
+    },
     /// A user-drawn linear gradient. Holds its own stops rather than a preset
     /// index so preview and export describe it identically.
     Gradient(VideoGradient),
