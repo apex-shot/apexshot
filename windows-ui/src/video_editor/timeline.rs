@@ -222,8 +222,8 @@ struct Data {
     zoom_camera: super::zoom::ZoomCameraSettings,
     /// The click sound and the keyboard captions the edit list carries.
     effects: super::project::EffectsSettings,
-    /// The export tier the stage's chip shows. Shared with the stage, so a
-    /// pick reaches the project file and a load reaches the chip.
+    /// The export tier the stage's estimate reads. Shared with the stage, so
+    /// a pick reaches the project file and a load reaches the estimate.
     quality: Option<Rc<Cell<super::window::QualityTier>>>,
     hide_clips: Vec<HideClip>,
     selected_zoom: Option<usize>,
@@ -1306,7 +1306,7 @@ impl Data {
             captions_show_single_letters: self.effects.captions.show_single_letters,
             sound: self.effects.sound.clone(),
             clip_sounds: self.effects.clip_sounds.clone(),
-            // The default tier needs no key, so a file written before the chip
+            // The default tier needs no key, so a file written before the tier
             // was stored opens on the same High it always showed.
             quality: self.quality.as_ref().and_then(|quality| {
                 let tier = quality.get();

@@ -5424,7 +5424,7 @@ msgid "Choose Studio in ApexShot, sign in, and pay. ApexShot turns Studio on for
 msgstr "Выберите Studio в ApexShot, войдите и оплатите. ApexShot сам включит Studio — без файла лицензии, который нужно копировать или импортировать."
 
 msgid "Name"
-msgstr "Имя"
+msgstr "Название"
 
 msgid "New preset"
 msgstr "Новая предустановка"
