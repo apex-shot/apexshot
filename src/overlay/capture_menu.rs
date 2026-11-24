@@ -717,6 +717,7 @@ fn install_transparent_window_css(display: &gdk::Display) {
                  box-shadow: none;\
                  min-width: 294px;\
              }\n\
+             popover.apexshot-device-submenu > contents { min-width: 0; }\n\
              .apexshot-device-list { background: transparent; }\n\
              button.apexshot-device-item {\
                  background: transparent;\
@@ -733,6 +734,7 @@ fn install_transparent_window_css(display: &gdk::Display) {
                  min-width: 0;\
              }\n\
              button.apexshot-device-item:hover { background: rgba(255,255,255,0.07); }\n\
+             button.apexshot-device-item:focus:not(:hover):not(:focus-visible) { background: transparent; }\n\
              button.apexshot-device-item:disabled { color: rgba(255,255,255,0.24); }\n\
              button.apexshot-device-item label {\
                  color: inherit;\
@@ -776,9 +778,9 @@ fn row_mark(mark: RowMark) -> DrawingArea {
     area.set_content_width(16);
     area.set_content_height(16);
     area.set_valign(gtk4::Align::Center);
-    // 294 px row - 8 px padding each side - 16 px mark - this = 216 px of
-    // label, the width the C++ menu elides at.
-    area.set_margin_start(46);
+    // 294 px row - 8 px padding each side - 16 px mark - this = 260 px of
+    // text, the width the C++ menu's 7/26/7/8 item padding leaves.
+    area.set_margin_start(2);
     area.set_draw_func(move |_, context, width, height| {
         let width = f64::from(width);
         let height = f64::from(height);
@@ -804,8 +806,19 @@ fn row_mark(mark: RowMark) -> DrawingArea {
     area
 }
 
+/// How a menu row sizes its text, matching the C++ menu: fixed command rows
+/// keep the whole text width, device names are elided at 216 px, and the app
+/// submenu, which has no fixed width, is as wide as its longest name.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RowWidth {
+    Command,
+    Name,
+    Natural,
+}
+
 fn device_row(
     label: &str,
+    width: RowWidth,
     mark: RowMark,
     sensitive: bool,
     activate: impl Fn() + 'static,
@@ -817,12 +830,27 @@ fn device_row(
     let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
     let text = gtk4::Label::new(Some(label));
     text.set_xalign(0.0);
-    text.set_hexpand(true);
-    // One-char natural width lets the popover's fixed width set the label's;
-    // the display name starts with the part that tells devices apart.
+    // One-char natural width lets the popover's fixed width (or the 216 px
+    // name width) set the label's; the display name leads with what differs.
     text.set_ellipsize(pango::EllipsizeMode::End);
     text.set_max_width_chars(1);
     row.append(&text);
+    match width {
+        RowWidth::Name => {
+            text.set_size_request(216, -1);
+            let spacer = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+            spacer.set_hexpand(true);
+            row.append(&spacer);
+        }
+        RowWidth::Command => text.set_hexpand(true),
+        RowWidth::Natural => {
+            // Natural width up to the 216 px the C++ menu elides names at.
+            text.set_max_width_chars(-1);
+            let natural = text.layout().pixel_size().0;
+            text.set_size_request(natural.min(216), -1);
+            text.set_hexpand(true);
+        }
+    }
     row.append(&row_mark(mark));
     button.set_child(Some(&row));
     button.connect_clicked(move |_| activate());
@@ -861,7 +889,13 @@ fn show_device_popover(
     list.add_css_class("apexshot-device-list");
     let on_choice = Rc::new(on_choice);
     if devices.is_empty() {
-        list.append(&device_row(empty_label, RowMark::Tick(false), false, || {}));
+        list.append(&device_row(
+            empty_label,
+            RowWidth::Command,
+            RowMark::Tick(false),
+            false,
+            || {},
+        ));
     } else {
         for device in &devices {
             // An input that is off ticks only its "Don't record" row.
@@ -872,6 +906,7 @@ fn show_device_popover(
             let on_choice = on_choice.clone();
             list.append(&device_row(
                 &device.label,
+                RowWidth::Name,
                 RowMark::Tick(ticked),
                 true,
                 move || {
@@ -891,6 +926,7 @@ fn show_device_popover(
         let on_choice = on_choice.clone();
         list.append(&device_row(
             off_label,
+            RowWidth::Command,
             RowMark::Tick(off_selected),
             true,
             move || {
@@ -950,6 +986,7 @@ fn show_speaker_popover(
         let on_change = on_change.clone();
         list.append(&device_row(
             "Record system audio from all apps",
+            RowWidth::Command,
             RowMark::Tick(enabled && chosen_app.is_empty()),
             true,
             move || {
@@ -972,7 +1009,13 @@ fn show_speaker_popover(
     } else {
         "Record audio from one app (not available here)"
     };
-    let one_row = device_row(one_label, RowMark::Chevron, app_audio_available, || {});
+    let one_row = device_row(
+        one_label,
+        RowWidth::Command,
+        RowMark::Chevron,
+        app_audio_available,
+        || {},
+    );
     {
         let popover = popover.downgrade();
         let submenu = submenu.clone();
@@ -1002,6 +1045,7 @@ fn show_speaker_popover(
         let on_change = on_change.clone();
         list.append(&device_row(
             "Don't record system audio",
+            RowWidth::Command,
             RowMark::Tick(!enabled),
             true,
             move || {
@@ -1061,13 +1105,15 @@ fn show_app_popover(
 ) -> gtk4::Popover {
     let popover = gtk4::Popover::new();
     popover.add_css_class("apexshot-device-popover");
+    popover.add_css_class("apexshot-device-submenu");
     popover.set_parent(row);
     popover.set_has_arrow(false);
     // The submenu sits at the row's right edge, its top aligned with it.
     popover.set_position(gtk4::PositionType::Right);
     popover.set_halign(gtk4::Align::Start);
     popover.set_valign(gtk4::Align::Start);
-    popover.set_offset(6, 0);
+    // 6 px clear of the menu, first row level with the hovered one.
+    popover.set_offset(6, -5);
     popover.set_autohide(true);
     popover.set_pointing_to(Some(&gdk::Rectangle::new(
         0,
@@ -1082,6 +1128,7 @@ fn show_app_popover(
     if applications.is_empty() {
         list.append(&device_row(
             "No apps are playing audio",
+            RowWidth::Natural,
             RowMark::Tick(false),
             false,
             || {},
@@ -1106,6 +1153,7 @@ fn show_app_popover(
             let parent = parent.downgrade();
             list.append(&device_row(
                 &label,
+                RowWidth::Natural,
                 RowMark::Tick(ticked),
                 true,
                 move || {
