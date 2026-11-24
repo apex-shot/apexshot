@@ -414,7 +414,13 @@ jobs:
 
       - name: Get version from tag
         id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        # Untagged (scheduled or manual) runs package the Cargo.toml version.
+        run: |
+          case "$GITHUB_REF" in
+            refs/tags/*) VERSION="${GITHUB_REF#refs/tags/}" ;;
+            *) VERSION="v$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)" ;;
+          esac
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Package GNOME extension
         run: |
@@ -486,7 +492,13 @@ jobs:
 
       - name: Get version from tag
         id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        # Untagged (scheduled or manual) runs package the Cargo.toml version.
+        run: |
+          case "$GITHUB_REF" in
+            refs/tags/*) VERSION="${GITHUB_REF#refs/tags/}" ;;
+            *) VERSION="v$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)" ;;
+          esac
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Build openSUSE RPMs
         run: scripts/build-opensuse-rpm.sh "${{ steps.get_version.outputs.VERSION }}"
@@ -575,7 +587,13 @@ jobs:
 
       - name: Get version from tag
         id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        # Untagged (scheduled or manual) runs package the Cargo.toml version.
+        run: |
+          case "$GITHUB_REF" in
+            refs/tags/*) VERSION="${GITHUB_REF#refs/tags/}" ;;
+            *) VERSION="v$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)" ;;
+          esac
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Build Fedora RPMs
         run: scripts/build-fedora-rpm.sh "${{ steps.get_version.outputs.VERSION }}"
@@ -652,7 +670,13 @@ jobs:
 
       - name: Get version from tag
         id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        # Untagged (scheduled or manual) runs package the Cargo.toml version.
+        run: |
+          case "$GITHUB_REF" in
+            refs/tags/*) VERSION="${GITHUB_REF#refs/tags/}" ;;
+            *) VERSION="v$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)" ;;
+          esac
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Update PKGBUILD version from tag
         run: |
@@ -671,8 +695,10 @@ jobs:
               # checked-out commit under the Cargo.toml version instead.
               PKGVER=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
               ARCHIVE="apexshot-${PKGVER}.tar.gz"
-              git config --global --add safe.directory "$PWD"
-              git archive --format=tar.gz --prefix="apexshot-${PKGVER}/" -o "/tmp/${ARCHIVE}" HEAD
+              # The container checkout has no .git (git is installed after
+              # checkout), so archive the working tree itself.
+              tar -czf "/tmp/${ARCHIVE}" --exclude=./target --exclude=./.git \
+                --transform="s#^\.#apexshot-${PKGVER}#" .
               cp "/tmp/${ARCHIVE}" "packaging/arch/${ARCHIVE}"
               SOURCE_URL="${ARCHIVE}"
               SOURCE_ENTRY="${ARCHIVE}"
