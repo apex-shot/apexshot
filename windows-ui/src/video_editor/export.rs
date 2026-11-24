@@ -3403,7 +3403,7 @@ mod tests {
             .arg(&source)
             .output();
         if !generated.is_ok_and(|output| output.status.success()) {
-            eprintln!("skipping the slow motion export test: ffmpeg is unavailable");
+            crate::test_support::skip_without_media("skipping the slow motion export test: ffmpeg is unavailable");
             return;
         }
         let settings = ExportSettings {
@@ -3631,7 +3631,7 @@ mod tests {
             .stderr(std::process::Stdio::null())
             .status();
         if !generated.is_ok_and(|status| status.success()) {
-            eprintln!("skipping the HEVC export test: ffmpeg is unavailable");
+            crate::test_support::skip_without_media("skipping the HEVC export test: ffmpeg is unavailable");
             return;
         }
         let probe_stream = |path: &std::path::Path, stream: &str, entries: &str| -> String {
@@ -4394,7 +4394,7 @@ mod tests {
             return;
         }
         let Some(fps) = crate::recording::editor::ffmpeg::probe_frame_rate(&source) else {
-            eprintln!("skipping export test: ffprobe is unavailable");
+            crate::test_support::skip_without_media("skipping export test: ffprobe is unavailable");
             return;
         };
         let output = std::env::temp_dir().join("apexshot-export-gated-test.mp4");
@@ -5442,7 +5442,7 @@ mod webcam_export_tests {
         }
         let source = dir.join("screen.mp4");
         if !solid_clip(&source, "0x1e1e1e", "320x240", 2.0) {
-            eprintln!("skipping the webcam export test: ffmpeg is unavailable");
+            crate::test_support::skip_without_media("skipping the webcam export test: ffmpeg is unavailable");
             return;
         }
         let Some(track_path) = webcam_track_file(&source) else {
@@ -5578,7 +5578,7 @@ mod webcam_export_tests {
         }
         let source = dir.join("screen.mp4");
         if !solid_clip(&source, "0xd0d0d0", "320x240", 2.0) {
-            eprintln!("skipping the camera shadow export test: ffmpeg is unavailable");
+            crate::test_support::skip_without_media("skipping the camera shadow export test: ffmpeg is unavailable");
             return;
         }
         let Some(track_path) = webcam_track_file(&source) else {
@@ -5692,7 +5692,7 @@ mod webcam_export_tests {
         }
         let source = dir.join("screen.mp4");
         if !solid_clip(&source, "0x1e1e1e", "320x240", 2.0) {
-            eprintln!("skipping the webcam export test: ffmpeg is unavailable");
+            crate::test_support::skip_without_media("skipping the webcam export test: ffmpeg is unavailable");
             return;
         }
         let Some(track_path) = webcam_track_file(&source) else {
@@ -5818,7 +5818,7 @@ mod webcam_export_tests {
         }
         let source = dir.join("screen.mp4");
         if !solid_clip(&source, "0x1e1e1e", "320x240", 2.0) {
-            eprintln!("skipping the webcam export test: ffmpeg is unavailable");
+            crate::test_support::skip_without_media("skipping the webcam export test: ffmpeg is unavailable");
             return;
         }
         let Some(track_path) = webcam_track_file(&source) else {
@@ -5901,7 +5901,7 @@ mod webcam_export_tests {
         }
         let source = dir.join("screen.mp4");
         if !solid_clip(&source, "0x1e1e1e", "320x240", 2.0) {
-            eprintln!("skipping the webcam export test: ffmpeg is unavailable");
+            crate::test_support::skip_without_media("skipping the webcam export test: ffmpeg is unavailable");
             return;
         }
         let Some(track_path) = webcam_track_file(&source) else {
@@ -6018,7 +6018,7 @@ mod webcam_export_tests {
         }
         let source = dir.join("screen.mp4");
         if !solid_clip(&source, "0x1e1e1e", "320x240", 2.0) {
-            eprintln!("skipping the webcam export test: ffmpeg is unavailable");
+            crate::test_support::skip_without_media("skipping the webcam export test: ffmpeg is unavailable");
             return;
         }
         let Some(track_path) = webcam_track_file(&source) else {
@@ -6095,7 +6095,7 @@ mod webcam_export_tests {
         }
         let source = dir.join("screen.mp4");
         if !solid_clip(&source, "0x1e1e1e", "320x240", 2.0) {
-            eprintln!("skipping the webcam export test: ffmpeg is unavailable");
+            crate::test_support::skip_without_media("skipping the webcam export test: ffmpeg is unavailable");
             return;
         }
         let Some(track_path) = webcam_track_file(&source) else {
@@ -6195,7 +6195,7 @@ mod webcam_export_tests {
         }
         let source = dir.join("screen.mp4");
         if !solid_clip(&source, "0x1e1e1e", "320x240", 5.0) {
-            eprintln!("skipping the layout cue test: ffmpeg is unavailable");
+            crate::test_support::skip_without_media("skipping the layout cue test: ffmpeg is unavailable");
             return;
         }
         let Some(track_path) = webcam_track_file(&source) else {
@@ -6402,7 +6402,7 @@ mod webcam_export_tests {
         }
         let source = dir.join("screen.mp4");
         if !striped_clip(&source, 2.0) {
-            eprintln!("skipping the split cover test: ffmpeg is unavailable");
+            crate::test_support::skip_without_media("skipping the split cover test: ffmpeg is unavailable");
             return;
         }
         let Some(track_path) = webcam_track_file(&source) else {
@@ -6545,7 +6545,7 @@ mod webcam_export_tests {
         }
         let source = dir.join("screen.mp4");
         if !halves_clip(&source, (640, 360), 3.0) {
-            eprintln!("skipping the split slide test: ffmpeg is unavailable");
+            crate::test_support::skip_without_media("skipping the split slide test: ffmpeg is unavailable");
             return;
         }
         let Some(track_path) = webcam_track_file(&source) else {
@@ -6910,7 +6910,7 @@ mod webcam_export_tests {
         }
         let source = dir.join("screen.mp4");
         if !solid_clip(&source, "0x1e1e1e", "320x240", 5.0) {
-            eprintln!("skipping the camera blur test: ffmpeg is unavailable");
+            crate::test_support::skip_without_media("skipping the camera blur test: ffmpeg is unavailable");
             return;
         }
         let Some(track_path) = webcam_track_file(&source) else {
@@ -7089,7 +7089,7 @@ mod webcam_export_tests {
         }
         let source = dir.join("screen.mp4");
         if !solid_clip(&source, "0x404040", "1280x720", 3.0) {
-            eprintln!("skipping the camera fade blur test: ffmpeg is unavailable");
+            crate::test_support::skip_without_media("skipping the camera fade blur test: ffmpeg is unavailable");
             return;
         }
         let Some(track_path) = webcam_track_file(&source) else {
@@ -7253,7 +7253,7 @@ mod webcam_export_tests {
         fs::create_dir_all(&dir).unwrap();
         let source = dir.join("source.mp4");
         if !solid_clip(&source, "red", "320x240", 2.0) {
-            eprintln!("skipping: ffmpeg could not make the clip");
+            crate::test_support::skip_without_media("skipping: ffmpeg could not make the clip");
             return;
         }
         let output = dir.join("output.mp4");
@@ -7506,7 +7506,7 @@ mod webcam_export_tests {
         }
         let source = dir.join("screen.mp4");
         if !solid_clip(&source, "0xc83232", "320x200", 5.0) {
-            eprintln!("skipping the widened stage test: ffmpeg is unavailable");
+            crate::test_support::skip_without_media("skipping the widened stage test: ffmpeg is unavailable");
             return;
         }
         let Some(track_path) = webcam_track_file(&source) else {
@@ -7693,12 +7693,12 @@ mod webcam_export_tests {
         }
         let wide_source = dir.join("wide.mp4");
         if !solid_clip(&wide_source, "0xc83232", "320x200", 5.0) {
-            eprintln!("skipping the padded split test: ffmpeg is unavailable");
+            crate::test_support::skip_without_media("skipping the padded split test: ffmpeg is unavailable");
             return;
         }
         let plain_source = dir.join("plain.mp4");
         if !solid_clip(&plain_source, "0xc83232", "320x180", 5.0) {
-            eprintln!("skipping the padded split test: ffmpeg is unavailable");
+            crate::test_support::skip_without_media("skipping the padded split test: ffmpeg is unavailable");
             return;
         }
         let Some(wide_track) = webcam_track_file(&wide_source) else {

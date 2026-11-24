@@ -347,3 +347,13 @@ mod broadway {
         });
     }
 }
+
+/// Tests that need ffmpeg or ffprobe call this where they would skip. CI sets
+/// `APEXSHOT_REQUIRE_MEDIA_TESTS` so a missing tool fails the test instead of
+/// letting it pass without running.
+pub(crate) fn skip_without_media(reason: &str) {
+    if std::env::var_os("APEXSHOT_REQUIRE_MEDIA_TESTS").is_some() {
+        panic!("{reason} (APEXSHOT_REQUIRE_MEDIA_TESTS is set, so this test must run)");
+    }
+    eprintln!("{reason}");
+}

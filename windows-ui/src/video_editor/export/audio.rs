@@ -238,7 +238,7 @@ mod tests {
             .stderr(Stdio::null())
             .status();
         if !generated.is_ok_and(|status| status.success()) {
-            eprintln!("skipping the sped export sound test: ffmpeg is unavailable");
+            crate::test_support::skip_without_media("skipping the sped export sound test: ffmpeg is unavailable");
             return;
         }
         let model = ExportModel {
@@ -391,7 +391,7 @@ mod tests {
             .stderr(Stdio::null())
             .status();
         if !generated.is_ok_and(|status| status.success()) {
-            eprintln!("skipping the export sound test: ffmpeg is unavailable");
+            crate::test_support::skip_without_media("skipping the export sound test: ffmpeg is unavailable");
             return;
         }
         let model = ExportModel {
@@ -535,7 +535,7 @@ mod tests {
             .stderr(Stdio::null())
             .status();
         if !generated.is_ok_and(|status| status.success()) {
-            eprintln!("skipping the silent export test: ffmpeg is unavailable");
+            crate::test_support::skip_without_media("skipping the silent export test: ffmpeg is unavailable");
             return;
         }
         let model = ExportModel {
@@ -620,7 +620,7 @@ mod tests {
             .stderr(Stdio::null())
             .status();
         if !generated.is_ok_and(|status| status.success()) {
-            eprintln!("skipping the click sound test: ffmpeg is unavailable");
+            crate::test_support::skip_without_media("skipping the click sound test: ffmpeg is unavailable");
             return;
         }
         let mut sidecar = PointerSidecar::new(

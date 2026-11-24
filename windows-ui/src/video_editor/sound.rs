@@ -1528,7 +1528,7 @@ mod tests {
                     .arg(path)
                     .output();
             if !generated.is_ok_and(|output| output.status.success()) {
-                eprintln!("skipping the sound graph test: ffmpeg is unavailable");
+                crate::test_support::skip_without_media("skipping the sound graph test: ffmpeg is unavailable");
                 let _ = std::fs::remove_dir_all(&dir);
                 return;
             }

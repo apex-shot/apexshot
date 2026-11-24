@@ -2,3 +2,7 @@
 # Rust sources stay LF on every checkout: rustfmt.toml sets newline_style = "Unix",
 # and Git for Windows otherwise checks them out as CRLF, which fails cargo fmt --check.
 *.rs text eol=lf
+# Shell scripts and the files they read run under bash on Linux and MSYS2,
+# where a CRLF checkout puts a  in every command.
+*.sh text eol=lf
+packaging/windows/msys2-versions.txt text eol=lf

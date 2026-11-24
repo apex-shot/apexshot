@@ -6174,7 +6174,7 @@ mod tests {
                 .arg(&path)
                 .status();
         if !matches!(status, Ok(status) if status.success()) {
-            eprintln!("skipping the camera last-frame test: ffmpeg is unavailable");
+            crate::test_support::skip_without_media("skipping the camera last-frame test: ffmpeg is unavailable");
             let _ = std::fs::remove_dir_all(&dir);
             return;
         }
