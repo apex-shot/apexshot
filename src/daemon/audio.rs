@@ -32,6 +32,12 @@ pub(super) static SPEAKER_MONITOR_STOP: Mutex<
 
 pub(super) static AUDIO_IDLE_REAPER: std::sync::Once = std::sync::Once::new();
 
+/// Pulse source the overlay's Quick Capture meter wants each stream to
+/// measure. `None` keeps the historical choice: the first physical input, and
+/// the default sink's monitor source.
+pub(super) static MIC_METER_SOURCE: Mutex<Option<String>> = Mutex::new(None);
+pub(super) static SPEAKER_METER_SOURCE: Mutex<Option<String>> = Mutex::new(None);
+
 /// Convert RMS audio amplitude to a visible meter value using a decibel range.
 /// A linear gate hid normal built-in microphone speech below roughly -26 dBFS.
 pub(crate) fn audio_meter_level(rms: f64, capture_sink: bool) -> f64 {
@@ -56,6 +62,24 @@ pub(super) fn audio_monitor_is_idle(last_poll_ms: u64, now_ms: u64, idle: Durati
         return true;
     }
     now_ms.saturating_sub(last_poll_ms) >= idle.as_millis() as u64
+}
+
+/// True when the requested meter source differs from the one in use.
+///
+/// `None` means "the default device", so clearing a source is a change too:
+/// the running stream has to be reopened for the default to take effect.
+pub(super) fn meter_source_changed(current: Option<&str>, requested: Option<&str>) -> bool {
+    current != requested
+}
+
+/// D-Bus callers clear a meter source with an empty string.
+pub(super) fn normalized_meter_source(source: String) -> Option<String> {
+    let source = source.trim();
+    if source.is_empty() {
+        None
+    } else {
+        Some(source.to_string())
+    }
 }
 
 pub(super) fn ensure_audio_idle_reaper() {
@@ -124,6 +148,96 @@ pub(super) fn touch_speaker_monitor() {
     ensure_speaker_monitor();
 }
 
+/// Point the meters at the sources the Quick Capture toolbar shows.
+///
+/// A source change restarts a running meter on the new device; an unchanged
+/// request costs only a lock so pollers can call this on every state change.
+pub(crate) fn set_meter_sources(mic: Option<String>, speaker: Option<String>) {
+    if set_meter_source(&MIC_METER_SOURCE, mic.as_deref()) {
+        restart_mic_meter();
+    }
+    if set_meter_source(&SPEAKER_METER_SOURCE, speaker.as_deref()) {
+        restart_speaker_meter();
+    }
+}
+
+/// Stores `source` and reports whether the meter has to be reopened.
+fn set_meter_source(slot: &Mutex<Option<String>>, source: Option<&str>) -> bool {
+    let Ok(mut guard) = slot.lock() else {
+        return false;
+    };
+    if !meter_source_changed(guard.as_deref(), source) {
+        return false;
+    }
+    *guard = source.map(String::from);
+    true
+}
+
+fn meter_source(slot: &Mutex<Option<String>>) -> Option<String> {
+    slot.lock().ok().and_then(|guard| guard.clone())
+}
+
+fn wait_for_monitor_stop(running: &'static std::sync::atomic::AtomicBool) {
+    let deadline = std::time::Instant::now() + Duration::from_millis(1500);
+    while running.load(std::sync::atomic::Ordering::Acquire) && std::time::Instant::now() < deadline
+    {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// Reopen a running meter after its source changed. The old thread clears the
+/// running flag on exit, so the new stream starts from a watcher thread rather
+/// than racing the old one for the same device.
+fn restart_mic_meter() {
+    if !MIC_MONITOR_RUNNING.load(std::sync::atomic::Ordering::Acquire) {
+        return;
+    }
+    stop_mic_monitor();
+    std::thread::spawn(|| {
+        wait_for_monitor_stop(&MIC_MONITOR_RUNNING);
+        if recording_audio_is_exclusive() {
+            return;
+        }
+        MIC_LAST_POLL_MS.store(monitor_now_ms(), std::sync::atomic::Ordering::Relaxed);
+        ensure_mic_monitor();
+    });
+}
+
+fn restart_speaker_meter() {
+    if !SPEAKER_MONITOR_RUNNING.load(std::sync::atomic::Ordering::Acquire) {
+        return;
+    }
+    stop_speaker_monitor();
+    std::thread::spawn(|| {
+        wait_for_monitor_stop(&SPEAKER_MONITOR_RUNNING);
+        if recording_audio_is_exclusive() {
+            return;
+        }
+        SPEAKER_LAST_POLL_MS.store(monitor_now_ms(), std::sync::atomic::Ordering::Relaxed);
+        ensure_speaker_monitor();
+    });
+}
+
+/// Mic level for in-process readers. Polling keeps the stream alive the same
+/// way the D-Bus getter does, so the idle reaper leaves it running.
+pub(crate) fn mic_meter_level() -> f64 {
+    touch_mic_monitor();
+    f64::from_bits(MIC_LEVEL.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+pub(crate) fn speaker_meter_level() -> f64 {
+    touch_speaker_monitor();
+    f64::from_bits(SPEAKER_LEVEL.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+/// Releases the meter streams this process opened. In-process callers that
+/// draw their own meter use it on close, so a capture starting right after
+/// does not share the device with a stream the idle reaper has not reached.
+pub(crate) fn stop_meter_streams() {
+    stop_mic_monitor();
+    stop_speaker_monitor();
+}
+
 pub(super) fn ensure_mic_monitor() {
     use std::sync::atomic::Ordering;
     if MIC_MONITOR_RUNNING
@@ -136,7 +250,7 @@ pub(super) fn ensure_mic_monitor() {
     if let Ok(mut guard) = MIC_MONITOR_STOP.lock() {
         *guard = Some(stop.clone());
     }
-    let mic_target = find_physical_input_device();
+    let mic_target = meter_source(&MIC_METER_SOURCE).or_else(find_physical_input_device);
     start_audio_level_stream(
         "mic",
         mic_target.as_deref(),
@@ -159,9 +273,12 @@ pub(super) fn ensure_speaker_monitor() {
     if let Ok(mut guard) = SPEAKER_MONITOR_STOP.lock() {
         *guard = Some(stop.clone());
     }
+    // A named monitor source opens that output; `capture_sink` keeps the
+    // speaker level scaling either way.
+    let speaker_target = meter_source(&SPEAKER_METER_SOURCE);
     start_audio_level_stream(
         "speaker",
-        None,
+        speaker_target.as_deref(),
         true,
         &SPEAKER_LEVEL,
         stop,

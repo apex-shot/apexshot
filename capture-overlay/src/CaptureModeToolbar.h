@@ -136,6 +136,9 @@ private:
     int itemCount() const;
     int itemWidth(int index) const;
     int preferredWidth() const;
+    /// Whether the slot shows a recording device (name, slash, meter) rather
+    /// than its usual label.
+    bool deviceCell(int index) const;
     /// Whether the Scroll item exists in the current mode. Scrolling capture
     /// is a screenshot feature, so the slot is dropped while Video is
     /// selected where no webcam toggle takes it over.
@@ -164,13 +167,16 @@ private:
     void updateAudioMonitoring();
 #endif
 #ifdef Q_OS_LINUX
-    /// Re-list Pulse devices at most once per toolbar; the menus and the
-    /// hover tooltips share that listing.
+    /// Re-list Pulse devices at most once per toolbar; the menus, labels and
+    /// the hover tooltips share that listing.
     void refreshLinuxAudioDevices();
     /// Point the enabled inputs at a source that still exists, falling back
     /// to the current Pulse default the way the Windows toolbar does.
     void resolveLinuxAudioDevices();
-    QString linuxAudioTooltip(int index);
+    /// Start or stop the daemon-meter poll for the current mode.
+    void updateAudioMonitoring();
+    /// Send the chosen devices to the daemon so its meters measure them.
+    void updateLinuxMeterSources();
 #endif
 
     QScreen* m_screen;
@@ -198,14 +204,21 @@ private:
     bool m_setupMode = false;
     std::function<void()> m_onClose;
     std::function<void(bool, const QString&)> m_cameraChanged;
+    /// Width of a Mic/Speaker cell while Video is selected.
+    int m_deviceItemWidth = 160;
+    QTimer* m_meterTimer = nullptr;
 #ifdef Q_OS_LINUX
     QVector<Platform::AudioSourceDevice> m_linuxMicrophones;
     QVector<Platform::AudioOutputDevice> m_linuxOutputs;
     bool m_linuxDevicesLoaded = false;
+    double m_micLevel = 0.0;
+    double m_speakerLevel = 0.0;
+    /// Last sources handed to the daemon, so a poll does not resend them.
+    QString m_meterMicSource;
+    QString m_meterSpeakerSource;
 #endif
 #ifdef Q_OS_WIN
     QString m_outputDevice;
-    int m_deviceItemWidth = 160;
     Platform::AudioLevelMonitor m_microphoneMonitor;
     Platform::AudioLevelMonitor m_systemAudioMonitor;
     QString m_monitoredMicrophone;
@@ -213,6 +226,5 @@ private:
     quint32 m_monitoredProcessId = 0;
     bool m_monitoringMicrophone = false;
     bool m_monitoringSystemAudio = false;
-    QTimer* m_meterTimer = nullptr;
 #endif
 };

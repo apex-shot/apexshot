@@ -33,6 +33,11 @@
 #ifdef Q_OS_WIN
 #include "platform/windows/audio_devices.h"
 #endif
+#ifdef Q_OS_LINUX
+#include <QDBusConnection>
+#include <QDBusInterface>
+#include <QDBusReply>
+#endif
 
 #include <algorithm>
 #include <memory>
@@ -255,6 +260,47 @@ CaptureModeToolbar::CaptureModeToolbar(QScreen* screen, bool screenIsLocked,
             update();
     });
 #endif
+#ifdef Q_OS_LINUX
+    // The daemon owns the capture streams; the toolbar only polls its levels
+    // while the device cells are on screen.
+    m_meterTimer = new QTimer(this);
+    m_meterTimer->setInterval(33);
+    QObject::connect(m_meterTimer, &QTimer::timeout, this, [this]() {
+        if (!m_recording || !isVisible())
+            return;
+        QDBusInterface iface(daemonBusName(),
+                             QStringLiteral("/org/apexshot/Daemon"),
+                             QStringLiteral("org.apexshot.Daemon"),
+                             QDBusConnection::sessionBus());
+        if (!iface.isValid())
+            return;
+        // Bound the GUI-thread D-Bus wait the way the recording panel does;
+        // a wedged daemon must not freeze the toolbar being clicked.
+        iface.setTimeout(150);
+        const double previousMic = m_micLevel;
+        const double previousSpeaker = m_speakerLevel;
+        if (m_microphone) {
+            const QDBusReply<double> reply = iface.call(QStringLiteral("GetMicLevel"));
+            if (reply.isValid()) {
+                const double level = reply.value();
+                m_micLevel = level > m_micLevel ? level : m_micLevel * 0.6 + level * 0.4;
+            }
+        } else {
+            m_micLevel = 0.0;
+        }
+        if (m_speaker) {
+            const QDBusReply<double> reply = iface.call(QStringLiteral("GetSpeakerLevel"));
+            if (reply.isValid()) {
+                const double level = reply.value();
+                m_speakerLevel = level > m_speakerLevel ? level : m_speakerLevel * 0.6 + level * 0.4;
+            }
+        } else {
+            m_speakerLevel = 0.0;
+        }
+        if (m_micLevel != previousMic || m_speakerLevel != previousSpeaker)
+            update();
+    });
+#endif
 }
 
 CaptureModeToolbar::Result CaptureModeToolbar::choose(QLocalServer* controlServer,
@@ -406,14 +452,27 @@ bool CaptureModeToolbar::scrollSlotVisible() const
 #endif
 }
 
+/// Recording device cells carry a device name, a slash when the input is off,
+/// and a live level meter. Windows adds the Webcam slot; Linux has no camera
+/// source, so only Mic and Speaker qualify there.
+bool CaptureModeToolbar::deviceCell(int index) const
+{
+#ifdef Q_OS_WIN
+    return m_enableScrollCapture && m_recording && index >= 5 && index <= 7;
+#elif defined(Q_OS_LINUX)
+    return m_recording && (index == 5 || index == 6);
+#else
+    Q_UNUSED(index);
+    return false;
+#endif
+}
+
 int CaptureModeToolbar::itemWidth(int index) const
 {
     if (index == itemCount() - 1)
         return 44;
-#ifdef Q_OS_WIN
-    if (m_enableScrollCapture && m_recording && index >= 5 && index <= 7)
+    if (deviceCell(index))
         return m_deviceItemWidth;
-#endif
 
     QFont font(QStringLiteral("DM Sans"));
     font.setPixelSize(14);
@@ -480,6 +539,28 @@ QString CaptureModeToolbar::labelFor(int index) const
                 ? m_cameraDevice : QStringLiteral("No camera");
     }
 #endif
+#ifdef Q_OS_LINUX
+    // The device cells and their hover tooltip both show the chosen source's
+    // Pulse description; the name only stands in when the listing missed it.
+    if (deviceCell(index)) {
+        if (index == 5) {
+            if (!m_microphone || m_microphoneDevice.isEmpty())
+                return QStringLiteral("No microphone");
+            for (const Platform::AudioSourceDevice& device : m_linuxMicrophones) {
+                if (device.name == m_microphoneDevice)
+                    return device.description;
+            }
+            return m_microphoneDevice;
+        }
+        if (!m_speaker || m_speakerDevice.isEmpty())
+            return QStringLiteral("No system audio");
+        for (const Platform::AudioOutputDevice& device : m_linuxOutputs) {
+            if (device.monitorSource == m_speakerDevice)
+                return device.description;
+        }
+        return m_speakerDevice;
+    }
+#endif
     if (cameraSlot(index))
         return QStringLiteral("Webcam");
     if (scrollSlotVisible() && index == 7)
@@ -491,19 +572,35 @@ QString CaptureModeToolbar::displayedLabel(int index, const QFont& font) const
 {
     const int width = std::max(0, int(itemRect(index).width()) - 2 * kIconPad
                                       - kIconSize - kIconGap);
+#ifdef Q_OS_LINUX
+    // Pulse names a card's devices alike up front, so keep both ends.
+    return QFontMetrics(font).elidedText(labelFor(index), Qt::ElideMiddle, width);
+#else
     return QFontMetrics(font).elidedText(labelFor(index), Qt::ElideRight, width);
+#endif
 }
 
 void CaptureModeToolbar::resizeForMode()
 {
+#ifdef Q_OS_WIN
     if (!m_enableScrollCapture)
         return;
-#ifdef Q_OS_WIN
     if (m_recording && m_screen) {
         const int fixedWidth = preferredWidth() - 3 * m_deviceItemWidth;
         m_deviceItemWidth = std::clamp((m_screen->availableGeometry().width() - 24 - fixedWidth) / 3,
                                        74, 160);
     }
+#elif defined(Q_OS_LINUX)
+    // Video replaces the Scroll slot with the two device cells, so the bar
+    // changes width on Linux even where scrolling capture is unavailable.
+    if (m_recording && m_screen) {
+        const int fixedWidth = preferredWidth() - 2 * m_deviceItemWidth;
+        m_deviceItemWidth = std::clamp((m_screen->availableGeometry().width() - 24 - fixedWidth) / 2,
+                                       74, 160);
+    }
+#else
+    if (!m_enableScrollCapture)
+        return;
 #endif
     const int center = x() + width() / 2;
     setFixedSize(preferredWidth(), kPanelHeight);
@@ -512,6 +609,12 @@ void CaptureModeToolbar::resizeForMode()
     if (!available.isNull() && width() <= available.width())
         left = std::clamp(left, available.left(), available.right() - width() + 1);
     move(left, y());
+#ifdef Q_OS_LINUX
+    // A Wayland client cannot place its own toplevel, so the shell extension
+    // re-centres the surface on the new width.
+    if (qEnvironmentVariableIsSet("WAYLAND_DISPLAY"))
+        requestShellOverlayFocus(windowTitle());
+#endif
 }
 
 /// While recording, the Scroll slot carries the Webcam toggle instead. Scroll
@@ -656,11 +759,8 @@ void CaptureModeToolbar::paintEvent(QPaintEvent*)
         groupFont.setHintingPreference(QFont::PreferNoHinting);
         groupFont.setLetterSpacing(QFont::PercentageSpacing, 98.0);
         QString label = isClose ? QString() : labelFor(i);
-        bool deviceCell = false;
-#ifdef Q_OS_WIN
-        deviceCell = m_enableScrollCapture && m_recording && i >= 5 && i <= 7;
-#endif
-        if (deviceCell) {
+        const bool deviceSlot = deviceCell(i);
+        if (deviceSlot) {
             label = displayedLabel(i, groupFont);
         } else if (!isClose && m_recording && i == 5) {
             label = QStringLiteral("Mic");
@@ -672,13 +772,13 @@ void CaptureModeToolbar::paintEvent(QPaintEvent*)
         const double labelWidth =
             isClose ? 0.0 : QFontMetricsF(groupFont).horizontalAdvance(label);
         const double groupWidth = isClose ? 0.0 : kIconSize + kIconGap + labelWidth;
-        const double groupLeft = deviceCell ? cell.left() + kIconPad
+        const double groupLeft = deviceSlot ? cell.left() + kIconPad
                                             : cell.center().x() - groupWidth / 2.0;
         const QPointF iconCenter(isClose ? cell.center().x() : groupLeft + kIconSize / 2.0,
-                                 cell.center().y() - (deviceCell && i != 7 ? 2.0 : 0.0));
+                                 cell.center().y() - (deviceSlot && i != 7 ? 2.0 : 0.0));
         drawIcon(painter, i, iconCenter,
                  isClose && !hovered ? QColor(190, 190, 196) : iconColor);
-        if (deviceCell && !deviceOn) {
+        if (deviceSlot && !deviceOn) {
             painter.setPen(QPen(QColor(150, 150, 158), 1.5, Qt::SolidLine, Qt::RoundCap));
             painter.drawLine(iconCenter + QPointF(-8.0, -8.0),
                              iconCenter + QPointF(8.0, 8.0));
@@ -688,7 +788,7 @@ void CaptureModeToolbar::paintEvent(QPaintEvent*)
             painter.setFont(groupFont);
             painter.setPen(active || deviceOn ? Qt::white
                                               : (disabled ? QColor(115, 115, 122)
-                                                          : (deviceCell ? QColor(150, 150, 158)
+                                                          : (deviceSlot ? QColor(150, 150, 158)
                                                                         : QColor(228, 228, 232))));
             const double textLeft = groupLeft + kIconSize + kIconGap;
             const QFontMetricsF labelMetrics(groupFont);
@@ -697,20 +797,24 @@ void CaptureModeToolbar::paintEvent(QPaintEvent*)
             painter.drawText(QPointF(textLeft,
                                      iconCenter.y() + labelMetrics.capHeight() / 2.0),
                              label);
-#ifdef Q_OS_WIN
-            if (deviceCell && (i == 5 || i == 6) && deviceOn) {
+            if (deviceSlot && (i == 5 || i == 6) && deviceOn) {
                 const qreal meterWidth = std::max(0.0, cell.right() - kIconPad - textLeft);
                 const QRectF meter(textLeft, cell.bottom() - 8.0, meterWidth, 3.0);
                 painter.setPen(Qt::NoPen);
                 painter.setBrush(QColor(255, 255, 255, 30));
                 painter.drawRoundedRect(meter, 1.5, 1.5);
+#ifdef Q_OS_WIN
                 const float level = i == 5 ? m_microphoneMonitor.peak()
                                            : m_systemAudioMonitor.peak();
+#elif defined(Q_OS_LINUX)
+                const double level = i == 5 ? m_micLevel : m_speakerLevel;
+#else
+                const double level = 0.0;
+#endif
                 painter.setBrush(QColor(255, 138, 64));
                 painter.drawRoundedRect(QRectF(meter.x(), meter.y(), meter.width() * level,
                                                meter.height()), 1.5, 1.5);
             }
-#endif
         }
 
         if (separatorAfter(i)) {
@@ -927,7 +1031,8 @@ void CaptureModeToolbar::mouseMoveEvent(QMouseEvent* event)
             QToolTip::showText(event->globalPos(), labelFor(hovered), this);
 #elif defined(Q_OS_LINUX)
         } else if (m_recording && (hovered == 5 || hovered == 6)) {
-            QToolTip::showText(event->globalPos(), linuxAudioTooltip(hovered), this);
+            refreshLinuxAudioDevices();
+            QToolTip::showText(event->globalPos(), labelFor(hovered), this);
 #endif
         } else {
             QToolTip::hideText();
@@ -987,7 +1092,7 @@ void CaptureModeToolbar::mousePressEvent(QMouseEvent* event)
                 m_timerSeconds = 0;
         }
         resizeForMode();
-#ifdef Q_OS_WIN
+#if defined(Q_OS_WIN) || defined(Q_OS_LINUX)
         updateAudioMonitoring();
 #endif
         update();
@@ -1000,7 +1105,7 @@ void CaptureModeToolbar::mousePressEvent(QMouseEvent* event)
         notifyCameraChanged();
         m_scroll = false;
         resizeForMode();
-#ifdef Q_OS_WIN
+#if defined(Q_OS_WIN) || defined(Q_OS_LINUX)
         updateAudioMonitoring();
 #endif
         update();
@@ -1019,6 +1124,11 @@ void CaptureModeToolbar::mousePressEvent(QMouseEvent* event)
             refreshDevices();
             updateAudioMonitoring();
         }
+#elif defined(Q_OS_LINUX)
+        // The device cells show Pulse descriptions, and a device saved for a
+        // previous recording may have been unplugged since.
+        resolveLinuxAudioDevices();
+        updateAudioMonitoring();
 #endif
         resizeForMode();
         update();
@@ -1054,6 +1164,8 @@ void CaptureModeToolbar::mousePressEvent(QMouseEvent* event)
                 refreshDevices();
                 updateAudioMonitoring();
             }
+#elif defined(Q_OS_LINUX)
+            updateAudioMonitoring();
 #endif
             update();
         } else if (!m_scroll && m_timerSeconds == 0) {
@@ -1069,6 +1181,8 @@ void CaptureModeToolbar::mousePressEvent(QMouseEvent* event)
                 refreshDevices();
                 updateAudioMonitoring();
             }
+#elif defined(Q_OS_LINUX)
+            updateAudioMonitoring();
 #endif
             update();
         } else if (!m_scroll && !m_ocr) {
@@ -1090,6 +1204,10 @@ void CaptureModeToolbar::closeEvent(QCloseEvent* event)
     m_systemAudioMonitor.stop();
     m_monitoringMicrophone = false;
     m_monitoringSystemAudio = false;
+#endif
+#ifdef Q_OS_LINUX
+    if (m_meterTimer)
+        m_meterTimer->stop();
 #endif
     QWidget::closeEvent(event);
 }
@@ -1207,28 +1325,38 @@ void CaptureModeToolbar::resolveLinuxAudioDevices()
     }
 }
 
-QString CaptureModeToolbar::linuxAudioTooltip(int index)
+void CaptureModeToolbar::updateAudioMonitoring()
 {
-    refreshLinuxAudioDevices();
-    if (index == 5) {
-        if (!m_microphone || m_microphoneDevice.isEmpty())
-            return QStringLiteral("No microphone");
-        for (const Platform::AudioSourceDevice& device : m_linuxMicrophones) {
-            if (device.name == m_microphoneDevice)
-                return device.description;
-        }
-        return m_microphoneDevice;
+    updateLinuxMeterSources();
+    if (m_recording && (m_microphone || m_speaker)) {
+        if (m_meterTimer && !m_meterTimer->isActive())
+            m_meterTimer->start();
+        return;
     }
-    if (index == 6) {
-        if (!m_speaker || m_speakerDevice.isEmpty())
-            return QStringLiteral("No system audio");
-        for (const Platform::AudioOutputDevice& device : m_linuxOutputs) {
-            if (device.monitorSource == m_speakerDevice)
-                return device.description;
-        }
-        return m_speakerDevice;
-    }
-    return QString();
+    if (m_meterTimer)
+        m_meterTimer->stop();
+    m_micLevel = 0.0;
+    m_speakerLevel = 0.0;
+}
+
+/// The daemon measures the sources the cells name, so its meter follows the
+/// menu instead of whatever the server calls default.
+void CaptureModeToolbar::updateLinuxMeterSources()
+{
+    const QString mic = m_microphone ? m_microphoneDevice : QString();
+    const QString speaker = m_speaker ? m_speakerDevice : QString();
+    if (mic == m_meterMicSource && speaker == m_meterSpeakerSource)
+        return;
+    m_meterMicSource = mic;
+    m_meterSpeakerSource = speaker;
+    QDBusInterface iface(daemonBusName(),
+                         QStringLiteral("/org/apexshot/Daemon"),
+                         QStringLiteral("org.apexshot.Daemon"),
+                         QDBusConnection::sessionBus());
+    if (!iface.isValid())
+        return;
+    iface.setTimeout(150);
+    iface.call(QStringLiteral("SetMeterSources"), mic, speaker);
 }
 #endif
 
@@ -1379,6 +1507,7 @@ void CaptureModeToolbar::openDeviceMenu(int index)
                 m_speakerDevice = chosen->data().toString();
             }
         }
+        updateAudioMonitoring();
         update();
         return;
     }
