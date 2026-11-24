@@ -4,7 +4,7 @@ use tokio::sync::mpsc;
 
 use super::*;
 
-pub(super) fn is_wlroots_session() -> bool {
+pub(crate) fn is_wlroots_session() -> bool {
     let desktop = std::env::var("XDG_CURRENT_DESKTOP")
         .or_else(|_| std::env::var("DESKTOP_SESSION"))
         .unwrap_or_default()
@@ -160,6 +160,14 @@ pub(super) async fn record_with_wf_recorder(
     // "show cursor" flag, so only omit cursor customization here.
 
     if audio_inputs.any() {
+        if let Some(app) = config.speaker_app.as_ref() {
+            // wf-recorder opens one Pulse source; a single app's streams need
+            // the PipeWire graph, so this path records every app.
+            eprintln!(
+                "[recording] one-app audio is unavailable here; recording every app instead of '{}'",
+                app.name
+            );
+        }
         let source = if audio_inputs.speaker && !audio_inputs.mic {
             config
                 .speaker_source

@@ -43,6 +43,7 @@ fn build_x11_audio_bin(
         profile.muxer,
         AudioTermination::GhostPad,
         setup.noise_suppression,
+        !setup.app_streams.is_empty(),
     ) {
         eprintln!("[recording] X11 audio unavailable: GStreamer audio elements missing");
         return None;
@@ -700,6 +701,7 @@ mod tests {
             speaker_enabled: false,
             mic_source: None,
             speaker_source: None,
+            speaker_app: None,
             noise_suppression: false,
         }
     }

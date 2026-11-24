@@ -36,7 +36,9 @@ pub(super) static AUDIO_IDLE_REAPER: std::sync::Once = std::sync::Once::new();
 /// measure. `None` keeps the historical choice: the first physical input, and
 /// the default sink's monitor source.
 pub(super) static MIC_METER_SOURCE: Mutex<Option<String>> = Mutex::new(None);
-pub(super) static SPEAKER_METER_SOURCE: Mutex<Option<String>> = Mutex::new(None);
+/// The app whose streams the speaker meter follows. `None` meters the default
+/// output's monitor, the historical choice.
+pub(super) static SPEAKER_METER_APP_PID: Mutex<Option<u32>> = Mutex::new(None);
 
 /// Convert RMS audio amplitude to a visible meter value using a decibel range.
 /// A linear gate hid normal built-in microphone speech below roughly -26 dBFS.
@@ -152,11 +154,13 @@ pub(super) fn touch_speaker_monitor() {
 ///
 /// A source change restarts a running meter on the new device; an unchanged
 /// request costs only a lock so pollers can call this on every state change.
-pub(crate) fn set_meter_sources(mic: Option<String>, speaker: Option<String>) {
+/// `speaker_app_pid` follows one app's streams; `None` meters the default
+/// output's monitor.
+pub(crate) fn set_meter_sources(mic: Option<String>, speaker_app_pid: Option<u32>) {
     if set_meter_source(&MIC_METER_SOURCE, mic.as_deref()) {
         restart_mic_meter();
     }
-    if set_meter_source(&SPEAKER_METER_SOURCE, speaker.as_deref()) {
+    if set_meter_app_pid(speaker_app_pid) {
         restart_speaker_meter();
     }
 }
@@ -173,8 +177,23 @@ fn set_meter_source(slot: &Mutex<Option<String>>, source: Option<&str>) -> bool 
     true
 }
 
+fn set_meter_app_pid(pid: Option<u32>) -> bool {
+    let Ok(mut guard) = SPEAKER_METER_APP_PID.lock() else {
+        return false;
+    };
+    if *guard == pid {
+        return false;
+    }
+    *guard = pid;
+    true
+}
+
 fn meter_source(slot: &Mutex<Option<String>>) -> Option<String> {
     slot.lock().ok().and_then(|guard| guard.clone())
+}
+
+fn meter_app_pid() -> Option<u32> {
+    SPEAKER_METER_APP_PID.lock().ok().and_then(|guard| *guard)
 }
 
 fn wait_for_monitor_stop(running: &'static std::sync::atomic::AtomicBool) {
@@ -273,12 +292,29 @@ pub(super) fn ensure_speaker_monitor() {
     if let Ok(mut guard) = SPEAKER_MONITOR_STOP.lock() {
         *guard = Some(stop.clone());
     }
-    // A named monitor source opens that output; `capture_sink` keeps the
-    // speaker level scaling either way.
-    let speaker_target = meter_source(&SPEAKER_METER_SOURCE);
+
+    // One app: meter its first PipeWire stream. An app that has not started
+    // yet clears the flag so the next poll can open the stream once it does.
+    if let Some(pid) = meter_app_pid() {
+        let serial = crate::recording::app_stream_serials(pid, "")
+            .into_iter()
+            .next();
+        let Some(serial) = serial else {
+            SPEAKER_MONITOR_RUNNING.store(false, Ordering::Release);
+            if let Ok(mut guard) = SPEAKER_MONITOR_STOP.lock() {
+                guard.take();
+            }
+            return;
+        };
+        start_app_level_stream("speaker", serial, &SPEAKER_LEVEL, stop);
+        return;
+    }
+
+    // Every app: the meter opens the default output's monitor; `capture_sink`
+    // keeps the speaker level scaling either way.
     start_audio_level_stream(
         "speaker",
-        speaker_target.as_deref(),
+        None,
         true,
         &SPEAKER_LEVEL,
         stop,
@@ -326,6 +362,24 @@ pub(super) fn stop_monitors_and_wait(timeout: Duration) {
     );
 }
 
+/// Clears the meter's running flag and level when its thread exits, however
+/// it exits.
+struct ClearRunning {
+    running: &'static std::sync::atomic::AtomicBool,
+    level: &'static std::sync::atomic::AtomicU64,
+    label: &'static str,
+}
+
+impl Drop for ClearRunning {
+    fn drop(&mut self) {
+        self.level
+            .store(0.0f64.to_bits(), std::sync::atomic::Ordering::Relaxed);
+        self.running
+            .store(false, std::sync::atomic::Ordering::Release);
+        eprintln!("[daemon] audio ({}): monitoring stopped.", self.label);
+    }
+}
+
 pub(super) fn start_audio_level_stream(
     label: &'static str,
     target: Option<&str>,
@@ -336,20 +390,6 @@ pub(super) fn start_audio_level_stream(
 ) {
     let target_owned = target.map(String::from);
     std::thread::spawn(move || {
-        struct ClearRunning {
-            running: &'static std::sync::atomic::AtomicBool,
-            level: &'static std::sync::atomic::AtomicU64,
-            label: &'static str,
-        }
-        impl Drop for ClearRunning {
-            fn drop(&mut self) {
-                self.level
-                    .store(0.0f64.to_bits(), std::sync::atomic::Ordering::Relaxed);
-                self.running
-                    .store(false, std::sync::atomic::Ordering::Release);
-                eprintln!("[daemon] audio ({}): monitoring stopped.", self.label);
-            }
-        }
         let _clear = ClearRunning {
             running,
             level,
@@ -361,6 +401,28 @@ pub(super) fn start_audio_level_stream(
         }
 
         crate::recording::run_audio_level_monitor(label, target_owned, capture_sink, level, stop);
+    });
+}
+
+/// Speaker meter on one app's PipeWire node.
+pub(super) fn start_app_level_stream(
+    label: &'static str,
+    serial: u32,
+    level: &'static std::sync::atomic::AtomicU64,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    std::thread::spawn(move || {
+        let _clear = ClearRunning {
+            running: &SPEAKER_MONITOR_RUNNING,
+            level,
+            label,
+        };
+
+        if stop.load(std::sync::atomic::Ordering::Acquire) {
+            return;
+        }
+
+        crate::recording::run_app_audio_level_monitor(label, serial, level, stop);
     });
 }
 

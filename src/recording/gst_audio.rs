@@ -6,8 +6,12 @@
 //! ```text
 //! pulsesrc(mic)      ! queue ! volume ! audioconvert ! audioresample ! caps ! audiomixer
 //! pulsesrc(monitor) ! queue ! volume ! audioconvert ! audioresample ! caps ! audiomixer
+//! pipewiresrc(app)  ! queue ! volume ! audioconvert ! audioresample ! caps ! audiomixer
 //! audiomixer ! queue ! audioconvert ! caps ! encoder ! aacparse|oggmux ! appsink|ghost pad
 //! ```
+//!
+//! The `pipewiresrc` branch replaces the monitor when one app is chosen, once
+//! per stream that app has open.
 //!
 //! Wayland recordings hand the encoded frames to ffmpeg through an inherited
 //! pipe fd (`-f aac|ogg -i pipe:3 -c:a copy`); X11 links the ghost pad into
@@ -23,7 +27,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use super::audio::{PulseMicDevice, ResolvedAudioDevices};
+use super::audio::PulseMicDevice;
 use super::RecordingConfig;
 
 pub(super) const AUDIO_SAMPLE_RATE: i32 = 48000;
@@ -100,6 +104,7 @@ fn required_elements(
     encoder: AudioEncoder,
     termination: AudioTermination,
     noise_suppression: bool,
+    app_audio: bool,
 ) -> Option<Vec<&'static str>> {
     let mut elements = vec![
         "pulsesrc",
@@ -121,6 +126,9 @@ fn required_elements(
     if noise_suppression {
         elements.push("webrtcdsp");
     }
+    if app_audio {
+        elements.push("pipewiresrc");
+    }
     Some(elements)
 }
 
@@ -129,6 +137,7 @@ pub(super) fn audio_available(
     muxer: &str,
     termination: AudioTermination,
     noise_suppression: bool,
+    app_audio: bool,
 ) -> bool {
     if ensure_gst_initialized().is_err() {
         return false;
@@ -136,7 +145,7 @@ pub(super) fn audio_available(
     let Some(encoder) = encoder_for_muxer(muxer) else {
         return false;
     };
-    required_elements(encoder, termination, noise_suppression)
+    required_elements(encoder, termination, noise_suppression, app_audio)
         .map(|elements| {
             elements
                 .iter()
@@ -152,6 +161,9 @@ pub(super) struct GstAudioSetup {
     pub mic: Option<PulseMicDevice>,
     /// Speaker-monitor branch input (a real `.monitor` source name).
     pub monitor: Option<String>,
+    /// One PipeWire node serial per stream of the chosen app; replaces the
+    /// monitor branch when set.
+    pub app_streams: Vec<u32>,
     pub mono: bool,
     pub noise_suppression: bool,
     /// Replace pulsesrc with this element factory (tests use `audiotestsrc`).
@@ -172,11 +184,63 @@ impl GstAudioSetup {
         if !inputs.any() {
             return None;
         }
-        let ResolvedAudioDevices { mic, monitor } =
-            super::audio::resolve_recording_audio_devices(config, inputs)?;
+
+        let mic = inputs.mic.then(|| match config.mic_source.as_deref() {
+            Some(name) if name != "default" => PulseMicDevice::Named(name.to_string()),
+            _ => PulseMicDevice::Default,
+        });
+
+        let mut monitor = None;
+        let mut app_streams = Vec::new();
+        if inputs.speaker {
+            if let Some(app) = config.speaker_app.as_ref() {
+                // One app is captured from its own PipeWire nodes. Anything
+                // that cannot do that records the default output's monitor,
+                // so a recording never fails over the choice.
+                let app_capture = gst::ElementFactory::find("pipewiresrc").is_some()
+                    && super::app_audio_capture_available();
+                if app_capture {
+                    app_streams = super::audio::app_stream_serials(app.pid, &app.name);
+                }
+                if app_streams.is_empty() {
+                    eprintln!(
+                        "[recording] recording every app instead of '{}': {}",
+                        app.name,
+                        if app_capture {
+                            "it is not playing audio"
+                        } else {
+                            "one-app capture is unavailable here"
+                        }
+                    );
+                    crate::utils::notify::desktop_notification(
+                        &crate::i18n::t("Recording all system audio"),
+                        &crate::i18n::tfmt(
+                            "{app} is not playing audio, so the recording captures every app.",
+                            &[("app", app.name.as_str())],
+                        ),
+                    );
+                }
+            }
+            if app_streams.is_empty() {
+                let name = config
+                    .speaker_source
+                    .clone()
+                    .unwrap_or_else(super::audio::get_pulse_speaker_monitor);
+                if name == "default.monitor" {
+                    // No output to record; keep the mic if it survives.
+                    mic.as_ref()?;
+                } else {
+                    monitor = Some(name);
+                }
+            }
+        }
+        if mic.is_none() && monitor.is_none() && app_streams.is_empty() {
+            return None;
+        }
         Some(Self {
             mic,
             monitor,
+            app_streams,
             mono: config.mono_audio,
             noise_suppression: config.noise_suppression,
             source_factory_override: None,
@@ -189,15 +253,28 @@ pub(super) struct GstAudioBin {
     pub bin: gst::Bin,
     pub appsink: Option<gst_app::AppSink>,
     pub volumes: Vec<gst::Element>,
+    /// How many trailing branches carry the speaker side: one monitor, or one
+    /// per stream of the chosen app.
+    speaker_branches: usize,
 }
 
 impl GstAudioBin {
-    /// Mute/unmute one capture branch (mic = 0, monitor = 1 when present).
-    /// The overlay volume sliders keep mutating system volume (WYSIWYG
-    /// recording); this handle is for programmatic mute from control plumbing.
+    /// Mute/unmute one capture branch (mic = 0 when present, then the monitor
+    /// or the app's streams). The overlay volume sliders keep mutating system
+    /// volume (WYSIWYG recording); this handle is for programmatic mute from
+    /// control plumbing.
     #[allow(dead_code)]
     pub fn set_branch_muted(&self, branch: usize, muted: bool) {
         if let Some(volume) = self.volumes.get(branch) {
+            volume.set_property("volume", if muted { 0.0f64 } else { 1.0f64 });
+        }
+    }
+
+    /// Mute the whole speaker side together, however many app streams it has.
+    #[allow(dead_code)]
+    pub fn set_speaker_muted(&self, muted: bool) {
+        let start = self.volumes.len().saturating_sub(self.speaker_branches);
+        for volume in &self.volumes[start..] {
             volume.set_property("volume", if muted { 0.0f64 } else { 1.0f64 });
         }
     }
@@ -268,6 +345,19 @@ fn make_source(
     Ok(src)
 }
 
+/// A PipeWire node source, used for one app's own stream.
+fn make_app_source(name: &str, serial: u32) -> Result<gst::Element, String> {
+    let src = gst::ElementFactory::make("pipewiresrc")
+        .name(name)
+        .property("target-object", serial.to_string())
+        .build()
+        .map_err(|_| "missing GStreamer element 'pipewiresrc'".to_string())?;
+    if src.find_property("do-timestamp").is_some() {
+        src.set_property("do-timestamp", true);
+    }
+    Ok(src)
+}
+
 fn configure_live_queue(queue: &gst::Element) {
     if queue.find_property("leaky").is_some() {
         queue.set_property_from_str("leaky", "downstream");
@@ -292,13 +382,21 @@ fn build_branch(
     setup: &GstAudioSetup,
     prefix: &str,
     device: Option<&str>,
+    app_serial: Option<u32>,
     with_dsp: bool,
     channels: i32,
 ) -> Result<Vec<gst::Element>, String> {
     let queue = make_element("queue", &format!("{prefix}_queue"))?;
     configure_live_queue(&queue);
+    let source_name = format!("{prefix}_src");
+    let source = match app_serial {
+        Some(serial) if setup.source_factory_override.is_none() => {
+            make_app_source(&source_name, serial)?
+        }
+        _ => make_source(setup, &source_name, device)?,
+    };
     let mut elements = vec![
-        make_source(setup, &format!("{prefix}_src"), device)?,
+        source,
         queue,
         make_element("volume", &format!("{prefix}_volume"))?,
         make_element("audioconvert", &format!("{prefix}_convert"))?,
@@ -348,6 +446,7 @@ pub(super) fn build_audio_bin(
             setup,
             "mic",
             device,
+            None,
             setup.noise_suppression,
             channels,
         )?);
@@ -357,6 +456,18 @@ pub(super) fn build_audio_bin(
             setup,
             "mon",
             Some(monitor.as_str()),
+            None,
+            false,
+            channels,
+        )?);
+    }
+    // One pipewiresrc per app stream, mixed into the same audiomixer.
+    for (index, serial) in setup.app_streams.iter().enumerate() {
+        branches.push(build_branch(
+            setup,
+            &format!("app{index}"),
+            None,
+            Some(*serial),
             false,
             channels,
         )?);
@@ -519,6 +630,7 @@ pub(super) fn build_audio_bin(
         bin,
         appsink,
         volumes,
+        speaker_branches: setup.monitor.iter().count() + setup.app_streams.len(),
     })
 }
 
@@ -971,7 +1083,45 @@ pub(crate) fn run_pulse_level_monitor(
     if src.find_property("client-name").is_some() {
         src.set_property("client-name", format!("ApexShot {label} meter"));
     }
+    run_level_meter(label, src, capture_sink, level, stop);
+}
 
+/// Level meter on one PipeWire node, used while the Speaker item watches a
+/// single app's streams.
+pub(crate) fn run_pipewire_level_monitor(
+    label: &'static str,
+    serial: u32,
+    level: &'static AtomicU64,
+    stop: Arc<AtomicBool>,
+) {
+    if let Err(err) = ensure_gst_initialized() {
+        eprintln!("[audio] {label} meter: {err}");
+        return;
+    }
+    let src = match gst::ElementFactory::make("pipewiresrc")
+        .name(format!("{label}_meter_src"))
+        .property("target-object", serial.to_string())
+        .build()
+    {
+        Ok(src) => src,
+        Err(_) => {
+            eprintln!("[audio] {label} meter: failed to create pipewiresrc");
+            return;
+        }
+    };
+    // One app's audio is still system audio, so it keeps that level scale.
+    run_level_meter(label, src, true, level, stop);
+}
+
+/// Feed one source through the shared meter chain and publish its RMS until
+/// `stop` is set.
+fn run_level_meter(
+    label: &'static str,
+    src: gst::Element,
+    capture_sink: bool,
+    level: &'static AtomicU64,
+    stop: Arc<AtomicBool>,
+) {
     let convert = match make_element("audioconvert", &format!("{label}_meter_convert")) {
         Ok(el) => el,
         Err(err) => {
@@ -1021,7 +1171,7 @@ pub(crate) fn run_pulse_level_monitor(
         let _ = pipeline.set_state(gst::State::Null);
         return;
     }
-    eprintln!("[audio] {label} meter: GStreamer pulsesrc started");
+    eprintln!("[audio] {label} meter: GStreamer meter started");
 
     while !stop.load(Ordering::Acquire) {
         if let Some(sample) = appsink.try_pull_sample(gst::ClockTime::from_mseconds(80)) {
@@ -1145,6 +1295,7 @@ mod tests {
         GstAudioSetup {
             mic: Some(PulseMicDevice::Default),
             monitor: Some("test.monitor".to_string()),
+            app_streams: Vec::new(),
             mono,
             noise_suppression: false,
             source_factory_override: Some("audiotestsrc"),
@@ -1190,7 +1341,8 @@ mod tests {
         assert!(!audio_available(
             "nonexistent-muxer",
             AudioTermination::AppSink,
-            false
+            false,
+            false,
         ));
     }
 

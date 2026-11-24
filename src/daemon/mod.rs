@@ -737,13 +737,14 @@ impl DaemonIpc {
         audio::speaker_meter_level()
     }
 
-    /// Points the meters at the sources the Quick Capture toolbar shows; an
-    /// empty string restores the default source for that meter.
-    fn set_meter_sources(&self, mic: String, speaker: String) -> zbus::fdo::Result<()> {
-        eprintln!("[daemon] D-Bus SetMeterSources: mic={mic:?} speaker={speaker:?}");
+    /// Points the meters at what the Quick Capture toolbar shows; an empty
+    /// microphone restores the default input, and a zero app pid meters every
+    /// app on the default output.
+    fn set_meter_sources(&self, mic: String, speaker_app_pid: u32) -> zbus::fdo::Result<()> {
+        eprintln!("[daemon] D-Bus SetMeterSources: mic={mic:?} speaker_app_pid={speaker_app_pid}");
         audio::set_meter_sources(
             audio::normalized_meter_source(mic),
-            audio::normalized_meter_source(speaker),
+            (speaker_app_pid != 0).then_some(speaker_app_pid),
         );
         Ok(())
     }

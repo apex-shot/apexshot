@@ -76,6 +76,13 @@ pub struct AudioOutputDevice {
     pub default: bool,
 }
 
+/// One app currently playing audio, as the Speaker menu lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioApplication {
+    pub name: String,
+    pub pid: u32,
+}
+
 /// Run one pactl query, giving up after 1.5 s so a wedged Pulse server never
 /// blocks the toolbar. The child is left to exit on its own; pactl is local
 /// and bounded, and killing it from the UI thread is worse than waiting out
@@ -104,11 +111,13 @@ struct PactlBlock {
     description: String,
     monitor_source: String,
     monitor_of: String,
+    active_port: String,
+    product: String,
+    ports: Vec<(String, String)>,
 }
 
 /// Split `pactl list sources` / `list sinks` long output into blocks. pactl
-/// indents fields with one tab and properties with two, so only the one-tab
-/// keys are read.
+/// indents fields with one tab and properties/ports with two.
 fn parse_pactl_blocks(text: &str) -> Vec<PactlBlock> {
     let mut blocks: Vec<PactlBlock> = Vec::new();
     for line in text.lines() {
@@ -119,12 +128,28 @@ fn parse_pactl_blocks(text: &str) -> Vec<PactlBlock> {
         let Some(block) = blocks.last_mut() else {
             continue;
         };
+        if let Some(field) = line.strip_prefix("\t\t") {
+            let field = field.trim();
+            if field.starts_with('[') {
+                // "[Out] HDMI3: HDMI / DisplayPort 3 Output (type: HDMI, ...)"
+                if let Some((name, description)) = field.split_once(": ") {
+                    let description = description
+                        .split(" (type:")
+                        .next()
+                        .unwrap_or(description)
+                        .trim();
+                    block
+                        .ports
+                        .push((name.trim().to_string(), description.to_string()));
+                }
+            } else if let Some(value) = field.strip_prefix("device.product.name =") {
+                block.product = unquoted(value);
+            }
+            continue;
+        }
         let Some(field) = line.strip_prefix('\t') else {
             continue;
         };
-        if field.starts_with('\t') {
-            continue;
-        }
         let field = field.trim();
         if let Some(value) = field.strip_prefix("Name:") {
             block.name = value.trim().to_string();
@@ -134,6 +159,8 @@ fn parse_pactl_blocks(text: &str) -> Vec<PactlBlock> {
             block.monitor_source = value.trim().to_string();
         } else if let Some(value) = field.strip_prefix("Monitor of Sink:") {
             block.monitor_of = value.trim().to_string();
+        } else if let Some(value) = field.strip_prefix("Active Port:") {
+            block.active_port = value.trim().to_string();
         }
     }
     blocks
@@ -145,6 +172,41 @@ fn device_description(description: &str, name: &str) -> String {
     } else {
         description.trim().to_string()
     }
+}
+
+fn unquoted(value: &str) -> String {
+    let text = value.trim();
+    text.strip_prefix('"')
+        .and_then(|text| text.strip_suffix('"'))
+        .unwrap_or(text)
+        .to_string()
+}
+
+/// "Digital Microphone (Raptor Lake-P/U/H cAVS)": the active port first and
+/// the card in parentheses, the shape the Windows toolbar uses.
+fn join_display_name(port: &str, product: &str, fallback: &str) -> String {
+    if port.is_empty() {
+        return fallback.to_string();
+    }
+    if product.is_empty() {
+        port.to_string()
+    } else {
+        format!("{port} ({product})")
+    }
+}
+
+fn block_display_name(block: &PactlBlock) -> String {
+    let port = block
+        .ports
+        .iter()
+        .find(|(name, _)| *name == block.active_port)
+        .map(|(_, description)| description.as_str())
+        .unwrap_or_default();
+    join_display_name(
+        port,
+        &block.product,
+        &device_description(&block.description, &block.name),
+    )
 }
 
 fn json_description(value: &serde_json::Value, name: &str) -> String {
@@ -161,6 +223,47 @@ fn json_description(value: &serde_json::Value, name: &str) -> String {
         .and_then(|description| description.as_str())
         .unwrap_or_default();
     device_description(property, name)
+}
+
+fn json_product_name(value: &serde_json::Value) -> String {
+    value
+        .get("properties")
+        .and_then(|properties| properties.get("device.product.name"))
+        .and_then(|product| product.as_str())
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+fn json_active_port_description(value: &serde_json::Value) -> String {
+    let active = value
+        .get("active_port")
+        .and_then(|port| port.as_str())
+        .unwrap_or_default();
+    if active.is_empty() {
+        return String::new();
+    }
+    value
+        .get("ports")
+        .and_then(|ports| ports.as_array())
+        .and_then(|ports| {
+            ports
+                .iter()
+                .find(|port| port.get("name").and_then(|name| name.as_str()) == Some(active))
+        })
+        .and_then(|port| port.get("description"))
+        .and_then(|description| description.as_str())
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+fn json_display_name(value: &serde_json::Value, name: &str) -> String {
+    join_display_name(
+        &json_active_port_description(value),
+        &json_product_name(value),
+        &json_description(value, name),
+    )
 }
 
 fn parse_sources_json(text: &str) -> Vec<AudioInputDevice> {
@@ -184,7 +287,7 @@ fn parse_sources_json(text: &str) -> Vec<AudioInputDevice> {
             }
             Some(AudioInputDevice {
                 name: name.to_string(),
-                description: json_description(value, name),
+                description: json_display_name(value, name),
                 default: false,
             })
         })
@@ -202,7 +305,7 @@ fn parse_sources_text(text: &str) -> Vec<AudioInputDevice> {
                 && !block.name.ends_with(".monitor")
         })
         .map(|block| AudioInputDevice {
-            description: device_description(&block.description, &block.name),
+            description: block_display_name(&block),
             name: block.name,
             default: false,
         })
@@ -229,7 +332,7 @@ fn parse_sinks_json(text: &str) -> Vec<AudioOutputDevice> {
                 .unwrap_or_else(|| format!("{name}.monitor"));
             Some(AudioOutputDevice {
                 name: name.to_string(),
-                description: json_description(value, name),
+                description: json_display_name(value, name),
                 monitor_source: monitor,
                 default: false,
             })
@@ -245,10 +348,10 @@ fn parse_sinks_text(text: &str) -> Vec<AudioOutputDevice> {
             let monitor = if block.monitor_source.is_empty() {
                 format!("{}.monitor", block.name)
             } else {
-                block.monitor_source
+                block.monitor_source.clone()
             };
             AudioOutputDevice {
-                description: device_description(&block.description, &block.name),
+                description: block_display_name(&block),
                 name: block.name,
                 monitor_source: monitor,
                 default: false,
@@ -416,52 +519,6 @@ pub(super) enum PulseMicDevice {
     Named(String),
 }
 
-#[derive(Debug, Clone)]
-pub(super) struct ResolvedAudioDevices {
-    pub mic: Option<PulseMicDevice>,
-    pub monitor: Option<String>,
-}
-
-/// Resolve the mic/monitor Pulse source names for the GStreamer audio path.
-///
-/// `inputs` is the already-checked set of sources that exist; unavailable
-/// ones were dropped by `resolve_available_audio_inputs`. `None` when no
-/// input remains, or when the monitor source cannot be resolved to a real
-/// `.monitor` name (pulsesrc has no "default monitor" shorthand, unlike
-/// ffmpeg's pulse input) — callers then fall back to the ffmpeg-pulse audio
-/// path.
-pub(super) fn resolve_recording_audio_devices(
-    config: &super::RecordingConfig,
-    inputs: AudioInputs,
-) -> Option<ResolvedAudioDevices> {
-    if !inputs.any() {
-        return None;
-    }
-
-    let mic = inputs.mic.then(|| match config.mic_source.as_deref() {
-        Some(name) if name != "default" => PulseMicDevice::Named(name.to_string()),
-        _ => PulseMicDevice::Default,
-    });
-
-    let monitor = if inputs.speaker {
-        let name = config
-            .speaker_source
-            .clone()
-            .unwrap_or_else(get_pulse_speaker_monitor);
-        if name == "default.monitor" {
-            return None;
-        }
-        Some(name)
-    } else {
-        None
-    };
-
-    if mic.is_none() && monitor.is_none() {
-        return None;
-    }
-    Some(ResolvedAudioDevices { mic, monitor })
-}
-
 /// List all PulseAudio/PipeWire input sources (microphones), marking the
 /// server's current default.
 pub fn list_audio_inputs() -> Vec<AudioInputDevice> {
@@ -496,6 +553,186 @@ pub fn list_audio_outputs() -> Vec<AudioOutputDevice> {
         device.default = device.monitor_source == default;
     }
     devices
+}
+
+/// One Pulse sink-input: one stream one app has open on an output.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SinkInput {
+    name: String,
+    pid: u32,
+    /// The PipeWire node serial `pipewiresrc target-object` opens.
+    serial: Option<u32>,
+}
+
+/// The recorder's own meter and capture streams are never a menu choice.
+fn own_audio_stream(name: &str) -> bool {
+    name.to_ascii_lowercase().contains("apexshot")
+}
+
+fn application_name(name: &str, binary: &str) -> Option<String> {
+    let name = if name.trim().is_empty() { binary } else { name };
+    let name = name.trim();
+    (!name.is_empty() && !own_audio_stream(name)).then(|| name.to_string())
+}
+
+fn parse_sink_inputs_json(text: &str) -> Vec<SinkInput> {
+    let Ok(values) = serde_json::from_str::<Vec<serde_json::Value>>(text) else {
+        return Vec::new();
+    };
+    values
+        .iter()
+        .filter_map(|value| {
+            let properties = value.get("properties")?;
+            let pid = properties
+                .get("application.process.id")
+                .and_then(|pid| {
+                    pid.as_str()
+                        .map(str::to_string)
+                        .or_else(|| pid.as_u64().map(|pid| pid.to_string()))
+                })
+                .and_then(|pid| pid.trim().parse::<u32>().ok())
+                .filter(|pid| *pid != 0)?;
+            let name = application_name(
+                properties
+                    .get("application.name")
+                    .and_then(|name| name.as_str())
+                    .unwrap_or_default(),
+                properties
+                    .get("application.process.binary")
+                    .and_then(|binary| binary.as_str())
+                    .unwrap_or_default(),
+            )?;
+            // PipeWire puts the node serial on the stream; older servers only
+            // expose the Pulse object id, which pipewiresrc cannot open.
+            let serial = properties
+                .get("object.serial")
+                .or_else(|| value.get("object.serial"))
+                .and_then(|serial| {
+                    serial
+                        .as_str()
+                        .map(str::to_string)
+                        .or_else(|| serial.as_u64().map(|serial| serial.to_string()))
+                })
+                .and_then(|serial| serial.trim().parse::<u32>().ok())
+                .filter(|serial| *serial != 0);
+            Some(SinkInput { name, pid, serial })
+        })
+        .collect()
+}
+
+fn parse_sink_inputs_text(text: &str) -> Vec<SinkInput> {
+    #[derive(Default)]
+    struct Block {
+        name: String,
+        binary: String,
+        pid: String,
+        serial: String,
+    }
+
+    let mut blocks: Vec<Block> = Vec::new();
+    for line in text.lines() {
+        if line.starts_with("Sink Input #") {
+            blocks.push(Block::default());
+            continue;
+        }
+        let Some(block) = blocks.last_mut() else {
+            continue;
+        };
+        let Some(field) = line.strip_prefix("\t\t") else {
+            continue;
+        };
+        let field = field.trim();
+        if let Some(value) = field.strip_prefix("application.name =") {
+            block.name = unquoted(value);
+        } else if let Some(value) = field.strip_prefix("application.process.binary =") {
+            block.binary = unquoted(value);
+        } else if let Some(value) = field.strip_prefix("application.process.id =") {
+            block.pid = unquoted(value);
+        } else if let Some(value) = field.strip_prefix("object.serial =") {
+            block.serial = unquoted(value);
+        }
+    }
+    blocks
+        .into_iter()
+        .filter_map(|block| {
+            let pid = block
+                .pid
+                .trim()
+                .parse::<u32>()
+                .ok()
+                .filter(|pid| *pid != 0)?;
+            let name = application_name(&block.name, &block.binary)?;
+            let serial = block
+                .serial
+                .trim()
+                .parse::<u32>()
+                .ok()
+                .filter(|serial| *serial != 0);
+            Some(SinkInput { name, pid, serial })
+        })
+        .collect()
+}
+
+fn load_sink_inputs() -> Vec<SinkInput> {
+    let mut inputs = run_pactl(&["-f", "json", "list", "sink-inputs"])
+        .map(|text| parse_sink_inputs_json(&text))
+        .unwrap_or_default();
+    if inputs.is_empty() {
+        inputs = run_pactl(&["list", "sink-inputs"])
+            .map(|text| parse_sink_inputs_text(&text))
+            .unwrap_or_default();
+    }
+    inputs
+}
+
+/// Apps currently playing audio, one row per process. An app often opens
+/// several streams, which share a row.
+pub fn list_audio_applications() -> Vec<AudioApplication> {
+    applications_from_inputs(load_sink_inputs())
+}
+
+fn applications_from_inputs(inputs: Vec<SinkInput>) -> Vec<AudioApplication> {
+    let mut applications: Vec<AudioApplication> = Vec::new();
+    for input in inputs {
+        if applications
+            .iter()
+            .any(|application| application.pid == input.pid)
+        {
+            continue;
+        }
+        applications.push(AudioApplication {
+            name: input.name,
+            pid: input.pid,
+        });
+    }
+    applications
+}
+
+/// Node serials of the app's streams right now: matched by pid first, then by
+/// name when the process was restarted since it was picked. Empty means the
+/// app is not playing, and the recording falls back to every app.
+pub(crate) fn app_stream_serials(pid: u32, name: &str) -> Vec<u32> {
+    stream_serials(&load_sink_inputs(), pid, name)
+}
+
+fn stream_serials(inputs: &[SinkInput], pid: u32, name: &str) -> Vec<u32> {
+    let by_pid: Vec<u32> = inputs
+        .iter()
+        .filter(|input| input.pid == pid)
+        .filter_map(|input| input.serial)
+        .collect();
+    if !by_pid.is_empty() {
+        return by_pid;
+    }
+    let name = name.trim().to_lowercase();
+    if name.is_empty() {
+        return Vec::new();
+    }
+    inputs
+        .iter()
+        .filter(|input| input.name.to_lowercase() == name)
+        .filter_map(|input| input.serial)
+        .collect()
 }
 
 #[cfg(test)]
@@ -715,5 +952,177 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn pactl_json_display_names_read_like_the_windows_toolbar() {
+        let json = r#"[
+            {"name":"alsa_input.mic","monitor_source":"",
+             "description":"Raptor Lake-P/U/H cAVS Digital Microphone",
+             "active_port":"[In] Mic1",
+             "ports":[
+                {"name":"[In] Mic1","description":"Digital Microphone"},
+                {"name":"[In] Mic2","description":"Stereo Microphone"}
+             ],
+             "properties":{"device.product.name":"Raptor Lake-P/U/H cAVS"}},
+            {"name":"easyeffects_source","monitor_source":"",
+             "description":"Easy Effects Source"}
+        ]"#;
+        let devices = parse_sources_json(json);
+        assert_eq!(
+            devices[0].description,
+            "Digital Microphone (Raptor Lake-P/U/H cAVS)"
+        );
+        // No ports: the description stands on its own.
+        assert_eq!(devices[1].description, "Easy Effects Source");
+    }
+
+    #[test]
+    fn pactl_text_display_names_use_the_active_port() {
+        let text = "Source #0\n\
+        \tState: RUNNING\n\
+        \tName: alsa_input.mic\n\
+        \tDescription: Raptor Lake-P/U/H cAVS Digital Microphone\n\
+        \tMonitor of Sink: n/a\n\
+        \tProperties:\n\
+        \t\tdevice.product.name = \"Raptor Lake-P/U/H cAVS\"\n\
+        \tPorts:\n\
+        \t\t[In] Mic1: Digital Microphone (type: Mic, priority: 100)\n\
+        \t\t[In] Mic2: Stereo Microphone (type: Mic, priority: 200)\n\
+        \tActive Port: [In] Mic1\n";
+        assert_eq!(
+            parse_sources_text(text)[0].description,
+            "Digital Microphone (Raptor Lake-P/U/H cAVS)"
+        );
+
+        let sink = "Sink #0\n\
+        \tName: alsa_output.speaker\n\
+        \tDescription: Raptor Lake-P/U/H cAVS Speaker\n\
+        \tMonitor Source: alsa_output.speaker.monitor\n\
+        \tProperties:\n\
+        \t\tdevice.product.name = \"Raptor Lake-P/U/H cAVS\"\n\
+        \tPorts:\n\
+        \t\t[Out] Speaker: Speaker (type: Speaker, priority: 100)\n\
+        \tActive Port: [Out] Speaker\n";
+        assert_eq!(
+            parse_sinks_text(sink)[0].description,
+            "Speaker (Raptor Lake-P/U/H cAVS)"
+        );
+    }
+
+    #[test]
+    fn pactl_json_lists_one_row_per_app_with_its_node_serial() {
+        // The real shape keeps `object.serial` on the stream, not inside
+        // `properties`; older servers only have the String pid form.
+        let json = r#"[
+            {"object.serial":"3373","properties":{
+                "application.name":"Google Chrome",
+                "application.process.id":"9707"}},
+            {"object.serial":"3374","properties":{
+                "application.name":"Google Chrome",
+                "application.process.id":"9707"}},
+            {"object.serial":"40","properties":{
+                "application.name":"ApexShot Recording",
+                "application.process.id":"123"}},
+            {"object.serial":41,"properties":{
+                "application.process.binary":"mpv",
+                "application.process.id":4242}}
+        ]"#;
+        assert_eq!(
+            parse_sink_inputs_json(json),
+            vec![
+                SinkInput {
+                    name: "Google Chrome".into(),
+                    pid: 9707,
+                    serial: Some(3373),
+                },
+                SinkInput {
+                    name: "Google Chrome".into(),
+                    pid: 9707,
+                    serial: Some(3374),
+                },
+                SinkInput {
+                    name: "mpv".into(),
+                    pid: 4242,
+                    serial: Some(41),
+                },
+            ]
+        );
+        assert_eq!(
+            applications_from_inputs(parse_sink_inputs_json(json)),
+            vec![
+                AudioApplication {
+                    name: "Google Chrome".into(),
+                    pid: 9707,
+                },
+                AudioApplication {
+                    name: "mpv".into(),
+                    pid: 4242,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn pactl_text_lists_apps_when_json_is_unavailable() {
+        let text = "Sink Input #3373\n\
+        \tState: RUNNING\n\
+        \tProperties:\n\
+        \t\tapplication.name = \"Google Chrome\"\n\
+        \t\tapplication.process.binary = \"chrome\"\n\
+        \t\tapplication.process.id = \"9707\"\n\
+        \t\tobject.serial = \"3373\"\n\
+        Sink Input #3374\n\
+        \tProperties:\n\
+        \t\tapplication.name = \"Google Chrome\"\n\
+        \t\tapplication.process.id = \"9707\"\n\
+        \t\tobject.serial = \"3374\"\n";
+        assert_eq!(
+            parse_sink_inputs_text(text),
+            vec![
+                SinkInput {
+                    name: "Google Chrome".into(),
+                    pid: 9707,
+                    serial: Some(3373),
+                },
+                SinkInput {
+                    name: "Google Chrome".into(),
+                    pid: 9707,
+                    serial: Some(3374),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn app_streams_match_by_pid_then_by_name() {
+        let inputs = vec![
+            SinkInput {
+                name: "Google Chrome".into(),
+                pid: 9707,
+                serial: Some(3373),
+            },
+            SinkInput {
+                name: "Google Chrome".into(),
+                pid: 9707,
+                serial: Some(3374),
+            },
+            SinkInput {
+                name: "mpv".into(),
+                pid: 4242,
+                serial: Some(41),
+            },
+        ];
+        assert_eq!(
+            stream_serials(&inputs, 9707, "Google Chrome"),
+            vec![3373, 3374]
+        );
+        // A restarted app keeps the name but changes pid.
+        assert_eq!(
+            stream_serials(&inputs, 1, "google chrome"),
+            vec![3373, 3374]
+        );
+        assert_eq!(stream_serials(&inputs, 4242, ""), vec![41]);
+        assert!(stream_serials(&inputs, 1, "Firefox").is_empty());
     }
 }

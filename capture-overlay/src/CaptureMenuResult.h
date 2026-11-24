@@ -20,9 +20,12 @@ struct Selection {
     int timerSeconds = 0;
     bool microphone = false;
     bool speaker = false;
-    /// Linux: the Pulse source names the recording should open.
+    /// Linux: the Pulse source the recording should open.
     QString microphoneDevice;
-    QString speakerDevice;
+    /// Linux: the one app whose audio the recording captures, empty for every
+    /// app.
+    QString speakerApp;
+    quint32 speakerAppPid = 0;
 };
 
 bool parse(const QByteArray& json,

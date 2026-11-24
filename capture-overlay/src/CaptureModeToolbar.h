@@ -41,11 +41,11 @@ public:
         bool timedSelection = false;
         bool microphone = false;
         QString microphoneDevice;
-        /// Linux: the Pulse monitor source behind the chosen output.
-        QString speakerDevice;
         bool speaker = false;
         QString systemAudioApplication;
         quint32 systemAudioProcessId = 0;
+        /// Linux: whether the recorder can capture one app's streams.
+        bool systemAudioAppCapture = false;
         bool camera = false;
         QString cameraDevice;
     };
@@ -68,8 +68,6 @@ public:
         /// stays open over the picker and the selected window so devices can
         /// still be changed until Start. The caller owns it.
         CaptureModeToolbar* toolbar = nullptr;
-        /// Linux: the Pulse monitor source behind the chosen output.
-        QString speakerDevice;
     };
 
     // When a display was chosen before opening the toolbar, keep the toolbar
@@ -194,8 +192,6 @@ private:
     bool m_microphone = false;
     QString m_microphoneDevice;
     bool m_speaker = false;
-    /// Linux: the Pulse monitor source the recording opens.
-    QString m_speakerDevice;
     QString m_systemAudioApplication;
     quint32 m_systemAudioProcessId = 0;
     bool m_camera = false;
@@ -211,11 +207,16 @@ private:
     QVector<Platform::AudioSourceDevice> m_linuxMicrophones;
     QVector<Platform::AudioOutputDevice> m_linuxOutputs;
     bool m_linuxDevicesLoaded = false;
+    /// Whether a single app's streams can be captured on this session; the
+    /// host passes the answer so the menu can disable the choice.
+    bool m_appAudioCapture = false;
+    /// The daemon's speaker meter follows one app's streams, or all of them.
+    quint32 m_meterSpeakerPid = 0;
+    bool m_meterSourcesSent = false;
     double m_micLevel = 0.0;
     double m_speakerLevel = 0.0;
-    /// Last sources handed to the daemon, so a poll does not resend them.
+    /// Last microphone handed to the daemon, so a poll does not resend it.
     QString m_meterMicSource;
-    QString m_meterSpeakerSource;
 #endif
 #ifdef Q_OS_WIN
     QString m_outputDevice;

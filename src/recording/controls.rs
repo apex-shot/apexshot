@@ -775,13 +775,11 @@ pub fn prepare_overlay_recording_request(
     app_config.rec_countdown = request.countdown;
     app_config.rec_mic = request.mic;
     app_config.rec_speaker = request.speaker;
-    // The Quick Capture device menus own the source choice. A request that
-    // carries one saves it for next time; one without keeps the saved value.
+    // The Quick Capture microphone menu owns the source choice. A request
+    // that carries one saves it for next time; one without keeps the saved
+    // value.
     if !request.mic_device.trim().is_empty() {
         app_config.rec_mic_device = request.mic_device.trim().to_string();
-    }
-    if !request.speaker_device.trim().is_empty() {
-        app_config.rec_speaker_device = request.speaker_device.trim().to_string();
     }
     let mic_source = if !request.mic_device.trim().is_empty() {
         Some(request.mic_device.trim().to_string())
@@ -790,13 +788,14 @@ pub fn prepare_overlay_recording_request(
     } else {
         None
     };
-    let speaker_source = if !request.speaker_device.trim().is_empty() {
-        Some(request.speaker_device.trim().to_string())
-    } else if !app_config.rec_speaker_device.is_empty() {
-        Some(app_config.rec_speaker_device.clone())
-    } else {
-        None
-    };
+    // The Speaker menu chooses an app, never an output. An empty name means
+    // every app, which records the default output's monitor and clears the
+    // saved choice.
+    app_config.rec_speaker_app = request.speaker_app.trim().to_string();
+    let speaker_app = (!request.speaker_app.trim().is_empty()).then(|| super::SpeakerApp {
+        name: request.speaker_app.trim().to_string(),
+        pid: request.speaker_app_pid,
+    });
     // `rec_video_max_res` is deliberately not taken from the request: neither
     // quick access offers a resolution picker any more, so the request only
     // echoes the value the overlay was launched with. Writing that echo back
@@ -866,7 +865,8 @@ pub fn prepare_overlay_recording_request(
         mic_enabled: request.mic,
         speaker_enabled: request.speaker,
         mic_source,
-        speaker_source,
+        speaker_source: None,
+        speaker_app,
         noise_suppression: request.noise_suppression,
     };
 
@@ -2224,7 +2224,8 @@ mod tests {
             mic: true,
             speaker: false,
             mic_device: String::new(),
-            speaker_device: String::new(),
+            speaker_app: String::new(),
+            speaker_app_pid: 0,
             display_rec_time: true,
             hidpi: true,
             notifications: false,
@@ -2720,16 +2721,17 @@ mod tests {
         let at = chrono::Utc.with_ymd_and_hms(2026, 5, 8, 12, 0, 0).unwrap();
         let saved = AppConfig {
             rec_mic_device: "alsa_input.saved".into(),
-            rec_speaker_device: "alsa_output.saved.monitor".into(),
+            rec_speaker_app: "Saved Player".into(),
             ..AppConfig::default()
         };
 
-        // A device picked in the overlay wins and is remembered.
+        // A device and an app picked in the overlay win and are remembered.
         let request = RecordingRequest {
             mic: true,
             speaker: true,
             mic_device: "alsa_input.request".into(),
-            speaker_device: "alsa_output.request.monitor".into(),
+            speaker_app: "Google Chrome".into(),
+            speaker_app_pid: 9707,
             ..RecordingRequest::default()
         };
         let prepared = prepare_overlay_recording_request(saved.clone(), &request, at);
@@ -2737,18 +2739,20 @@ mod tests {
             prepared.recording_config.mic_source.as_deref(),
             Some("alsa_input.request")
         );
+        // An app is not a source: every-app capture leaves the monitor unset.
+        assert_eq!(prepared.recording_config.speaker_source, None);
         assert_eq!(
-            prepared.recording_config.speaker_source.as_deref(),
-            Some("alsa_output.request.monitor")
+            prepared.recording_config.speaker_app,
+            Some(super::super::SpeakerApp {
+                name: "Google Chrome".into(),
+                pid: 9707,
+            })
         );
         assert_eq!(
             prepared.updated_app_config.rec_mic_device,
             "alsa_input.request"
         );
-        assert_eq!(
-            prepared.updated_app_config.rec_speaker_device,
-            "alsa_output.request.monitor"
-        );
+        assert_eq!(prepared.updated_app_config.rec_speaker_app, "Google Chrome");
         assert_eq!(
             super::super::RecordingConfig::from_app_config_at(
                 &prepared.updated_app_config,
@@ -2760,7 +2764,8 @@ mod tests {
             Some("alsa_input.request")
         );
 
-        // Without a request device the saved choice carries over.
+        // Without a request device the saved microphone carries over, and an
+        // empty speaker choice means every app and clears the saved one.
         let request = RecordingRequest {
             mic: true,
             speaker: true,
@@ -2771,15 +2776,14 @@ mod tests {
             prepared.recording_config.mic_source.as_deref(),
             Some("alsa_input.saved")
         );
-        assert_eq!(
-            prepared.recording_config.speaker_source.as_deref(),
-            Some("alsa_output.saved.monitor")
-        );
+        assert_eq!(prepared.recording_config.speaker_app, None);
+        assert_eq!(prepared.updated_app_config.rec_speaker_app, "");
 
         // With neither, the server default is left unset.
         let prepared = prepare_overlay_recording_request(AppConfig::default(), &request, at);
         assert_eq!(prepared.recording_config.mic_source, None);
         assert_eq!(prepared.recording_config.speaker_source, None);
+        assert_eq!(prepared.recording_config.speaker_app, None);
     }
 
     #[test]

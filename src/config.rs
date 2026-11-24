@@ -85,11 +85,11 @@ pub struct AppConfig {
     pub rec_noise_suppression: bool,
     pub rec_mic: bool,
     pub rec_speaker: bool,
-    /// Linux: Pulse source the Quick Capture device menus picked. The mic
-    /// value is a source name; the speaker value is the output's monitor
-    /// source.
+    /// Linux: Pulse source the Quick Capture device menus picked for the mic,
+    /// and the one app whose audio the Speaker item records (empty = all
+    /// apps).
     pub rec_mic_device: String,
-    pub rec_speaker_device: String,
+    pub rec_speaker_app: String,
     // Webcam track. The Windows recorder writes the camera to its own file and
     // the editor composites it, so these are layer settings rather than
     // encoder ones.
@@ -242,7 +242,7 @@ impl Default for AppConfig {
             rec_mic: false,
             rec_speaker: false,
             rec_mic_device: String::new(),
-            rec_speaker_device: String::new(),
+            rec_speaker_app: String::new(),
             rec_webcam_enabled: false,
             rec_webcam_device: String::new(),
             rec_webcam_size: 1,

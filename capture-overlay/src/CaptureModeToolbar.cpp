@@ -154,61 +154,6 @@ QString menuLabel(const QString& text, const QFont& font)
     return QFontMetrics(font).elidedText(text, Qt::ElideRight, 216);
 }
 
-#ifdef Q_OS_LINUX
-/// Pulse names a card's outputs alike up front ("... HDMI / DisplayPort 1
-/// Output", "... 2 Output"), so a right-elided label hides the part that
-/// tells them apart. Linux device labels keep both ends instead.
-QString deviceMenuLabel(const QString& text, const QFont& font)
-{
-    return QFontMetrics(font).elidedText(text, Qt::ElideMiddle, 216);
-}
-
-/// Pulse heads every device of a card with the card's name, which is all a
-/// narrow cell has room for. Drop the leading words a description shares
-/// with a sibling, keeping the shortest such prefix so outputs that differ
-/// only at the end keep their distinguishing words. A device with no sibling
-/// keeps its whole description.
-QString withoutSharedCardName(const QString& description, const QStringList& all)
-{
-    const QStringList words = description.split(QLatin1Char(' '), Qt::SkipEmptyParts);
-    int shared = -1;
-    for (const QString& other : all) {
-        if (other == description)
-            continue;
-        const QStringList otherWords = other.split(QLatin1Char(' '), Qt::SkipEmptyParts);
-        int count = 0;
-        while (count < words.size() && count < otherWords.size()
-               && words.at(count) == otherWords.at(count))
-            ++count;
-        if (count > 0 && count < words.size() && (shared < 0 || count < shared))
-            shared = count;
-    }
-    return shared > 0 ? words.mid(shared).join(QLatin1Char(' ')) : description;
-}
-
-/// When a cell is still too narrow, also drop trailing words a sibling shares
-/// ("Output", "Microphone"), keeping the shortest such suffix.
-QString withoutSharedTail(const QString& label, const QString& description,
-                          const QStringList& all)
-{
-    const QStringList words = label.split(QLatin1Char(' '), Qt::SkipEmptyParts);
-    int shared = -1;
-    for (const QString& other : all) {
-        if (other == description)
-            continue;
-        const QStringList otherWords = other.split(QLatin1Char(' '), Qt::SkipEmptyParts);
-        int count = 0;
-        while (count < words.size() && count < otherWords.size()
-               && words.at(words.size() - 1 - count)
-                   == otherWords.at(otherWords.size() - 1 - count))
-            ++count;
-        if (count > 0 && count < words.size() && (shared < 0 || count < shared))
-            shared = count;
-    }
-    return shared > 0 ? words.mid(0, words.size() - shared).join(QLatin1Char(' ')) : label;
-}
-#endif
-
 void applyMenuStyle(QMenu& menu)
 {
     // The toolbar is topmost, so its device menus need the same z-order.
@@ -279,12 +224,14 @@ CaptureModeToolbar::CaptureModeToolbar(QScreen* screen, bool screenIsLocked,
     , m_microphone(defaults.microphone)
     , m_microphoneDevice(defaults.microphoneDevice)
     , m_speaker(defaults.speaker)
-    , m_speakerDevice(defaults.speakerDevice)
     , m_systemAudioApplication(defaults.systemAudioApplication)
     , m_systemAudioProcessId(defaults.systemAudioProcessId)
     , m_camera(defaults.camera)
     , m_cameraDevice(defaults.cameraDevice)
 {
+#ifdef Q_OS_LINUX
+    m_appAudioCapture = defaults.systemAudioAppCapture;
+#endif
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_DeleteOnClose, false);
     setFocusPolicy(Qt::StrongFocus);
@@ -448,8 +395,7 @@ CaptureModeToolbar::Result CaptureModeToolbar::choose(QLocalServer* controlServe
                   toolbar.m_camera,
                   toolbar.m_cameraDevice,
                   toolbar.m_scroll,
-                  nullptr,
-                  toolbar.m_speakerDevice};
+                  nullptr};
     if (persistForWindowSetup && toolbar.m_action == Action::Window
         && toolbar.m_recording) {
         // The window picker and the selected window still need the device
@@ -585,8 +531,8 @@ QString CaptureModeToolbar::labelFor(int index) const
     }
 #endif
 #ifdef Q_OS_LINUX
-    // The device cells and their hover tooltip both show the chosen source's
-    // Pulse description; the name only stands in when the listing missed it.
+    // The device cells and their hover tooltip show the chosen source's
+    // display name; the Pulse name only stands in when the listing missed it.
     if (deviceCell(index)) {
         if (index == 5) {
             if (!m_microphone || m_microphoneDevice.isEmpty())
@@ -597,13 +543,18 @@ QString CaptureModeToolbar::labelFor(int index) const
             }
             return m_microphoneDevice;
         }
-        if (!m_speaker || m_speakerDevice.isEmpty())
+        if (!m_speaker)
             return QStringLiteral("No system audio");
+        if (!m_systemAudioApplication.isEmpty())
+            return m_systemAudioApplication;
+        // System audio from every app names the default output, the way the
+        // Windows cell names the default endpoint.
         for (const Platform::AudioOutputDevice& device : m_linuxOutputs) {
-            if (device.monitorSource == m_speakerDevice)
+            if (device.isDefault)
                 return device.description;
         }
-        return m_speakerDevice;
+        return m_linuxOutputs.isEmpty() ? QStringLiteral("No system audio")
+                                        : m_linuxOutputs.first().description;
     }
 #endif
     if (cameraSlot(index))
@@ -617,30 +568,9 @@ QString CaptureModeToolbar::displayedLabel(int index, const QFont& font) const
 {
     const int width = std::max(0, int(itemRect(index).width()) - 2 * kIconPad
                                       - kIconSize - kIconGap);
-#ifdef Q_OS_LINUX
-    // The cell drops the card name its siblings share (the tooltip keeps the
-    // full description), then keeps both ends of what is left.
-    QString label = labelFor(index);
-    if (deviceCell(index)) {
-        QStringList all;
-        if (index == 5) {
-            for (const Platform::AudioSourceDevice& device : m_linuxMicrophones)
-                all.append(device.description);
-        } else {
-            for (const Platform::AudioOutputDevice& device : m_linuxOutputs)
-                all.append(device.description);
-        }
-        if (all.contains(label)) {
-            const QString description = label;
-            label = withoutSharedCardName(description, all);
-            if (QFontMetrics(font).horizontalAdvance(label) > width)
-                label = withoutSharedTail(label, description, all);
-        }
-    }
-    return QFontMetrics(font).elidedText(label, Qt::ElideMiddle, width);
-#else
+    // Cut the end, like the Windows cell: the display name leads with the
+    // part that tells devices apart.
     return QFontMetrics(font).elidedText(labelFor(index), Qt::ElideRight, width);
-#endif
 }
 
 void CaptureModeToolbar::resizeForMode()
@@ -1370,26 +1300,46 @@ void CaptureModeToolbar::resolveLinuxAudioDevices()
     }
 
     if (m_speaker) {
-        const bool known = std::any_of(
-            m_linuxOutputs.cbegin(), m_linuxOutputs.cend(),
-            [this](const Platform::AudioOutputDevice& device) {
-                return device.monitorSource == m_speakerDevice;
-            });
-        if (!known) {
-            QString resolved = Platform::defaultSpeakerMonitor();
-            const bool defaultKnown = std::any_of(
-                m_linuxOutputs.cbegin(), m_linuxOutputs.cend(),
-                [&resolved](const Platform::AudioOutputDevice& device) {
-                    return device.monitorSource == resolved;
-                });
-            if (!defaultKnown)
-                resolved = m_linuxOutputs.isEmpty() ? QString()
-                                                    : m_linuxOutputs.first().monitorSource;
-            if (resolved != m_speakerDevice)
-                m_speakerDevice = resolved;
+        if (!m_appAudioCapture) {
+            // A saved app needs one-app capture, which this session lacks;
+            // fall back to every app.
+            m_systemAudioApplication.clear();
+            m_systemAudioProcessId = 0;
         }
-        if (m_speakerDevice.isEmpty())
+        if (m_linuxOutputs.isEmpty()) {
             m_speaker = false;
+        } else if (!m_systemAudioApplication.isEmpty()) {
+            // A saved app may have stopped playing since it was picked. Keep
+            // it while it still has a stream, by pid first and then by name,
+            // and fall back to every app otherwise.
+            const QVector<Platform::AudioApplication> applications =
+                Platform::pulseApplications();
+            const Platform::AudioApplication* match = nullptr;
+            for (const Platform::AudioApplication& application : applications) {
+                if (m_systemAudioProcessId != 0
+                    && application.processId == m_systemAudioProcessId) {
+                    match = &application;
+                    break;
+                }
+            }
+            if (!match) {
+                for (const Platform::AudioApplication& application : applications) {
+                    if (application.name.compare(m_systemAudioApplication,
+                                                  Qt::CaseInsensitive)
+                        == 0) {
+                        match = &application;
+                        break;
+                    }
+                }
+            }
+            if (match) {
+                m_systemAudioApplication = match->name;
+                m_systemAudioProcessId = match->processId;
+            } else {
+                m_systemAudioApplication.clear();
+                m_systemAudioProcessId = 0;
+            }
+        }
     }
 }
 
@@ -1407,16 +1357,20 @@ void CaptureModeToolbar::updateAudioMonitoring()
     m_speakerLevel = 0.0;
 }
 
-/// The daemon measures the sources the cells name, so its meter follows the
-/// menu instead of whatever the server calls default.
+/// The daemon measures the source the Mic cell names and either the default
+/// output or the chosen app's streams, so its meters follow the menu.
 void CaptureModeToolbar::updateLinuxMeterSources()
 {
     const QString mic = m_microphone ? m_microphoneDevice : QString();
-    const QString speaker = m_speaker ? m_speakerDevice : QString();
-    if (mic == m_meterMicSource && speaker == m_meterSpeakerSource)
+    // 0 means every app; the daemon reads the default output's monitor.
+    const quint32 speakerPid = m_speaker && !m_systemAudioApplication.isEmpty()
+        ? m_systemAudioProcessId
+        : 0;
+    if (m_meterSourcesSent && mic == m_meterMicSource && speakerPid == m_meterSpeakerPid)
         return;
+    m_meterSourcesSent = true;
     m_meterMicSource = mic;
-    m_meterSpeakerSource = speaker;
+    m_meterSpeakerPid = speakerPid;
     QDBusInterface iface(daemonBusName(),
                          QStringLiteral("/org/apexshot/Daemon"),
                          QStringLiteral("org.apexshot.Daemon"),
@@ -1424,7 +1378,7 @@ void CaptureModeToolbar::updateLinuxMeterSources()
     if (!iface.isValid())
         return;
     iface.setTimeout(150);
-    iface.call(QStringLiteral("SetMeterSources"), mic, speaker);
+    iface.call(QStringLiteral("SetMeterSources"), mic, speakerPid);
 }
 #endif
 
@@ -1508,13 +1462,15 @@ void CaptureModeToolbar::openDeviceMenu(int index)
         applyMenuStyle(menu);
 
         QAction* off = nullptr;
+        QAction* all = nullptr;
+        QVector<QAction*> appActions;
         if (index == 5) {
             if (m_linuxMicrophones.isEmpty()) {
                 QAction* empty = menu.addAction(QStringLiteral("No microphone detected"));
                 empty->setEnabled(false);
             } else {
                 for (const Platform::AudioSourceDevice& device : m_linuxMicrophones) {
-                    QAction* action = menu.addAction(deviceMenuLabel(device.description, menu.font()));
+                    QAction* action = menu.addAction(menuLabel(device.description, menu.font()));
                     action->setProperty("ticked", m_microphone
                                                    && device.name == m_microphoneDevice);
                     action->setData(device.name);
@@ -1524,17 +1480,45 @@ void CaptureModeToolbar::openDeviceMenu(int index)
             off = menu.addAction(QStringLiteral("Don't record microphone"));
             off->setProperty("ticked", !m_microphone);
         } else {
-            if (m_linuxOutputs.isEmpty()) {
-                QAction* empty = menu.addAction(QStringLiteral("No audio output detected"));
-                empty->setEnabled(false);
-            } else {
-                for (const Platform::AudioOutputDevice& device : m_linuxOutputs) {
-                    QAction* action = menu.addAction(deviceMenuLabel(device.description, menu.font()));
-                    action->setProperty("ticked", m_speaker
-                                                   && device.monitorSource == m_speakerDevice);
-                    action->setData(device.monitorSource);
+            // The Windows toolbar's three choices: every app, one app, or
+            // nothing. Linux captures every app from the default output's
+            // monitor, and one app from that app's own streams.
+            all = menu.addAction(QStringLiteral("Record system audio from all apps"));
+            all->setProperty("ticked", m_speaker && m_systemAudioApplication.isEmpty());
+
+            const QString oneAppLabel = m_appAudioCapture
+                ? QStringLiteral("Record audio from one app")
+                : QStringLiteral("Record audio from one app (not available here)");
+            DeviceMenu* one = new DeviceMenu(oneAppLabel, &menu);
+            one->setEnabled(m_appAudioCapture);
+            one->menuAction()->setEnabled(m_appAudioCapture);
+            menu.addAction(one->menuAction());
+            one->setFont(menu.font());
+            one->setStyleSheet(menu.styleSheet());
+            // Qt butts a submenu against its parent; nudge it clear once it
+            // is placed so the two panels read as separate surfaces.
+            QObject::connect(one, &QMenu::aboutToShow, one, [one]() {
+                QTimer::singleShot(0, one, [one]() { one->move(one->x() + 6, one->y()); });
+            });
+
+            if (m_appAudioCapture) {
+                const QVector<Platform::AudioApplication> applications =
+                    Platform::pulseApplications();
+                if (applications.isEmpty()) {
+                    QAction* empty = one->addAction(QStringLiteral("No apps are playing audio"));
+                    empty->setEnabled(false);
+                } else {
+                    for (const Platform::AudioApplication& application : applications) {
+                        QAction* action = one->addAction(menuLabel(application.name, one->font()));
+                        action->setProperty("ticked", m_speaker
+                                           && application.processId == m_systemAudioProcessId);
+                        action->setData(application.processId);
+                        action->setProperty("appName", application.name);
+                        appActions.append(action);
+                    }
                 }
             }
+
             menu.addSeparator();
             off = menu.addAction(QStringLiteral("Don't record system audio"));
             off->setProperty("ticked", !m_speaker);
@@ -1562,18 +1546,24 @@ void CaptureModeToolbar::openDeviceMenu(int index)
         if (!chosen)
             return;
         if (chosen == off) {
-            if (index == 5)
-                m_microphone = false;
-            else
-                m_speaker = false;
-        } else if (!chosen->data().toString().isEmpty()) {
             if (index == 5) {
-                m_microphone = true;
-                m_microphoneDevice = chosen->data().toString();
+                m_microphone = false;
             } else {
-                m_speaker = true;
-                m_speakerDevice = chosen->data().toString();
+                m_speaker = false;
+                m_systemAudioApplication.clear();
+                m_systemAudioProcessId = 0;
             }
+        } else if (chosen == all) {
+            m_speaker = true;
+            m_systemAudioApplication.clear();
+            m_systemAudioProcessId = 0;
+        } else if (index == 5 && !chosen->data().toString().isEmpty()) {
+            m_microphone = true;
+            m_microphoneDevice = chosen->data().toString();
+        } else if (appActions.contains(chosen)) {
+            m_speaker = true;
+            m_systemAudioProcessId = chosen->data().toUInt();
+            m_systemAudioApplication = chosen->property("appName").toString();
         }
         updateAudioMonitoring();
         update();
@@ -1724,7 +1714,6 @@ CaptureModeToolbar::DeviceDefaults CaptureModeToolbar::deviceState()
     state.microphone = m_microphone;
     state.microphoneDevice = m_microphoneDevice;
     state.speaker = m_speaker;
-    state.speakerDevice = m_speakerDevice;
     state.systemAudioApplication = m_systemAudioApplication;
     state.systemAudioProcessId = m_systemAudioProcessId;
     state.camera = m_camera;

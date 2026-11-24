@@ -413,7 +413,8 @@ mod tests {
             microphone: false,
             speaker: false,
             mic_device: String::new(),
-            speaker_device: String::new(),
+            speaker_app: String::new(),
+            speaker_app_pid: 0,
         });
         let state = selector.state.lock().unwrap();
         assert!(state.capture_menu_area_mode);

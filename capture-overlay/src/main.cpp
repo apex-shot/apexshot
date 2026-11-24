@@ -228,7 +228,8 @@ QByteArray jsonString(const QString& text)
 
 void printRecordingJson(const QRect& sel, const char* mode, const char* recordType,
                          bool controls, bool mic, bool speaker,
-                         const QString& micDevice, const QString& speakerDevice,
+                         const QString& micDevice, const QString& speakerApp,
+                         quint32 speakerAppPid,
                          bool clicks, bool keystrokes,
                          double clickSize, int clickColor, int clickStyle,
                          bool clickAnimate, double keySize, int keyPosition,
@@ -240,11 +241,11 @@ void printRecordingJson(const QRect& sel, const char* mode, const char* recordTy
                          bool fullscreen, bool window = false)
 {
     const QByteArray micDeviceJson = jsonString(micDevice);
-    const QByteArray speakerDeviceJson = jsonString(speakerDevice);
+    const QByteArray speakerAppJson = jsonString(speakerApp);
     std::printf("{\"x\":%d,\"y\":%d,\"width\":%d,\"height\":%d,"
                 "\"mode\":\"%s\",\"record_type\":\"%s\","
                 "\"controls\":%s,\"mic\":%s,\"speaker\":%s,"
-                "\"mic_device\":%s,\"speaker_device\":%s,"
+                "\"mic_device\":%s,\"speaker_app\":%s,\"speaker_app_pid\":%u,"
                 "\"clicks\":%s,\"keystrokes\":%s,"
                 "\"click_size\":%.4f,\"click_color\":%d,"
                 "\"click_style\":%d,\"click_animate\":%s,"
@@ -263,7 +264,8 @@ void printRecordingJson(const QRect& sel, const char* mode, const char* recordTy
                 mic ? "true" : "false",
                 speaker ? "true" : "false",
                 micDeviceJson.constData(),
-                speakerDeviceJson.constData(),
+                speakerAppJson.constData(),
+                static_cast<unsigned>(speakerAppPid),
                 clicks ? "true" : "false",
                 keystrokes ? "true" : "false",
                 clickSize,
@@ -787,7 +789,11 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
     bool initialMic = false;
     QString initialMicDevice;
     bool initialSpeaker = false;
-    QString initialSpeakerDevice;
+    // Linux: the app the last recording captured, and whether this session
+    // can capture one app at all.
+    QString initialSpeakerApp;
+    quint32 initialSpeakerAppPid = 0;
+    bool initialAppAudio = false;
     bool initialRecControls = true;
     bool initialDisplayRecTime = false;
     bool initialHidpi = true;
@@ -896,8 +902,12 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
             initialMicDevice = QString(argv[i]).mid(17);
         } else if (std::strcmp(argv[i], "--rec-speaker") == 0) {
             initialSpeaker = true;
-        } else if (QString(argv[i]).startsWith("--rec-speaker-device=")) {
-            initialSpeakerDevice = QString(argv[i]).mid(21);
+        } else if (QString(argv[i]).startsWith("--rec-speaker-app-pid=")) {
+            initialSpeakerAppPid = QString(argv[i]).mid(22).toUInt();
+        } else if (QString(argv[i]).startsWith("--rec-speaker-app=")) {
+            initialSpeakerApp = QString(argv[i]).mid(18);
+        } else if (QString(argv[i]).startsWith("--rec-app-audio=")) {
+            initialAppAudio = QString(argv[i]).mid(16) == QStringLiteral("1");
         } else if (std::strcmp(argv[i], "--rec-controls") == 0) {
             initialRecControls = true;
         } else if (std::strcmp(argv[i], "--no-rec-controls") == 0) {
@@ -1144,15 +1154,18 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
             captureMenuResult.microphone = selectedCaptureMenuResult.microphone;
             captureMenuResult.speaker = selectedCaptureMenuResult.speaker;
             captureMenuResult.microphoneDevice = selectedCaptureMenuResult.microphoneDevice;
-            captureMenuResult.speakerDevice = selectedCaptureMenuResult.speakerDevice;
+            captureMenuResult.systemAudioApplication = selectedCaptureMenuResult.speakerApp;
+            captureMenuResult.systemAudioProcessId = selectedCaptureMenuResult.speakerAppPid;
         } else {
-            // Seed the toolbar's Mic and Speaker items from the saved device
-            // choices so the menu matches the last recording.
+            // Seed the toolbar's Mic and Speaker items from the saved choices
+            // so the menu matches the last recording.
             CaptureModeToolbar::DeviceDefaults toolbarDefaults;
             toolbarDefaults.microphone = initialMic;
             toolbarDefaults.microphoneDevice = initialMicDevice;
             toolbarDefaults.speaker = initialSpeaker;
-            toolbarDefaults.speakerDevice = initialSpeakerDevice;
+            toolbarDefaults.systemAudioApplication = initialSpeakerApp;
+            toolbarDefaults.systemAudioProcessId = initialSpeakerAppPid;
+            toolbarDefaults.systemAudioAppCapture = initialAppAudio;
             // Scrolling capture needs the root window and synthetic input,
             // both of which only the unsandboxed X11 session offers.
             QString scrollError;
@@ -1182,7 +1195,8 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
                                captureMenuResult.microphone,
                                captureMenuResult.speaker,
                                captureMenuResult.microphoneDevice,
-                               captureMenuResult.speakerDevice,
+                               captureMenuResult.systemAudioApplication,
+                               captureMenuResult.systemAudioProcessId,
                                false,
                                false,
                                initialClickSize,
@@ -1628,7 +1642,8 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
                                overlay->recordMicEnabled(),
                                overlay->recordSpeakerEnabled(),
                                initialMicDevice,
-                               initialSpeakerDevice,
+                               initialSpeakerApp,
+                               initialSpeakerAppPid,
                                overlay->recordClicksEnabled(),
                                overlay->recordKeystrokesEnabled(),
                                overlay->recordClickSize(),
@@ -1749,7 +1764,8 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
                            overlay->recordMicEnabled(),
                            overlay->recordSpeakerEnabled(),
                            initialMicDevice,
-                           initialSpeakerDevice,
+                           initialSpeakerApp,
+                           initialSpeakerAppPid,
                            overlay->recordClicksEnabled(),
                            overlay->recordKeystrokesEnabled(),
                            overlay->recordClickSize(),

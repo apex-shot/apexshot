@@ -307,6 +307,7 @@ mod tests {
             speaker_enabled: false,
             mic_source: None,
             speaker_source: None,
+            speaker_app: None,
             noise_suppression: false,
         }
     }
