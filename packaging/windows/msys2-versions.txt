@@ -1,0 +1,6 @@
+# MSYS2 packages the Windows installer bundles, pinned to the versions that
+# passed the installed-app smoke test. CI fails when MSYS2 serves a different
+# version, so an upgrade is a deliberate edit here after the smoke test passes.
+# Format: the output of `pacman -Q <package>`.
+mingw-w64-ucrt-x86_64-ffmpeg 9.1-1
+mingw-w64-ucrt-x86_64-gtk4 4.24.1-1

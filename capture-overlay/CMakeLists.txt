@@ -225,9 +225,11 @@ if(WIN32)
             src/platform/windows/ddagrab.cpp
             src/platform/windows/ddagrab.h
             src/platform/windows/screen_capture.cpp
+            src/platform/windows/hdr_capture.cpp
+            src/platform/windows/hdr_capture.h
         )
         target_include_directories(apexshot-ddagrab-tests PRIVATE src)
-        target_link_libraries(apexshot-ddagrab-tests PRIVATE Qt5::Core Qt5::Gui dxgi ole32 dwmapi)
+        target_link_libraries(apexshot-ddagrab-tests PRIVATE Qt5::Core Qt5::Gui dxgi d3d11 ole32 dwmapi)
         add_test(NAME apexshot-ddagrab-tests COMMAND apexshot-ddagrab-tests)
 
         add_executable(apexshot-window-capture-tests

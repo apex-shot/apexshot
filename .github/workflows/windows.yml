@@ -14,6 +14,10 @@ on:
       - Cargo.toml
       - Cargo.lock
       - build.rs
+      - capture-overlay/**
+      - packaging/windows/**
+      - scripts/package-windows.sh
+      - scripts/check-msys2-versions.sh
   pull_request:
     paths:
       - .github/workflows/windows.yml
@@ -23,7 +27,13 @@ on:
       - Cargo.toml
       - Cargo.lock
       - build.rs
+      - capture-overlay/**
+      - packaging/windows/**
+      - scripts/package-windows.sh
+      - scripts/check-msys2-versions.sh
   workflow_dispatch:
+  schedule:
+    - cron: '0 5 * * 1'
 
 concurrency:
   group: windows-${{ github.ref }}
@@ -63,7 +73,7 @@ jobs:
       # the supported way to get GTK4 headers and DLLs onto a Windows runner
       # without building GTK from source. MSYS2 retired the MINGW64 package
       # set, so this uses UCRT64, its supported GCC environment.
-      - name: Install GTK4
+      - name: Install GTK4 and ffmpeg
         uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -75,6 +85,11 @@ jobs:
             mingw-w64-ucrt-x86_64-gtk4
             mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-ffmpeg
+
+      - name: Check the pinned MSYS2 versions
+        shell: msys2 {0}
+        run: bash scripts/check-msys2-versions.sh
 
       # The MSVC toolchain cannot link against the MinGW GTK import libraries,
       # so the crate is built for the GNU target that matches them.
@@ -97,8 +112,47 @@ jobs:
       # and the test binaries find the GTK DLLs at run time.
       - name: Format, lint, and test
         shell: msys2 {0}
+        env:
+          # The export tests run the same MSYS2 ffmpeg the installer bundles,
+          # and fail instead of skipping when it is missing.
+          APEXSHOT_REQUIRE_MEDIA_TESTS: '1'
         working-directory: windows-ui
         run: |
           cargo fmt --all -- --check
           cargo clippy --all-targets
           cargo test
+
+  capture-overlay:
+    name: Build & test the Windows capture shell
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Qt 5
+        id: qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '5.15.2'
+          arch: win64_msvc2019_64
+          cache: true
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Build
+        shell: pwsh
+        run: |
+          cmake -S capture-overlay -B capture-overlay/build -G Ninja -DCMAKE_BUILD_TYPE=Release "-DQt5_DIR=${{ steps.qt.outputs.qt-root-dir }}/lib/cmake/Qt5"
+          cmake --build capture-overlay/build
+
+      - name: Test
+        shell: pwsh
+        working-directory: capture-overlay/build
+        run: |
+          $env:PATH = "${{ steps.qt.outputs.qt-root-dir }}\bin;$env:PATH"
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          ctest --output-on-failure

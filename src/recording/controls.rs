@@ -2126,7 +2126,7 @@ mod tests {
     #[test]
     fn validate_saved_recording_probes_container_structure() {
         if !tool_installed("ffmpeg") || !tool_installed("ffprobe") {
-            eprintln!("skipping: ffmpeg/ffprobe not available");
+            crate::test_support::skip_without_media("skipping: ffmpeg/ffprobe not available");
             return;
         }
         let path = std::env::temp_dir().join(format!(

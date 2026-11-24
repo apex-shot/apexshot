@@ -8,6 +8,10 @@ on:
     # Every pull request, not only those aimed at main: this repo stacks
     # feature branches, and a base-branch filter silently skipped the layer.
   workflow_dispatch:
+  # Weekly, with no push needed: distro and MSYS2 updates that break the
+  # packages show up as a red run on a quiet day, not on release day.
+  schedule:
+    - cron: '0 5 * * 1'
 
 concurrency:
   # A newer push supersedes the run it replaced instead of queueing behind it.
@@ -276,7 +280,8 @@ jobs:
   studio_release_config:
     name: Validate official Studio build configuration
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
+    # Also on pushes to main: the Windows installer smoke test needs its outputs.
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     outputs:
       verify_key: ${{ steps.validate.outputs.verify_key }}
       release_timestamp: ${{ steps.validate.outputs.release_timestamp }}
@@ -300,7 +305,7 @@ jobs:
     name: Build Debian package and GNOME extension
     runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [lint, ci, studio_release_config]
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     env:
       APEXSHOT_STUDIO_VERIFY_KEY: ${{ needs.studio_release_config.outputs.verify_key }}
       APEXSHOT_STUDIO_RELEASE_TIMESTAMP: ${{ needs.studio_release_config.outputs.release_timestamp }}
@@ -402,9 +407,20 @@ jobs:
       - name: Build .deb package
         run: scripts/package-deb.sh --no-build --verbose
 
+      - name: Smoke test the installed Debian package
+        run: |
+          apt-get install -y --no-install-recommends ./target/debian/*.deb xvfb xauth dbus ffmpeg
+          bash scripts/smoke-linux-package.sh
+
       - name: Get version from tag
         id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        # Untagged (scheduled or manual) runs package the Cargo.toml version.
+        run: |
+          case "$GITHUB_REF" in
+            refs/tags/*) VERSION="${GITHUB_REF#refs/tags/}" ;;
+            *) VERSION="v$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)" ;;
+          esac
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Package GNOME extension
         run: |
@@ -426,7 +442,7 @@ jobs:
   opensuse:
     name: Build openSUSE RPM package
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     needs: [lint, ci, studio_release_config, release]
     container:
       image: opensuse/tumbleweed
@@ -476,10 +492,22 @@ jobs:
 
       - name: Get version from tag
         id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        # Untagged (scheduled or manual) runs package the Cargo.toml version.
+        run: |
+          case "$GITHUB_REF" in
+            refs/tags/*) VERSION="${GITHUB_REF#refs/tags/}" ;;
+            *) VERSION="v$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)" ;;
+          esac
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Build openSUSE RPMs
         run: scripts/build-opensuse-rpm.sh "${{ steps.get_version.outputs.VERSION }}"
+
+      - name: Smoke test the installed openSUSE package
+        run: |
+          rpm=$(find target/opensuse-rpmbuild/RPMS -name 'apexshot-[0-9]*.rpm' ! -name '*debug*' | head -1)
+          zypper --non-interactive --no-gpg-checks install --allow-unsigned-rpm "$rpm" xvfb-run dbus-1 ffmpeg
+          bash scripts/smoke-linux-package.sh
 
       - name: Upload openSUSE RPM build artifacts
         uses: actions/upload-artifact@v4
@@ -494,7 +522,7 @@ jobs:
   fedora:
     name: Build Fedora ${{ matrix.fedora }} RPM package
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     needs: [lint, ci, studio_release_config, release]
     # One RPM per supported Fedora release: the installer picks the build that
     # matches the host, and an RPM built on a newer Fedora will not install on
@@ -559,10 +587,22 @@ jobs:
 
       - name: Get version from tag
         id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        # Untagged (scheduled or manual) runs package the Cargo.toml version.
+        run: |
+          case "$GITHUB_REF" in
+            refs/tags/*) VERSION="${GITHUB_REF#refs/tags/}" ;;
+            *) VERSION="v$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)" ;;
+          esac
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Build Fedora RPMs
         run: scripts/build-fedora-rpm.sh "${{ steps.get_version.outputs.VERSION }}"
+
+      - name: Smoke test the installed Fedora package
+        run: |
+          rpm=$(find target/fedora-rpmbuild/RPMS -name 'apexshot-[0-9]*.rpm' ! -name '*debug*' | head -1)
+          dnf -y install "$rpm" xorg-x11-server-Xvfb xorg-x11-xauth dbus-daemon ffmpeg-free
+          bash scripts/smoke-linux-package.sh
 
       - name: Upload Fedora RPM build artifacts
         uses: actions/upload-artifact@v4
@@ -577,7 +617,7 @@ jobs:
   arch:
     name: Build Arch Linux package
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     needs: [lint, ci, studio_release_config]
     container:
       image: archlinux:latest
@@ -630,23 +670,46 @@ jobs:
 
       - name: Get version from tag
         id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        # Untagged (scheduled or manual) runs package the Cargo.toml version.
+        run: |
+          case "$GITHUB_REF" in
+            refs/tags/*) VERSION="${GITHUB_REF#refs/tags/}" ;;
+            *) VERSION="v$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)" ;;
+          esac
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Update PKGBUILD version from tag
         run: |
           VERSION="${{ steps.get_version.outputs.VERSION }}"
-          PKGVER="${VERSION#v}"
-          ARCHIVE="apexshot-${PKGVER}.tar.gz"
-          SOURCE_URL="https://github.com/apex-shot/apexshot/archive/${VERSION}.tar.gz"
-
-          # Download the release tarball and compute its SHA-256
-          curl -fsSL "${SOURCE_URL}" -o "/tmp/${ARCHIVE}"
+          case "$GITHUB_REF" in
+            refs/tags/*)
+              PKGVER="${VERSION#v}"
+              ARCHIVE="apexshot-${PKGVER}.tar.gz"
+              SOURCE_URL="https://github.com/apex-shot/apexshot/archive/${VERSION}.tar.gz"
+              # Download the release tarball and compute its SHA-256
+              curl -fsSL "${SOURCE_URL}" -o "/tmp/${ARCHIVE}"
+              SOURCE_ENTRY="${ARCHIVE}::${SOURCE_URL}"
+              ;;
+            *)
+              # Scheduled and manual runs have no tag to download: package the
+              # checked-out commit under the Cargo.toml version instead.
+              PKGVER=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+              ARCHIVE="apexshot-${PKGVER}.tar.gz"
+              # The container checkout has no .git (git is installed after
+              # checkout), so archive the working tree itself.
+              tar -czf "/tmp/${ARCHIVE}" --exclude=./target --exclude=./.git \
+                --transform="s#^\.#apexshot-${PKGVER}#" .
+              cp "/tmp/${ARCHIVE}" "packaging/arch/${ARCHIVE}"
+              SOURCE_URL="${ARCHIVE}"
+              SOURCE_ENTRY="${ARCHIVE}"
+              ;;
+          esac
           SHA256="$(sha256sum "/tmp/${ARCHIVE}" | awk '{print $1}')"
 
           cd packaging/arch
           sed -i \
             -e "s/^pkgver=.*/pkgver=${PKGVER}/" \
-            -e "s#^source=.*#source=(\"${ARCHIVE}::${SOURCE_URL}\")#" \
+            -e "s#^source=.*#source=(\"${SOURCE_ENTRY}\")#" \
             -e "s/^sha256sums=.*/sha256sums=('${SHA256}')/" \
             PKGBUILD
 
@@ -666,6 +729,12 @@ jobs:
             APEXSHOT_STUDIO_RELEASE_TIMESTAMP="$APEXSHOT_STUDIO_RELEASE_TIMESTAMP" \
             makepkg -sf --noconfirm
 
+      - name: Smoke test the installed Arch package
+        run: |
+          pacman -U --noconfirm packaging/arch/*.pkg.tar.zst
+          pacman -S --noconfirm --needed xorg-server-xvfb xorg-xauth dbus
+          bash scripts/smoke-linux-package.sh
+
       - name: Upload Arch package build artifact
         uses: actions/upload-artifact@v4
         with:
@@ -680,7 +749,7 @@ jobs:
     # Pinned: the packaging script looks for the Visual Studio 2022
     # vcvars64.bat, and the Qt 5 install is the MSVC 2019 build.
     runs-on: windows-2022
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     needs: [lint, ci, studio_release_config]
     timeout-minutes: 90
     env:
@@ -732,6 +801,10 @@ jobs:
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-ffmpeg
             mingw-w64-ucrt-x86_64-ninja
+
+      - name: Check the pinned MSYS2 versions
+        shell: msys2 {0}
+        run: bash scripts/check-msys2-versions.sh
 
       # The MSVC toolchain cannot link against the MinGW GTK import libraries,
       # so the Rust binaries use the GNU target that matches them. The Qt
@@ -798,16 +871,51 @@ jobs:
         shell: msys2 {0}
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
-          cargo_version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
-          if [[ -z $cargo_version || $version != "$cargo_version" ]]; then
-            echo "Tag version $version does not match Cargo.toml version $cargo_version" >&2
-            exit 1
+          if [[ $GITHUB_REF == refs/tags/* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            cargo_version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+            if [[ -z $cargo_version || $version != "$cargo_version" ]]; then
+              echo "Tag version $version does not match Cargo.toml version $cargo_version" >&2
+              exit 1
+            fi
           fi
           qt_dir=$(cygpath -u "${{ steps.qt.outputs.qt-root-dir }}")
           bash scripts/package-windows.sh --qt-dir "$qt_dir"
 
+      # Install what users download and run it: the recorder must record and
+      # the editor must start with the ffmpeg the installer ships.
+      - name: Install the installer silently
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist/windows/ApexShot-*-setup.exe | Select-Object -First 1
+          $install = Join-Path $env:RUNNER_TEMP 'ApexShotSmoke'
+          $process = Start-Process $setup.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CURRENTUSER',"/DIR=`"$install`"" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "installer exited with $($process.ExitCode)" }
+          Get-Process apexshot-* -ErrorAction SilentlyContinue | Stop-Process -Force
+          "APEXSHOT_SMOKE_DIR=$install" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Smoke test the installed recorder and editor
+        shell: pwsh
+        run: |
+          $bin = Join-Path $env:APEXSHOT_SMOKE_DIR 'bin'
+          & (Join-Path $bin 'ffmpeg.exe') -hide_banner -version | Select-Object -First 1
+          $video = Join-Path $env:RUNNER_TEMP 'smoke.mp4'
+          $recorder = Start-Process (Join-Path $bin 'apexshot-capture.exe') -ArgumentList '--self-test-record',"`"$video`"" -Wait -PassThru
+          Get-Content "$video.selftest.txt" -ErrorAction SilentlyContinue
+          if ($recorder.ExitCode -ne 0) {
+            Get-Content (Join-Path $env:TEMP 'apexshot-recording.log') -ErrorAction SilentlyContinue | Select-Object -Last 60
+            throw "recorder self-test failed ($($recorder.ExitCode))"
+          }
+          $duration = & (Join-Path $bin 'ffprobe.exe') -v error -show_entries format=duration -of csv=p=0 $video
+          Write-Host "recorded ${duration}s"
+          if ([double]$duration -lt 1.0) { throw "recording is shorter than one second" }
+          $report = Join-Path $env:RUNNER_TEMP 'editor-check.txt'
+          $editor = Start-Process (Join-Path $bin 'apexshot-video-editor.exe') -ArgumentList '--self-check',"`"$report`"" -Wait -PassThru
+          Get-Content $report -ErrorAction SilentlyContinue
+          if ($editor.ExitCode -ne 0) { throw "video editor self-check failed ($($editor.ExitCode))" }
+
       - name: Upload the Windows installer
+        if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v4
         with:
           name: windows-installer

@@ -1421,7 +1421,7 @@ mod tests {
     #[test]
     fn motion_video_export_writes_an_mp4() {
         if crate::recording::editor::ffmpeg::ensure_tools_available().is_err() {
-            eprintln!("skipping: ffmpeg unavailable");
+            crate::test_support::skip_without_media("skipping: ffmpeg unavailable");
             return;
         }
         let Some(()) = crate::test_support::with_gtk(|| {

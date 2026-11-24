@@ -1431,7 +1431,7 @@ mod tests {
             .output()
             .is_err()
         {
-            eprintln!("skipping: ffmpeg not available");
+            crate::test_support::skip_without_media("skipping: ffmpeg not available");
             return;
         }
 

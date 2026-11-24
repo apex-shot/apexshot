@@ -67,3 +67,34 @@ expensive (Qt 5 alone is about twenty minutes) and their results are cached in
   `xdg-user-dir` and then mount nothing, so the sandbox cannot see those
   folders and the app reports host files as missing. Unset `XDG_DATA_HOME`,
   `XDG_CACHE_HOME`, and `XDG_CONFIG_HOME` for launch commands too.
+
+## Cross-platform release checks
+
+The maintainer usually works on Linux, so Windows breakage is invisible
+locally. CI covers the gap; use it before every release and after any change
+to recording, export, ffmpeg arguments, packaging, or bundled dependencies.
+
+- **What runs where.** `windows.yml` builds and tests the Windows UI and the
+  capture shell (`capture-overlay`) on every push and PR that touches them;
+  its export tests run against the same MSYS2 ffmpeg the installer bundles,
+  with `APEXSHOT_REQUIRE_MEDIA_TESTS=1` so a missing tool fails instead of
+  skipping. `release.yml` builds every package (Windows installer, `.deb`,
+  Fedora, openSUSE, Arch), installs each one, and smoke-tests it: a real
+  two-second recording and an editor start with the shipped ffmpeg. It runs on
+  tags, weekly, and on demand; the Windows installer also runs on every push to
+  `main`.
+- **From Linux, before tagging a release**, run the whole package matrix on
+  the commit you will tag and wait for it to pass:
+  `gh workflow run release.yml --ref main`, then
+  `gh run watch "$(gh run list -w release.yml -L1 --json databaseId -q '.[0].databaseId')"`.
+  A tag must never be the first run of a packaging change.
+- **Pinned Windows dependencies.** `packaging/windows/msys2-versions.txt` pins
+  the MSYS2 ffmpeg and GTK4 the installer bundles. When MSYS2 moves, CI fails
+  with the new version; bump the pin only after the installer smoke test passes
+  with it, and say so in the commit.
+- **Locally on Linux**, `bash scripts/smoke-linux-package.sh` smoke-tests an
+  installed package the same way CI does (needs `xvfb-run` and `ffmpeg`).
+- **Locally on Windows**, the installed recorder can be checked with
+  `apexshot-capture.exe --self-test-record <out.mp4>` (result in
+  `<out.mp4>.selftest.txt`) and the editor with
+  `apexshot-video-editor.exe --self-check <report.txt>`.

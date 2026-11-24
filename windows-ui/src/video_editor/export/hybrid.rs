@@ -609,7 +609,7 @@ mod tests {
             .status()
             .is_ok_and(|status| status.success());
         if !available {
-            eprintln!("skipping: ffmpeg is not available");
+            crate::test_support::skip_without_media("skipping: ffmpeg is not available");
             return;
         }
         let dir = std::env::temp_dir().join(format!("apexshot-hybrid-test-{}", std::process::id()));
@@ -689,7 +689,7 @@ mod tests {
     #[test]
     fn matching_pieces_join() {
         if !ffmpeg_available() {
-            eprintln!("skipping: ffmpeg is not available");
+            crate::test_support::skip_without_media("skipping: ffmpeg is not available");
             return;
         }
         let dir = std::env::temp_dir().join(format!("apexshot-join-ok-{}", std::process::id()));
@@ -706,7 +706,7 @@ mod tests {
     #[test]
     fn mismatched_pieces_fail_with_a_clear_message() {
         if !ffmpeg_available() {
-            eprintln!("skipping: ffmpeg is not available");
+            crate::test_support::skip_without_media("skipping: ffmpeg is not available");
             return;
         }
         let dir = std::env::temp_dir().join(format!("apexshot-join-bad-{}", std::process::id()));
