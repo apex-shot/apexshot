@@ -806,6 +806,22 @@ fn row_mark(mark: RowMark) -> DrawingArea {
     area
 }
 
+/// A popover moves focus to its first row, and the toolbar's earlier key
+/// presses leave the window showing focus, so a menu opened with the mouse
+/// would start with a highlighted row. The C++ menu highlights only under
+/// the pointer or after arrow keys, which turn focus display back on.
+fn hide_pointer_focus(popover: &gtk4::Popover) {
+    // Focus moves in when the popover maps, after `popup()` returns.
+    popover.connect_map(|popover| {
+        let popover = popover.clone();
+        glib::idle_add_local_once(move || {
+            if let Some(window) = popover.root().and_downcast::<gtk4::Window>() {
+                window.set_focus_visible(false);
+            }
+        });
+    });
+}
+
 /// How a menu row sizes its text, matching the C++ menu: fixed command rows
 /// keep the whole text width, device names are elided at 216 px, and the app
 /// submenu, which has no fixed width, is as wide as its longest name.
@@ -1004,13 +1020,10 @@ fn show_speaker_popover(
     }
 
     // One app opens a second popover anchored to this row's right edge.
-    let one_label = if app_audio_available {
-        "Record audio from one app"
-    } else {
-        "Record audio from one app (not available here)"
-    };
+    // Where one app cannot be captured the row keeps the Windows text and is
+    // greyed out, so the menu has the same shape.
     let one_row = device_row(
-        one_label,
+        "Record audio from one app",
         RowWidth::Command,
         RowMark::Chevron,
         app_audio_available,
@@ -1030,6 +1043,7 @@ fn show_speaker_popover(
                 return;
             };
             let child = show_app_popover(row, &state, parent, on_change.clone());
+            hide_pointer_focus(&child);
             child.popup();
             *submenu.borrow_mut() = Some(child);
         });
@@ -1594,6 +1608,7 @@ fn choose_capture_mode_internal(
             popover.connect_closed(move |_| {
                 open_popover.replace(None);
             });
+            hide_pointer_focus(&popover);
             popover.popup();
         });
     }

@@ -1487,10 +1487,9 @@ void CaptureModeToolbar::openDeviceMenu(int index)
             all = menu.addAction(QStringLiteral("Record system audio from all apps"));
             all->setProperty("ticked", m_speaker && m_systemAudioApplication.isEmpty());
 
-            const QString oneAppLabel = m_appAudioCapture
-                ? QStringLiteral("Record audio from one app")
-                : QStringLiteral("Record audio from one app (not available here)");
-            DeviceMenu* one = new DeviceMenu(oneAppLabel, &menu);
+            // Where one app cannot be captured the item keeps the Windows
+            // text and is greyed out, so the menu has the same shape.
+            DeviceMenu* one = new DeviceMenu(QStringLiteral("Record audio from one app"), &menu);
             one->setEnabled(m_appAudioCapture);
             one->menuAction()->setEnabled(m_appAudioCapture);
             menu.addAction(one->menuAction());
