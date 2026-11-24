@@ -162,6 +162,51 @@ QString deviceMenuLabel(const QString& text, const QFont& font)
 {
     return QFontMetrics(font).elidedText(text, Qt::ElideMiddle, 216);
 }
+
+/// Pulse heads every device of a card with the card's name, which is all a
+/// narrow cell has room for. Drop the leading words a description shares
+/// with a sibling, keeping the shortest such prefix so outputs that differ
+/// only at the end keep their distinguishing words. A device with no sibling
+/// keeps its whole description.
+QString withoutSharedCardName(const QString& description, const QStringList& all)
+{
+    const QStringList words = description.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    int shared = -1;
+    for (const QString& other : all) {
+        if (other == description)
+            continue;
+        const QStringList otherWords = other.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        int count = 0;
+        while (count < words.size() && count < otherWords.size()
+               && words.at(count) == otherWords.at(count))
+            ++count;
+        if (count > 0 && count < words.size() && (shared < 0 || count < shared))
+            shared = count;
+    }
+    return shared > 0 ? words.mid(shared).join(QLatin1Char(' ')) : description;
+}
+
+/// When a cell is still too narrow, also drop trailing words a sibling shares
+/// ("Output", "Microphone"), keeping the shortest such suffix.
+QString withoutSharedTail(const QString& label, const QString& description,
+                          const QStringList& all)
+{
+    const QStringList words = label.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    int shared = -1;
+    for (const QString& other : all) {
+        if (other == description)
+            continue;
+        const QStringList otherWords = other.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        int count = 0;
+        while (count < words.size() && count < otherWords.size()
+               && words.at(words.size() - 1 - count)
+                   == otherWords.at(otherWords.size() - 1 - count))
+            ++count;
+        if (count > 0 && count < words.size() && (shared < 0 || count < shared))
+            shared = count;
+    }
+    return shared > 0 ? words.mid(0, words.size() - shared).join(QLatin1Char(' ')) : label;
+}
 #endif
 
 void applyMenuStyle(QMenu& menu)
@@ -573,8 +618,26 @@ QString CaptureModeToolbar::displayedLabel(int index, const QFont& font) const
     const int width = std::max(0, int(itemRect(index).width()) - 2 * kIconPad
                                       - kIconSize - kIconGap);
 #ifdef Q_OS_LINUX
-    // Pulse names a card's devices alike up front, so keep both ends.
-    return QFontMetrics(font).elidedText(labelFor(index), Qt::ElideMiddle, width);
+    // The cell drops the card name its siblings share (the tooltip keeps the
+    // full description), then keeps both ends of what is left.
+    QString label = labelFor(index);
+    if (deviceCell(index)) {
+        QStringList all;
+        if (index == 5) {
+            for (const Platform::AudioSourceDevice& device : m_linuxMicrophones)
+                all.append(device.description);
+        } else {
+            for (const Platform::AudioOutputDevice& device : m_linuxOutputs)
+                all.append(device.description);
+        }
+        if (all.contains(label)) {
+            const QString description = label;
+            label = withoutSharedCardName(description, all);
+            if (QFontMetrics(font).horizontalAdvance(label) > width)
+                label = withoutSharedTail(label, description, all);
+        }
+    }
+    return QFontMetrics(font).elidedText(label, Qt::ElideMiddle, width);
 #else
     return QFontMetrics(font).elidedText(labelFor(index), Qt::ElideRight, width);
 #endif
@@ -611,9 +674,14 @@ void CaptureModeToolbar::resizeForMode()
     move(left, y());
 #ifdef Q_OS_LINUX
     // A Wayland client cannot place its own toplevel, so the shell extension
-    // re-centres the surface on the new width.
-    if (qEnvironmentVariableIsSet("WAYLAND_DISPLAY"))
-        requestShellOverlayFocus(windowTitle());
+    // re-centres the surface. It centres the frame it sees, and the new width
+    // only lands once the compositor applies the next commit, so ask after it.
+    if (QGuiApplication::platformName().startsWith(QLatin1String("wayland"))) {
+        QTimer::singleShot(150, this, [this] {
+            if (isVisible())
+                requestShellOverlayFocus(windowTitle());
+        });
+    }
 #endif
 }
 

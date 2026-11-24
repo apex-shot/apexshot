@@ -412,6 +412,60 @@ fn speaker_label(state: &MenuState, labels: &DeviceLabels) -> String {
         .unwrap_or_else(|| state.speaker_device.clone())
 }
 
+/// Pulse heads every device of a sound card with the card's name ("Raptor
+/// Lake-P/U/H cAVS Stereo Microphone", "... Digital Microphone"), which is all
+/// a narrow cell has room for. Drop the leading words a description shares
+/// with a sibling, keeping the shortest such prefix so outputs that differ
+/// only at the end ("... DisplayPort 1 Output") keep their distinguishing
+/// words. A device with no sibling keeps its whole description.
+fn without_shared_card_name<'a>(description: &str, all: impl Iterator<Item = &'a str>) -> String {
+    let words: Vec<&str> = description.split_whitespace().collect();
+    let shared = all
+        .filter(|other| *other != description)
+        .map(|other| {
+            words
+                .iter()
+                .zip(other.split_whitespace())
+                .take_while(|(a, b)| *a == b)
+                .count()
+        })
+        .filter(|&count| count > 0 && count < words.len())
+        .min();
+    match shared {
+        Some(count) => words[count..].join(" "),
+        None => description.to_string(),
+    }
+}
+
+/// The label a device cell draws: the description without the card name its
+/// siblings share and, when that still does not fit, also without trailing
+/// words a sibling shares ("Output", "Microphone"). What remains is elided in
+/// the middle by the caller; the menu keeps the full description.
+fn short_device_label(description: &str, all: &[&str], fits: impl Fn(&str) -> bool) -> String {
+    let label = without_shared_card_name(description, all.iter().copied());
+    if fits(&label) {
+        return label;
+    }
+    let words: Vec<&str> = label.split_whitespace().collect();
+    let shared = all
+        .iter()
+        .filter(|other| **other != description)
+        .map(|other| {
+            words
+                .iter()
+                .rev()
+                .zip(other.split_whitespace().rev())
+                .take_while(|(a, b)| *a == b)
+                .count()
+        })
+        .filter(|&count| count > 0 && count < words.len())
+        .min();
+    match shared {
+        Some(count) => words[..words.len() - count].join(" "),
+        None => label,
+    }
+}
+
 fn label_for(index: usize, state: &MenuState, labels: &DeviceLabels) -> String {
     match index {
         5 if state.recording => microphone_label(state, labels),
@@ -534,16 +588,37 @@ fn draw_menu(
         // Mic and Speaker carry a device name, a slash when the input is off,
         // and a level meter while Video is selected.
         let device_slot = state.recording && (index == 5 || index == 6);
-        let label = if is_close {
-            String::new()
-        } else {
-            label_for(index, state, labels)
-        };
         let weight = if active || device_on {
             pango::Weight::Medium
         } else {
             pango::Weight::Normal
         };
+        let mut label = if is_close {
+            String::new()
+        } else {
+            label_for(index, state, labels)
+        };
+        if device_slot {
+            let room = (cell.width - 2.0 * ICON_PAD - ICON_SIZE - ICON_GAP).max(0.0);
+            let all: Vec<&str> = if index == 5 {
+                labels
+                    .microphones
+                    .iter()
+                    .map(|d| d.description.as_str())
+                    .collect()
+            } else {
+                labels
+                    .outputs
+                    .iter()
+                    .map(|d| d.description.as_str())
+                    .collect()
+            };
+            if all.contains(&label.as_str()) {
+                label = short_device_label(&label, &all, |text| {
+                    logical_width(&label_layout(&pango_context, text, weight)) <= room
+                });
+            }
+        }
         let layout = label_layout(&pango_context, &label, weight);
         let label_width = if is_close || device_slot {
             0.0
@@ -1460,6 +1535,62 @@ mod tests {
             assert!(max_x > min_x);
             assert!(max_y > min_y);
         }
+    }
+
+    #[test]
+    fn cell_labels_drop_the_shared_card_name() {
+        let mics = [
+            "Raptor Lake-P/U/H cAVS Stereo Microphone",
+            "Raptor Lake-P/U/H cAVS Digital Microphone",
+            "Easy Effects Source",
+        ];
+        assert_eq!(
+            without_shared_card_name(mics[1], mics.iter().copied()),
+            "Digital Microphone"
+        );
+        assert_eq!(
+            without_shared_card_name(mics[2], mics.iter().copied()),
+            "Easy Effects Source"
+        );
+        let outputs = [
+            "Raptor Lake-P/U/H cAVS HDMI / DisplayPort 3 Output",
+            "Raptor Lake-P/U/H cAVS HDMI / DisplayPort 2 Output",
+            "Raptor Lake-P/U/H cAVS Speaker",
+        ];
+        assert_eq!(
+            without_shared_card_name(outputs[0], outputs.iter().copied()),
+            "HDMI / DisplayPort 3 Output"
+        );
+        assert_eq!(
+            without_shared_card_name("USB Headset", ["USB Headset"].into_iter()),
+            "USB Headset"
+        );
+    }
+
+    #[test]
+    fn narrow_cells_also_drop_shared_trailing_words() {
+        let outputs = [
+            "Raptor Lake-P/U/H cAVS HDMI / DisplayPort 3 Output",
+            "Raptor Lake-P/U/H cAVS HDMI / DisplayPort 2 Output",
+            "Raptor Lake-P/U/H cAVS Speaker",
+        ];
+        assert_eq!(
+            short_device_label(outputs[0], &outputs, |_| true),
+            "HDMI / DisplayPort 3 Output"
+        );
+        assert_eq!(
+            short_device_label(outputs[0], &outputs, |_| false),
+            "HDMI / DisplayPort 3"
+        );
+        let mics = [
+            "Raptor Lake-P/U/H cAVS Stereo Microphone",
+            "Raptor Lake-P/U/H cAVS Digital Microphone",
+        ];
+        assert_eq!(short_device_label(mics[1], &mics, |_| false), "Digital");
+        assert_eq!(
+            short_device_label("Easy Effects Source", &["Easy Effects Source"], |_| false),
+            "Easy Effects Source"
+        );
     }
 
     #[test]
