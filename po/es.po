@@ -5291,6 +5291,12 @@ msgstr "Audio del sistema no disponible"
 msgid "Recording continues without system audio."
 msgstr "La grabación continúa sin el audio del sistema."
 
+msgid "Recording all system audio"
+msgstr "Se graba todo el audio del sistema"
+
+msgid "{app} is not playing audio, so the recording captures every app."
+msgstr "{app} no está reproduciendo audio, así que la grabación captura todas las apps."
+
 msgid "Pause Recording"
 msgstr "Pausar grabación"
 

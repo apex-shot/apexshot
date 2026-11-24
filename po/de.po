@@ -5293,6 +5293,12 @@ msgstr "Systemaudio nicht verfügbar"
 msgid "Recording continues without system audio."
 msgstr "Die Aufnahme wird ohne Systemaudio fortgesetzt."
 
+msgid "Recording all system audio"
+msgstr "Gesamtes Systemaudio wird aufgenommen"
+
+msgid "{app} is not playing audio, so the recording captures every app."
+msgstr "{app} gibt keinen Ton wieder, daher nimmt die Aufnahme alle Apps auf."
+
 msgid "Pause Recording"
 msgstr "Aufnahme pausieren"
 

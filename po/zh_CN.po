@@ -5181,6 +5181,12 @@ msgstr "系统音频不可用"
 msgid "Recording continues without system audio."
 msgstr "将继续录制，但不包含系统音频。"
 
+msgid "Recording all system audio"
+msgstr "正在录制所有系统音频"
+
+msgid "{app} is not playing audio, so the recording captures every app."
+msgstr "{app} 没有在播放音频，因此录制将捕获所有应用的声音。"
+
 msgid "Pause Recording"
 msgstr "暂停录制"
 

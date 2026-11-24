@@ -5190,6 +5190,12 @@ msgstr "システム音声を利用できません"
 msgid "Recording continues without system audio."
 msgstr "システム音声なしで録画を続行します。"
 
+msgid "Recording all system audio"
+msgstr "すべてのシステム音声を録音します"
+
+msgid "{app} is not playing audio, so the recording captures every app."
+msgstr "{app} は音声を再生していないため、すべてのアプリの音声を録音します。"
+
 msgid "Pause Recording"
 msgstr "録画を一時停止"
 

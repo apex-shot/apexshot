@@ -5273,6 +5273,12 @@ msgstr "Системный звук недоступен"
 msgid "Recording continues without system audio."
 msgstr "Запись продолжится без системного звука."
 
+msgid "Recording all system audio"
+msgstr "Записывается весь системный звук"
+
+msgid "{app} is not playing audio, so the recording captures every app."
+msgstr "{app} не воспроизводит звук, поэтому записывается звук всех приложений."
+
 msgid "Pause Recording"
 msgstr "Пауза записи"
 

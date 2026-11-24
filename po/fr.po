@@ -5303,6 +5303,12 @@ msgstr "Audio du système indisponible"
 msgid "Recording continues without system audio."
 msgstr "L'enregistrement continue sans l'audio du système."
 
+msgid "Recording all system audio"
+msgstr "Enregistrement de tout l'audio du système"
+
+msgid "{app} is not playing audio, so the recording captures every app."
+msgstr "{app} ne lit aucun son, l'enregistrement capture donc toutes les applications."
+
 msgid "Pause Recording"
 msgstr "Mettre l'enregistrement en pause"
 
