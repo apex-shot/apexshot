@@ -593,6 +593,14 @@ void excludeFromCapture(quintptr nativeId)
     SetWindowDisplayAffinity(hwnd, kExcludeFromCapture);
 }
 
+void includeInCapture(quintptr nativeId)
+{
+    const HWND hwnd = reinterpret_cast<HWND>(nativeId);
+    if (!hwnd)
+        return;
+    SetWindowDisplayAffinity(hwnd, WDA_NONE);
+}
+
 void keepTopmost(quintptr nativeId)
 {
     if (!nativeId)

@@ -104,4 +104,7 @@ void setTopmost(quintptr nativeId, bool topmost);
 /// platform cannot do it.
 void excludeFromCapture(quintptr nativeId);
 
+/// Undo `excludeFromCapture`, so the window shows in captures again.
+void includeInCapture(quintptr nativeId);
+
 } // namespace Platform

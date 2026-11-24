@@ -670,4 +670,9 @@ void excludeFromCapture(quintptr nativeId)
     Q_UNUSED(nativeId);
 }
 
+void includeInCapture(quintptr nativeId)
+{
+    Q_UNUSED(nativeId);
+}
+
 } // namespace Platform

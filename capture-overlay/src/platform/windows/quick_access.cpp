@@ -1710,8 +1710,9 @@ public:
         raise();
         Platform::setTopmost(static_cast<quintptr>(winId()), m_pinned || m_sample);
         // Never part of a screenshot or recording, even if one starts while
-        // the card is still on screen.
-        Platform::excludeFromCapture(static_cast<quintptr>(winId()));
+        // the card is still on screen; a card that appears during a recording
+        // is the exception, so the recording can show ApexShot being used.
+        applyCaptureVisibility();
         if (slideIn) {
             m_motion.setStartValue(pos());
             m_motion.setEndValue(m_target);
@@ -1766,6 +1767,26 @@ public:
     }
 
     bool isSuspended() const { return m_suspended; }
+
+    /// Whether the card shows in captures. Only a card that appears while a
+    /// recording runs is recordable, and only until that recording ends.
+    void setRecordable(bool recordable)
+    {
+        if (m_recordable == recordable)
+            return;
+        m_recordable = recordable;
+        if (testAttribute(Qt::WA_WState_Created))
+            applyCaptureVisibility();
+    }
+
+    void applyCaptureVisibility()
+    {
+        const auto id = static_cast<quintptr>(winId());
+        if (m_recordable)
+            Platform::includeInCapture(id);
+        else
+            Platform::excludeFromCapture(id);
+    }
 
     void setOnShelved(std::function<void()> callback) { m_onShelved = std::move(callback); }
     void setSequence(quint64 sequence) { m_sequence = sequence; }
@@ -2132,6 +2153,7 @@ private:
     quint64 m_sequence = 0;
     bool m_shelved = false;
     bool m_suspended = false;
+    bool m_recordable = false;
     std::function<void()> m_onShelved;
     QList<CardButton*> m_controls;
     CardButton* m_cancelUpload = nullptr;
@@ -2401,6 +2423,7 @@ public:
         // The capture this card belongs to is done, so the others return too.
         resumeCards();
         auto* card = new ResultCard(image, path, video);
+        card->setRecordable(m_recordingLive);
         card->setSequence(++m_cardSequence);
         card->setOnShelved([this] { scheduleCardLayout(); });
         connect(card, &QObject::destroyed, this, [this] { scheduleCardLayout(); });
@@ -2429,10 +2452,25 @@ public:
                 shelved.append(card);
         }
         for (ResultCard* card : shelved) {
+            card->setRecordable(m_recordingLive);
             makeRoom(card->targetScreen(), card->height(), card);
             card->reveal(true, cardsOnLeft());
         }
         layoutCards(true);
+    }
+
+    /// While a recording runs, the cards it produces show in it, so a
+    /// recording can demonstrate ApexShot itself. When it ends, every card
+    /// goes back to staying out of captures.
+    void setRecordingLive(bool live)
+    {
+        m_recordingLive = live;
+        if (live)
+            return;
+        for (const QPointer<ResultCard>& card : m_cards) {
+            if (card)
+                card->setRecordable(false);
+        }
     }
 
     bool cardsOnLeft() const
@@ -3824,6 +3862,7 @@ private:
                     if (m_activeSession == session) {
                         m_activeSession = nullptr;
                         m_restartActiveRecording = nullptr;
+                        setRecordingLive(false);
                     }
                     if (m_recordingMask) {
                         m_recordingMask->close();
@@ -3876,6 +3915,7 @@ private:
             QMessageBox::warning(nullptr, QStringLiteral("Recording"), error);
             return;
         }
+        setRecordingLive(true);
         if (!session->webcamActive() && m_webcamBubble) {
             m_webcamBubble->close();
             m_webcamBubble = nullptr;
@@ -4171,6 +4211,7 @@ private:
     /// Throws the running take away and starts the same recording again; set
     /// while a recording runs, for the restart button and shortcut.
     std::function<void()> m_restartActiveRecording;
+    bool m_recordingLive = false;
     /// Unfinished recordings the person chose to recover, saved one at a time.
     QVector<Platform::UnfinishedRecording> m_pendingRecoveries;
     /// Set when the restart button asks for a fresh take after the current
