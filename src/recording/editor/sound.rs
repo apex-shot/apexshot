@@ -1914,14 +1914,18 @@ mod tests {
     #[test]
     fn a_full_graph_renders_the_compositions_length() {
         if !ffmpeg_available() {
-            crate::test_support::skip_without_media("skipping the sound graph test: ffmpeg is unavailable");
+            crate::test_support::skip_without_media(
+                "skipping the sound graph test: ffmpeg is unavailable",
+            );
             return;
         }
         let dir = scratch("graph");
         let video = dir.join("clip.m4a");
         let music = dir.join("music.m4a");
         if !tone(&video, "sine=f=440:d=6", 48_000) || !tone(&music, "sine=f=220:d=1.5", 48_000) {
-            crate::test_support::skip_without_media("skipping the sound graph test: ffmpeg could not write its tones");
+            crate::test_support::skip_without_media(
+                "skipping the sound graph test: ffmpeg could not write its tones",
+            );
             let _ = std::fs::remove_dir_all(&dir);
             return;
         }
