@@ -146,6 +146,40 @@ bool runProbe(const QStringList& arguments, QString* out, QString* error)
     return true;
 }
 
+/// Older ffmpeg reads -thread_queue_size before an input as that input's
+/// queue depth. ffmpeg 9 made it an output-only option and rejects the whole
+/// command when it comes before an input, so ask each ffmpeg once.
+bool ffmpegTakesInputQueueSize()
+{
+    static QMutex mutex;
+    static QHash<QString, bool> answers;
+    const QString program = ffmpegExecutable();
+    QMutexLocker lock(&mutex);
+    const auto known = answers.constFind(program);
+    if (known != answers.constEnd())
+        return known.value();
+
+    const bool accepted = runProbe({QStringLiteral("-hide_banner"),
+                                    QStringLiteral("-loglevel"),
+                                    QStringLiteral("error"),
+                                    QStringLiteral("-thread_queue_size"),
+                                    QStringLiteral("8"),
+                                    QStringLiteral("-f"),
+                                    QStringLiteral("lavfi"),
+                                    QStringLiteral("-i"),
+                                    QStringLiteral("nullsrc=s=16x16:d=0.04"),
+                                    QStringLiteral("-f"),
+                                    QStringLiteral("null"),
+                                    QStringLiteral("-")},
+                                   nullptr,
+                                   nullptr);
+    recordingLog(QStringLiteral("ffmpeg %1 input -thread_queue_size: %2")
+                     .arg(program, accepted ? QStringLiteral("accepted")
+                                            : QStringLiteral("rejected")));
+    answers.insert(program, accepted);
+    return accepted;
+}
+
 void appendHardwareEncoder(QStringList& args, const QString& hardware, int quality)
 {
     if (hardware.endsWith(QLatin1String("_qsv"))) {
@@ -974,7 +1008,8 @@ QStringList RecordingSession::Private::buildScreenArguments(const QString& segme
     }
 
     // Raw 4K frames are roughly 32 MiB each, so bounding this queue matters.
-    args << QStringLiteral("-thread_queue_size") << QStringLiteral("8");
+    if (ffmpegTakesInputQueueSize())
+        args << QStringLiteral("-thread_queue_size") << QStringLiteral("8");
     if (useWindowCapture) {
         recordingLog(QStringLiteral("capture: window graphics pipe=%1 size=%2x%3")
                          .arg(windowCapture->pipePath())
@@ -1063,7 +1098,8 @@ QStringList RecordingSession::Private::buildWebcamArguments(
     const int fps = webcamFps > 0 ? webcamFps : 30;
     // The camera runs on its own clock; a deep buffer keeps the encoder from
     // making dshow drop frames out of the track.
-    args << QStringLiteral("-thread_queue_size") << QStringLiteral("1024");
+    if (ffmpegTakesInputQueueSize())
+        args << QStringLiteral("-thread_queue_size") << QStringLiteral("1024");
     if (!request.webcamStreamUrl.isEmpty()) {
         args << QStringLiteral("-f") << QStringLiteral("mjpeg")
              << QStringLiteral("-probesize") << QStringLiteral("32768")
