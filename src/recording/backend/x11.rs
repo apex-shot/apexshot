@@ -181,6 +181,10 @@ pub(super) async fn record_x11_with_gstreamer(
         .downcast::<gst::Pipeline>()
         .map_err(|_| RecordError::GStreamerError("Cast to Pipeline failed".into()))?;
 
+    // A one-app branch's pipewiresrc offers the PipeWire clock; Pulse sources
+    // are told not to. Keep the recording on the system clock either way.
+    pipeline.use_clock(Some(&gst::SystemClock::obtain()));
+
     if let Some(audio) = audio_bin {
         let muxer = pipeline
             .by_name("mux")

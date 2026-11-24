@@ -835,6 +835,11 @@ impl ActiveGstAudio {
         let bin = build_audio_bin(setup, encoder, AudioTermination::AppSink)?;
         let appsink = bin.appsink.clone().ok_or("audio bin has no appsink")?;
         let pipeline = gst::Pipeline::new();
+        // The trim gate compares buffer running time with CLOCK_MONOTONIC.
+        // A one-app branch's pipewiresrc offers the PipeWire clock, which the
+        // pipeline would otherwise pick, putting the start point far in the
+        // future and trimming every sample.
+        pipeline.use_clock(Some(&gst::SystemClock::obtain()));
         pipeline
             .add(&bin.bin)
             .map_err(|err| format!("failed to add audio bin: {err}"))?;
