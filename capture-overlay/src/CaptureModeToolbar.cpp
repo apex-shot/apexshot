@@ -1463,6 +1463,7 @@ void CaptureModeToolbar::openDeviceMenu(int index)
 
         QAction* off = nullptr;
         QAction* all = nullptr;
+        DeviceMenu* appMenu = nullptr;
         QVector<QAction*> appActions;
         if (index == 5) {
             if (m_linuxMicrophones.isEmpty()) {
@@ -1495,11 +1496,7 @@ void CaptureModeToolbar::openDeviceMenu(int index)
             menu.addAction(one->menuAction());
             one->setFont(menu.font());
             one->setStyleSheet(menu.styleSheet());
-            // Qt butts a submenu against its parent; nudge it clear once it
-            // is placed so the two panels read as separate surfaces.
-            QObject::connect(one, &QMenu::aboutToShow, one, [one]() {
-                QTimer::singleShot(0, one, [one]() { one->move(one->x() + 6, one->y()); });
-            });
+            appMenu = one;
 
             if (m_appAudioCapture) {
                 const QVector<Platform::AudioApplication> applications =
@@ -1539,8 +1536,31 @@ void CaptureModeToolbar::openDeviceMenu(int index)
             path.addRoundedRect(QRectF(menu.rect().adjusted(0, kGap, 0, 0)), 10, 10);
             menu.setMask(QRegion(path.toFillPolygon().toPolygon()));
             anchor = mapToGlobal(QPoint(qRound(itemRect(index).left()), height() - 1));
+            if (appMenu) {
+                // Qt butts a submenu against its parent, and a Wayland client
+                // cannot move its own popup, so the gap is a transparent margin.
+                constexpr int kSubGap = 6;
+                appMenu->setStyleSheet(appMenu->styleSheet()
+                                       + QStringLiteral("QMenu { margin-left:%1px; }")
+                                             .arg(kSubGap));
+                appMenu->ensurePolished();
+                appMenu->adjustSize();
+                QPainterPath subPath;
+                subPath.addRoundedRect(QRectF(appMenu->rect().adjusted(kSubGap, 0, 0, 0)), 10,
+                                       10);
+                appMenu->setMask(QRegion(subPath.toFillPolygon().toPolygon()));
+            }
         } else {
             roundMenu(menu);
+            if (appMenu) {
+                // Qt butts a submenu against its parent; nudge it clear once
+                // it is placed so the two panels read as separate surfaces.
+                QObject::connect(appMenu, &QMenu::aboutToShow, appMenu, [appMenu]() {
+                    QTimer::singleShot(0, appMenu,
+                                       [appMenu]() { appMenu->move(appMenu->x() + 6, appMenu->y()); });
+                });
+                roundMenu(*appMenu);
+            }
         }
         QAction* chosen = menu.exec(anchor);
         if (!chosen)
