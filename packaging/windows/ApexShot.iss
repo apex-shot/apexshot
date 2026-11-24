@@ -104,14 +104,25 @@ var
 
 // Read before the files are copied: the uninstall key the previous install
 // left behind is what tells an upgrade from a fresh install.
+// Releases up to 0.3.0 registered under an AppId missing its closing brace,
+// so their key is `{GUID_is1`; it still marks an existing install.
 function InitializeSetup(): Boolean;
 begin
   Upgrading := RegKeyExists(HKA,
-    'Software\Microsoft\Windows\CurrentVersion\Uninstall\{' + '{#AppGuid}' + '}_is1');
+    'Software\Microsoft\Windows\CurrentVersion\Uninstall\{' + '{#AppGuid}' + '}_is1')
+    or RegKeyExists(HKA,
+    'Software\Microsoft\Windows\CurrentVersion\Uninstall\{' + '{#AppGuid}' + '_is1');
   Result := True;
 end;
 
 function IsUpgrade(): Boolean;
 begin
   Result := Upgrading;
+end;
+
+// The licence was accepted and the tasks chosen on the first install; an
+// upgrade reuses the previous task choices instead of asking again.
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := Upgrading and ((PageID = wpLicense) or (PageID = wpSelectTasks));
 end;

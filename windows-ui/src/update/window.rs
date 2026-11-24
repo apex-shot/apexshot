@@ -893,8 +893,22 @@ fn fact_line(text: &str) -> GtkBox {
     line
 }
 
+/// Arguments for an in-place upgrade. The user accepted the licence and chose
+/// the install options on the first install, so the update shows only the
+/// installer's progress window: no wizard pages, no message boxes, and no
+/// reboot. `/CLOSEAPPLICATIONS` lets Restart Manager close the tray shell
+/// without a prompt; the installer starts it again when it finishes.
+const INSTALLER_ARGS: [&str; 5] = [
+    "/SILENT",
+    "/SUPPRESSMSGBOXES",
+    "/NORESTART",
+    "/SP-",
+    "/CLOSEAPPLICATIONS",
+];
+
 fn launch_installer(path: &Path) -> std::io::Result<u32> {
     std::process::Command::new(path)
+        .args(INSTALLER_ARGS)
         .spawn()
         .map(|child| child.id())
 }
