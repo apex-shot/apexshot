@@ -9,15 +9,43 @@ rm -f "$out"
 apexshot --version
 
 # The recorder needs an X display; Xvfb stands in for a desktop session.
+# --overlay-stop is the path the app's own controls take: it serves the D-Bus
+# control that `apexshot record stop` reaches. A bare `record screen` has no
+# way to be stopped. Everything runs under a hard timeout so a recorder that
+# never stops fails the job instead of hanging it.
 unset WAYLAND_DISPLAY
-xvfb-run -a -s "-screen 0 1280x720x24" dbus-run-session -- bash -c '
-    set -euo pipefail
-    apexshot record screen --output "$1" &
+log=$(mktemp)
+status=0
+timeout --kill-after=10 180 \
+    xvfb-run -a -s "-screen 0 1280x720x24" dbus-run-session -- bash -c '
+    set -uo pipefail
+    apexshot record screen --overlay-stop --output "$1" > "$2" 2>&1 &
     recorder=$!
-    sleep 6
-    apexshot record stop || kill -INT "$recorder"
+    # Startup plus any countdown, then a few seconds of recording.
+    sleep 10
+    stopped=0
+    for _ in $(seq 30); do
+        if apexshot record stop; then stopped=1; break; fi
+        kill -0 "$recorder" 2>/dev/null || break
+        sleep 1
+    done
+    if (( ! stopped )); then
+        echo "::error::the recording could not be stopped through its control" >&2
+        kill -TERM "$recorder" 2>/dev/null
+        exit 1
+    fi
+    for _ in $(seq 60); do
+        kill -0 "$recorder" 2>/dev/null || break
+        sleep 1
+    done
     wait "$recorder"
-' _ "$out"
+' _ "$out" "$log" || status=$?
+echo "--- recorder output ---"
+cat "$log"
+if (( status != 0 )); then
+    echo "::error::the smoke recording failed (exit $status)" >&2
+    exit 1
+fi
 
 size=$(stat -c %s "$out" 2>/dev/null || echo 0)
 if (( size < 10000 )); then
