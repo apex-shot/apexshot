@@ -52,6 +52,11 @@ fn build_capture_overlay() {
     println!("cargo:rerun-if-changed=capture-overlay/src/Sandbox.h");
     println!("cargo:rerun-if-changed=capture-overlay/src/MonitorPicker.cpp");
     println!("cargo:rerun-if-changed=capture-overlay/src/MonitorPicker.h");
+    // Linux Pulse device listing for the toolbar's device menus.
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/linux_audio_devices.cpp");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/linux_audio_devices.h");
     // Windows platform sources (the Quick Access shell and its seams).
     #[rustfmt::skip]
     println!("cargo:rerun-if-changed=capture-overlay/src/platform/recording.h");

@@ -52,6 +52,25 @@ fn build_area_init_args(config: &crate::config::AppConfig) -> Vec<String> {
     if config.rec_speaker {
         extra_args.push("--rec-speaker".into());
     }
+    // Seed the toolbar's device menus with the last chosen devices.
+    if !config.rec_mic_device.is_empty() {
+        extra_args.push(format!("--rec-mic-device={}", config.rec_mic_device));
+    }
+    if !config.rec_speaker_app.is_empty() {
+        // Only the name is remembered; a pid does not survive a restart, so
+        // the toolbar looks it up from the app list.
+        extra_args.push(format!("--rec-speaker-app={}", config.rec_speaker_app));
+    }
+    // The toolbar greys out the one-app choice where the recorder cannot
+    // capture it.
+    extra_args.push(format!(
+        "--rec-app-audio={}",
+        if crate::recording::app_audio_capture_available() {
+            1
+        } else {
+            0
+        }
+    ));
     extra_args.push(if config.rec_controls {
         "--rec-controls".into()
     } else {

@@ -72,7 +72,22 @@ pub enum RecordError {
 #[error("{0}")]
 pub struct RecordingFailureNotified(pub anyhow::Error);
 
-pub use audio::{list_audio_inputs, list_audio_outputs};
+pub(crate) use audio::app_stream_serials;
+pub use audio::{list_audio_applications, AudioApplication};
+pub use audio::{list_audio_inputs, list_audio_outputs, AudioInputDevice, AudioOutputDevice};
+
+/// Whether a single app's streams can be captured on this session: the
+/// PipeWire socket must be reachable, and the wlroots and Flatpak paths only
+/// record the default output.
+pub(crate) fn app_audio_capture_available() -> bool {
+    if wf_recorder::is_wlroots_session() || crate::app_identity::portal_only() {
+        return false;
+    }
+    let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR") else {
+        return false;
+    };
+    std::path::Path::new(&runtime).join("pipewire-0").exists()
+}
 
 /// GStreamer pulsesrc level meter used by the daemon/overlay instead of a
 /// second native PipeWire capture (which races recording + screen capture).
@@ -84,6 +99,17 @@ pub(crate) fn run_audio_level_monitor(
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
     gst_audio::run_pulse_level_monitor(label, device, capture_sink, level, stop);
+}
+
+/// Level meter on one PipeWire node, used while the Speaker item watches a
+/// single app's streams.
+pub(crate) fn run_app_audio_level_monitor(
+    label: &'static str,
+    serial: u32,
+    level: &'static std::sync::atomic::AtomicU64,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    gst_audio::run_pipewire_level_monitor(label, serial, level, stop);
 }
 pub use controls::{
     persist_overlay_recording_request_state, prepare_overlay_recording_request,
@@ -179,8 +205,18 @@ pub struct RecordingConfig {
     pub speaker_enabled: bool,
     pub mic_source: Option<String>,
     pub speaker_source: Option<String>,
+    /// One app to record instead of every app on the default output. Linux
+    /// only; `speaker_source` stays unset on these paths.
+    pub speaker_app: Option<SpeakerApp>,
     /// webrtcdsp noise suppression on the mic branch (GStreamer audio path).
     pub noise_suppression: bool,
+}
+
+/// The app a recording captures alone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpeakerApp {
+    pub name: String,
+    pub pid: u32,
 }
 
 /// Capture source requested for a recording session.
@@ -262,6 +298,7 @@ impl Default for RecordingConfig {
             speaker_enabled: false,
             mic_source: None,
             speaker_source: None,
+            speaker_app: None,
             noise_suppression: false,
         }
     }
@@ -314,8 +351,13 @@ impl RecordingConfig {
             mono_audio: app_config.rec_video_mono,
             mic_enabled: false,
             speaker_enabled: false,
-            mic_source: None,
+            // Hotkey recordings use the microphone the Quick Capture menus
+            // saved. They always record every app: the saved speaker choice is
+            // an app, whose pid is unknown here.
+            mic_source: (!app_config.rec_mic_device.is_empty())
+                .then(|| app_config.rec_mic_device.clone()),
             speaker_source: None,
+            speaker_app: None,
             noise_suppression: app_config.rec_noise_suppression,
         }
     }

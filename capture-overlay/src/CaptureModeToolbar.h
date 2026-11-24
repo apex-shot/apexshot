@@ -5,12 +5,16 @@
 #include <QColor>
 #include <QRectF>
 #include <QString>
+#include <QVector>
 #include <QWidget>
 
 #include <functional>
 
 #ifdef Q_OS_WIN
 #include "platform/windows/audio_devices.h"
+#endif
+#ifdef Q_OS_LINUX
+#include "platform/linux_audio_devices.h"
 #endif
 
 class QCloseEvent;
@@ -40,6 +44,8 @@ public:
         bool speaker = false;
         QString systemAudioApplication;
         quint32 systemAudioProcessId = 0;
+        /// Linux: whether the recorder can capture one app's streams.
+        bool systemAudioAppCapture = false;
         bool camera = false;
         QString cameraDevice;
     };
@@ -102,7 +108,7 @@ public:
 
     /// Current device state, read when a persisted toolbar's window setup
     /// starts recording.
-    DeviceDefaults deviceState() const;
+    DeviceDefaults deviceState();
 
     /// Called when the Close item is clicked while the toolbar is persisting
     /// over a window setup. The handler dismisses the picker or the selected
@@ -128,6 +134,9 @@ private:
     int itemCount() const;
     int itemWidth(int index) const;
     int preferredWidth() const;
+    /// Whether the slot shows a recording device (name, slash, meter) rather
+    /// than its usual label.
+    bool deviceCell(int index) const;
     /// Whether the Scroll item exists in the current mode. Scrolling capture
     /// is a screenshot feature, so the slot is dropped while Video is
     /// selected where no webcam toggle takes it over.
@@ -155,6 +164,18 @@ private:
     void refreshDevices();
     void updateAudioMonitoring();
 #endif
+#ifdef Q_OS_LINUX
+    /// Re-list Pulse devices at most once per toolbar; the menus, labels and
+    /// the hover tooltips share that listing.
+    void refreshLinuxAudioDevices();
+    /// Point the enabled inputs at a source that still exists, falling back
+    /// to the current Pulse default the way the Windows toolbar does.
+    void resolveLinuxAudioDevices();
+    /// Start or stop the daemon-meter poll for the current mode.
+    void updateAudioMonitoring();
+    /// Send the chosen devices to the daemon so its meters measure them.
+    void updateLinuxMeterSources();
+#endif
 
     QScreen* m_screen;
     bool m_screenIsLocked = false;
@@ -179,9 +200,26 @@ private:
     bool m_setupMode = false;
     std::function<void()> m_onClose;
     std::function<void(bool, const QString&)> m_cameraChanged;
+    /// Width of a Mic/Speaker cell while Video is selected.
+    int m_deviceItemWidth = 160;
+    QTimer* m_meterTimer = nullptr;
+#ifdef Q_OS_LINUX
+    QVector<Platform::AudioSourceDevice> m_linuxMicrophones;
+    QVector<Platform::AudioOutputDevice> m_linuxOutputs;
+    bool m_linuxDevicesLoaded = false;
+    /// Whether a single app's streams can be captured on this session; the
+    /// host passes the answer so the menu can disable the choice.
+    bool m_appAudioCapture = false;
+    /// The daemon's speaker meter follows one app's streams, or all of them.
+    quint32 m_meterSpeakerPid = 0;
+    bool m_meterSourcesSent = false;
+    double m_micLevel = 0.0;
+    double m_speakerLevel = 0.0;
+    /// Last microphone handed to the daemon, so a poll does not resend it.
+    QString m_meterMicSource;
+#endif
 #ifdef Q_OS_WIN
     QString m_outputDevice;
-    int m_deviceItemWidth = 160;
     Platform::AudioLevelMonitor m_microphoneMonitor;
     Platform::AudioLevelMonitor m_systemAudioMonitor;
     QString m_monitoredMicrophone;
@@ -189,6 +227,5 @@ private:
     quint32 m_monitoredProcessId = 0;
     bool m_monitoringMicrophone = false;
     bool m_monitoringSystemAudio = false;
-    QTimer* m_meterTimer = nullptr;
 #endif
 };

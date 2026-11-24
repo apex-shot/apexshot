@@ -30,7 +30,7 @@ const WINDOW_CROP_POLL: std::time::Duration = std::time::Duration::from_millis(5
 /// into the video muxer. Audio is a new capability here — any setup failure
 /// falls back to the historical video-only recording instead of failing.
 fn build_x11_audio_bin(
-    config: &RecordingConfig,
+    config: &mut RecordingConfig,
     profile: &EncoderProfile,
 ) -> Option<gst_audio::GstAudioBin> {
     use gst_audio::{
@@ -43,6 +43,7 @@ fn build_x11_audio_bin(
         profile.muxer,
         AudioTermination::GhostPad,
         setup.noise_suppression,
+        !setup.app_streams.is_empty(),
     ) {
         eprintln!("[recording] X11 audio unavailable: GStreamer audio elements missing");
         return None;
@@ -155,7 +156,7 @@ fn start_window_crop_watcher(
 /// now with optional audio from the shared GStreamer audio bin.
 #[allow(unused_assignments)]
 pub(super) async fn record_x11_with_gstreamer(
-    config: &RecordingConfig,
+    config: &mut RecordingConfig,
     profile: &EncoderProfile,
     final_path: &Path,
     command_rx: Option<mpsc::UnboundedReceiver<RecordingControlCommand>>,
@@ -179,6 +180,10 @@ pub(super) async fn record_x11_with_gstreamer(
         .map_err(|e| RecordError::GStreamerError(format!("Failed to parse pipeline: {}", e)))?
         .downcast::<gst::Pipeline>()
         .map_err(|_| RecordError::GStreamerError("Cast to Pipeline failed".into()))?;
+
+    // A one-app branch's pipewiresrc offers the PipeWire clock; Pulse sources
+    // are told not to. Keep the recording on the system clock either way.
+    pipeline.use_clock(Some(&gst::SystemClock::obtain()));
 
     if let Some(audio) = audio_bin {
         let muxer = pipeline
@@ -700,6 +705,7 @@ mod tests {
             speaker_enabled: false,
             mic_source: None,
             speaker_source: None,
+            speaker_app: None,
             noise_suppression: false,
         }
     }

@@ -5216,6 +5216,12 @@ msgstr "صوت النظام غير متاح"
 msgid "Recording continues without system audio."
 msgstr "سيستمر التسجيل بدون صوت النظام."
 
+msgid "Recording all system audio"
+msgstr "يتم تسجيل كل صوت النظام"
+
+msgid "{app} is not playing audio, so the recording captures every app."
+msgstr "{app} لا يشغّل أي صوت، لذا سيسجّل التسجيل صوت كل التطبيقات."
+
 msgid "Pause Recording"
 msgstr "إيقاف التسجيل مؤقتًا"
 

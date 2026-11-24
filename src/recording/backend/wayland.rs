@@ -18,7 +18,12 @@ fn start_gst_audio_or_fallback(
     use super::gst_audio::{audio_available, ActiveGstAudio, AudioTermination, GstAudioSetup};
 
     let setup = GstAudioSetup::from_recording(config, inputs)?;
-    if !audio_available(muxer, AudioTermination::AppSink, setup.noise_suppression) {
+    if !audio_available(
+        muxer,
+        AudioTermination::AppSink,
+        setup.noise_suppression,
+        !setup.app_streams.is_empty(),
+    ) {
         eprintln!("[recording] GStreamer audio unavailable; using ffmpeg pulse inputs");
         return None;
     }
@@ -112,7 +117,7 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
     encoder_name: &str,
     encoder_props: &str,
     audio_muxer: &str,
-    config: &super::RecordingConfig,
+    config: &mut super::RecordingConfig,
     command_rx: Option<mpsc::UnboundedReceiver<RecordingControlCommand>>,
 ) -> super::RecordResult<super::RecordedSession> {
     use std::io::Read;
@@ -295,6 +300,15 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
         }
 
         if audio_inputs.speaker {
+            if let Some(app) = config.speaker_app.as_ref() {
+                // The ffmpeg pulse fallback opens the output monitor; a
+                // single app's streams are only available on the GStreamer
+                // path.
+                eprintln!(
+                    "[recording] one-app audio is unavailable on this path; recording every app instead of '{}'",
+                    app.name
+                );
+            }
             let spk_dev = config
                 .speaker_source
                 .clone()

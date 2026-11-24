@@ -313,11 +313,14 @@ mod tests {
                 recording: true,
                 microphone: true,
                 speaker: true,
+                mic_device: "alsa_input.usb-mic".into(),
+                speaker_app: "Google Chrome".into(),
+                speaker_app_pid: 9707,
                 ..CaptureMenuResult::default()
             },
         ];
         for menu in cases {
-            let json = quick_capture_menu_result_json(menu).unwrap();
+            let json = quick_capture_menu_result_json(menu.clone()).unwrap();
             let parsed: CaptureMenuResult = serde_json::from_str(&json).unwrap();
             assert_eq!(parsed, menu);
         }
@@ -659,11 +662,25 @@ mod tests {
 
     #[test]
     fn build_area_init_args_includes_runtime_overlay_defaults() {
-        let config = AppConfig::default();
+        let config = AppConfig {
+            rec_mic_device: "alsa_input.usb-mic".into(),
+            rec_speaker_app: "Google Chrome".into(),
+            ..AppConfig::default()
+        };
 
         let args = build_area_init_args(&config);
 
         assert!(args.contains(&"--video-format=0".to_string()));
+        assert!(args.contains(&"--rec-mic-device=alsa_input.usb-mic".to_string()));
+        assert!(args.contains(&"--rec-speaker-app=Google Chrome".to_string()));
+        assert!(args
+            .iter()
+            .any(|arg| arg.starts_with("--rec-app-audio=")));
+
+        // Empty saved devices stay off the command line.
+        let args = build_area_init_args(&AppConfig::default());
+        assert!(!args.iter().any(|arg| arg.starts_with("--rec-mic-device=")));
+        assert!(!args.iter().any(|arg| arg.starts_with("--rec-speaker-app=")));
     }
 
     #[test]

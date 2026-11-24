@@ -26,7 +26,7 @@ pub enum CaptureMenuAction {
     Area,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CaptureMenuResult {
     pub action: CaptureMenuAction,
@@ -35,6 +35,16 @@ pub struct CaptureMenuResult {
     pub timer_seconds: u8,
     pub microphone: bool,
     pub speaker: bool,
+    /// Linux: the Pulse source chosen in the device menu. Empty keeps the
+    /// saved choice, then the server default.
+    #[serde(default)]
+    pub mic_device: String,
+    /// Linux: the one app whose audio the recording captures, empty for every
+    /// app. The pid is its process at menu time.
+    #[serde(default)]
+    pub speaker_app: String,
+    #[serde(default)]
+    pub speaker_app_pid: u32,
 }
 
 impl Default for CaptureMenuResult {
@@ -46,17 +56,23 @@ impl Default for CaptureMenuResult {
             timer_seconds: 0,
             microphone: false,
             speaker: false,
+            mic_device: String::new(),
+            speaker_app: String::new(),
+            speaker_app_pid: 0,
         }
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Default)]
 struct MenuState {
     recording: bool,
     ocr: bool,
     timer_seconds: u8,
     microphone: bool,
     speaker: bool,
+    mic_device: String,
+    speaker_app: String,
+    speaker_app_pid: u32,
 }
 
 impl MenuState {
@@ -68,6 +84,9 @@ impl MenuState {
             timer_seconds: self.timer_seconds,
             microphone: self.microphone,
             speaker: self.speaker,
+            mic_device: self.mic_device,
+            speaker_app: self.speaker_app,
+            speaker_app_pid: self.speaker_app_pid,
         }
     }
 }
@@ -177,7 +196,17 @@ fn text_width(context: &pango::Context, text: &str) -> f64 {
     logical_width(&label_layout(context, text, pango::Weight::Medium)).ceil()
 }
 
-fn item_widths() -> [f64; 8] {
+fn item_widths(state: &MenuState, monitor_width: Option<f64>) -> [f64; 8] {
+    let mut widths = plain_item_widths();
+    if state.recording {
+        let device = device_cell_width(&widths, monitor_width);
+        widths[5] = device;
+        widths[6] = device;
+    }
+    widths
+}
+
+fn plain_item_widths() -> [f64; 8] {
     let context = pangocairo::FontMap::default().create_context();
     set_font_options(&context);
     let measure = |text: &str| text_width(&context, text);
@@ -198,7 +227,23 @@ fn item_widths() -> [f64; 8] {
     ]
 }
 
-fn item_is_disabled(index: usize, state: MenuState) -> bool {
+/// Mic and Speaker share what the monitor leaves after the fixed cells, the
+/// same clamp the C++ toolbar applies when Video is selected.
+fn device_cell_width(widths: &[f64; 8], monitor_width: Option<f64>) -> f64 {
+    let Some(monitor_width) = monitor_width else {
+        return 160.0;
+    };
+    let separators = (0..8).filter(|&index| separator_after(index)).count() as f64 * SEPARATOR;
+    let fixed: f64 = 2.0 * OUTER_PAD
+        + separators
+        + (0..8)
+            .filter(|&index| index != 5 && index != 6)
+            .map(|index| widths[index])
+            .sum::<f64>();
+    ((monitor_width - 24.0 - fixed) / 2.0).clamp(74.0, 160.0)
+}
+
+fn item_is_disabled(index: usize, state: &MenuState) -> bool {
     (state.recording && index == 4)
         || (!state.recording && index == 2 && state.ocr)
         || (!state.recording && index == 3 && (state.timer_seconds > 0 || state.ocr))
@@ -207,7 +252,7 @@ fn item_is_disabled(index: usize, state: MenuState) -> bool {
         || (!state.recording && index == 6 && state.ocr)
 }
 
-fn item_is_active(index: usize, state: MenuState) -> bool {
+fn item_is_active(index: usize, state: &MenuState) -> bool {
     (index == 0 && !state.recording)
         || (index == 1 && state.recording)
         || (!state.recording && index == 5 && state.ocr)
@@ -219,11 +264,11 @@ fn item_is_active(index: usize, state: MenuState) -> bool {
 /// Drawing splits the bar's selected look from the recording phase's device
 /// state, exactly as the C++ toolbar does: OCR and Timer must not inherit the
 /// last recording's microphone or speaker.
-fn drawing_active(index: usize, state: MenuState) -> bool {
+fn drawing_active(index: usize, state: &MenuState) -> bool {
     item_is_active(index, state) && !device_on(index, state)
 }
 
-fn device_on(index: usize, state: MenuState) -> bool {
+fn device_on(index: usize, state: &MenuState) -> bool {
     state.recording && ((index == 5 && state.microphone) || (index == 6 && state.speaker))
 }
 
@@ -292,7 +337,7 @@ fn draw_icon(
     context.new_path();
 }
 
-fn glyph_for(index: usize, state: MenuState) -> &'static icons::Glyph {
+fn glyph_for(index: usize, state: &MenuState) -> &'static icons::Glyph {
     match index {
         0 => &icons::CAMERA,
         1 => &icons::VIDEO,
@@ -307,16 +352,125 @@ fn glyph_for(index: usize, state: MenuState) -> &'static icons::Glyph {
     }
 }
 
-fn label_for(index: usize, state: MenuState) -> String {
+/// Pulse descriptions for the sources the device cells name. Listed when
+/// Video is entered and refreshed whenever a device changes.
+#[derive(Default)]
+struct DeviceLabels {
+    loaded: bool,
+    microphones: Vec<crate::recording::AudioInputDevice>,
+    outputs: Vec<crate::recording::AudioOutputDevice>,
+}
+
+fn load_device_labels(labels: &RefCell<DeviceLabels>, force: bool) {
+    if !force && labels.borrow().loaded {
+        return;
+    }
+    let microphones = crate::recording::list_audio_inputs();
+    let outputs = crate::recording::list_audio_outputs();
+    *labels.borrow_mut() = DeviceLabels {
+        loaded: true,
+        microphones,
+        outputs,
+    };
+}
+
+/// Relists only when the chosen microphone is missing from the cache, so a
+/// pick does not pay a pactl round trip the menu just made.
+fn refresh_missing_labels(state: &MenuState, labels: &RefCell<DeviceLabels>) {
+    let known = state.mic_device.is_empty()
+        || labels
+            .borrow()
+            .microphones
+            .iter()
+            .any(|device| device.name == state.mic_device);
+    if !known {
+        // A saved microphone may have been unplugged; the cell then names the
+        // default instead of a stale source.
+        load_device_labels(labels, true);
+    }
+}
+
+fn microphone_label(state: &MenuState, labels: &DeviceLabels) -> String {
+    if !state.microphone || state.mic_device.is_empty() {
+        return "No microphone".into();
+    }
+    labels
+        .microphones
+        .iter()
+        .find(|device| device.name == state.mic_device)
+        .map(|device| device.description.clone())
+        .unwrap_or_else(|| state.mic_device.clone())
+}
+
+fn speaker_label(state: &MenuState, labels: &DeviceLabels) -> String {
+    if !state.speaker {
+        return "No system audio".into();
+    }
+    if !state.speaker_app.is_empty() {
+        // The app's name, the way the Windows cell names a chosen app.
+        return state.speaker_app.clone();
+    }
+    // Every app records the default output, whose name the cell shows.
+    labels
+        .outputs
+        .iter()
+        .find(|device| device.default)
+        .or_else(|| labels.outputs.first())
+        .map(|device| device.description.clone())
+        .unwrap_or_else(|| "No system audio".into())
+}
+
+/// A saved app is kept only while it still has a stream: by pid first, then
+/// by name when the process restarted, else the menu falls back to all apps.
+fn resolve_saved_speaker_app(menu: &mut MenuState) {
+    if menu.speaker_app.is_empty() {
+        return;
+    }
+    if !crate::recording::app_audio_capture_available() {
+        // A saved app needs one-app capture, which this session lacks; fall
+        // back to every app.
+        menu.speaker_app.clear();
+        menu.speaker_app_pid = 0;
+        return;
+    }
+    let applications = crate::recording::list_audio_applications();
+    let matched = applications
+        .iter()
+        .find(|application| menu.speaker_app_pid != 0 && application.pid == menu.speaker_app_pid)
+        .or_else(|| {
+            applications
+                .iter()
+                .find(|application| application.name.eq_ignore_ascii_case(&menu.speaker_app))
+        });
+    match matched {
+        Some(application) => {
+            menu.speaker_app = application.name.clone();
+            menu.speaker_app_pid = application.pid;
+        }
+        None => {
+            menu.speaker_app.clear();
+            menu.speaker_app_pid = 0;
+        }
+    }
+}
+
+fn label_for(index: usize, state: &MenuState, labels: &DeviceLabels) -> String {
     match index {
-        5 if state.recording => "Mic".into(),
-        6 if state.recording => "Speaker".into(),
+        5 if state.recording => microphone_label(state, labels),
+        6 if state.recording => speaker_label(state, labels),
         6 if state.timer_seconds > 0 => format!("{}s", state.timer_seconds),
         _ => LABELS[index].into(),
     }
 }
 
-fn draw_menu(context: &cairo::Context, state: MenuState, hovered: i32, rects: &[Rect; 8]) {
+fn draw_menu(
+    context: &cairo::Context,
+    state: &MenuState,
+    hovered: i32,
+    rects: &[Rect; 8],
+    labels: &DeviceLabels,
+    levels: (f64, f64),
+) {
     context.set_antialias(cairo::Antialias::Best);
     let panel = Rect {
         x: 1.5,
@@ -419,18 +573,21 @@ fn draw_menu(context: &cairo::Context, state: MenuState, hovered: i32, rects: &[
             (185.0 / 255.0, 186.0 / 255.0, 193.0 / 255.0, 1.0)
         };
         let is_close = index == 7;
-        let label = if is_close {
-            String::new()
-        } else {
-            label_for(index, state)
-        };
+        // Mic and Speaker carry a device name, a slash when the input is off,
+        // and a level meter while Video is selected.
+        let device_slot = state.recording && (index == 5 || index == 6);
         let weight = if active || device_on {
             pango::Weight::Medium
         } else {
             pango::Weight::Normal
         };
+        let label = if is_close {
+            String::new()
+        } else {
+            label_for(index, state, labels)
+        };
         let layout = label_layout(&pango_context, &label, weight);
-        let label_width = if is_close {
+        let label_width = if is_close || device_slot {
             0.0
         } else {
             logical_width(&layout)
@@ -441,14 +598,19 @@ fn draw_menu(context: &cairo::Context, state: MenuState, hovered: i32, rects: &[
             ICON_SIZE + ICON_GAP + label_width
         };
         let (cell_x, cell_y) = cell.center();
-        let group_left = cell_x - group_width / 2.0;
+        // A device group sits at the cell's left edge; the rest stay centred.
+        let group_left = if device_slot {
+            cell.x + ICON_PAD
+        } else {
+            cell_x - group_width / 2.0
+        };
         let icon_center = (
             if is_close {
                 cell_x
             } else {
                 group_left + ICON_SIZE / 2.0
             },
-            cell_y,
+            if device_slot { cell_y - 2.0 } else { cell_y },
         );
         let icon_ink = if is_close && !is_hovered {
             (190.0 / 255.0, 190.0 / 255.0, 196.0 / 255.0, 1.0)
@@ -456,26 +618,72 @@ fn draw_menu(context: &cairo::Context, state: MenuState, hovered: i32, rects: &[
             icon_color
         };
         draw_icon(context, glyph_for(index, state), icon_center, icon_ink);
+        if device_slot && !device_on {
+            context.set_source_rgba(150.0 / 255.0, 150.0 / 255.0, 158.0 / 255.0, 1.0);
+            context.set_line_width(1.5);
+            context.set_line_cap(cairo::LineCap::Round);
+            context.move_to(icon_center.0 - 8.0, icon_center.1 - 8.0);
+            context.line_to(icon_center.0 + 8.0, icon_center.1 + 8.0);
+            let _ = context.stroke();
+        }
         if !is_close {
             let text_color = if active || device_on {
                 (1.0, 1.0, 1.0, 1.0)
             } else if disabled {
                 (115.0 / 255.0, 115.0 / 255.0, 122.0 / 255.0, 1.0)
+            } else if device_slot {
+                (150.0 / 255.0, 150.0 / 255.0, 158.0 / 255.0, 1.0)
             } else {
                 (228.0 / 255.0, 228.0 / 255.0, 232.0 / 255.0, 1.0)
             };
+            let text_left = group_left + ICON_SIZE + ICON_GAP;
+            if device_slot {
+                // The display name leads with what tells devices apart, so
+                // keep the start and cut the end, like the Windows cell.
+                let width = (cell.x + cell.width - ICON_PAD - text_left).max(0.0);
+                layout.set_width((width * f64::from(pango::SCALE)).round() as i32);
+                layout.set_ellipsize(pango::EllipsizeMode::End);
+                layout.set_single_paragraph_mode(true);
+            }
             // Centre the icon on the cap height rather than the whole line
             // box, the same optical fit the C++ toolbar draws.
             let (ink, _) = label_layout(&pango_context, "H", weight).extents();
             let cap_height = f64::from(ink.height()) / f64::from(pango::SCALE);
             let baseline = icon_center.1 + cap_height / 2.0;
-            let text_left = group_left + ICON_SIZE + ICON_GAP;
             context.set_source_rgba(text_color.0, text_color.1, text_color.2, text_color.3);
             context.move_to(
                 text_left,
                 baseline - f64::from(layout.baseline()) / f64::from(pango::SCALE),
             );
             pangocairo::functions::show_layout(context, &layout);
+            if device_slot && device_on {
+                let meter = Rect {
+                    x: text_left,
+                    y: cell.y + cell.height - 8.0,
+                    width: (cell.x + cell.width - ICON_PAD - text_left).max(0.0),
+                    height: 3.0,
+                };
+                rounded_rect(context, meter, 1.5);
+                context.set_source_rgba(1.0, 1.0, 1.0, 30.0 / 255.0);
+                let _ = context.fill();
+                let level = match index {
+                    5 => levels.0,
+                    _ => levels.1,
+                }
+                .clamp(0.0, 1.0);
+                if level > 0.0 {
+                    rounded_rect(
+                        context,
+                        Rect {
+                            width: meter.width * level,
+                            ..meter
+                        },
+                        1.5,
+                    );
+                    context.set_source_rgba(1.0, 138.0 / 255.0, 64.0 / 255.0, 1.0);
+                    let _ = context.fill();
+                }
+            }
         }
         if separator_after(index) {
             let x = cell.x + cell.width + 7.0;
@@ -492,9 +700,614 @@ fn install_transparent_window_css(display: &gdk::Display) {
     static INSTALLED: std::sync::Once = std::sync::Once::new();
     INSTALLED.call_once(|| {
         let provider = CssProvider::new();
-        provider.load_from_data("window.apexshot-capture-menu, window.apexshot-capture-menu > * { background: transparent; }");
-        gtk4::style_context_add_provider_for_display(display, &provider, gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION);
+        provider.load_from_data(
+            "window.apexshot-capture-menu, window.apexshot-capture-menu > * { background: transparent; }\n\
+             popover.apexshot-device-popover {\
+                 background: transparent;\
+                 border: none;\
+                 box-shadow: none;\
+                 outline: none;\
+                 padding: 0;\
+             }\n\
+             popover.apexshot-device-popover > contents {\
+                 background: #252526;\
+                 border: 1px solid rgba(255,255,255,0.10);\
+                 border-radius: 10px;\
+                 padding: 4px;\
+                 box-shadow: none;\
+                 min-width: 294px;\
+             }\n\
+             popover.apexshot-device-submenu > contents { min-width: 0; }\n\
+             .apexshot-device-list { background: transparent; }\n\
+             button.apexshot-device-item {\
+                 background: transparent;\
+                 border: none;\
+                 box-shadow: none;\
+                 outline: none;\
+                 padding: 7px 8px 7px 8px;\
+                 border-radius: 6px;\
+                 color: rgba(255,255,255,0.90);\
+                 font-family: \"DM Sans\";\
+                 font-size: 14px;\
+                 font-weight: 500;\
+                 min-height: 0;\
+                 min-width: 0;\
+             }\n\
+             button.apexshot-device-item:hover { background: rgba(255,255,255,0.07); }\n\
+             button.apexshot-device-item:focus:not(:hover):not(:focus-visible) { background: transparent; }\n\
+             button.apexshot-device-item:disabled { color: rgba(255,255,255,0.24); }\n\
+             button.apexshot-device-item label {\
+                 color: inherit;\
+                 font-family: \"DM Sans\";\
+                 font-size: 14px;\
+                 font-weight: 500;\
+             }\n\
+             .apexshot-device-separator {\
+                 background: rgba(255,255,255,0.06);\
+                 min-height: 1px;\
+                 margin: 4px 8px;\
+             }",
+        );
+        gtk4::style_context_add_provider_for_display(
+            display,
+            &provider,
+            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
     });
+}
+
+/// One row of a Quick Capture device popover.
+struct DeviceChoice {
+    label: String,
+    value: String,
+}
+
+/// What a menu row draws in its trailing column.
+#[derive(Clone, Copy)]
+enum RowMark {
+    /// The C++ menu's Lucide check, filled when the row is chosen.
+    Tick(bool),
+    /// The C++ menu's submenu chevron.
+    Chevron,
+}
+
+/// The trailing mark, drawn with cairo so it matches the C++ menu without
+/// depending on a glyph being present in the installed fonts.
+fn row_mark(mark: RowMark) -> DrawingArea {
+    let area = DrawingArea::new();
+    area.set_content_width(16);
+    area.set_content_height(16);
+    area.set_valign(gtk4::Align::Center);
+    // 294 px row - 8 px padding each side - 16 px mark - this = 260 px of
+    // text, the width the C++ menu's 7/26/7/8 item padding leaves.
+    area.set_margin_start(2);
+    area.set_draw_func(move |_, context, width, height| {
+        let width = f64::from(width);
+        let height = f64::from(height);
+        context.set_line_width(1.8);
+        context.set_line_cap(cairo::LineCap::Round);
+        match mark {
+            RowMark::Tick(true) => {
+                context.set_source_rgba(1.0, 1.0, 1.0, 219.0 / 255.0);
+                context.move_to(width * 0.20, height * 0.52);
+                context.line_to(width * 0.42, height * 0.74);
+                context.line_to(width * 0.80, height * 0.28);
+            }
+            RowMark::Chevron => {
+                context.set_source_rgba(1.0, 1.0, 1.0, 168.0 / 255.0);
+                context.move_to(width * 0.36, height * 0.28);
+                context.line_to(width * 0.64, height * 0.50);
+                context.line_to(width * 0.36, height * 0.72);
+            }
+            RowMark::Tick(false) => return,
+        }
+        let _ = context.stroke();
+    });
+    area
+}
+
+/// A popover moves focus to its first row, and the toolbar's earlier key
+/// presses leave the window showing focus, so a menu opened with the mouse
+/// would start with a highlighted row. The C++ menu highlights only under
+/// the pointer or after arrow keys, which turn focus display back on.
+fn hide_pointer_focus(popover: &gtk4::Popover) {
+    // Focus moves in when the popover maps, after `popup()` returns.
+    popover.connect_map(|popover| {
+        let popover = popover.clone();
+        glib::idle_add_local_once(move || {
+            if let Some(window) = popover.root().and_downcast::<gtk4::Window>() {
+                window.set_focus_visible(false);
+            }
+        });
+    });
+}
+
+/// How a menu row sizes its text, matching the C++ menu: fixed command rows
+/// keep the whole text width, device names are elided at 216 px, and the app
+/// submenu, which has no fixed width, is as wide as its longest name.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RowWidth {
+    Command,
+    Name,
+    Natural,
+}
+
+fn device_row(
+    label: &str,
+    width: RowWidth,
+    mark: RowMark,
+    sensitive: bool,
+    activate: impl Fn() + 'static,
+) -> gtk4::Button {
+    let button = gtk4::Button::new();
+    button.add_css_class("apexshot-device-item");
+    button.set_has_frame(false);
+    button.set_sensitive(sensitive);
+    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    let text = gtk4::Label::new(Some(label));
+    text.set_xalign(0.0);
+    // One-char natural width lets the popover's fixed width (or the 216 px
+    // name width) set the label's; the display name leads with what differs.
+    text.set_ellipsize(pango::EllipsizeMode::End);
+    text.set_max_width_chars(1);
+    row.append(&text);
+    match width {
+        RowWidth::Name => {
+            text.set_size_request(216, -1);
+            let spacer = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+            spacer.set_hexpand(true);
+            row.append(&spacer);
+        }
+        RowWidth::Command => text.set_hexpand(true),
+        RowWidth::Natural => {
+            // Natural width up to the 216 px the C++ menu elides names at.
+            text.set_max_width_chars(-1);
+            let natural = text.layout().pixel_size().0;
+            text.set_size_request(natural.min(216), -1);
+            text.set_hexpand(true);
+        }
+    }
+    row.append(&row_mark(mark));
+    button.set_child(Some(&row));
+    button.connect_clicked(move |_| activate());
+    button
+}
+
+/// A dark list anchored under a toolbar item, styled like the C++ menu.
+#[allow(clippy::too_many_arguments)]
+fn show_device_popover(
+    drawing: &DrawingArea,
+    rect: Rect,
+    empty_label: &str,
+    off_label: &str,
+    devices: Vec<DeviceChoice>,
+    selected: Option<&str>,
+    off_selected: bool,
+    on_choice: impl Fn(Option<String>) + 'static,
+) -> gtk4::Popover {
+    let popover = gtk4::Popover::new();
+    popover.add_css_class("apexshot-device-popover");
+    popover.set_parent(drawing);
+    popover.set_has_arrow(false);
+    popover.set_position(gtk4::PositionType::Bottom);
+    // Left edge on the item and 6 px below the panel, where the C++ menu opens.
+    popover.set_halign(gtk4::Align::Start);
+    popover.set_offset(0, 6);
+    popover.set_autohide(true);
+    popover.set_pointing_to(Some(&gdk::Rectangle::new(
+        rect.x.round() as i32,
+        PANEL_HEIGHT.round() as i32 - 1,
+        rect.width.round() as i32,
+        1,
+    )));
+
+    let list = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    list.add_css_class("apexshot-device-list");
+    let on_choice = Rc::new(on_choice);
+    if devices.is_empty() {
+        list.append(&device_row(
+            empty_label,
+            RowWidth::Command,
+            RowMark::Tick(false),
+            false,
+            || {},
+        ));
+    } else {
+        for device in &devices {
+            // An input that is off ticks only its "Don't record" row.
+            let ticked = !off_selected && selected == Some(device.value.as_str());
+            let value = device.value.clone();
+            // Weak: the row owns the closure, the popover owns the row.
+            let popover = popover.downgrade();
+            let on_choice = on_choice.clone();
+            list.append(&device_row(
+                &device.label,
+                RowWidth::Name,
+                RowMark::Tick(ticked),
+                true,
+                move || {
+                    (*on_choice)(Some(value.clone()));
+                    if let Some(popover) = popover.upgrade() {
+                        popover.popdown();
+                    }
+                },
+            ));
+        }
+    }
+    let separator = gtk4::Separator::new(gtk4::Orientation::Horizontal);
+    separator.add_css_class("apexshot-device-separator");
+    list.append(&separator);
+    {
+        let popover = popover.downgrade();
+        let on_choice = on_choice.clone();
+        list.append(&device_row(
+            off_label,
+            RowWidth::Command,
+            RowMark::Tick(off_selected),
+            true,
+            move || {
+                (*on_choice)(None);
+                if let Some(popover) = popover.upgrade() {
+                    popover.popdown();
+                }
+            },
+        ));
+    }
+
+    popover.set_child(Some(&list));
+    let drawing = drawing.clone();
+    popover.connect_closed(move |popover| {
+        popover.unparent();
+        let _ = drawing.grab_focus();
+    });
+    popover
+}
+
+/// The three-part Speaker menu, matching the Windows toolbar: every app, one
+/// app (a second popover), or nothing.
+fn show_speaker_popover(
+    drawing: &DrawingArea,
+    rect: Rect,
+    state: &Rc<RefCell<MenuState>>,
+    app_audio_available: bool,
+    on_change: impl Fn() + 'static,
+) -> gtk4::Popover {
+    let popover = gtk4::Popover::new();
+    popover.add_css_class("apexshot-device-popover");
+    popover.set_parent(drawing);
+    popover.set_has_arrow(false);
+    popover.set_position(gtk4::PositionType::Bottom);
+    popover.set_halign(gtk4::Align::Start);
+    popover.set_offset(0, 6);
+    popover.set_autohide(true);
+    popover.set_pointing_to(Some(&gdk::Rectangle::new(
+        rect.x.round() as i32,
+        PANEL_HEIGHT.round() as i32 - 1,
+        rect.width.round() as i32,
+        1,
+    )));
+
+    let list = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    list.add_css_class("apexshot-device-list");
+    let on_change: Rc<dyn Fn()> = Rc::new(on_change);
+    let submenu: Rc<RefCell<Option<gtk4::Popover>>> = Rc::new(RefCell::new(None));
+    let (enabled, chosen_app) = {
+        let menu = state.borrow();
+        (menu.speaker, menu.speaker_app.clone())
+    };
+
+    {
+        let popover = popover.downgrade();
+        let state = state.clone();
+        let on_change = on_change.clone();
+        list.append(&device_row(
+            "Record system audio from all apps",
+            RowWidth::Command,
+            RowMark::Tick(enabled && chosen_app.is_empty()),
+            true,
+            move || {
+                let mut menu = state.borrow_mut();
+                menu.speaker = true;
+                menu.speaker_app.clear();
+                menu.speaker_app_pid = 0;
+                drop(menu);
+                (*on_change)();
+                if let Some(popover) = popover.upgrade() {
+                    popover.popdown();
+                }
+            },
+        ));
+    }
+
+    // One app opens a second popover anchored to this row's right edge.
+    // Where one app cannot be captured the row keeps the Windows text and is
+    // greyed out, so the menu has the same shape.
+    let one_row = device_row(
+        "Record audio from one app",
+        RowWidth::Command,
+        RowMark::Chevron,
+        app_audio_available,
+        || {},
+    );
+    {
+        let popover = popover.downgrade();
+        let submenu = submenu.clone();
+        let state = state.clone();
+        let on_change = on_change.clone();
+        one_row.connect_clicked(move |row| {
+            if let Some(existing) = submenu.borrow_mut().take() {
+                existing.popdown();
+                existing.unparent();
+            }
+            let Some(parent) = popover.upgrade() else {
+                return;
+            };
+            let child = show_app_popover(row, &state, parent, on_change.clone());
+            hide_pointer_focus(&child);
+            child.popup();
+            *submenu.borrow_mut() = Some(child);
+        });
+    }
+    list.append(&one_row);
+
+    let separator = gtk4::Separator::new(gtk4::Orientation::Horizontal);
+    separator.add_css_class("apexshot-device-separator");
+    list.append(&separator);
+    {
+        let popover = popover.downgrade();
+        let state = state.clone();
+        let on_change = on_change.clone();
+        list.append(&device_row(
+            "Don't record system audio",
+            RowWidth::Command,
+            RowMark::Tick(!enabled),
+            true,
+            move || {
+                let mut menu = state.borrow_mut();
+                menu.speaker = false;
+                menu.speaker_app.clear();
+                menu.speaker_app_pid = 0;
+                drop(menu);
+                (*on_change)();
+                if let Some(popover) = popover.upgrade() {
+                    popover.popdown();
+                }
+            },
+        ));
+    }
+
+    popover.set_child(Some(&list));
+
+    // Escape closes this menu, not the toolbar underneath it.
+    let key = EventControllerKey::new();
+    {
+        let popover = popover.downgrade();
+        key.connect_key_pressed(move |_, keyval, _, _| {
+            if keyval == gdk::Key::Escape {
+                if let Some(popover) = popover.upgrade() {
+                    popover.popdown();
+                }
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        });
+    }
+    popover.add_controller(key);
+
+    {
+        let drawing = drawing.clone();
+        let submenu = submenu.clone();
+        popover.connect_closed(move |popover| {
+            if let Some(child) = submenu.borrow_mut().take() {
+                child.popdown();
+                child.unparent();
+            }
+            popover.unparent();
+            let _ = drawing.grab_focus();
+        });
+    }
+    popover
+}
+
+/// Apps currently playing audio, anchored to the "one app" row. Picking one
+/// closes this menu and the Speaker menu it hangs from.
+fn show_app_popover(
+    row: &gtk4::Button,
+    state: &Rc<RefCell<MenuState>>,
+    parent: gtk4::Popover,
+    on_change: Rc<dyn Fn()>,
+) -> gtk4::Popover {
+    let popover = gtk4::Popover::new();
+    popover.add_css_class("apexshot-device-popover");
+    popover.add_css_class("apexshot-device-submenu");
+    popover.set_parent(row);
+    popover.set_has_arrow(false);
+    // The submenu sits at the row's right edge, its top aligned with it.
+    popover.set_position(gtk4::PositionType::Right);
+    popover.set_halign(gtk4::Align::Start);
+    popover.set_valign(gtk4::Align::Start);
+    // 6 px clear of the menu, first row level with the hovered one.
+    popover.set_offset(6, -5);
+    popover.set_autohide(true);
+    popover.set_pointing_to(Some(&gdk::Rectangle::new(
+        0,
+        0,
+        row.width().max(1),
+        row.height().max(1),
+    )));
+
+    let list = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    list.add_css_class("apexshot-device-list");
+    let applications = crate::recording::list_audio_applications();
+    if applications.is_empty() {
+        list.append(&device_row(
+            "No apps are playing audio",
+            RowWidth::Natural,
+            RowMark::Tick(false),
+            false,
+            || {},
+        ));
+    } else {
+        let (chosen_app, chosen_pid) = {
+            let menu = state.borrow();
+            (menu.speaker_app.clone(), menu.speaker_app_pid)
+        };
+        for application in applications {
+            let ticked = if chosen_pid != 0 {
+                application.pid == chosen_pid
+            } else {
+                !chosen_app.is_empty() && application.name.eq_ignore_ascii_case(&chosen_app)
+            };
+            let label = application.name.clone();
+            let name = application.name;
+            let pid = application.pid;
+            let state = state.clone();
+            let on_change = on_change.clone();
+            let popover = popover.downgrade();
+            let parent = parent.downgrade();
+            list.append(&device_row(
+                &label,
+                RowWidth::Natural,
+                RowMark::Tick(ticked),
+                true,
+                move || {
+                    let mut menu = state.borrow_mut();
+                    menu.speaker = true;
+                    menu.speaker_app = name.clone();
+                    menu.speaker_app_pid = pid;
+                    drop(menu);
+                    (*on_change)();
+                    if let Some(popover) = popover.upgrade() {
+                        popover.popdown();
+                    }
+                    if let Some(parent) = parent.upgrade() {
+                        parent.popdown();
+                    }
+                },
+            ));
+        }
+    }
+    popover.set_child(Some(&list));
+
+    // Escape closes the submenu first; the Speaker menu stays open.
+    let key = EventControllerKey::new();
+    {
+        let popover = popover.downgrade();
+        key.connect_key_pressed(move |_, keyval, _, _| {
+            if keyval == gdk::Key::Escape {
+                if let Some(popover) = popover.upgrade() {
+                    popover.popdown();
+                }
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        });
+    }
+    popover.add_controller(key);
+    popover
+}
+
+/// Recomputes the cells for the current mode and gives the surface its new
+/// width. The layer surface is anchored top only, so the compositor keeps it
+/// centred on the monitor.
+fn relayout(
+    state: &RefCell<MenuState>,
+    rects: &RefCell<[Rect; 8]>,
+    monitor_width: Option<f64>,
+    drawing: &DrawingArea,
+    window: &Window,
+) {
+    let next = item_rects(&item_widths(&state.borrow(), monitor_width));
+    let width = panel_width(&next).round() as i32;
+    let height = PANEL_HEIGHT.round() as i32;
+    *rects.borrow_mut() = next;
+    drawing.set_content_width(width);
+    drawing.set_content_height(height);
+    drawing.set_size_request(width, height);
+    window.set_default_size(width, height);
+    drawing.queue_resize();
+    drawing.queue_draw();
+}
+
+/// Points the daemon's meters at the devices the cells name and polls them
+/// while Video shows a live input. The source removes itself when Video or
+/// both inputs go away.
+fn update_meter_poll(
+    state: &Rc<RefCell<MenuState>>,
+    levels: &Rc<Cell<(f64, f64)>>,
+    drawing: &DrawingArea,
+    poll: &Rc<RefCell<Option<glib::SourceId>>>,
+) {
+    let (mic, speaker, speaker_app_pid) = {
+        let state = state.borrow();
+        let mic = (state.recording && state.microphone && !state.mic_device.is_empty())
+            .then(|| state.mic_device.clone());
+        let speaker = state.recording && state.speaker;
+        // A pid follows that app's streams; `None` meters every app on the
+        // default output.
+        let speaker_app_pid =
+            (speaker && !state.speaker_app.is_empty() && state.speaker_app_pid != 0)
+                .then_some(state.speaker_app_pid);
+        (mic, speaker, speaker_app_pid)
+    };
+    if mic.is_none() && !speaker {
+        if let Some(source) = poll.borrow_mut().take() {
+            source.remove();
+        }
+        levels.set((0.0, 0.0));
+        crate::daemon::set_meter_sources(None, None);
+        drawing.queue_draw();
+        return;
+    }
+    crate::daemon::set_meter_sources(mic, speaker_app_pid);
+    if poll.borrow().is_some() {
+        return;
+    }
+    let state = state.clone();
+    let levels = levels.clone();
+    let drawing = drawing.clone();
+    let poll_slot = poll.clone();
+    let source = glib::timeout_add_local(Duration::from_millis(33), move || {
+        let (mic, speaker) = {
+            let state = state.borrow();
+            (
+                state.recording && state.microphone,
+                state.recording && state.speaker,
+            )
+        };
+        if !mic && !speaker {
+            // The id leaves its slot without removing this source; returning
+            // Break is what stops it.
+            poll_slot.borrow_mut().take();
+            levels.set((0.0, 0.0));
+            return glib::ControlFlow::Break;
+        }
+        let (old_mic, old_speaker) = levels.get();
+        let next_mic = if mic {
+            let level = crate::daemon::mic_meter_level();
+            if level > old_mic {
+                level
+            } else {
+                old_mic * 0.6 + level * 0.4
+            }
+        } else {
+            0.0
+        };
+        let next_speaker = if speaker {
+            let level = crate::daemon::speaker_meter_level();
+            if level > old_speaker {
+                level
+            } else {
+                old_speaker * 0.6 + level * 0.4
+            }
+        } else {
+            0.0
+        };
+        levels.set((next_mic, next_speaker));
+        drawing.queue_draw();
+        glib::ControlFlow::Continue
+    });
+    *poll.borrow_mut() = Some(source);
 }
 
 /// Shows a pixel-controlled port of the C++ capture toolbar on the selected display.
@@ -526,9 +1339,27 @@ fn choose_capture_mode_internal(
         return None;
     }
     install_transparent_window_css(&display);
-    let widths = item_widths();
-    let rects = Rc::new(item_rects(&widths));
-    let window_width = panel_width(&rects).round() as i32;
+    // The device cells take their width from the monitor the bar sits on.
+    let monitor_width = layer_shell_monitor
+        .as_ref()
+        .map(|monitor| f64::from(monitor.geometry().width()));
+    let app_config = crate::config::load_config();
+    let state = Rc::new(RefCell::new(MenuState {
+        recording: false,
+        ocr: false,
+        timer_seconds: 0,
+        microphone: false,
+        speaker: false,
+        mic_device: app_config.rec_mic_device,
+        speaker_app: app_config.rec_speaker_app,
+        speaker_app_pid: 0,
+    }));
+    let labels: Rc<RefCell<DeviceLabels>> = Rc::new(RefCell::new(DeviceLabels::default()));
+    let levels = Rc::new(Cell::new((0.0, 0.0)));
+    let meter_poll: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
+    let initial_rects = item_rects(&item_widths(&state.borrow(), monitor_width));
+    let rects: Rc<RefCell<[Rect; 8]>> = Rc::new(RefCell::new(initial_rects));
+    let window_width = panel_width(&initial_rects).round() as i32;
     let window_height = PANEL_HEIGHT.round() as i32;
     let result = Rc::new(RefCell::new(None));
     let main_loop = glib::MainLoop::new(None, false);
@@ -548,13 +1379,7 @@ fn choose_capture_mode_internal(
         window.set_keyboard_mode(KeyboardMode::Exclusive);
         window.set_namespace(Some("apexshot-capture-menu"));
     }
-    let state = Rc::new(RefCell::new(MenuState {
-        recording: false,
-        ocr: false,
-        timer_seconds: 0,
-        microphone: false,
-        speaker: false,
-    }));
+    let open_popover: Rc<RefCell<Option<gtk4::Popover>>> = Rc::new(RefCell::new(None));
     let hovered = Rc::new(Cell::new(-1));
     let drawing = DrawingArea::new();
     drawing.set_content_width(window_width);
@@ -565,8 +1390,17 @@ fn choose_capture_mode_internal(
         let state = state.clone();
         let hovered = hovered.clone();
         let rects = rects.clone();
+        let labels = labels.clone();
+        let levels = levels.clone();
         drawing.set_draw_func(move |_, context, _, _| {
-            draw_menu(context, *state.borrow(), hovered.get(), &rects)
+            draw_menu(
+                context,
+                &state.borrow(),
+                hovered.get(),
+                &rects.borrow(),
+                &labels.borrow(),
+                levels.get(),
+            )
         });
     }
     let motion = EventControllerMotion::new();
@@ -576,9 +1410,9 @@ fn choose_capture_mode_internal(
         let drawing = drawing.clone();
         let rects = rects.clone();
         motion.connect_motion(move |_, x, y| {
-            let menu = *state.borrow();
-            let next = item_at(x, y, &rects)
-                .filter(|&i| !item_is_disabled(i, menu))
+            let menu = state.borrow();
+            let next = item_at(x, y, &rects.borrow())
+                .filter(|&i| !item_is_disabled(i, &menu))
                 .map(|i| i as i32)
                 .unwrap_or(-1);
             if hovered.replace(next) != next {
@@ -604,33 +1438,36 @@ fn choose_capture_mode_internal(
         let window = window.clone();
         let drawing = drawing.clone();
         let rects = rects.clone();
+        let labels = labels.clone();
+        let levels = levels.clone();
+        let meter_poll = meter_poll.clone();
         click.connect_pressed(move |_, _, x, y| {
-            let Some(index) = item_at(x, y, &rects) else {
+            let Some(index) = item_at(x, y, &rects.borrow()) else {
                 return;
             };
             let mut menu = state.borrow_mut();
-            if item_is_disabled(index, *menu) {
+            if item_is_disabled(index, &menu) {
                 return;
             }
             match index {
                 0 => set_recording_mode(&mut menu, false),
                 1 => set_recording_mode(&mut menu, true),
                 2 => {
-                    *result.borrow_mut() = Some(menu.result(CaptureMenuAction::Display));
+                    *result.borrow_mut() = Some(menu.clone().result(CaptureMenuAction::Display));
                     drop(menu);
                     window.close();
                     main_loop.quit();
                     return;
                 }
                 3 => {
-                    *result.borrow_mut() = Some(menu.result(CaptureMenuAction::Window));
+                    *result.borrow_mut() = Some(menu.clone().result(CaptureMenuAction::Window));
                     drop(menu);
                     window.close();
                     main_loop.quit();
                     return;
                 }
                 4 => {
-                    *result.borrow_mut() = Some(menu.result(CaptureMenuAction::Area));
+                    *result.borrow_mut() = Some(menu.clone().result(CaptureMenuAction::Area));
                     drop(menu);
                     window.close();
                     main_loop.quit();
@@ -657,18 +1494,141 @@ fn choose_capture_mode_internal(
                 _ => {}
             }
             drop(menu);
+            if matches!(index, 0 | 1) {
+                // The mode decides whether the device cells exist and how
+                // wide they are, so the surface grows or shrinks with it.
+                if state.borrow().recording {
+                    load_device_labels(&labels, false);
+                    // A saved app is kept only while it is still playing.
+                    let mut menu = state.borrow_mut();
+                    resolve_saved_speaker_app(&mut menu);
+                }
+
+                relayout(&state, &rects, monitor_width, &drawing, &window);
+            }
+            update_meter_poll(&state, &levels, &drawing, &meter_poll);
             drawing.queue_draw();
         });
     }
     drawing.add_controller(click);
+    // Right-click while Video is selected opens the same device menu the
+    // Windows toolbar draws under Mic and Speaker.
+    let device_click = GestureClick::builder().button(3).build();
+    {
+        let state = state.clone();
+        let drawing = drawing.clone();
+        let rects = rects.clone();
+        let labels = labels.clone();
+        let levels = levels.clone();
+        let meter_poll = meter_poll.clone();
+        let open_popover = open_popover.clone();
+        device_click.connect_pressed(move |_, _, x, y| {
+            let Some(index) = item_at(x, y, &rects.borrow()) else {
+                return;
+            };
+            if !matches!(index, 5 | 6) || !state.borrow().recording {
+                return;
+            }
+            // One device menu at a time; the closed handler clears this slot.
+            let existing = open_popover.borrow().clone();
+            if let Some(existing) = existing {
+                existing.popdown();
+            }
+            let rect = rects.borrow()[index];
+            let popover = if index == 5 {
+                let devices = crate::recording::list_audio_inputs();
+                let enabled = state.borrow().microphone;
+                let current = state.borrow().mic_device.clone();
+                let selected = if enabled && devices.iter().any(|device| device.name == current) {
+                    Some(current.clone())
+                } else {
+                    devices
+                        .iter()
+                        .find(|device| device.default)
+                        .map(|device| device.name.clone())
+                };
+                // A saved microphone that disappeared silently falls back to
+                // the default, so the request carries a source that exists.
+                if let (true, Some(selected)) = (enabled, selected.as_ref()) {
+                    if state.borrow().mic_device != *selected {
+                        state.borrow_mut().mic_device = selected.to_string();
+                    }
+                }
+                let choices = devices
+                    .into_iter()
+                    .map(|device| DeviceChoice {
+                        label: device.description,
+                        value: device.name,
+                    })
+                    .collect();
+                let state = state.clone();
+                let redraw = drawing.clone();
+                let labels = labels.clone();
+                let levels = levels.clone();
+                let meter_poll = meter_poll.clone();
+                show_device_popover(
+                    &drawing,
+                    rect,
+                    "No microphone detected",
+                    "Don't record microphone",
+                    choices,
+                    selected.as_deref(),
+                    !enabled,
+                    move |value| {
+                        let mut menu = state.borrow_mut();
+                        match value {
+                            Some(name) => {
+                                menu.microphone = true;
+                                menu.mic_device = name;
+                            }
+                            None => menu.microphone = false,
+                        }
+                        drop(menu);
+                        refresh_missing_labels(&state.borrow(), &labels);
+                        update_meter_poll(&state, &levels, &redraw, &meter_poll);
+                        redraw.queue_draw();
+                    },
+                )
+            } else {
+                // The same three choices the Windows toolbar offers: every
+                // app, one app, or nothing. Linux records every app from the
+                // default output's monitor, and one app from its own streams.
+                let app_audio_available = crate::recording::app_audio_capture_available();
+                let meter_state = state.clone();
+                let redraw = drawing.clone();
+                let levels = levels.clone();
+                let meter_poll = meter_poll.clone();
+                show_speaker_popover(&drawing, rect, &state, app_audio_available, move || {
+                    update_meter_poll(&meter_state, &levels, &redraw, &meter_poll);
+                    redraw.queue_draw();
+                })
+            };
+            open_popover.replace(Some(popover.clone()));
+            let open_popover = open_popover.clone();
+            popover.connect_closed(move |_| {
+                open_popover.replace(None);
+            });
+            hide_pointer_focus(&popover);
+            popover.popup();
+        });
+    }
+    drawing.add_controller(device_click);
     window.set_child(Some(&drawing));
     let key = EventControllerKey::new();
     {
         let result = result.clone();
         let main_loop = main_loop.clone();
         let window = window.clone();
+        let open_popover = open_popover.clone();
         key.connect_key_pressed(move |_, keyval, _, _| {
             if keyval == gdk::Key::Escape {
+                // Escape closes an open device menu first; it must not cancel
+                // the toolbar underneath it.
+                let open_device_menu = open_popover.borrow().clone();
+                if let Some(popover) = open_device_menu {
+                    popover.popdown();
+                    return glib::Propagation::Stop;
+                }
                 *result.borrow_mut() = Some(CaptureMenuResult::default());
                 window.close();
                 main_loop.quit();
@@ -720,70 +1680,65 @@ fn choose_capture_mode_internal(
     if let Some(control_poll) = control_poll {
         control_poll.remove();
     }
+    if let Some(source) = meter_poll.borrow_mut().take() {
+        source.remove();
+    }
+    // Release this process's meter streams; a capture starts right after and
+    // must not share the device with a stream the idle reaper has not reached.
+    crate::daemon::stop_meter_streams();
     window.hide();
     window.destroy();
     while glib::MainContext::default().iteration(false) {}
-    let selected = result.borrow().unwrap_or_default();
+    let selected = result.borrow_mut().take().unwrap_or_default();
     Some(selected)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn menu_state_matches_the_qt_toolbar_constraints() {
-        let shot = MenuState {
-            recording: false,
-            ocr: false,
-            timer_seconds: 0,
-            microphone: false,
-            speaker: false,
-        };
-        assert!(item_is_active(0, shot));
-        assert!(!item_is_disabled(2, shot));
+        let shot = MenuState::default();
+        assert!(item_is_active(0, &shot));
+        assert!(!item_is_disabled(2, &shot));
         let timer = MenuState {
             timer_seconds: 3,
-            ..shot
+            ..shot.clone()
         };
-        assert!(item_is_disabled(3, timer));
-        assert!(item_is_disabled(4, timer));
+        assert!(item_is_disabled(3, &timer));
+        assert!(item_is_disabled(4, &timer));
         let video = MenuState {
             recording: true,
             ..shot
         };
-        assert!(item_is_active(1, video));
-        assert!(!item_is_disabled(3, video));
-        assert!(item_is_disabled(4, video));
+        assert!(item_is_active(1, &video));
+        assert!(!item_is_disabled(3, &video));
+        assert!(item_is_disabled(4, &video));
     }
 
     #[test]
     fn shot_ocr_disables_display_and_timer_but_allows_area() {
         let shot = MenuState {
-            recording: false,
             ocr: true,
-            timer_seconds: 0,
-            microphone: false,
-            speaker: false,
+            ..MenuState::default()
         };
 
-        assert!(item_is_disabled(2, shot));
-        assert!(!item_is_disabled(4, shot));
-        assert!(item_is_disabled(6, shot));
+        assert!(item_is_disabled(2, &shot));
+        assert!(!item_is_disabled(4, &shot));
+        assert!(item_is_disabled(6, &shot));
     }
 
     #[test]
     fn video_audio_toggles_survive_shot_selection_for_area_capture() {
-        let shot = MenuState {
-            recording: false,
-            ocr: false,
-            timer_seconds: 0,
-            microphone: false,
-            speaker: false,
-        };
+        let shot = MenuState::default();
         let mut video = MenuState {
             recording: true,
             microphone: true,
             speaker: true,
+            mic_device: "alsa_input.usb-mic".into(),
+            speaker_app: "Google Chrome".into(),
+            speaker_app_pid: 9707,
             ..shot
         };
 
@@ -792,7 +1747,7 @@ mod tests {
         assert!(!video.recording);
         assert!(video.microphone);
         assert!(video.speaker);
-        assert!(!item_is_disabled(4, video));
+        assert!(!item_is_disabled(4, &video));
         assert_eq!(
             video.result(CaptureMenuAction::Area),
             CaptureMenuResult {
@@ -802,6 +1757,9 @@ mod tests {
                 timer_seconds: 0,
                 microphone: true,
                 speaker: true,
+                mic_device: "alsa_input.usb-mic".into(),
+                speaker_app: "Google Chrome".into(),
+                speaker_app_pid: 9707,
             }
         );
     }
@@ -841,20 +1799,96 @@ mod tests {
     #[test]
     fn device_toggles_only_count_while_recording() {
         let shot = MenuState {
-            recording: false,
-            ocr: false,
-            timer_seconds: 0,
             microphone: true,
             speaker: true,
+            ..MenuState::default()
         };
-        assert!(!device_on(5, shot));
-        assert!(!device_on(6, shot));
+        assert!(!device_on(5, &shot));
+        assert!(!device_on(6, &shot));
 
         let video = MenuState {
             recording: true,
             ..shot
         };
-        assert!(device_on(5, video));
-        assert!(device_on(6, video));
+        assert!(device_on(5, &video));
+        assert!(device_on(6, &video));
+    }
+
+    #[test]
+    fn device_cells_split_the_monitor_width_like_the_cpp_toolbar() {
+        let widths = [60.0, 62.0, 82.0, 86.0, 66.0, 70.0, 82.0, 44.0];
+        // Three separators and the outer pads stay fixed; the two device
+        // cells share whatever the monitor leaves.
+        let fixed = 2.0 * OUTER_PAD
+            + 3.0 * SEPARATOR
+            + widths[0]
+            + widths[1]
+            + widths[2]
+            + widths[3]
+            + widths[4]
+            + widths[7];
+        assert_eq!(
+            device_cell_width(&widths, Some(700.0)),
+            (700.0 - 24.0 - fixed) / 2.0
+        );
+        assert_eq!(device_cell_width(&widths, Some(1400.0)), 160.0);
+        assert_eq!(device_cell_width(&widths, Some(300.0)), 74.0);
+        assert_eq!(device_cell_width(&widths, None), 160.0);
+    }
+
+    #[test]
+    fn device_cells_show_the_chosen_description() {
+        let labels = DeviceLabels {
+            loaded: true,
+            microphones: vec![crate::recording::AudioInputDevice {
+                name: "alsa_input.builtin".into(),
+                description: "Built-in Microphone".into(),
+                default: true,
+            }],
+            outputs: vec![crate::recording::AudioOutputDevice {
+                name: "alsa_output.speakers".into(),
+                description: "Speaker (Raptor Lake-P/U/H cAVS)".into(),
+                monitor_source: "alsa_output.speakers.monitor".into(),
+                default: true,
+            }],
+        };
+        let video = MenuState {
+            recording: true,
+            microphone: true,
+            speaker: true,
+            mic_device: "alsa_input.builtin".into(),
+            ..MenuState::default()
+        };
+        assert_eq!(label_for(5, &video, &labels), "Built-in Microphone");
+        // Every app names the default output, the way the Windows cell names
+        // the default endpoint.
+        assert_eq!(
+            label_for(6, &video, &labels),
+            "Speaker (Raptor Lake-P/U/H cAVS)"
+        );
+
+        // One app names the app instead.
+        let one_app = MenuState {
+            speaker_app: "Google Chrome".into(),
+            speaker_app_pid: 9707,
+            ..video.clone()
+        };
+        assert_eq!(label_for(6, &one_app, &labels), "Google Chrome");
+
+        let off = MenuState {
+            microphone: false,
+            speaker: false,
+            ..video.clone()
+        };
+        assert_eq!(label_for(5, &off, &labels), "No microphone");
+        assert_eq!(label_for(6, &off, &labels), "No system audio");
+
+        // A source the listing missed still names itself rather than going
+        // blank, the way the C++ label falls back to the name.
+        let missing = MenuState {
+            mic_device: "alsa_input.usb".into(),
+            ..video
+        };
+        assert_eq!(label_for(5, &missing, &labels), "alsa_input.usb");
     }
 }

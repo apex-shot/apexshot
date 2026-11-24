@@ -4,7 +4,7 @@ use tokio::sync::mpsc;
 
 use super::*;
 
-pub(super) fn is_wlroots_session() -> bool {
+pub(crate) fn is_wlroots_session() -> bool {
     let desktop = std::env::var("XDG_CURRENT_DESKTOP")
         .or_else(|_| std::env::var("DESKTOP_SESSION"))
         .unwrap_or_default()
@@ -129,7 +129,7 @@ fn video_capture_args(config: &super::RecordingConfig) -> Vec<String> {
 }
 
 pub(super) async fn record_with_wf_recorder(
-    config: super::RecordingConfig,
+    mut config: super::RecordingConfig,
     command_rx: Option<mpsc::UnboundedReceiver<RecordingControlCommand>>,
 ) -> super::RecordResult<(PathBuf, super::RecordingTerminalAction)> {
     if let Some(msg) = crate::app_identity::host_escape_blocked("wf-recorder") {
@@ -145,14 +145,30 @@ pub(super) async fn record_with_wf_recorder(
     let final_path = config.output_path.clone();
     let mut args = video_capture_args(&config);
 
+    // wf-recorder opens one Pulse source. Resolve it against the live server
+    // first so an unplugged choice falls back to the default instead of
+    // making wf-recorder exit.
+    let audio_inputs = if config.mic_enabled || config.speaker_enabled {
+        super::audio::resolve_available_audio_inputs(&mut config)
+    } else {
+        super::audio::AudioInputs::default()
+    };
+
     // wf-recorder records the cursor by default on current wlroots setups.
     // Older packaged versions do not recognize `--show-cursor`, and passing it
     // can make recording startup noisy or fail. There is no portable positive
     // "show cursor" flag, so only omit cursor customization here.
 
-    if config.mic_enabled || config.speaker_enabled {
-        args.push("-a".into());
-        let source = if config.speaker_enabled && !config.mic_enabled {
+    if audio_inputs.any() {
+        if let Some(app) = config.speaker_app.as_ref() {
+            // wf-recorder opens one Pulse source; a single app's streams need
+            // the PipeWire graph, so this path records every app.
+            eprintln!(
+                "[recording] one-app audio is unavailable here; recording every app instead of '{}'",
+                app.name
+            );
+        }
+        let source = if audio_inputs.speaker && !audio_inputs.mic {
             config
                 .speaker_source
                 .clone()
@@ -167,8 +183,13 @@ pub(super) async fn record_with_wf_recorder(
                 .clone()
                 .unwrap_or_else(super::audio::get_pulse_default_source)
         };
-        if !source.is_empty() {
-            args.push(source);
+        // `-a` takes its device as an optional argument, so wf-recorder only
+        // reads it attached (`--audio=<source>`); a separate argument is
+        // ignored and the default source is recorded instead.
+        if source.is_empty() {
+            args.push("--audio".into());
+        } else {
+            args.push(format!("--audio={source}"));
         }
     }
 

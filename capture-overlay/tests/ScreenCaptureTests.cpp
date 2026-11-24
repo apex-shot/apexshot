@@ -767,7 +767,10 @@ void ScreenCaptureTests::parsesLayerShellCaptureMenuResult()
           "ocr":true,
           "timer_seconds":0,
           "microphone":true,
-          "speaker":true
+          "speaker":true,
+          "mic_device":"alsa_input.test",
+          "speaker_app":"Google Chrome",
+          "speaker_app_pid":9707
       })"),
       true,
       &selection,
@@ -788,7 +791,10 @@ void ScreenCaptureTests::parsesLayerShellCaptureMenuResult()
           "ocr":false,
           "timer_seconds":0,
           "microphone":true,
-          "speaker":true
+          "speaker":true,
+          "mic_device":"alsa_input.test",
+          "speaker_app":"Google Chrome",
+          "speaker_app_pid":9707
       })"),
       true,
       &selection));
@@ -803,7 +809,10 @@ void ScreenCaptureTests::parsesLayerShellCaptureMenuResult()
           "ocr":false,
           "timer_seconds":0,
           "microphone":true,
-          "speaker":true
+          "speaker":true,
+          "mic_device":"alsa_input.test",
+          "speaker_app":"Google Chrome",
+          "speaker_app_pid":9707
       })"),
       true,
       &selection));
@@ -812,6 +821,9 @@ void ScreenCaptureTests::parsesLayerShellCaptureMenuResult()
     QVERIFY(selection.recording);
     QVERIFY(selection.microphone);
     QVERIFY(selection.speaker);
+    QCOMPARE(selection.microphoneDevice, QStringLiteral("alsa_input.test"));
+    QCOMPARE(selection.speakerApp, QStringLiteral("Google Chrome"));
+    QCOMPARE(selection.speakerAppPid, 9707u);
 }
 
 void ScreenCaptureTests::rejectsMalformedLayerShellCaptureMenuResult()
@@ -827,7 +839,10 @@ void ScreenCaptureTests::rejectsMalformedLayerShellCaptureMenuResult()
             "ocr":false,
             "timer_seconds":0,
             "microphone":false,
-            "speaker":false
+            "speaker":false,
+            "mic_device":"",
+            "speaker_app":"",
+            "speaker_app_pid":0
         })"),
         QByteArrayLiteral(R"({
             "action":"display",
@@ -836,6 +851,9 @@ void ScreenCaptureTests::rejectsMalformedLayerShellCaptureMenuResult()
             "timer_seconds":0,
             "microphone":false,
             "speaker":false,
+            "mic_device":"",
+            "speaker_app":"",
+            "speaker_app_pid":0,
             "unexpected":true
         })"),
     };
@@ -854,7 +872,10 @@ void ScreenCaptureTests::rejectsUnsupportedLayerShellCaptureMenuState()
           "ocr":true,
           "timer_seconds":0,
           "microphone":false,
-          "speaker":false
+          "speaker":false,
+          "mic_device":"alsa_input.test",
+          "speaker_app":"Google Chrome",
+          "speaker_app_pid":9707
       })"),
       true,
       &selection));
@@ -865,7 +886,10 @@ void ScreenCaptureTests::rejectsUnsupportedLayerShellCaptureMenuState()
           "ocr":false,
           "timer_seconds":0,
           "microphone":false,
-          "speaker":false
+          "speaker":false,
+          "mic_device":"alsa_input.test",
+          "speaker_app":"Google Chrome",
+          "speaker_app_pid":9707
       })"),
       true,
       &selection));
@@ -876,7 +900,10 @@ void ScreenCaptureTests::rejectsUnsupportedLayerShellCaptureMenuState()
           "ocr":false,
           "timer_seconds":5,
           "microphone":false,
-          "speaker":false
+          "speaker":false,
+          "mic_device":"alsa_input.test",
+          "speaker_app":"Google Chrome",
+          "speaker_app_pid":9707
       })"),
       true,
       &selection));
@@ -887,7 +914,10 @@ void ScreenCaptureTests::rejectsUnsupportedLayerShellCaptureMenuState()
           "ocr":false,
           "timer_seconds":0,
           "microphone":false,
-          "speaker":false
+          "speaker":false,
+          "mic_device":"alsa_input.test",
+          "speaker_app":"Google Chrome",
+          "speaker_app_pid":9707
       })"),
       false,
       &selection));

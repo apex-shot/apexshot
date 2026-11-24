@@ -51,6 +51,9 @@ pub(crate) use audio::audio_meter_level;
 pub use audio::{
     begin_recording_audio_exclusive, end_recording_audio_exclusive, recording_audio_is_exclusive,
 };
+pub(crate) use audio::{
+    mic_meter_level, set_meter_sources, speaker_meter_level, stop_meter_streams,
+};
 pub use capture_handlers::{copy_screenshot_to_clipboard, open_file};
 pub use recording_handlers::{
     notify_daemon_recording_ended, notify_daemon_recording_paused,
@@ -723,8 +726,7 @@ impl DaemonIpc {
     /// The stream is released after [`audio::AUDIO_MONITOR_IDLE`] without polls so a
     /// tray-only daemon does not keep Bluetooth headsets in HSP/HFP mode.
     fn get_mic_level(&self) -> f64 {
-        audio::touch_mic_monitor();
-        f64::from_bits(audio::MIC_LEVEL.load(std::sync::atomic::Ordering::Relaxed))
+        audio::mic_meter_level()
     }
 
     /// Returns the current system audio level as a normalized f64 (0.0 to 1.0).
@@ -732,8 +734,19 @@ impl DaemonIpc {
     /// Lazily starts the speaker (sink-monitor) capture stream for the recording
     /// UI meter; released after idle like the mic stream.
     fn get_speaker_level(&self) -> f64 {
-        audio::touch_speaker_monitor();
-        f64::from_bits(audio::SPEAKER_LEVEL.load(std::sync::atomic::Ordering::Relaxed))
+        audio::speaker_meter_level()
+    }
+
+    /// Points the meters at what the Quick Capture toolbar shows; an empty
+    /// microphone restores the default input, and a zero app pid meters every
+    /// app on the default output.
+    fn set_meter_sources(&self, mic: String, speaker_app_pid: u32) -> zbus::fdo::Result<()> {
+        eprintln!("[daemon] D-Bus SetMeterSources: mic={mic:?} speaker_app_pid={speaker_app_pid}");
+        audio::set_meter_sources(
+            audio::normalized_meter_source(mic),
+            (speaker_app_pid != 0).then_some(speaker_app_pid),
+        );
+        Ok(())
     }
 
     async fn scroll_begin_gnome(&self) -> zbus::fdo::Result<bool> {
@@ -992,6 +1005,25 @@ mod tests {
         assert!(!audio_monitor_is_idle(10_000, 12_999, idle));
         assert!(audio_monitor_is_idle(10_000, 13_000, idle));
         assert!(audio_monitor_is_idle(10_000, 20_000, idle));
+    }
+
+    #[test]
+    fn meter_source_changes_only_for_a_different_source() {
+        assert!(!meter_source_changed(None, None));
+        assert!(!meter_source_changed(Some("mic"), Some("mic")));
+        assert!(meter_source_changed(None, Some("mic")));
+        assert!(meter_source_changed(Some("mic"), None));
+        assert!(meter_source_changed(Some("mic"), Some("other-mic")));
+    }
+
+    #[test]
+    fn empty_meter_source_restores_the_default() {
+        assert_eq!(normalized_meter_source(String::new()), None);
+        assert_eq!(normalized_meter_source("  ".into()), None);
+        assert_eq!(
+            normalized_meter_source("alsa_input.usb-mic".into()).as_deref(),
+            Some("alsa_input.usb-mic")
+        );
     }
 
     #[test]
