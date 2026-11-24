@@ -775,6 +775,28 @@ pub fn prepare_overlay_recording_request(
     app_config.rec_countdown = request.countdown;
     app_config.rec_mic = request.mic;
     app_config.rec_speaker = request.speaker;
+    // The Quick Capture device menus own the source choice. A request that
+    // carries one saves it for next time; one without keeps the saved value.
+    if !request.mic_device.trim().is_empty() {
+        app_config.rec_mic_device = request.mic_device.trim().to_string();
+    }
+    if !request.speaker_device.trim().is_empty() {
+        app_config.rec_speaker_device = request.speaker_device.trim().to_string();
+    }
+    let mic_source = if !request.mic_device.trim().is_empty() {
+        Some(request.mic_device.trim().to_string())
+    } else if !app_config.rec_mic_device.is_empty() {
+        Some(app_config.rec_mic_device.clone())
+    } else {
+        None
+    };
+    let speaker_source = if !request.speaker_device.trim().is_empty() {
+        Some(request.speaker_device.trim().to_string())
+    } else if !app_config.rec_speaker_device.is_empty() {
+        Some(app_config.rec_speaker_device.clone())
+    } else {
+        None
+    };
     // `rec_video_max_res` is deliberately not taken from the request: neither
     // quick access offers a resolution picker any more, so the request only
     // echoes the value the overlay was launched with. Writing that echo back
@@ -843,8 +865,8 @@ pub fn prepare_overlay_recording_request(
         mono_audio: request.record_mono,
         mic_enabled: request.mic,
         speaker_enabled: request.speaker,
-        mic_source: None,
-        speaker_source: None,
+        mic_source,
+        speaker_source,
         noise_suppression: request.noise_suppression,
     };
 
@@ -2201,6 +2223,8 @@ mod tests {
             controls: true,
             mic: true,
             speaker: false,
+            mic_device: String::new(),
+            speaker_device: String::new(),
             display_rec_time: true,
             hidpi: true,
             notifications: false,
@@ -2689,6 +2713,73 @@ mod tests {
         );
 
         assert!(prepared.controls_params.is_some());
+    }
+
+    #[test]
+    fn prepare_overlay_recording_request_prefers_request_device_then_saved() {
+        let at = chrono::Utc.with_ymd_and_hms(2026, 5, 8, 12, 0, 0).unwrap();
+        let saved = AppConfig {
+            rec_mic_device: "alsa_input.saved".into(),
+            rec_speaker_device: "alsa_output.saved.monitor".into(),
+            ..AppConfig::default()
+        };
+
+        // A device picked in the overlay wins and is remembered.
+        let request = RecordingRequest {
+            mic: true,
+            speaker: true,
+            mic_device: "alsa_input.request".into(),
+            speaker_device: "alsa_output.request.monitor".into(),
+            ..RecordingRequest::default()
+        };
+        let prepared = prepare_overlay_recording_request(saved.clone(), &request, at);
+        assert_eq!(
+            prepared.recording_config.mic_source.as_deref(),
+            Some("alsa_input.request")
+        );
+        assert_eq!(
+            prepared.recording_config.speaker_source.as_deref(),
+            Some("alsa_output.request.monitor")
+        );
+        assert_eq!(
+            prepared.updated_app_config.rec_mic_device,
+            "alsa_input.request"
+        );
+        assert_eq!(
+            prepared.updated_app_config.rec_speaker_device,
+            "alsa_output.request.monitor"
+        );
+        assert_eq!(
+            super::super::RecordingConfig::from_app_config_at(
+                &prepared.updated_app_config,
+                "mp4",
+                at
+            )
+            .mic_source
+            .as_deref(),
+            Some("alsa_input.request")
+        );
+
+        // Without a request device the saved choice carries over.
+        let request = RecordingRequest {
+            mic: true,
+            speaker: true,
+            ..RecordingRequest::default()
+        };
+        let prepared = prepare_overlay_recording_request(saved, &request, at);
+        assert_eq!(
+            prepared.recording_config.mic_source.as_deref(),
+            Some("alsa_input.saved")
+        );
+        assert_eq!(
+            prepared.recording_config.speaker_source.as_deref(),
+            Some("alsa_output.saved.monitor")
+        );
+
+        // With neither, the server default is left unset.
+        let prepared = prepare_overlay_recording_request(AppConfig::default(), &request, at);
+        assert_eq!(prepared.recording_config.mic_source, None);
+        assert_eq!(prepared.recording_config.speaker_source, None);
     }
 
     #[test]

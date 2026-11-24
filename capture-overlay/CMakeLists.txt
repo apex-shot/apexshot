@@ -334,6 +334,8 @@ else()
         src/MonitorPicker.h
         src/CaptureModeToolbar.cpp
         src/CaptureModeToolbar.h
+        src/platform/linux_audio_devices.cpp
+        src/platform/linux_audio_devices.h
         assets/lucide.qrc
         src/CaptureCountdownPill.cpp
         src/CaptureCountdownPill.h

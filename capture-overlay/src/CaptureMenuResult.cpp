@@ -34,13 +34,15 @@ bool parse(const QByteArray& json,
     }
 
     const QJsonObject object = document.object();
-    if (object.size() != 6
+    if (object.size() != 8
         || !object.contains(QStringLiteral("action"))
         || !object.contains(QStringLiteral("recording"))
         || !object.contains(QStringLiteral("ocr"))
         || !object.contains(QStringLiteral("timer_seconds"))
         || !object.contains(QStringLiteral("microphone"))
-        || !object.contains(QStringLiteral("speaker"))) {
+        || !object.contains(QStringLiteral("speaker"))
+        || !object.contains(QStringLiteral("mic_device"))
+        || !object.contains(QStringLiteral("speaker_device"))) {
         return reject(QStringLiteral("unsupported menu fields"));
     }
 
@@ -50,8 +52,11 @@ bool parse(const QByteArray& json,
     const QJsonValue timerValue = object.value(QStringLiteral("timer_seconds"));
     const QJsonValue microphoneValue = object.value(QStringLiteral("microphone"));
     const QJsonValue speakerValue = object.value(QStringLiteral("speaker"));
+    const QJsonValue microphoneDeviceValue = object.value(QStringLiteral("mic_device"));
+    const QJsonValue speakerDeviceValue = object.value(QStringLiteral("speaker_device"));
     if (!actionValue.isString() || !recordingValue.isBool() || !ocrValue.isBool()
-        || !timerValue.isDouble() || !microphoneValue.isBool() || !speakerValue.isBool()) {
+        || !timerValue.isDouble() || !microphoneValue.isBool() || !speakerValue.isBool()
+        || !microphoneDeviceValue.isString() || !speakerDeviceValue.isString()) {
         return reject(QStringLiteral("invalid menu field types"));
     }
 
@@ -78,6 +83,8 @@ bool parse(const QByteArray& json,
     parsed.timerSeconds = static_cast<int>(timerSeconds);
     parsed.microphone = microphoneValue.toBool();
     parsed.speaker = speakerValue.toBool();
+    parsed.microphoneDevice = microphoneDeviceValue.toString();
+    parsed.speakerDevice = speakerDeviceValue.toString();
 
     if (parsed.timerSeconds != 0 && parsed.timerSeconds != 3
         && parsed.timerSeconds != 5 && parsed.timerSeconds != 10) {

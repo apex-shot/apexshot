@@ -52,6 +52,13 @@ fn build_area_init_args(config: &crate::config::AppConfig) -> Vec<String> {
     if config.rec_speaker {
         extra_args.push("--rec-speaker".into());
     }
+    // Seed the toolbar's device menus with the last chosen sources.
+    if !config.rec_mic_device.is_empty() {
+        extra_args.push(format!("--rec-mic-device={}", config.rec_mic_device));
+    }
+    if !config.rec_speaker_device.is_empty() {
+        extra_args.push(format!("--rec-speaker-device={}", config.rec_speaker_device));
+    }
     extra_args.push(if config.rec_controls {
         "--rec-controls".into()
     } else {

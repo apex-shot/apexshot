@@ -112,7 +112,7 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
     encoder_name: &str,
     encoder_props: &str,
     audio_muxer: &str,
-    config: &super::RecordingConfig,
+    config: &mut super::RecordingConfig,
     command_rx: Option<mpsc::UnboundedReceiver<RecordingControlCommand>>,
 ) -> super::RecordResult<super::RecordedSession> {
     use std::io::Read;

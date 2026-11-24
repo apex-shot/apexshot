@@ -185,6 +185,8 @@ fn recording_request_for_target(
         controls: config.rec_controls,
         mic: menu.microphone,
         speaker: menu.speaker,
+        mic_device: menu.mic_device.clone(),
+        speaker_device: menu.speaker_device.clone(),
         display_rec_time: true,
         hidpi: config.rec_hidpi,
         notifications: config.rec_notifications,

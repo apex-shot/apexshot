@@ -58,6 +58,12 @@ pub struct RecordingRequest {
     pub controls: bool,
     pub mic: bool,
     pub speaker: bool,
+    /// Linux: Pulse sources chosen in the Quick Capture device menus. Empty
+    /// means "use the saved choice, then the server default".
+    #[serde(default)]
+    pub mic_device: String,
+    #[serde(default)]
+    pub speaker_device: String,
     // General tab settings
     pub display_rec_time: bool,
     pub hidpi: bool,
@@ -91,6 +97,8 @@ impl Default for RecordingRequest {
             controls: false,
             mic: false,
             speaker: false,
+            mic_device: String::new(),
+            speaker_device: String::new(),
             display_rec_time: false,
             hidpi: true,
             notifications: true,

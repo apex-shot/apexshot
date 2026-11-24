@@ -187,8 +187,48 @@ QString persistCaptureForStandaloneTest(const QString& sourcePath, bool enabled)
     return destination;
 }
 
+/// JSON-escape one string, quotes included, so a device description with a
+/// quote or backslash cannot break the recording request.
+QByteArray jsonString(const QString& text)
+{
+    QByteArray out;
+    out.reserve(text.size() + 2);
+    out += '"';
+    for (const QChar character : text) {
+        switch (character.unicode()) {
+        case '"':
+            out += "\\\"";
+            break;
+        case '\\':
+            out += "\\\\";
+            break;
+        case '\n':
+            out += "\\n";
+            break;
+        case '\r':
+            out += "\\r";
+            break;
+        case '\t':
+            out += "\\t";
+            break;
+        default:
+            if (character.unicode() < 0x20) {
+                out += QByteArray("\\u")
+                           + QByteArray::number(character.unicode(), 16)
+                                 .rightJustified(4, '0');
+            } else {
+                out += QString(character).toUtf8();
+            }
+            break;
+        }
+    }
+    out += '"';
+    return out;
+}
+
 void printRecordingJson(const QRect& sel, const char* mode, const char* recordType,
                          bool controls, bool mic, bool speaker,
+                         const QString& micDevice, const QString& speakerDevice,
                          bool clicks, bool keystrokes,
                          double clickSize, int clickColor, int clickStyle,
                          bool clickAnimate, double keySize, int keyPosition,
@@ -199,9 +239,12 @@ void printRecordingJson(const QRect& sel, const char* mode, const char* recordTy
                          int videoFormat, int videoMaxRes, int videoFps, bool recordMono, bool openEditor,
                          bool fullscreen, bool window = false)
 {
+    const QByteArray micDeviceJson = jsonString(micDevice);
+    const QByteArray speakerDeviceJson = jsonString(speakerDevice);
     std::printf("{\"x\":%d,\"y\":%d,\"width\":%d,\"height\":%d,"
                 "\"mode\":\"%s\",\"record_type\":\"%s\","
                 "\"controls\":%s,\"mic\":%s,\"speaker\":%s,"
+                "\"mic_device\":%s,\"speaker_device\":%s,"
                 "\"clicks\":%s,\"keystrokes\":%s,"
                 "\"click_size\":%.4f,\"click_color\":%d,"
                 "\"click_style\":%d,\"click_animate\":%s,"
@@ -219,6 +262,8 @@ void printRecordingJson(const QRect& sel, const char* mode, const char* recordTy
                 controls ? "true" : "false",
                 mic ? "true" : "false",
                 speaker ? "true" : "false",
+                micDeviceJson.constData(),
+                speakerDeviceJson.constData(),
                 clicks ? "true" : "false",
                 keystrokes ? "true" : "false",
                 clickSize,
@@ -740,7 +785,9 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
     bool controlShowTimer = true;
     QRect restoreSel;
     bool initialMic = false;
+    QString initialMicDevice;
     bool initialSpeaker = false;
+    QString initialSpeakerDevice;
     bool initialRecControls = true;
     bool initialDisplayRecTime = false;
     bool initialHidpi = true;
@@ -845,8 +892,12 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
             freezeSelectionBackground = QString(argv[i]).mid(22) == QStringLiteral("1");
         } else if (std::strcmp(argv[i], "--rec-mic") == 0) {
             initialMic = true;
+        } else if (QString(argv[i]).startsWith("--rec-mic-device=")) {
+            initialMicDevice = QString(argv[i]).mid(17);
         } else if (std::strcmp(argv[i], "--rec-speaker") == 0) {
             initialSpeaker = true;
+        } else if (QString(argv[i]).startsWith("--rec-speaker-device=")) {
+            initialSpeakerDevice = QString(argv[i]).mid(21);
         } else if (std::strcmp(argv[i], "--rec-controls") == 0) {
             initialRecControls = true;
         } else if (std::strcmp(argv[i], "--no-rec-controls") == 0) {
@@ -1092,12 +1143,16 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
             captureMenuResult.timerSeconds = selectedCaptureMenuResult.timerSeconds;
             captureMenuResult.microphone = selectedCaptureMenuResult.microphone;
             captureMenuResult.speaker = selectedCaptureMenuResult.speaker;
+            captureMenuResult.microphoneDevice = selectedCaptureMenuResult.microphoneDevice;
+            captureMenuResult.speakerDevice = selectedCaptureMenuResult.speakerDevice;
         } else {
             // Seed the toolbar's Mic and Speaker items from the saved device
             // choices so the menu matches the last recording.
             CaptureModeToolbar::DeviceDefaults toolbarDefaults;
             toolbarDefaults.microphone = initialMic;
+            toolbarDefaults.microphoneDevice = initialMicDevice;
             toolbarDefaults.speaker = initialSpeaker;
+            toolbarDefaults.speakerDevice = initialSpeakerDevice;
             // Scrolling capture needs the root window and synthetic input,
             // both of which only the unsandboxed X11 session offers.
             QString scrollError;
@@ -1126,6 +1181,8 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
                                initialRecControls,
                                captureMenuResult.microphone,
                                captureMenuResult.speaker,
+                               captureMenuResult.microphoneDevice,
+                               captureMenuResult.speakerDevice,
                                false,
                                false,
                                initialClickSize,
@@ -1570,6 +1627,8 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
                                overlay->recordControlsEnabled(),
                                overlay->recordMicEnabled(),
                                overlay->recordSpeakerEnabled(),
+                               initialMicDevice,
+                               initialSpeakerDevice,
                                overlay->recordClicksEnabled(),
                                overlay->recordKeystrokesEnabled(),
                                overlay->recordClickSize(),
@@ -1689,6 +1748,8 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
                            overlay->recordControlsEnabled(),
                            overlay->recordMicEnabled(),
                            overlay->recordSpeakerEnabled(),
+                           initialMicDevice,
+                           initialSpeakerDevice,
                            overlay->recordClicksEnabled(),
                            overlay->recordKeystrokesEnabled(),
                            overlay->recordClickSize(),

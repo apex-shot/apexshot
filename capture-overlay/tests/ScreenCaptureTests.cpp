@@ -767,7 +767,9 @@ void ScreenCaptureTests::parsesLayerShellCaptureMenuResult()
           "ocr":true,
           "timer_seconds":0,
           "microphone":true,
-          "speaker":true
+          "speaker":true,
+          "mic_device":"alsa_input.test",
+          "speaker_device":"alsa_output.test.monitor"
       })"),
       true,
       &selection,
@@ -788,7 +790,9 @@ void ScreenCaptureTests::parsesLayerShellCaptureMenuResult()
           "ocr":false,
           "timer_seconds":0,
           "microphone":true,
-          "speaker":true
+          "speaker":true,
+          "mic_device":"alsa_input.test",
+          "speaker_device":"alsa_output.test.monitor"
       })"),
       true,
       &selection));
@@ -803,7 +807,9 @@ void ScreenCaptureTests::parsesLayerShellCaptureMenuResult()
           "ocr":false,
           "timer_seconds":0,
           "microphone":true,
-          "speaker":true
+          "speaker":true,
+          "mic_device":"alsa_input.test",
+          "speaker_device":"alsa_output.test.monitor"
       })"),
       true,
       &selection));
@@ -812,6 +818,8 @@ void ScreenCaptureTests::parsesLayerShellCaptureMenuResult()
     QVERIFY(selection.recording);
     QVERIFY(selection.microphone);
     QVERIFY(selection.speaker);
+    QCOMPARE(selection.microphoneDevice, QStringLiteral("alsa_input.test"));
+    QCOMPARE(selection.speakerDevice, QStringLiteral("alsa_output.test.monitor"));
 }
 
 void ScreenCaptureTests::rejectsMalformedLayerShellCaptureMenuResult()
@@ -827,7 +835,9 @@ void ScreenCaptureTests::rejectsMalformedLayerShellCaptureMenuResult()
             "ocr":false,
             "timer_seconds":0,
             "microphone":false,
-            "speaker":false
+            "speaker":false,
+            "mic_device":"",
+            "speaker_device":""
         })"),
         QByteArrayLiteral(R"({
             "action":"display",
@@ -836,6 +846,8 @@ void ScreenCaptureTests::rejectsMalformedLayerShellCaptureMenuResult()
             "timer_seconds":0,
             "microphone":false,
             "speaker":false,
+            "mic_device":"",
+            "speaker_device":"",
             "unexpected":true
         })"),
     };
@@ -854,7 +866,9 @@ void ScreenCaptureTests::rejectsUnsupportedLayerShellCaptureMenuState()
           "ocr":true,
           "timer_seconds":0,
           "microphone":false,
-          "speaker":false
+          "speaker":false,
+          "mic_device":"alsa_input.test",
+          "speaker_device":"alsa_output.test.monitor"
       })"),
       true,
       &selection));
@@ -865,7 +879,9 @@ void ScreenCaptureTests::rejectsUnsupportedLayerShellCaptureMenuState()
           "ocr":false,
           "timer_seconds":0,
           "microphone":false,
-          "speaker":false
+          "speaker":false,
+          "mic_device":"alsa_input.test",
+          "speaker_device":"alsa_output.test.monitor"
       })"),
       true,
       &selection));
@@ -876,7 +892,9 @@ void ScreenCaptureTests::rejectsUnsupportedLayerShellCaptureMenuState()
           "ocr":false,
           "timer_seconds":5,
           "microphone":false,
-          "speaker":false
+          "speaker":false,
+          "mic_device":"alsa_input.test",
+          "speaker_device":"alsa_output.test.monitor"
       })"),
       true,
       &selection));
@@ -887,7 +905,9 @@ void ScreenCaptureTests::rejectsUnsupportedLayerShellCaptureMenuState()
           "ocr":false,
           "timer_seconds":0,
           "microphone":false,
-          "speaker":false
+          "speaker":false,
+          "mic_device":"alsa_input.test",
+          "speaker_device":"alsa_output.test.monitor"
       })"),
       false,
       &selection));

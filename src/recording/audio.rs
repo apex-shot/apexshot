@@ -56,6 +56,207 @@ impl AudioInputs {
     }
 }
 
+/// One microphone offered by the Quick Capture device menus.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioInputDevice {
+    pub name: String,
+    pub description: String,
+    /// The server's current default source.
+    pub default: bool,
+}
+
+/// One output offered by the Quick Capture device menus. The recorder opens
+/// `monitor_source`, not the sink itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioOutputDevice {
+    pub name: String,
+    pub description: String,
+    pub monitor_source: String,
+    /// The sink behind the server's current default output.
+    pub default: bool,
+}
+
+/// Run one pactl query, giving up after 1.5 s so a wedged Pulse server never
+/// blocks the toolbar. The child is left to exit on its own; pactl is local
+/// and bounded, and killing it from the UI thread is worse than waiting out
+/// the timeout.
+fn run_pactl(args: &[&str]) -> Option<String> {
+    let args: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let output = std::process::Command::new("pactl")
+            .args(&args)
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .and_then(|output| String::from_utf8(output.stdout).ok());
+        let _ = sender.send(output);
+    });
+    receiver
+        .recv_timeout(std::time::Duration::from_millis(1500))
+        .ok()
+        .flatten()
+}
+
+#[derive(Debug, Default)]
+struct PactlBlock {
+    name: String,
+    description: String,
+    monitor_source: String,
+    monitor_of: String,
+}
+
+/// Split `pactl list sources` / `list sinks` long output into blocks. pactl
+/// indents fields with one tab and properties with two, so only the one-tab
+/// keys are read.
+fn parse_pactl_blocks(text: &str) -> Vec<PactlBlock> {
+    let mut blocks: Vec<PactlBlock> = Vec::new();
+    for line in text.lines() {
+        if line.starts_with("Source #") || line.starts_with("Sink #") {
+            blocks.push(PactlBlock::default());
+            continue;
+        }
+        let Some(block) = blocks.last_mut() else {
+            continue;
+        };
+        let Some(field) = line.strip_prefix('\t') else {
+            continue;
+        };
+        if field.starts_with('\t') {
+            continue;
+        }
+        let field = field.trim();
+        if let Some(value) = field.strip_prefix("Name:") {
+            block.name = value.trim().to_string();
+        } else if let Some(value) = field.strip_prefix("Description:") {
+            block.description = value.trim().to_string();
+        } else if let Some(value) = field.strip_prefix("Monitor Source:") {
+            block.monitor_source = value.trim().to_string();
+        } else if let Some(value) = field.strip_prefix("Monitor of Sink:") {
+            block.monitor_of = value.trim().to_string();
+        }
+    }
+    blocks
+}
+
+fn device_description(description: &str, name: &str) -> String {
+    if description.trim().is_empty() {
+        name.to_string()
+    } else {
+        description.trim().to_string()
+    }
+}
+
+fn json_description(value: &serde_json::Value, name: &str) -> String {
+    let direct = value
+        .get("description")
+        .and_then(|description| description.as_str())
+        .unwrap_or_default();
+    if !direct.trim().is_empty() {
+        return direct.trim().to_string();
+    }
+    let property = value
+        .get("properties")
+        .and_then(|properties| properties.get("device.description"))
+        .and_then(|description| description.as_str())
+        .unwrap_or_default();
+    device_description(property, name)
+}
+
+fn parse_sources_json(text: &str) -> Vec<AudioInputDevice> {
+    let Ok(values) = serde_json::from_str::<Vec<serde_json::Value>>(text) else {
+        return Vec::new();
+    };
+    values
+        .iter()
+        .filter_map(|value| {
+            let name = value.get("name")?.as_str()?.trim();
+            if name.is_empty() || name.contains("auto_null") || name.ends_with(".monitor") {
+                return None;
+            }
+            // A monitor source records an output, not a microphone.
+            let monitor = value
+                .get("monitor_source")
+                .and_then(|monitor| monitor.as_str())
+                .unwrap_or_default();
+            if !monitor.is_empty() {
+                return None;
+            }
+            Some(AudioInputDevice {
+                name: name.to_string(),
+                description: json_description(value, name),
+                default: false,
+            })
+        })
+        .collect()
+}
+
+fn parse_sources_text(text: &str) -> Vec<AudioInputDevice> {
+    parse_pactl_blocks(text)
+        .into_iter()
+        .filter(|block| {
+            !block.name.is_empty()
+                && !block.name.contains("auto_null")
+                // Real microphones report "n/a" here; monitors name their sink.
+                && (block.monitor_of.is_empty() || block.monitor_of == "n/a")
+                && !block.name.ends_with(".monitor")
+        })
+        .map(|block| AudioInputDevice {
+            description: device_description(&block.description, &block.name),
+            name: block.name,
+            default: false,
+        })
+        .collect()
+}
+
+fn parse_sinks_json(text: &str) -> Vec<AudioOutputDevice> {
+    let Ok(values) = serde_json::from_str::<Vec<serde_json::Value>>(text) else {
+        return Vec::new();
+    };
+    values
+        .iter()
+        .filter_map(|value| {
+            let name = value.get("name")?.as_str()?.trim();
+            if name.is_empty() {
+                return None;
+            }
+            let monitor = value
+                .get("monitor_source")
+                .and_then(|monitor| monitor.as_str())
+                .map(str::trim)
+                .filter(|monitor| !monitor.is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("{name}.monitor"));
+            Some(AudioOutputDevice {
+                name: name.to_string(),
+                description: json_description(value, name),
+                monitor_source: monitor,
+                default: false,
+            })
+        })
+        .collect()
+}
+
+fn parse_sinks_text(text: &str) -> Vec<AudioOutputDevice> {
+    parse_pactl_blocks(text)
+        .into_iter()
+        .filter(|block| !block.name.is_empty())
+        .map(|block| {
+            let monitor = if block.monitor_source.is_empty() {
+                format!("{}.monitor", block.name)
+            } else {
+                block.monitor_source
+            };
+            AudioOutputDevice {
+                description: device_description(&block.description, &block.name),
+                name: block.name,
+                monitor_source: monitor,
+                default: false,
+            }
+        })
+        .collect()
+}
+
 /// Names of every PulseAudio/PipeWire source, or `None` when Pulse cannot be
 /// queried (no `pactl`, server down). Callers keep the requested inputs in
 /// that case: an unverifiable source is better than silently dropping audio.
@@ -123,16 +324,57 @@ fn filter_audio_inputs(
     }
 }
 
-/// Resolve which requested mic/speaker inputs exist right now. Each missing
-/// source is logged and reported once so the user knows the recording
-/// continues without it instead of failing when ffmpeg cannot open it.
-pub(super) fn resolve_available_audio_inputs(config: &super::RecordingConfig) -> AudioInputs {
+/// A chosen Pulse source the server no longer lists falls back to the current
+/// default, so a device unplugged since it was picked still records. `None`
+/// means nothing needs to change: the source is present, or there is no
+/// chosen source to fall back from.
+fn fallback_source(chosen: &Option<String>, default: &str, sources: &[String]) -> Option<String> {
+    let chosen = chosen.as_deref()?;
+    if source_is_available(chosen, sources) {
+        return None;
+    }
+    source_is_available(default, sources).then(|| default.to_string())
+}
+
+/// Resolve which requested mic/speaker inputs exist right now. A named
+/// source that disappeared is replaced with the current default, and only a
+/// missing default drops the input. Each dropped input is logged and reported
+/// once so the user knows the recording continues without it instead of
+/// failing when the backend cannot open it.
+pub(super) fn resolve_available_audio_inputs(config: &mut super::RecordingConfig) -> AudioInputs {
     let requested = AudioInputs {
         mic: config.mic_enabled,
         speaker: config.speaker_enabled,
     };
     if !requested.any() {
         return requested;
+    }
+
+    let sources = pulse_source_names();
+    let Some(sources) = sources else {
+        // Pulse could not be queried; keep what was asked for.
+        return requested;
+    };
+
+    if requested.mic {
+        let default = get_pulse_default_source();
+        if let Some(replacement) = fallback_source(&config.mic_source, &default, &sources) {
+            eprintln!(
+                "[recording] microphone source '{}' is unavailable; using '{replacement}'",
+                config.mic_source.as_deref().unwrap_or_default()
+            );
+            config.mic_source = Some(replacement);
+        }
+    }
+    if requested.speaker {
+        let default = get_pulse_speaker_monitor();
+        if let Some(replacement) = fallback_source(&config.speaker_source, &default, &sources) {
+            eprintln!(
+                "[recording] system audio source '{}' is unavailable; using '{replacement}'",
+                config.speaker_source.as_deref().unwrap_or_default()
+            );
+            config.speaker_source = Some(replacement);
+        }
     }
 
     let mic_device = config
@@ -143,9 +385,7 @@ pub(super) fn resolve_available_audio_inputs(config: &super::RecordingConfig) ->
         .speaker_source
         .clone()
         .unwrap_or_else(get_pulse_speaker_monitor);
-    let sources = pulse_source_names();
-    let available =
-        filter_audio_inputs(requested, &mic_device, &speaker_device, sources.as_deref());
+    let available = filter_audio_inputs(requested, &mic_device, &speaker_device, Some(&sources));
 
     if requested.mic && !available.mic {
         eprintln!(
@@ -222,60 +462,40 @@ pub(super) fn resolve_recording_audio_devices(
     Some(ResolvedAudioDevices { mic, monitor })
 }
 
-/// List all PulseAudio/PipeWire input sources (microphones).
-pub fn list_audio_inputs() -> Vec<(String, String)> {
-    // name, description
-    let output = std::process::Command::new("pactl")
-        .args(["list", "sources", "short"])
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
+/// List all PulseAudio/PipeWire input sources (microphones), marking the
+/// server's current default.
+pub fn list_audio_inputs() -> Vec<AudioInputDevice> {
+    let mut devices = run_pactl(&["-f", "json", "list", "sources"])
+        .map(|text| parse_sources_json(&text))
         .unwrap_or_default();
-
-    output
-        .lines()
-        .filter(|line| !line.contains(".monitor")) // exclude monitor sources
-        .filter_map(|line| {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 2 {
-                let name = parts[1].to_string();
-                let desc = parts.get(2..).map(|s| s.join(" ")).unwrap_or_default();
-                // Filter out "auto_null" and other virtual sources
-                if !name.contains("auto_null") && !desc.is_empty() {
-                    Some((name, desc))
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        })
-        .collect()
+    if devices.is_empty() {
+        devices = run_pactl(&["list", "sources"])
+            .map(|text| parse_sources_text(&text))
+            .unwrap_or_default();
+    }
+    let default = get_pulse_default_source();
+    for device in &mut devices {
+        device.default = device.name == default;
+    }
+    devices
 }
 
-/// List all PulseAudio/PipeWire monitor sources (speaker output capture).
-pub fn list_audio_outputs() -> Vec<(String, String)> {
-    let output = std::process::Command::new("pactl")
-        .args(["list", "sources", "short"])
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
+/// List all PulseAudio/PipeWire outputs, each with the monitor source that
+/// records it, marking the server's current default.
+pub fn list_audio_outputs() -> Vec<AudioOutputDevice> {
+    let mut devices = run_pactl(&["-f", "json", "list", "sinks"])
+        .map(|text| parse_sinks_json(&text))
         .unwrap_or_default();
-
-    output
-        .lines()
-        .filter(|line| line.contains(".monitor"))
-        .filter_map(|line| {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 2 {
-                let name = parts[1].to_string();
-                let desc = parts.get(2..).map(|s| s.join(" ")).unwrap_or_default();
-                Some((name, desc))
-            } else {
-                None
-            }
-        })
-        .collect()
+    if devices.is_empty() {
+        devices = run_pactl(&["list", "sinks"])
+            .map(|text| parse_sinks_text(&text))
+            .unwrap_or_default();
+    }
+    let default = get_pulse_speaker_monitor();
+    for device in &mut devices {
+        device.default = device.monitor_source == default;
+    }
+    devices
 }
 
 #[cfg(test)]
@@ -376,6 +596,124 @@ mod tests {
         assert_eq!(
             filter_audio_inputs(requested, "default", "default.monitor", None),
             requested
+        );
+    }
+
+    #[test]
+    fn pactl_json_lists_only_real_microphones_with_descriptions() {
+        let json = r#"[
+            {"name":"alsa_output.hdmi.monitor","description":"Monitor of HDMI",
+             "monitor_source":"alsa_output.hdmi"},
+            {"name":"alsa_input.usb-mic","description":"USB Microphone",
+             "monitor_source":""},
+            {"name":"auto_null.monitor","description":"Dummy Output",
+             "monitor_source":"auto_null"}
+        ]"#;
+        let devices = parse_sources_json(json);
+        assert_eq!(
+            devices,
+            vec![AudioInputDevice {
+                name: "alsa_input.usb-mic".into(),
+                description: "USB Microphone".into(),
+                default: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn pactl_json_lists_outputs_with_their_monitor_source() {
+        let json = r#"[
+            {"name":"alsa_output.speaker","description":"Built-in Speaker",
+             "monitor_source":"alsa_output.speaker.monitor"}
+        ]"#;
+        assert_eq!(
+            parse_sinks_json(json),
+            vec![AudioOutputDevice {
+                name: "alsa_output.speaker".into(),
+                description: "Built-in Speaker".into(),
+                monitor_source: "alsa_output.speaker.monitor".into(),
+                default: false,
+            }]
+        );
+
+        // pactl omits monitor_source on some sinks; the name still resolves.
+        let without_monitor = r#"[
+            {"name":"alsa_output.speaker","description":"Built-in Speaker"}
+        ]"#;
+        assert_eq!(
+            parse_sinks_json(without_monitor)[0].monitor_source,
+            "alsa_output.speaker.monitor"
+        );
+    }
+
+    #[test]
+    fn pactl_text_lists_devices_when_json_is_unavailable() {
+        let source_list = "Source #0\n\
+        \tState: RUNNING\n\
+        \tName: alsa_output.hdmi.monitor\n\
+        \tDescription: Monitor of HDMI\n\
+        \tMonitor of Sink: alsa_output.hdmi\n\
+        Source #1\n\
+        \tName: alsa_input.usb-mic\n\
+        \tDescription: USB Microphone\n\
+        \tMonitor of Sink: n/a\n";
+        assert_eq!(
+            parse_sources_text(source_list),
+            vec![AudioInputDevice {
+                name: "alsa_input.usb-mic".into(),
+                description: "USB Microphone".into(),
+                default: false,
+            }]
+        );
+
+        let sink_list = "Sink #0\n\
+        \tName: alsa_output.speaker\n\
+        \tDescription: Built-in Speaker\n\
+        \tMonitor Source: alsa_output.speaker.monitor\n";
+        assert_eq!(
+            parse_sinks_text(sink_list),
+            vec![AudioOutputDevice {
+                name: "alsa_output.speaker".into(),
+                description: "Built-in Speaker".into(),
+                monitor_source: "alsa_output.speaker.monitor".into(),
+                default: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn a_disappeared_chosen_source_falls_back_to_the_default() {
+        let available = sources(&["alsa_input.usb-mic", "alsa_output.speaker.monitor"]);
+        assert_eq!(
+            fallback_source(
+                &Some("alsa_input.missing".into()),
+                "alsa_input.usb-mic",
+                &available
+            ),
+            Some("alsa_input.usb-mic".into())
+        );
+        // A source that is still present stays chosen.
+        assert_eq!(
+            fallback_source(
+                &Some("alsa_input.usb-mic".into()),
+                "alsa_input.other",
+                &available
+            ),
+            None
+        );
+        // No unset choice has nothing to replace.
+        assert_eq!(
+            fallback_source(&None, "alsa_input.usb-mic", &available),
+            None
+        );
+        // Neither the choice nor the default exists: the input is dropped.
+        assert_eq!(
+            fallback_source(
+                &Some("alsa_input.missing".into()),
+                "alsa_input.also-missing",
+                &available
+            ),
+            None
         );
     }
 }

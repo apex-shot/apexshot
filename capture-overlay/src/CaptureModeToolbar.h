@@ -5,12 +5,16 @@
 #include <QColor>
 #include <QRectF>
 #include <QString>
+#include <QVector>
 #include <QWidget>
 
 #include <functional>
 
 #ifdef Q_OS_WIN
 #include "platform/windows/audio_devices.h"
+#endif
+#ifdef Q_OS_LINUX
+#include "platform/linux_audio_devices.h"
 #endif
 
 class QCloseEvent;
@@ -37,6 +41,8 @@ public:
         bool timedSelection = false;
         bool microphone = false;
         QString microphoneDevice;
+        /// Linux: the Pulse monitor source behind the chosen output.
+        QString speakerDevice;
         bool speaker = false;
         QString systemAudioApplication;
         quint32 systemAudioProcessId = 0;
@@ -62,6 +68,8 @@ public:
         /// stays open over the picker and the selected window so devices can
         /// still be changed until Start. The caller owns it.
         CaptureModeToolbar* toolbar = nullptr;
+        /// Linux: the Pulse monitor source behind the chosen output.
+        QString speakerDevice;
     };
 
     // When a display was chosen before opening the toolbar, keep the toolbar
@@ -102,7 +110,7 @@ public:
 
     /// Current device state, read when a persisted toolbar's window setup
     /// starts recording.
-    DeviceDefaults deviceState() const;
+    DeviceDefaults deviceState();
 
     /// Called when the Close item is clicked while the toolbar is persisting
     /// over a window setup. The handler dismisses the picker or the selected
@@ -155,6 +163,15 @@ private:
     void refreshDevices();
     void updateAudioMonitoring();
 #endif
+#ifdef Q_OS_LINUX
+    /// Re-list Pulse devices at most once per toolbar; the menus and the
+    /// hover tooltips share that listing.
+    void refreshLinuxAudioDevices();
+    /// Point the enabled inputs at a source that still exists, falling back
+    /// to the current Pulse default the way the Windows toolbar does.
+    void resolveLinuxAudioDevices();
+    QString linuxAudioTooltip(int index);
+#endif
 
     QScreen* m_screen;
     bool m_screenIsLocked = false;
@@ -171,6 +188,8 @@ private:
     bool m_microphone = false;
     QString m_microphoneDevice;
     bool m_speaker = false;
+    /// Linux: the Pulse monitor source the recording opens.
+    QString m_speakerDevice;
     QString m_systemAudioApplication;
     quint32 m_systemAudioProcessId = 0;
     bool m_camera = false;
@@ -179,6 +198,11 @@ private:
     bool m_setupMode = false;
     std::function<void()> m_onClose;
     std::function<void(bool, const QString&)> m_cameraChanged;
+#ifdef Q_OS_LINUX
+    QVector<Platform::AudioSourceDevice> m_linuxMicrophones;
+    QVector<Platform::AudioOutputDevice> m_linuxOutputs;
+    bool m_linuxDevicesLoaded = false;
+#endif
 #ifdef Q_OS_WIN
     QString m_outputDevice;
     int m_deviceItemWidth = 160;

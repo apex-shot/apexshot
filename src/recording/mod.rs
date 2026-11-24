@@ -72,7 +72,7 @@ pub enum RecordError {
 #[error("{0}")]
 pub struct RecordingFailureNotified(pub anyhow::Error);
 
-pub use audio::{list_audio_inputs, list_audio_outputs};
+pub use audio::{list_audio_inputs, list_audio_outputs, AudioInputDevice, AudioOutputDevice};
 
 /// GStreamer pulsesrc level meter used by the daemon/overlay instead of a
 /// second native PipeWire capture (which races recording + screen capture).
@@ -314,8 +314,12 @@ impl RecordingConfig {
             mono_audio: app_config.rec_video_mono,
             mic_enabled: false,
             speaker_enabled: false,
-            mic_source: None,
-            speaker_source: None,
+            // Hotkey recordings use the same devices the Quick Capture menus
+            // saved, so a chosen microphone carries over.
+            mic_source: (!app_config.rec_mic_device.is_empty())
+                .then(|| app_config.rec_mic_device.clone()),
+            speaker_source: (!app_config.rec_speaker_device.is_empty())
+                .then(|| app_config.rec_speaker_device.clone()),
             noise_suppression: app_config.rec_noise_suppression,
         }
     }

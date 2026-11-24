@@ -30,7 +30,7 @@ const WINDOW_CROP_POLL: std::time::Duration = std::time::Duration::from_millis(5
 /// into the video muxer. Audio is a new capability here — any setup failure
 /// falls back to the historical video-only recording instead of failing.
 fn build_x11_audio_bin(
-    config: &RecordingConfig,
+    config: &mut RecordingConfig,
     profile: &EncoderProfile,
 ) -> Option<gst_audio::GstAudioBin> {
     use gst_audio::{
@@ -155,7 +155,7 @@ fn start_window_crop_watcher(
 /// now with optional audio from the shared GStreamer audio bin.
 #[allow(unused_assignments)]
 pub(super) async fn record_x11_with_gstreamer(
-    config: &RecordingConfig,
+    config: &mut RecordingConfig,
     profile: &EncoderProfile,
     final_path: &Path,
     command_rx: Option<mpsc::UnboundedReceiver<RecordingControlCommand>>,

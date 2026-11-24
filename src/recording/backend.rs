@@ -177,7 +177,7 @@ pub(super) async fn prepare_recording_backend(
 }
 
 pub(super) async fn start_recording_with_prepared_backend(
-    built: BuiltPipeline,
+    mut built: BuiltPipeline,
     command_rx: Option<mpsc::UnboundedReceiver<RecordingControlCommand>>,
 ) -> super::RecordResult<super::RecordedSession> {
     if let Some(wayland_source) = built.wayland_source {
@@ -185,7 +185,7 @@ pub(super) async fn start_recording_with_prepared_backend(
         let encoder_name = built.encoder_name.clone();
         let encoder_props = built.encoder_props.clone();
         let audio_muxer = built.profile.muxer;
-        let config = built.config.clone();
+        let mut config = built.config.clone();
         return tokio::task::spawn_blocking(move || {
             record_wayland_with_ffmpeg_sync(
                 wayland_source,
@@ -193,7 +193,7 @@ pub(super) async fn start_recording_with_prepared_backend(
                 &encoder_name,
                 &encoder_props,
                 audio_muxer,
-                &config,
+                &mut config,
                 command_rx,
             )
         })
@@ -201,13 +201,18 @@ pub(super) async fn start_recording_with_prepared_backend(
         .map_err(|e| RecordError::GStreamerError(format!("Join error: {e}")))?;
     }
 
-    record_x11_with_gstreamer(&built.config, built.profile, &built.final_path, command_rx)
-        .await
-        .map(|(path, action, timeline)| super::RecordedSession {
-            path,
-            action,
-            timeline,
-        })
+    record_x11_with_gstreamer(
+        &mut built.config,
+        built.profile,
+        &built.final_path,
+        command_rx,
+    )
+    .await
+    .map(|(path, action, timeline)| super::RecordedSession {
+        path,
+        action,
+        timeline,
+    })
 }
 
 #[cfg(test)]

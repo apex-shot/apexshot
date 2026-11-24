@@ -26,7 +26,7 @@ pub enum CaptureMenuAction {
     Area,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CaptureMenuResult {
     pub action: CaptureMenuAction,
@@ -35,6 +35,12 @@ pub struct CaptureMenuResult {
     pub timer_seconds: u8,
     pub microphone: bool,
     pub speaker: bool,
+    /// Linux: Pulse sources chosen in the device menus. Empty keeps the saved
+    /// choice, then the server default.
+    #[serde(default)]
+    pub mic_device: String,
+    #[serde(default)]
+    pub speaker_device: String,
 }
 
 impl Default for CaptureMenuResult {
@@ -46,17 +52,21 @@ impl Default for CaptureMenuResult {
             timer_seconds: 0,
             microphone: false,
             speaker: false,
+            mic_device: String::new(),
+            speaker_device: String::new(),
         }
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Default)]
 struct MenuState {
     recording: bool,
     ocr: bool,
     timer_seconds: u8,
     microphone: bool,
     speaker: bool,
+    mic_device: String,
+    speaker_device: String,
 }
 
 impl MenuState {
@@ -68,6 +78,8 @@ impl MenuState {
             timer_seconds: self.timer_seconds,
             microphone: self.microphone,
             speaker: self.speaker,
+            mic_device: self.mic_device,
+            speaker_device: self.speaker_device,
         }
     }
 }
@@ -198,7 +210,7 @@ fn item_widths() -> [f64; 8] {
     ]
 }
 
-fn item_is_disabled(index: usize, state: MenuState) -> bool {
+fn item_is_disabled(index: usize, state: &MenuState) -> bool {
     (state.recording && index == 4)
         || (!state.recording && index == 2 && state.ocr)
         || (!state.recording && index == 3 && (state.timer_seconds > 0 || state.ocr))
@@ -207,7 +219,7 @@ fn item_is_disabled(index: usize, state: MenuState) -> bool {
         || (!state.recording && index == 6 && state.ocr)
 }
 
-fn item_is_active(index: usize, state: MenuState) -> bool {
+fn item_is_active(index: usize, state: &MenuState) -> bool {
     (index == 0 && !state.recording)
         || (index == 1 && state.recording)
         || (!state.recording && index == 5 && state.ocr)
@@ -219,11 +231,11 @@ fn item_is_active(index: usize, state: MenuState) -> bool {
 /// Drawing splits the bar's selected look from the recording phase's device
 /// state, exactly as the C++ toolbar does: OCR and Timer must not inherit the
 /// last recording's microphone or speaker.
-fn drawing_active(index: usize, state: MenuState) -> bool {
+fn drawing_active(index: usize, state: &MenuState) -> bool {
     item_is_active(index, state) && !device_on(index, state)
 }
 
-fn device_on(index: usize, state: MenuState) -> bool {
+fn device_on(index: usize, state: &MenuState) -> bool {
     state.recording && ((index == 5 && state.microphone) || (index == 6 && state.speaker))
 }
 
@@ -292,7 +304,7 @@ fn draw_icon(
     context.new_path();
 }
 
-fn glyph_for(index: usize, state: MenuState) -> &'static icons::Glyph {
+fn glyph_for(index: usize, state: &MenuState) -> &'static icons::Glyph {
     match index {
         0 => &icons::CAMERA,
         1 => &icons::VIDEO,
@@ -307,7 +319,7 @@ fn glyph_for(index: usize, state: MenuState) -> &'static icons::Glyph {
     }
 }
 
-fn label_for(index: usize, state: MenuState) -> String {
+fn label_for(index: usize, state: &MenuState) -> String {
     match index {
         5 if state.recording => "Mic".into(),
         6 if state.recording => "Speaker".into(),
@@ -316,7 +328,7 @@ fn label_for(index: usize, state: MenuState) -> String {
     }
 }
 
-fn draw_menu(context: &cairo::Context, state: MenuState, hovered: i32, rects: &[Rect; 8]) {
+fn draw_menu(context: &cairo::Context, state: &MenuState, hovered: i32, rects: &[Rect; 8]) {
     context.set_antialias(cairo::Antialias::Best);
     let panel = Rect {
         x: 1.5,
@@ -492,9 +504,187 @@ fn install_transparent_window_css(display: &gdk::Display) {
     static INSTALLED: std::sync::Once = std::sync::Once::new();
     INSTALLED.call_once(|| {
         let provider = CssProvider::new();
-        provider.load_from_data("window.apexshot-capture-menu, window.apexshot-capture-menu > * { background: transparent; }");
-        gtk4::style_context_add_provider_for_display(display, &provider, gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION);
+        provider.load_from_data(
+            "window.apexshot-capture-menu, window.apexshot-capture-menu > * { background: transparent; }\n\
+             popover.apexshot-device-popover {\
+                 background: transparent;\
+                 border: none;\
+                 box-shadow: none;\
+                 outline: none;\
+                 padding: 0;\
+             }\n\
+             popover.apexshot-device-popover > contents {\
+                 background: #252526;\
+                 border: 1px solid rgba(255,255,255,0.10);\
+                 border-radius: 10px;\
+                 padding: 4px;\
+                 box-shadow: none;\
+                 min-width: 294px;\
+             }\n\
+             .apexshot-device-list { background: transparent; }\n\
+             button.apexshot-device-item {\
+                 background: transparent;\
+                 border: none;\
+                 box-shadow: none;\
+                 outline: none;\
+                 padding: 7px 8px 7px 8px;\
+                 border-radius: 6px;\
+                 color: rgba(255,255,255,0.90);\
+                 font-family: \"DM Sans\";\
+                 font-size: 14px;\
+                 font-weight: 500;\
+                 min-height: 0;\
+                 min-width: 0;\
+             }\n\
+             button.apexshot-device-item:hover { background: rgba(255,255,255,0.07); }\n\
+             button.apexshot-device-item:disabled { color: rgba(255,255,255,0.24); }\n\
+             button.apexshot-device-item label {\
+                 color: inherit;\
+                 font-family: \"DM Sans\";\
+                 font-size: 14px;\
+                 font-weight: 500;\
+             }\n\
+             .apexshot-device-separator {\
+                 background: rgba(255,255,255,0.06);\
+                 min-height: 1px;\
+                 margin: 4px 8px;\
+             }",
+        );
+        gtk4::style_context_add_provider_for_display(
+            display,
+            &provider,
+            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
     });
+}
+
+/// One row of a Quick Capture device popover.
+struct DeviceChoice {
+    label: String,
+    value: String,
+}
+
+/// The trailing tick, drawn with cairo so it matches the C++ menu's mark
+/// without depending on a glyph being present in the installed fonts.
+fn device_tick(ticked: bool) -> DrawingArea {
+    let area = DrawingArea::new();
+    area.set_content_width(16);
+    area.set_content_height(16);
+    area.set_valign(gtk4::Align::Center);
+    // 294 px row - 8 px padding each side - 16 px tick - this = 216 px of
+    // label, the width the C++ menu elides at.
+    area.set_margin_start(46);
+    if ticked {
+        area.set_draw_func(|_, context, width, height| {
+            let width = f64::from(width);
+            let height = f64::from(height);
+            context.set_source_rgba(1.0, 1.0, 1.0, 219.0 / 255.0);
+            context.set_line_width(1.8);
+            context.set_line_cap(cairo::LineCap::Round);
+            context.move_to(width * 0.20, height * 0.52);
+            context.line_to(width * 0.42, height * 0.74);
+            context.line_to(width * 0.80, height * 0.28);
+            let _ = context.stroke();
+        });
+    }
+    area
+}
+
+fn device_row(
+    label: &str,
+    ticked: bool,
+    sensitive: bool,
+    activate: impl Fn() + 'static,
+) -> gtk4::Button {
+    let button = gtk4::Button::new();
+    button.add_css_class("apexshot-device-item");
+    button.set_has_frame(false);
+    button.set_sensitive(sensitive);
+    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    let text = gtk4::Label::new(Some(label));
+    text.set_xalign(0.0);
+    text.set_hexpand(true);
+    // Pulse names a card's outputs alike up front, so keep both ends. A
+    // one-char natural width lets the popover's fixed width set the label's.
+    text.set_ellipsize(pango::EllipsizeMode::Middle);
+    text.set_max_width_chars(1);
+    row.append(&text);
+    row.append(&device_tick(ticked));
+    button.set_child(Some(&row));
+    button.connect_clicked(move |_| activate());
+    button
+}
+
+/// A dark list anchored under a toolbar item, styled like the C++ menu.
+#[allow(clippy::too_many_arguments)]
+fn show_device_popover(
+    drawing: &DrawingArea,
+    rect: Rect,
+    empty_label: &str,
+    off_label: &str,
+    devices: Vec<DeviceChoice>,
+    selected: Option<&str>,
+    off_selected: bool,
+    on_choice: impl Fn(Option<String>) + 'static,
+) -> gtk4::Popover {
+    let popover = gtk4::Popover::new();
+    popover.add_css_class("apexshot-device-popover");
+    popover.set_parent(drawing);
+    popover.set_has_arrow(false);
+    popover.set_position(gtk4::PositionType::Bottom);
+    // Left edge on the item and 6 px below the panel, where the C++ menu opens.
+    popover.set_halign(gtk4::Align::Start);
+    popover.set_offset(0, 6);
+    popover.set_autohide(true);
+    popover.set_pointing_to(Some(&gdk::Rectangle::new(
+        rect.x.round() as i32,
+        PANEL_HEIGHT.round() as i32 - 1,
+        rect.width.round() as i32,
+        1,
+    )));
+
+    let list = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    list.add_css_class("apexshot-device-list");
+    let on_choice = Rc::new(on_choice);
+    if devices.is_empty() {
+        list.append(&device_row(empty_label, false, false, || {}));
+    } else {
+        for device in &devices {
+            // An input that is off ticks only its "Don't record" row.
+            let ticked = !off_selected && selected == Some(device.value.as_str());
+            let value = device.value.clone();
+            // Weak: the row owns the closure, the popover owns the row.
+            let popover = popover.downgrade();
+            let on_choice = on_choice.clone();
+            list.append(&device_row(&device.label, ticked, true, move || {
+                (*on_choice)(Some(value.clone()));
+                if let Some(popover) = popover.upgrade() {
+                    popover.popdown();
+                }
+            }));
+        }
+    }
+    let separator = gtk4::Separator::new(gtk4::Orientation::Horizontal);
+    separator.add_css_class("apexshot-device-separator");
+    list.append(&separator);
+    {
+        let popover = popover.downgrade();
+        let on_choice = on_choice.clone();
+        list.append(&device_row(off_label, off_selected, true, move || {
+            (*on_choice)(None);
+            if let Some(popover) = popover.upgrade() {
+                popover.popdown();
+            }
+        }));
+    }
+
+    popover.set_child(Some(&list));
+    let drawing = drawing.clone();
+    popover.connect_closed(move |popover| {
+        popover.unparent();
+        let _ = drawing.grab_focus();
+    });
+    popover
 }
 
 /// Shows a pixel-controlled port of the C++ capture toolbar on the selected display.
@@ -548,13 +738,17 @@ fn choose_capture_mode_internal(
         window.set_keyboard_mode(KeyboardMode::Exclusive);
         window.set_namespace(Some("apexshot-capture-menu"));
     }
+    let app_config = crate::config::load_config();
     let state = Rc::new(RefCell::new(MenuState {
         recording: false,
         ocr: false,
         timer_seconds: 0,
         microphone: false,
         speaker: false,
+        mic_device: app_config.rec_mic_device,
+        speaker_device: app_config.rec_speaker_device,
     }));
+    let open_popover: Rc<RefCell<Option<gtk4::Popover>>> = Rc::new(RefCell::new(None));
     let hovered = Rc::new(Cell::new(-1));
     let drawing = DrawingArea::new();
     drawing.set_content_width(window_width);
@@ -566,7 +760,7 @@ fn choose_capture_mode_internal(
         let hovered = hovered.clone();
         let rects = rects.clone();
         drawing.set_draw_func(move |_, context, _, _| {
-            draw_menu(context, *state.borrow(), hovered.get(), &rects)
+            draw_menu(context, &state.borrow(), hovered.get(), &rects)
         });
     }
     let motion = EventControllerMotion::new();
@@ -576,9 +770,9 @@ fn choose_capture_mode_internal(
         let drawing = drawing.clone();
         let rects = rects.clone();
         motion.connect_motion(move |_, x, y| {
-            let menu = *state.borrow();
+            let menu = state.borrow();
             let next = item_at(x, y, &rects)
-                .filter(|&i| !item_is_disabled(i, menu))
+                .filter(|&i| !item_is_disabled(i, &menu))
                 .map(|i| i as i32)
                 .unwrap_or(-1);
             if hovered.replace(next) != next {
@@ -609,28 +803,28 @@ fn choose_capture_mode_internal(
                 return;
             };
             let mut menu = state.borrow_mut();
-            if item_is_disabled(index, *menu) {
+            if item_is_disabled(index, &menu) {
                 return;
             }
             match index {
                 0 => set_recording_mode(&mut menu, false),
                 1 => set_recording_mode(&mut menu, true),
                 2 => {
-                    *result.borrow_mut() = Some(menu.result(CaptureMenuAction::Display));
+                    *result.borrow_mut() = Some(menu.clone().result(CaptureMenuAction::Display));
                     drop(menu);
                     window.close();
                     main_loop.quit();
                     return;
                 }
                 3 => {
-                    *result.borrow_mut() = Some(menu.result(CaptureMenuAction::Window));
+                    *result.borrow_mut() = Some(menu.clone().result(CaptureMenuAction::Window));
                     drop(menu);
                     window.close();
                     main_loop.quit();
                     return;
                 }
                 4 => {
-                    *result.borrow_mut() = Some(menu.result(CaptureMenuAction::Area));
+                    *result.borrow_mut() = Some(menu.clone().result(CaptureMenuAction::Area));
                     drop(menu);
                     window.close();
                     main_loop.quit();
@@ -661,14 +855,153 @@ fn choose_capture_mode_internal(
         });
     }
     drawing.add_controller(click);
+    // Right-click while Video is selected opens the same device menu the
+    // Windows toolbar draws under Mic and Speaker.
+    let device_click = GestureClick::builder().button(3).build();
+    {
+        let state = state.clone();
+        let drawing = drawing.clone();
+        let rects = rects.clone();
+        let open_popover = open_popover.clone();
+        device_click.connect_pressed(move |_, _, x, y| {
+            let Some(index) = item_at(x, y, &rects) else {
+                return;
+            };
+            if !matches!(index, 5 | 6) || !state.borrow().recording {
+                return;
+            }
+            // One device menu at a time; the closed handler clears this slot.
+            let existing = open_popover.borrow().clone();
+            if let Some(existing) = existing {
+                existing.popdown();
+            }
+            let rect = rects[index];
+            let popover = if index == 5 {
+                let devices = crate::recording::list_audio_inputs();
+                let enabled = state.borrow().microphone;
+                let current = state.borrow().mic_device.clone();
+                let selected = if enabled && devices.iter().any(|device| device.name == current) {
+                    Some(current.clone())
+                } else {
+                    devices
+                        .iter()
+                        .find(|device| device.default)
+                        .map(|device| device.name.clone())
+                };
+                // A saved microphone that disappeared silently falls back to
+                // the default, so the request carries a source that exists.
+                if let (true, Some(selected)) = (enabled, selected.as_ref()) {
+                    if state.borrow().mic_device != *selected {
+                        state.borrow_mut().mic_device = selected.to_string();
+                    }
+                }
+                let choices = devices
+                    .into_iter()
+                    .map(|device| DeviceChoice {
+                        label: device.description,
+                        value: device.name,
+                    })
+                    .collect();
+                let state = state.clone();
+                let redraw = drawing.clone();
+                show_device_popover(
+                    &drawing,
+                    rect,
+                    "No microphone detected",
+                    "Don't record microphone",
+                    choices,
+                    selected.as_deref(),
+                    !enabled,
+                    move |value| {
+                        let mut menu = state.borrow_mut();
+                        match value {
+                            Some(name) => {
+                                menu.microphone = true;
+                                menu.mic_device = name;
+                            }
+                            None => menu.microphone = false,
+                        }
+                        drop(menu);
+                        redraw.queue_draw();
+                    },
+                )
+            } else {
+                let devices = crate::recording::list_audio_outputs();
+                let enabled = state.borrow().speaker;
+                let current = state.borrow().speaker_device.clone();
+                let selected = if enabled
+                    && devices
+                        .iter()
+                        .any(|device| device.monitor_source == current)
+                {
+                    Some(current.clone())
+                } else {
+                    devices
+                        .iter()
+                        .find(|device| device.default)
+                        .map(|device| device.monitor_source.clone())
+                };
+                if let (true, Some(selected)) = (enabled, selected.as_ref()) {
+                    if state.borrow().speaker_device != *selected {
+                        state.borrow_mut().speaker_device = selected.to_string();
+                    }
+                }
+                let choices = devices
+                    .into_iter()
+                    .map(|device| DeviceChoice {
+                        label: device.description,
+                        value: device.monitor_source,
+                    })
+                    .collect();
+                let state = state.clone();
+                let redraw = drawing.clone();
+                show_device_popover(
+                    &drawing,
+                    rect,
+                    "No audio output detected",
+                    "Don't record system audio",
+                    choices,
+                    selected.as_deref(),
+                    !enabled,
+                    move |value| {
+                        let mut menu = state.borrow_mut();
+                        match value {
+                            Some(monitor) => {
+                                menu.speaker = true;
+                                menu.speaker_device = monitor;
+                            }
+                            None => menu.speaker = false,
+                        }
+                        drop(menu);
+                        redraw.queue_draw();
+                    },
+                )
+            };
+            open_popover.replace(Some(popover.clone()));
+            let open_popover = open_popover.clone();
+            popover.connect_closed(move |_| {
+                open_popover.replace(None);
+            });
+            popover.popup();
+        });
+    }
+    drawing.add_controller(device_click);
     window.set_child(Some(&drawing));
     let key = EventControllerKey::new();
     {
         let result = result.clone();
         let main_loop = main_loop.clone();
         let window = window.clone();
+        let open_popover = open_popover.clone();
         key.connect_key_pressed(move |_, keyval, _, _| {
             if keyval == gdk::Key::Escape {
+                // Escape closes an open device menu first; it must not cancel
+                // the toolbar underneath it.
+                let open_device_menu = open_popover.borrow().clone();
+                if let Some(popover) = open_device_menu {
+                    popover.popdown();
+                    return glib::Propagation::Stop;
+                }
                 *result.borrow_mut() = Some(CaptureMenuResult::default());
                 window.close();
                 main_loop.quit();
@@ -723,67 +1056,55 @@ fn choose_capture_mode_internal(
     window.hide();
     window.destroy();
     while glib::MainContext::default().iteration(false) {}
-    let selected = result.borrow().unwrap_or_default();
+    let selected = result.borrow_mut().take().unwrap_or_default();
     Some(selected)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn menu_state_matches_the_qt_toolbar_constraints() {
-        let shot = MenuState {
-            recording: false,
-            ocr: false,
-            timer_seconds: 0,
-            microphone: false,
-            speaker: false,
-        };
-        assert!(item_is_active(0, shot));
-        assert!(!item_is_disabled(2, shot));
+        let shot = MenuState::default();
+        assert!(item_is_active(0, &shot));
+        assert!(!item_is_disabled(2, &shot));
         let timer = MenuState {
             timer_seconds: 3,
-            ..shot
+            ..shot.clone()
         };
-        assert!(item_is_disabled(3, timer));
-        assert!(item_is_disabled(4, timer));
+        assert!(item_is_disabled(3, &timer));
+        assert!(item_is_disabled(4, &timer));
         let video = MenuState {
             recording: true,
             ..shot
         };
-        assert!(item_is_active(1, video));
-        assert!(!item_is_disabled(3, video));
-        assert!(item_is_disabled(4, video));
+        assert!(item_is_active(1, &video));
+        assert!(!item_is_disabled(3, &video));
+        assert!(item_is_disabled(4, &video));
     }
 
     #[test]
     fn shot_ocr_disables_display_and_timer_but_allows_area() {
         let shot = MenuState {
-            recording: false,
             ocr: true,
-            timer_seconds: 0,
-            microphone: false,
-            speaker: false,
+            ..MenuState::default()
         };
 
-        assert!(item_is_disabled(2, shot));
-        assert!(!item_is_disabled(4, shot));
-        assert!(item_is_disabled(6, shot));
+        assert!(item_is_disabled(2, &shot));
+        assert!(!item_is_disabled(4, &shot));
+        assert!(item_is_disabled(6, &shot));
     }
 
     #[test]
     fn video_audio_toggles_survive_shot_selection_for_area_capture() {
-        let shot = MenuState {
-            recording: false,
-            ocr: false,
-            timer_seconds: 0,
-            microphone: false,
-            speaker: false,
-        };
+        let shot = MenuState::default();
         let mut video = MenuState {
             recording: true,
             microphone: true,
             speaker: true,
+            mic_device: "alsa_input.usb-mic".into(),
+            speaker_device: "alsa_output.speaker.monitor".into(),
             ..shot
         };
 
@@ -792,7 +1113,7 @@ mod tests {
         assert!(!video.recording);
         assert!(video.microphone);
         assert!(video.speaker);
-        assert!(!item_is_disabled(4, video));
+        assert!(!item_is_disabled(4, &video));
         assert_eq!(
             video.result(CaptureMenuAction::Area),
             CaptureMenuResult {
@@ -802,6 +1123,8 @@ mod tests {
                 timer_seconds: 0,
                 microphone: true,
                 speaker: true,
+                mic_device: "alsa_input.usb-mic".into(),
+                speaker_device: "alsa_output.speaker.monitor".into(),
             }
         );
     }
@@ -841,20 +1164,18 @@ mod tests {
     #[test]
     fn device_toggles_only_count_while_recording() {
         let shot = MenuState {
-            recording: false,
-            ocr: false,
-            timer_seconds: 0,
             microphone: true,
             speaker: true,
+            ..MenuState::default()
         };
-        assert!(!device_on(5, shot));
-        assert!(!device_on(6, shot));
+        assert!(!device_on(5, &shot));
+        assert!(!device_on(6, &shot));
 
         let video = MenuState {
             recording: true,
             ..shot
         };
-        assert!(device_on(5, video));
-        assert!(device_on(6, video));
+        assert!(device_on(5, &video));
+        assert!(device_on(6, &video));
     }
 }
