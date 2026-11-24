@@ -1,1 +1,4 @@
 *.onnx binary
+# Rust sources stay LF on every checkout: rustfmt.toml sets newline_style = "Unix",
+# and Git for Windows otherwise checks them out as CRLF, which fails cargo fmt --check.
+*.rs text eol=lf
