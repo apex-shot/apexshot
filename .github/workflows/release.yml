@@ -657,18 +657,33 @@ jobs:
       - name: Update PKGBUILD version from tag
         run: |
           VERSION="${{ steps.get_version.outputs.VERSION }}"
-          PKGVER="${VERSION#v}"
-          ARCHIVE="apexshot-${PKGVER}.tar.gz"
-          SOURCE_URL="https://github.com/apex-shot/apexshot/archive/${VERSION}.tar.gz"
-
-          # Download the release tarball and compute its SHA-256
-          curl -fsSL "${SOURCE_URL}" -o "/tmp/${ARCHIVE}"
+          case "$GITHUB_REF" in
+            refs/tags/*)
+              PKGVER="${VERSION#v}"
+              ARCHIVE="apexshot-${PKGVER}.tar.gz"
+              SOURCE_URL="https://github.com/apex-shot/apexshot/archive/${VERSION}.tar.gz"
+              # Download the release tarball and compute its SHA-256
+              curl -fsSL "${SOURCE_URL}" -o "/tmp/${ARCHIVE}"
+              SOURCE_ENTRY="${ARCHIVE}::${SOURCE_URL}"
+              ;;
+            *)
+              # Scheduled and manual runs have no tag to download: package the
+              # checked-out commit under the Cargo.toml version instead.
+              PKGVER=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+              ARCHIVE="apexshot-${PKGVER}.tar.gz"
+              git config --global --add safe.directory "$PWD"
+              git archive --format=tar.gz --prefix="apexshot-${PKGVER}/" -o "/tmp/${ARCHIVE}" HEAD
+              cp "/tmp/${ARCHIVE}" "packaging/arch/${ARCHIVE}"
+              SOURCE_URL="${ARCHIVE}"
+              SOURCE_ENTRY="${ARCHIVE}"
+              ;;
+          esac
           SHA256="$(sha256sum "/tmp/${ARCHIVE}" | awk '{print $1}')"
 
           cd packaging/arch
           sed -i \
             -e "s/^pkgver=.*/pkgver=${PKGVER}/" \
-            -e "s#^source=.*#source=(\"${ARCHIVE}::${SOURCE_URL}\")#" \
+            -e "s#^source=.*#source=(\"${SOURCE_ENTRY}\")#" \
             -e "s/^sha256sums=.*/sha256sums=('${SHA256}')/" \
             PKGBUILD
 
