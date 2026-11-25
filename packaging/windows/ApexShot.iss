@@ -90,6 +90,11 @@ Root: HKCU; Subkey: "Software\Classes\apexshot\DefaultIcon"; ValueType: string; 
 Root: HKCU; Subkey: "Software\Classes\apexshot\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\bin\apexshot-settings.exe"" ""%1"""
 
 [Run]
+; Run the bundled ffmpeg once, hidden, and wait for it before anything starts.
+; The first run of a freshly written ffmpeg and its libraries is slow while the
+; system scans them; doing it here means the tray shell's recording check finds
+; a warm ffmpeg instead of timing out and reporting recording as unsupported.
+Filename: "{app}\bin\ffmpeg.exe"; Parameters: "-hide_banner -devices"; WorkingDir: "{app}\bin"; Flags: runhidden waituntilterminated; StatusMsg: "Preparing screen recording..."
 ; The settings binary owns the first-run flow and hands over to the tray shell
 ; when setup finishes, so it is the right entry point for a fresh install.
 Filename: "{app}\bin\apexshot-settings.exe"; Description: "{cm:LaunchProgram,{#StringChange(AppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent; Check: not IsUpgrade
