@@ -27,7 +27,7 @@ routes = [
   { pattern = "apexshot.org/update*", zone_name = "apexshot.org" },
   # Exact path, no wildcard, so any other /download page on the site is left
   # to the origin. The Worker answers with a redirect to the latest release's
-  # Windows installer on GitHub.
+  # Windows installer, on the R2 mirror when it has it, else on GitHub.
   { pattern = "apexshot.org/download/windows", zone_name = "apexshot.org" },
 ]
 
@@ -35,8 +35,15 @@ routes = [
 # depending on route registration or DNS.
 workers_dev = true
 
-# R2 mirror of the installer scripts. CI syncs scripts/ into this bucket under
-# the `scripts/` prefix (see docs/CLOUDFLARE_CDN_SETUP.md, step 7).
+# Mirror the latest GitHub release into R2 every fifteen minutes and prune
+# older releases (see `syncMirror` in the Worker). A run that finds the
+# release already mirrored only reads object metadata.
+[triggers]
+crons = ["*/15 * * * *"]
+
+# The release mirror, served publicly by its custom domain dl.apexshot.org.
+# The Worker also reads installer scripts from the `scripts/` prefix when
+# they are present there.
 [[r2_buckets]]
 binding = "RELEASES"
 bucket_name = "apexshot-releases"

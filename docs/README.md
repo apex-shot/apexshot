@@ -31,7 +31,7 @@ module, and developer docs live here; active plans live in [`plans/`](plans/).
 | [RELEASE_OPERATIONS.md](RELEASE_OPERATIONS.md) | Support path, pre-tag configuration, promotion, and rollback. |
 | [ARCH_SUPPORT.md](ARCH_SUPPORT.md) | Arch Linux packaging and distribution support. |
 | [AUR_PUBLISHING.md](AUR_PUBLISHING.md) | Release → AUR automation. |
-| [CLOUDFLARE_CDN_SETUP.md](CLOUDFLARE_CDN_SETUP.md) | Cloudflare CDN setup for release assets. |
+| [CLOUDFLARE_CDN_SETUP.md](CLOUDFLARE_CDN_SETUP.md) | Cloudflare installer entrypoint and release mirror. |
 | [`packaging/windows/README.md`](../packaging/windows/README.md) | Building the Windows installer. |
 | [`packaging/nix/README.md`](../packaging/nix/README.md) | The Nix package. |
 | [`flatpak/README.md`](../flatpak/README.md) | Building the Flatpak locally. |

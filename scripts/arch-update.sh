@@ -17,6 +17,7 @@ SUDO=""
 SCRIPT_NAME="arch-update"
 TELEMETRY_CHANNEL="update"
 TELEMETRY_URL="${APEXSHOT_TELEMETRY_URL:-https://apexshot.org/api/download-telemetry}"
+MIRROR_URL="${APEXSHOT_MIRROR_URL-https://dl.apexshot.org}"
 INSTALL_ID=""
 
 SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
@@ -207,11 +208,27 @@ send_download_telemetry() {
     (curl -fsS -m 2 -H "Content-Type: application/json" -A "ApexShotDownloadTelemetry/${SCRIPT_NAME}" -d "$payload" "$TELEMETRY_URL" >/dev/null 2>&1 || true) &
 }
 
+# Release assets are mirrored to Cloudflare (dl.apexshot.org) within minutes of
+# a release. Download from the mirror when it has the file and from GitHub
+# otherwise. Set APEXSHOT_MIRROR_URL= (empty) to always use GitHub.
+release_mirror_url() {
+    local prefix="https://github.com/${REPO}/releases/download/"
+    if [[ -n "$MIRROR_URL" && "$1" == "$prefix"* ]]; then
+        printf '%s/%s' "$MIRROR_URL" "${1#"$prefix"}"
+    fi
+}
+
 download_file() {
     local url=$1
     local output=$2
     local asset_type=${3:-package}
     local asset_name=${output##*/}
+
+    local mirror_url
+    mirror_url=$(release_mirror_url "$url")
+    if [[ -n "$mirror_url" ]] && curl -fsSI -m 10 -o /dev/null "$mirror_url" 2>/dev/null; then
+        url=$mirror_url
+    fi
 
     send_download_telemetry "download_started" "$asset_type" "started" 0 "$asset_name"
 

@@ -157,7 +157,7 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
     let lbl_telemetry = Label::new(Some(&t("Share anonymous usage statistics")));
     lbl_telemetry.set_xalign(0.0);
     let telemetry_hint = Label::new(Some(&t(
-        "Daily heartbeat only: app version, distro, desktop, and coarse feature counts. No screenshots or personal data. Override with APEXSHOT_TELEMETRY=0.",
+        "Daily heartbeat: app version, distro, desktop, and coarse feature counts. The update window also reports each update download (version and size). No screenshots or personal data. Override with APEXSHOT_TELEMETRY=0.",
     )));
     telemetry_hint.add_css_class("settings-sub-option");
     telemetry_hint.set_xalign(0.0);

@@ -331,9 +331,9 @@ msgid "Share anonymous usage statistics"
 msgstr "مشاركة إحصاءات استخدام مجهولة"
 
 msgid ""
-"Daily heartbeat only: app version, distro, desktop, and coarse feature counts. No screenshots or personal data. Override with APEXSHOT_TELEMETRY=0."
+"Daily heartbeat: app version, distro, desktop, and coarse feature counts. The update window also reports each update download (version and size). No screenshots or personal data. Override with APEXSHOT_TELEMETRY=0."
 msgstr ""
-"نبضة يومية فقط: الإصدار والتوزيعة وسطح المكتب وعدّادات عامة. بلا لقطات أو بيانات شخصية. عطّلها بـ APEXSHOT_TELEMETRY=0."
+"نبضة يومية: إصدار التطبيق والتوزيعة وسطح المكتب وعدادات تقريبية للميزات. تُبلغ نافذة التحديث أيضًا عن كل تنزيل تحديث (الإصدار والحجم). لا لقطات شاشة أو بيانات شخصية. يمكن إيقافها باستخدام APEXSHOT_TELEMETRY=0."
 
 msgid "Language"
 msgstr "اللغة"
@@ -3930,9 +3930,9 @@ msgid "Off by default. Turning this on sends anonymous usage statistics."
 msgstr "متوقف افتراضيًا. عند تشغيله تُرسل إحصاءات استخدام مجهولة."
 
 msgid ""
-"Optional daily heartbeat: app version, Windows, and feature counts. No screenshots, paths, or OCR text. Override with APEXSHOT_TELEMETRY=0."
+"Optional daily heartbeat: app version, Windows, and feature counts. The update window also reports each update download (version and size). No screenshots, paths, or OCR text. APEXSHOT_TELEMETRY=0 turns both off."
 msgstr ""
-"نبضة يومية اختيارية: إصدار التطبيق وWindows وعدد الميزات. لا لقطات ولا مسارات ولا نص OCR. يمكن تجاوزها باستخدام APEXSHOT_TELEMETRY=0."
+"نبضة يومية اختيارية: إصدار التطبيق وWindows وعدادات الميزات. تُبلغ نافذة التحديث أيضًا عن كل تنزيل تحديث (الإصدار والحجم). لا لقطات شاشة أو مسارات أو نص OCR. يوقف APEXSHOT_TELEMETRY=0 كليهما."
 
 msgid "Requires the corresponding Windows OCR language pack."
 msgstr "يتطلب حزمة لغة OCR المقابلة في Windows."

@@ -454,7 +454,7 @@ fn build_settings_window(app: &Application) {
         .telemetry_enabled_check
         .set_active(config.windows_telemetry_enabled);
     advanced.telemetry_hint.set_text(&t(
-        "Optional daily heartbeat: app version, Windows, and feature counts. No screenshots, paths, or OCR text. Override with APEXSHOT_TELEMETRY=0.",
+        "Optional daily heartbeat: app version, Windows, and feature counts. The update window also reports each update download (version and size). No screenshots, paths, or OCR text. APEXSHOT_TELEMETRY=0 turns both off.",
     ));
     advanced.telemetry_enabled_check.set_tooltip_text(Some(&t(
         "Off by default. Turning this on sends anonymous usage statistics.",
