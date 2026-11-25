@@ -16,6 +16,7 @@ use async_channel::{Receiver, Sender};
 use sha2::{Digest, Sha256};
 
 use super::release::{self, AssetError, ReleaseAsset};
+use super::telemetry;
 use crate::i18n::{t, tfmt};
 
 const USER_AGENT: &str = concat!("ApexShot/", env!("CARGO_PKG_VERSION"));
@@ -116,21 +117,30 @@ fn run(
     };
     let package_path = directory.join(&package_name);
     let partial = partial_path(&package_path);
-    let package_digest = download_file(
+    let package_telemetry =
+        telemetry::Asset::new(&request.package.browser_download_url, &package_name);
+    package_telemetry.started();
+    let package_digest = download_release_file(
         &request.package.browser_download_url,
         &package_path,
         &partial,
         cancel,
         Some(sender),
-    )?;
+    )
+    .inspect_err(|error| package_telemetry.failed(error.status()))?;
 
+    // The manifest always comes from GitHub, so a mirrored package is checked
+    // against GitHub's own checksums.
     let _ = sender.send_blocking(Event::Verifying);
-    let checksums_text = fetch_text(&request.checksums.browser_download_url, MAX_CHECKSUMS_BYTES)?;
+    let checksums_text = fetch_text(&request.checksums.browser_download_url, MAX_CHECKSUMS_BYTES)
+        .inspect_err(|error| package_telemetry.failed(error.status()))?;
     let sums = release::parse_sha256sums(&checksums_text);
     if let Err(error) = release::verify_digest(&package_digest, &request.package.name, &sums) {
         let _ = fs::remove_file(&package_path);
+        package_telemetry.failed("checksum_mismatch");
         return Err(DownloadError::Failed(error.message()));
     }
+    package_telemetry.completed(file_size(&package_path));
 
     // The extension archive only matters when the user already has the
     // extension: refreshing must not install it for someone who skipped it.
@@ -142,17 +152,23 @@ fn run(
             let extension_name = sanitize_file_name(&extension.name);
             let extension_path = directory.join(extension_name);
             let extension_partial = partial_path(&extension_path);
-            let extension_digest = download_file(
+            let extension_telemetry =
+                telemetry::Asset::new(&extension.browser_download_url, &extension.name);
+            extension_telemetry.started();
+            let extension_digest = download_release_file(
                 &extension.browser_download_url,
                 &extension_path,
                 &extension_partial,
                 cancel,
                 None,
-            )?;
+            )
+            .inspect_err(|error| extension_telemetry.failed(error.status()))?;
             if let Err(error) = release::verify_digest(&extension_digest, &extension.name, &sums) {
                 let _ = fs::remove_file(&extension_path);
+                extension_telemetry.failed("checksum_mismatch");
                 return Err(DownloadError::Failed(error.message()));
             }
+            extension_telemetry.completed(file_size(&extension_path));
             Some(extension_path)
         }
         _ => None,
@@ -176,6 +192,54 @@ fn partial_path(destination: &Path) -> PathBuf {
 enum DownloadError {
     Cancelled,
     Failed(String),
+}
+
+impl DownloadError {
+    /// The `status` a `download_failed` event carries.
+    fn status(&self) -> &'static str {
+        match self {
+            Self::Cancelled => "cancelled",
+            Self::Failed(_) => "error",
+        }
+    }
+}
+
+const GITHUB_RELEASE_DOWNLOADS: &str = "https://github.com/apex-shot/apexshot/releases/download/";
+/// The Cloudflare mirror holds the latest releases at the same `<tag>/<name>`
+/// paths as GitHub's release downloads.
+const RELEASE_MIRROR: &str = "https://dl.apexshot.org/";
+
+/// The mirror's copy of a GitHub release asset, if `url` is one.
+fn mirror_url(url: &str) -> Option<String> {
+    let path = url.strip_prefix(GITHUB_RELEASE_DOWNLOADS)?;
+    (!path.is_empty()).then(|| format!("{RELEASE_MIRROR}{path}"))
+}
+
+/// Download from the mirror first; any failure other than a cancel restarts
+/// the download from GitHub. The caller verifies the result against GitHub's
+/// checksum manifest either way.
+fn download_release_file(
+    url: &str,
+    destination: &Path,
+    partial: &Path,
+    cancel: &AtomicBool,
+    sender: Option<&Sender<Event>>,
+) -> Result<String, DownloadError> {
+    if let Some(mirror) = mirror_url(url) {
+        match download_file(&mirror, destination, partial, cancel, sender) {
+            Err(DownloadError::Failed(_)) => {
+                let _ = fs::remove_file(partial);
+            }
+            result => return result,
+        }
+    }
+    download_file(url, destination, partial, cancel, sender)
+}
+
+fn file_size(path: &Path) -> u64 {
+    fs::metadata(path)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0)
 }
 
 /// A user-facing failure whose text keeps the operating system's own reason.
@@ -383,6 +447,21 @@ pub fn size_text(received: u64, total: Option<u64>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn release_assets_are_fetched_from_the_mirror_first() {
+        assert_eq!(
+            mirror_url(
+                "https://github.com/apex-shot/apexshot/releases/download/v0.3.1/apexshot_0.3.1-1_amd64.deb"
+            )
+            .as_deref(),
+            Some("https://dl.apexshot.org/v0.3.1/apexshot_0.3.1-1_amd64.deb")
+        );
+        assert_eq!(
+            mirror_url("https://github.test/apexshot_0.3.1_amd64.deb"),
+            None
+        );
+    }
 
     #[test]
     fn sizes_use_decimal_units_and_two_decimals() {

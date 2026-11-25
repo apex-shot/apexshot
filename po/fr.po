@@ -333,9 +333,9 @@ msgid "Share anonymous usage statistics"
 msgstr "Partager des statistiques d’usage anonymes"
 
 msgid ""
-"Daily heartbeat only: app version, distro, desktop, and coarse feature counts. No screenshots or personal data. Override with APEXSHOT_TELEMETRY=0."
+"Daily heartbeat: app version, distro, desktop, and coarse feature counts. The update window also reports each update download (version and size). No screenshots or personal data. Override with APEXSHOT_TELEMETRY=0."
 msgstr ""
-"Un battement quotidien : version, distro, bureau et compteurs. Pas de captures ni de données perso. Désactivez avec APEXSHOT_TELEMETRY=0."
+"Signal quotidien : version de l'app, distribution, bureau et compteurs approximatifs de fonctions. La fenêtre de mise à jour signale aussi chaque téléchargement de mise à jour (version et taille). Aucune capture ni donnée personnelle. Désactivable avec APEXSHOT_TELEMETRY=0."
 
 msgid "Language"
 msgstr "Langue"
@@ -3994,9 +3994,9 @@ msgstr ""
 "Désactivé par défaut. L'activer envoie des statistiques d'usage anonymes."
 
 msgid ""
-"Optional daily heartbeat: app version, Windows, and feature counts. No screenshots, paths, or OCR text. Override with APEXSHOT_TELEMETRY=0."
+"Optional daily heartbeat: app version, Windows, and feature counts. The update window also reports each update download (version and size). No screenshots, paths, or OCR text. APEXSHOT_TELEMETRY=0 turns both off."
 msgstr ""
-"Signal quotidien facultatif : version de l'application, Windows et nombre de fonctions. Aucune capture, chemin ou texte OCR. Surchargeable avec APEXSHOT_TELEMETRY=0."
+"Signal quotidien facultatif : version de l'app, Windows et compteurs de fonctions. La fenêtre de mise à jour signale aussi chaque téléchargement de mise à jour (version et taille). Aucune capture, aucun chemin ni texte OCR. APEXSHOT_TELEMETRY=0 désactive les deux."
 
 msgid "Requires the corresponding Windows OCR language pack."
 msgstr "Nécessite le pack de langue OCR Windows correspondant."

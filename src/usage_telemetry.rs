@@ -175,7 +175,7 @@ fn save_state(path: &Path, state: &UsageState) {
     }
 }
 
-fn detect_distro_label() -> String {
+pub(crate) fn detect_distro_label() -> String {
     match DistroInfo::detect() {
         Some(info) => match info.version_id {
             Some(ver) if !ver.is_empty() => format!("{}:{}", info.id, ver),

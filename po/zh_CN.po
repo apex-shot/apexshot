@@ -329,8 +329,9 @@ msgid "Share anonymous usage statistics"
 msgstr "分享匿名使用统计"
 
 msgid ""
-"Daily heartbeat only: app version, distro, desktop, and coarse feature counts. No screenshots or personal data. Override with APEXSHOT_TELEMETRY=0."
-msgstr "仅每日心跳：应用版本、发行版、桌面和粗略功能计数。不含截图或个人数据。可用 APEXSHOT_TELEMETRY=0 关闭。"
+"Daily heartbeat: app version, distro, desktop, and coarse feature counts. The update window also reports each update download (version and size). No screenshots or personal data. Override with APEXSHOT_TELEMETRY=0."
+msgstr ""
+"每日心跳：应用版本、发行版、桌面和粗略功能计数。更新窗口还会报告每次更新下载（版本和大小）。不含截图或个人数据。可用 APEXSHOT_TELEMETRY=0 关闭。"
 
 msgid "Language"
 msgstr "语言"
@@ -3897,8 +3898,9 @@ msgid "Off by default. Turning this on sends anonymous usage statistics."
 msgstr "默认关闭。开启后会发送匿名使用统计。"
 
 msgid ""
-"Optional daily heartbeat: app version, Windows, and feature counts. No screenshots, paths, or OCR text. Override with APEXSHOT_TELEMETRY=0."
-msgstr "可选的每日心跳：应用版本、Windows 和功能数量。不包含截图、路径或 OCR 文本。可通过 APEXSHOT_TELEMETRY=0 覆盖。"
+"Optional daily heartbeat: app version, Windows, and feature counts. The update window also reports each update download (version and size). No screenshots, paths, or OCR text. APEXSHOT_TELEMETRY=0 turns both off."
+msgstr ""
+"可选的每日心跳：应用版本、Windows 和功能计数。更新窗口还会报告每次更新下载（版本和大小）。不含截图、路径或 OCR 文本。APEXSHOT_TELEMETRY=0 可同时关闭两者。"
 
 msgid "Requires the corresponding Windows OCR language pack."
 msgstr "需要相应的 Windows OCR 语言包。"

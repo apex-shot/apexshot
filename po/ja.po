@@ -330,9 +330,9 @@ msgid "Share anonymous usage statistics"
 msgstr "匿名の利用統計を共有"
 
 msgid ""
-"Daily heartbeat only: app version, distro, desktop, and coarse feature counts. No screenshots or personal data. Override with APEXSHOT_TELEMETRY=0."
+"Daily heartbeat: app version, distro, desktop, and coarse feature counts. The update window also reports each update download (version and size). No screenshots or personal data. Override with APEXSHOT_TELEMETRY=0."
 msgstr ""
-"日次のハートビートのみ（バージョン、ディストロ、デスクトップ、機能回数）。スクリーンショットや個人データは送りません。APEXSHOT_TELEMETRY=0 で無効。"
+"日次のハートビート（バージョン、ディストロ、デスクトップ、機能回数）。更新ウィンドウは各更新のダウンロード（バージョンとサイズ）も報告します。スクリーンショットや個人データは送りません。APEXSHOT_TELEMETRY=0 で無効。"
 
 msgid "Language"
 msgstr "言語"
@@ -3905,9 +3905,9 @@ msgid "Off by default. Turning this on sends anonymous usage statistics."
 msgstr "既定ではオフです。オンにすると匿名の使用状況統計が送信されます。"
 
 msgid ""
-"Optional daily heartbeat: app version, Windows, and feature counts. No screenshots, paths, or OCR text. Override with APEXSHOT_TELEMETRY=0."
+"Optional daily heartbeat: app version, Windows, and feature counts. The update window also reports each update download (version and size). No screenshots, paths, or OCR text. APEXSHOT_TELEMETRY=0 turns both off."
 msgstr ""
-"任意の毎日のハートビート: アプリのバージョン、Windows、機能の数。スクリーンショット、パス、OCR テキストは含みません。APEXSHOT_TELEMETRY=0 で上書きできます。"
+"任意の日次ハートビート：アプリのバージョン、Windows、機能の使用回数。更新ウィンドウは各更新のダウンロード（バージョンとサイズ）も報告します。スクリーンショット、パス、OCR テキストは送信しません。APEXSHOT_TELEMETRY=0 で両方を無効にできます。"
 
 msgid "Requires the corresponding Windows OCR language pack."
 msgstr "対応する Windows OCR 言語パックが必要です。"

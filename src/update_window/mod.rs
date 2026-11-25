@@ -10,6 +10,7 @@ mod download;
 mod install;
 mod release;
 mod running;
+mod telemetry;
 pub(crate) mod ui;
 mod window;
 
