@@ -4454,7 +4454,16 @@ int run(QApplication& app)
     // The Rust settings window can turn the countdown off entirely; keep the
     // submenu honest without restarting the shell.
     QObject::connect(menu, &QMenu::aboutToShow, menu,
-                     [countdownMenu, countdownGroup, stopRecording, showHiddenCard, shell] {
+                     [recordMenu, countdownMenu, countdownGroup, stopRecording, showHiddenCard,
+                      shell] {
+        // A probe that failed while the shell was starting (a cold ffmpeg right
+        // after an install) is retried here, so Record does not stay greyed out.
+        if (!recordMenu->isEnabled()) {
+            QString error;
+            const bool available = Platform::RecordingSession::available(&error);
+            recordMenu->setEnabled(available);
+            recordMenu->setToolTip(available ? QString() : error);
+        }
         const Platform::ShellSettings settings = Platform::loadShellSettings();
         showHiddenCard->setVisible(shell->hasHiddenCard());
         stopRecording->setVisible(shell->hasActiveRecording());

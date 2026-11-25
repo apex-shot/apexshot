@@ -2497,32 +2497,34 @@ RecordingSession::~RecordingSession()
 
 bool RecordingSession::available(QString* error)
 {
-    static bool probed = false;
+    // Only a success is remembered. The first probe often runs seconds after an
+    // install or at sign-in, while the system is still scanning a freshly written
+    // ffmpeg and its libraries; a probe that times out then must not turn
+    // recording off for the rest of the session, so a failure is probed again on
+    // the next ask.
     static bool usable = false;
-    static QString probeError;
+    if (usable)
+        return true;
 
-    if (!probed) {
-        probed = true;
-        QString output;
-        QString launchError;
-        if (!runProbe({QStringLiteral("-hide_banner"),
-                       QStringLiteral("-devices")},
-                      &output,
-                      &launchError)) {
-            usable = false;
-            probeError = launchError;
-        } else if (!output.contains(QStringLiteral("gdigrab"))) {
-            usable = false;
-            probeError = QStringLiteral(
-                "This ffmpeg build has no gdigrab device, so screen recording is unavailable.");
-        } else {
-            usable = true;
-        }
+    QString output;
+    QString probeError;
+    if (!runProbe({QStringLiteral("-hide_banner"),
+                   QStringLiteral("-devices")},
+                  &output,
+                  &probeError)) {
+        // runProbe already filled probeError.
+    } else if (!output.contains(QStringLiteral("gdigrab"))) {
+        probeError = QStringLiteral(
+            "This ffmpeg build has no gdigrab device, so screen recording is unavailable.");
+    } else {
+        usable = true;
+        return true;
     }
 
-    if (!usable && error)
+    recordingLog(QStringLiteral("recording unavailable: %1").arg(probeError));
+    if (error)
         *error = probeError;
-    return usable;
+    return false;
 }
 
 bool RecordingSession::start(const RecordingRequest& request, QString& error)
