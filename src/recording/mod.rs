@@ -385,14 +385,74 @@ fn command_exists(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Start a recording session
+/// Start a recording session with no on-screen controls. It serves the same
+/// stop control the controls bar does, so `apexshot record stop` and the tray
+/// can end it.
 pub async fn start_recording(config: RecordingConfig) -> RecordResult<PathBuf> {
-    start_recording_with_commands(config, None)
-        .await
-        .map(|session| session.path)
+    record_without_controls(config, false).await
 }
 
-/// Start a recording session and stop when `stop_rx` resolves (in addition to Ctrl+C).
+/// [`start_recording`] for a process that owns the recording, such as the CLI:
+/// Ctrl+C and SIGTERM also stop and save it. Not for the daemon, because the
+/// signal handlers stay installed for the life of the process.
+pub async fn start_recording_until_interrupted(config: RecordingConfig) -> RecordResult<PathBuf> {
+    record_without_controls(config, true).await
+}
+
+async fn record_without_controls(
+    config: RecordingConfig,
+    stop_on_signal: bool,
+) -> RecordResult<PathBuf> {
+    let (command_tx, command_rx) = mpsc::unbounded_channel();
+    let session_id = format!(
+        "recording-{}-{}",
+        std::process::id(),
+        chrono::Utc::now().timestamp_millis()
+    );
+    // Without the control, nothing outside this process could stop the
+    // recording. A session bus that is missing only costs that control.
+    let control_server = match RecordingControlServer::start(session_id).await {
+        Ok(server) => {
+            server.set_command_sender(command_tx.clone());
+            Some(server)
+        }
+        Err(err) => {
+            eprintln!("[recording] stop control unavailable: {err}");
+            None
+        }
+    };
+    let signal_task = stop_on_signal.then(|| tokio::spawn(stop_on_interrupt(command_tx)));
+
+    let result = start_recording_with_commands(config, Some(command_rx)).await;
+
+    if let Some(task) = signal_task {
+        task.abort();
+    }
+    if let Some(server) = control_server {
+        server.clear_command_sender();
+    }
+    result.map(|session| session.path)
+}
+
+/// Send a save-and-stop on the first Ctrl+C or SIGTERM.
+async fn stop_on_interrupt(command_tx: mpsc::UnboundedSender<RecordingControlCommand>) {
+    use tokio::signal::unix::{signal, SignalKind};
+    match signal(SignalKind::terminate()) {
+        Ok(mut terminate) => {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = terminate.recv() => {}
+            }
+        }
+        Err(_) => {
+            let _ = tokio::signal::ctrl_c().await;
+        }
+    }
+    eprintln!("Stopping the recording...");
+    let _ = command_tx.send(RecordingControlCommand::StopSave);
+}
+
+/// Start a recording session and stop when `stop_rx` resolves.
 pub async fn start_recording_with_stop(
     config: RecordingConfig,
     stop_rx: oneshot::Receiver<StopAction>,

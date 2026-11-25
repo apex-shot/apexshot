@@ -12,8 +12,8 @@ use apexshot::{
     ocr::{extract_text_from_capture, extract_text_from_path, ContentSource, OcrConfig, OcrOutput},
     preview_launch::{launch_preview_on_display, show_preview_direct_on_display},
     recording::{
-        run_recording_with_controls, start_recording, RecordError, RecordingConfig,
-        RecordingControlsParams, RecordingTarget, StopAction,
+        run_recording_with_controls, start_recording_until_interrupted, RecordError,
+        RecordingConfig, RecordingControlsParams, RecordingTarget, StopAction,
     },
 };
 use std::path::PathBuf;
@@ -773,7 +773,7 @@ pub(crate) async fn run_record(args: &[String]) -> Result<(), Box<dyn std::error
                 return Ok(());
             }
         }
-        match start_recording(config).await {
+        match start_recording_until_interrupted(config).await {
             Err(RecordError::Cancelled) => {
                 eprintln!("Recording cancelled.");
                 return Ok(());
