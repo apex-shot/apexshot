@@ -24,13 +24,15 @@ Worker limits.
 Nothing in CI uploads to R2, and nobody has to clean it up. The Worker has a
 cron trigger (every 15 minutes) that:
 
-1. Reads the latest GitHub release.
-2. Copies each user-facing asset into `<tag>/<name>`: the Windows installer,
-   the `.deb`, the RPMs, the Arch package, the GNOME extension zip,
-   `SHA256SUMS`, and the Studio release metadata. Source RPMs and debug
-   packages stay on GitHub only. Each write carries GitHub's SHA-256 digest
-   for the asset, and R2 rejects it unless the bytes match, so the mirror can
-   only ever hold GitHub's exact files. Assets already present are skipped.
+1. Finds the latest published tag from the `github.com/.../releases/latest`
+   redirect. It does not call the GitHub API, whose unauthenticated rate limit
+   Cloudflare's shared addresses run out of.
+2. Reads the release's `SHA256SUMS` and copies each user-facing asset it lists
+   into `<tag>/<name>`: the Windows installer, the `.deb`, the RPMs, the Arch
+   package, the GNOME extension zip, and the Studio release metadata, then
+   `SHA256SUMS` itself. Source RPMs and debug packages stay on GitHub only.
+   Each write carries the asset's hash from `SHA256SUMS`, and R2 rejects it
+   unless the bytes match. Assets already present are skipped.
 3. Once every asset is in place, moves `latest` to the new tag.
 4. Deletes every mirrored release except the new one and the newest older one.
 
@@ -84,7 +86,7 @@ npx wrangler tail apexshot-install          # watch a cron run's "mirrored …" 
 
 | Symptom | Cause |
 |---|---|
-| `latest` never appears | The cron run fails. `wrangler tail apexshot-install` shows the error; a missing `sha256` digest on an asset stops the run. |
+| `latest` never appears | The cron run fails. `wrangler tail apexshot-install --format pretty` shows the error; a release without `SHA256SUMS` stops the run. |
 | `/download/windows` says `github` long after a release | Same as above, or the release has no `-setup.exe` asset. |
 | `curl https://apexshot.org/install` returns the website | Route not registered. Re-deploy and check Workers → Routes. |
 | Site homepage broke | A route pattern is too broad. They must stay `apexshot.org/install*`, `/update*`, and the exact `/download/windows`. |

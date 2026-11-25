@@ -214,39 +214,50 @@ function compareTags(a, b) {
   return 0;
 }
 
+const GH_RELEASE_DOWNLOADS = 'https://github.com/apex-shot/apexshot/releases/download';
+const CONTENT_TYPES = {
+  '.exe': 'application/vnd.microsoft.portable-executable',
+  '.deb': 'application/vnd.debian.binary-package',
+  '.rpm': 'application/x-rpm',
+  '.zst': 'application/zstd',
+  '.zip': 'application/zip',
+  '.json': 'application/json',
+};
+
+function contentType(name) {
+  const match = Object.keys(CONTENT_TYPES).find((extension) => name.endsWith(extension));
+  return match ? CONTENT_TYPES[match] : 'text/plain; charset=utf-8';
+}
+
 /**
- * Copy one GitHub asset into R2. The stream is never buffered: GitHub's body
- * is piped through a fixed-length stream so R2 knows the size up front, and
- * R2 rejects the write unless the bytes match GitHub's SHA-256 digest.
+ * Copy one GitHub release asset into R2. The stream is never buffered:
+ * GitHub's body is piped through a fixed-length stream so R2 knows the size up
+ * front, and when `sha256` is given R2 rejects the write unless the bytes
+ * match it. Release paths never change, so an object already present is kept.
  */
-async function mirrorAsset(env, tag, asset) {
-  const key = `${tag}/${asset.name}`;
-  const existing = await env.RELEASES.head(key);
-  if (existing && existing.size === asset.size) return false;
+async function mirrorAsset(env, tag, name, sha256) {
+  const key = `${tag}/${name}`;
+  if (await env.RELEASES.head(key)) return false;
 
-  const digest = typeof asset.digest === 'string' && asset.digest.startsWith('sha256:')
-    ? asset.digest.slice('sha256:'.length)
-    : null;
-  if (!digest) throw new Error(`${asset.name} has no sha256 digest`);
-
-  const upstream = await fetch(asset.browser_download_url, {
+  const upstream = await fetch(`${GH_RELEASE_DOWNLOADS}/${tag}/${encodeURIComponent(name)}`, {
     headers: { 'user-agent': 'apexshot-release-mirror' },
   });
-  if (!upstream.ok || !upstream.body) {
-    throw new Error(`${asset.name}: GitHub answered ${upstream.status}`);
+  const size = Number(upstream.headers.get('content-length'));
+  if (!upstream.ok || !upstream.body || !Number.isFinite(size) || size <= 0) {
+    throw new Error(`${name}: GitHub answered ${upstream.status}`);
   }
-  const { readable, writable } = new FixedLengthStream(asset.size);
+  const { readable, writable } = new FixedLengthStream(size);
   const piped = upstream.body.pipeTo(writable);
   await env.RELEASES.put(key, readable, {
-    sha256: digest,
+    ...(sha256 ? { sha256 } : {}),
     httpMetadata: {
-      contentType: asset.content_type || 'application/octet-stream',
-      contentDisposition: `attachment; filename="${asset.name}"`,
+      contentType: contentType(name),
+      contentDisposition: `attachment; filename="${name}"`,
       cacheControl: 'public, max-age=31536000, immutable',
     },
   });
   await piped;
-  console.log(`mirrored ${key} (${asset.size} bytes)`);
+  console.log(`mirrored ${key} (${size} bytes)`);
   return true;
 }
 
@@ -283,24 +294,37 @@ async function pruneReleases(env, keep) {
  * run picks up where this one stopped.
  */
 async function syncMirror(env) {
-  const response = await fetch(GH_LATEST_API, {
-    headers: {
-      accept: 'application/vnd.github+json',
-      'user-agent': 'apexshot-release-mirror',
-    },
+  // The release page redirect names the latest published, non-prerelease tag.
+  // It is not subject to the API's unauthenticated rate limit, which
+  // Cloudflare's shared egress addresses exhaust.
+  const latest = await fetch(GH_RELEASES_PAGE, {
+    method: 'HEAD',
+    redirect: 'manual',
+    headers: { 'user-agent': 'apexshot-release-mirror' },
   });
-  if (!response.ok) throw new Error(`latest release lookup returned ${response.status}`);
-  const release = await response.json();
-  const tag = String(release.tag_name || '');
-  if (!RELEASE_TAG.test(tag) || release.draft || release.prerelease) {
-    throw new Error(`refusing to mirror release ${JSON.stringify(tag)}`);
+  const location = latest.headers.get('location') || '';
+  const tag = decodeURIComponent(location.split('/releases/tag/')[1] || '');
+  if (!RELEASE_TAG.test(tag)) {
+    throw new Error(`latest release redirect answered ${latest.status} ${JSON.stringify(location)}`);
   }
 
-  const assets = (release.assets || []).filter((asset) => isMirroredAsset(asset.name));
+  // SHA256SUMS is the release's manifest: every asset with its digest.
+  const sumsResponse = await fetch(`${GH_RELEASE_DOWNLOADS}/${tag}/SHA256SUMS`, {
+    headers: { 'user-agent': 'apexshot-release-mirror' },
+  });
+  if (!sumsResponse.ok) throw new Error(`${tag}/SHA256SUMS: GitHub answered ${sumsResponse.status}`);
+  const assets = [];
+  for (const line of (await sumsResponse.text()).split('\n')) {
+    const match = line.trim().match(/^([0-9a-f]{64})\s+\*?(.+)$/);
+    if (match && !match[2].includes('/') && isMirroredAsset(match[2])) {
+      assets.push({ sha256: match[1], name: match[2] });
+    }
+  }
   if (!assets.length) throw new Error(`${tag} has no assets to mirror`);
   for (const asset of assets) {
-    await mirrorAsset(env, tag, asset);
+    await mirrorAsset(env, tag, asset.name, asset.sha256);
   }
+  await mirrorAsset(env, tag, 'SHA256SUMS', null);
 
   const pointer = await env.RELEASES.get(MIRROR_LATEST_KEY);
   const previous = pointer ? (await pointer.text()).trim() : '';
