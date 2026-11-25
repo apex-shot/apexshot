@@ -3,7 +3,7 @@
 //! The worker is a plain thread because `ureq` blocks. The window drains its
 //! events on the GTK main loop and never waits on the network itself.
 
-use std::fs::{self, File};
+use std::fs::{self, OpenOptions};
 use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,9 +16,13 @@ use super::telemetry;
 
 const USER_AGENT: &str = concat!("ApexShot/", env!("CARGO_PKG_VERSION"));
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-const READ_TIMEOUT: Duration = Duration::from_secs(30);
+const READ_TIMEOUT: Duration = Duration::from_secs(15);
 const REPORT_INTERVAL: Duration = Duration::from_millis(100);
 const BUFFER_SIZE: usize = 64 * 1024;
+/// Tries per source before falling back or giving up; each retry resumes.
+const ATTEMPTS_PER_SOURCE: u32 = 5;
+/// The speed shown is an average over roughly this long, so it reads steadily.
+const SPEED_WINDOW: Duration = Duration::from_secs(2);
 
 /// One update to the download view.
 #[derive(Clone, Debug, PartialEq)]
@@ -62,15 +66,21 @@ pub fn start(
 
     std::thread::spawn(move || {
         telemetry.started();
-        // The mirror is tried first; GitHub stays the source of truth, so any
-        // mirror failure (not yet synced, unreachable, cut off) restarts the
-        // download from GitHub.
+        // A stale partial from an earlier run is never trusted.
+        let _ = fs::remove_file(&partial);
+        let mut progress = Progress::default();
+        // The mirror is tried first; GitHub stays the source of truth. A mirror
+        // that fails hands over to GitHub, which resumes from the bytes already
+        // on disk when it serves the same file.
         let mut result = Err(DownloadError::Failed(String::new()));
         if let Some(mirror) = mirror_url(&url) {
-            result = download(&mirror, &worker_destination, &partial, &cancel, &sender);
+            result = download_with_retries(&mirror, &partial, &cancel, &sender, &mut progress);
         }
         if matches!(result, Err(DownloadError::Failed(_))) {
-            result = download(&url, &worker_destination, &partial, &cancel, &sender);
+            result = download_with_retries(&url, &partial, &cancel, &sender, &mut progress);
+        }
+        if result.is_ok() {
+            result = finish(&partial, &worker_destination, &progress);
         }
         match result {
             Ok(()) => {
@@ -124,90 +134,238 @@ enum DownloadError {
     Failed(String),
 }
 
-fn download(
+/// What a download has on disk so far, carried across retries and sources.
+#[derive(Default)]
+struct Progress {
+    received: u64,
+    total: Option<u64>,
+    bytes_per_second: f64,
+}
+
+/// How one attempt ended.
+enum Attempt {
+    Cancelled,
+    /// Worth trying again: the connection dropped, stalled, or the server hiccuped.
+    Retry(String),
+    /// Trying this source again will not help (missing file, disk error).
+    Fatal(String),
+}
+
+fn download_with_retries(
     url: &str,
-    destination: &Path,
     partial: &Path,
     cancel: &AtomicBool,
     sender: &Sender<Event>,
+    progress: &mut Progress,
 ) -> Result<(), DownloadError> {
+    let mut last_error = String::new();
+    for attempt in 0..ATTEMPTS_PER_SOURCE {
+        if attempt > 0 && !wait_before_retry(attempt, cancel) {
+            return Err(DownloadError::Cancelled);
+        }
+        match download_attempt(url, partial, cancel, sender, progress) {
+            Ok(()) => return Ok(()),
+            Err(Attempt::Cancelled) => return Err(DownloadError::Cancelled),
+            Err(Attempt::Retry(message)) => last_error = message,
+            Err(Attempt::Fatal(message)) => return Err(DownloadError::Failed(message)),
+        }
+    }
+    Err(DownloadError::Failed(last_error))
+}
+
+/// Back off 1, 2, 4, 8 seconds, checking for a cancel every 100 ms. Returns
+/// false when the user cancelled while waiting.
+fn wait_before_retry(attempt: u32, cancel: &AtomicBool) -> bool {
+    let wait = Duration::from_secs(1u64 << (attempt - 1).min(3));
+    let deadline = Instant::now() + wait;
+    while Instant::now() < deadline {
+        if cancel.load(Ordering::Relaxed) {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    !cancel.load(Ordering::Relaxed)
+}
+
+/// 408, 429 and 5xx are passing server trouble; any other status is final for
+/// this source.
+fn is_retryable_status(code: u16) -> bool {
+    code == 408 || code == 429 || code >= 500
+}
+
+/// The full size from a `Content-Range: bytes 100-199/200` header.
+fn content_range_total(header: Option<&str>) -> Option<u64> {
+    header?
+        .rsplit('/')
+        .next()?
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .filter(|total| *total > 0)
+}
+
+/// An exponential average whose weight follows the time since the last
+/// sample, so the shown speed settles over about `SPEED_WINDOW`.
+fn smooth_rate(previous: f64, instant: f64, elapsed: Duration) -> f64 {
+    if previous <= 0.0 {
+        return instant;
+    }
+    let weight = 1.0 - (-elapsed.as_secs_f64() / SPEED_WINDOW.as_secs_f64()).exp();
+    previous + (instant - previous) * weight
+}
+
+fn download_attempt(
+    url: &str,
+    partial: &Path,
+    cancel: &AtomicBool,
+    sender: &Sender<Event>,
+    progress: &mut Progress,
+) -> Result<(), Attempt> {
+    if cancel.load(Ordering::Relaxed) {
+        return Err(Attempt::Cancelled);
+    }
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(CONNECT_TIMEOUT)
         .timeout_read(READ_TIMEOUT)
         .user_agent(USER_AGENT)
         .build();
 
-    let response = agent
-        .get(url)
-        .call()
-        .map_err(|error| DownloadError::Failed(describe(error)))?;
-    let total = response
-        .header("Content-Length")
-        .and_then(|value| value.parse::<u64>().ok())
-        .filter(|value| *value > 0);
+    let mut request = agent.get(url);
+    if progress.received > 0 {
+        request = request.set("Range", &format!("bytes={}-", progress.received));
+    }
+    let response = match request.call() {
+        Ok(response) => response,
+        // Everything was already on disk when the last attempt dropped.
+        Err(ureq::Error::Status(416, _)) if progress.total == Some(progress.received) => {
+            return Ok(());
+        }
+        Err(error @ ureq::Error::Status(code, _)) => {
+            let message = describe(error);
+            return Err(if is_retryable_status(code) {
+                Attempt::Retry(message)
+            } else {
+                Attempt::Fatal(message)
+            });
+        }
+        Err(error) => return Err(Attempt::Retry(describe(error))),
+    };
 
-    let file = File::create(partial)
-        .map_err(|error| DownloadError::Failed(format!("Could not save the update: {error}")))?;
+    let resuming = progress.received > 0 && response.status() == 206;
+    let total = if resuming {
+        content_range_total(response.header("Content-Range"))
+    } else {
+        response
+            .header("Content-Length")
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+    };
+    if resuming && total.is_some() && progress.total.is_some() && total != progress.total {
+        // A different file under the same name: start it from the beginning.
+        progress.received = 0;
+        progress.total = None;
+        return Err(Attempt::Retry(
+            "The download changed on the server.".to_string(),
+        ));
+    }
+    if !resuming {
+        // The server ignored the range or this is the first try.
+        progress.received = 0;
+    }
+    if total.is_some() {
+        progress.total = total;
+    }
+
+    let file = if resuming {
+        OpenOptions::new().append(true).open(partial)
+    } else {
+        OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(partial)
+    }
+    .map_err(|error| Attempt::Fatal(format!("Could not save the update: {error}")))?;
     let mut file = BufWriter::with_capacity(BUFFER_SIZE, file);
     let mut reader = response.into_reader();
     let mut buffer = vec![0u8; BUFFER_SIZE];
-    let mut received = 0u64;
     let mut last_report = Instant::now();
-    let mut last_report_bytes = 0u64;
+    let mut last_report_bytes = progress.received;
 
     // The first event carries the total as soon as the headers arrive, so the
     // card can show the file size before the first chunk lands.
     let _ = sender.try_send(Event::Progress {
-        received: 0,
-        total,
-        bytes_per_second: 0.0,
+        received: progress.received,
+        total: progress.total,
+        bytes_per_second: progress.bytes_per_second,
     });
 
     loop {
         if cancel.load(Ordering::Relaxed) {
-            return Err(DownloadError::Cancelled);
+            return Err(Attempt::Cancelled);
         }
-        let read = reader
-            .read(&mut buffer)
-            .map_err(|error| DownloadError::Failed(format!("The download stopped: {error}")))?;
+        let read = match reader.read(&mut buffer) {
+            Ok(read) => read,
+            Err(error) => {
+                // Keep what arrived; the next attempt resumes from the bytes
+                // actually on disk.
+                drop(file);
+                progress.received = fs::metadata(partial).map_or(0, |metadata| metadata.len());
+                return Err(Attempt::Retry(format!("The download stopped: {error}")));
+            }
+        };
         if read == 0 {
             break;
         }
-        file.write_all(&buffer[..read]).map_err(|error| {
-            DownloadError::Failed(format!("Could not save the update: {error}"))
-        })?;
-        received += read as u64;
+        file.write_all(&buffer[..read])
+            .map_err(|error| Attempt::Fatal(format!("Could not save the update: {error}")))?;
+        progress.received += read as u64;
 
         let now = Instant::now();
         let elapsed = now.duration_since(last_report);
         if elapsed >= REPORT_INTERVAL {
-            let bytes_per_second =
-                (received - last_report_bytes) as f64 / elapsed.as_secs_f64().max(0.001);
+            let instant =
+                (progress.received - last_report_bytes) as f64 / elapsed.as_secs_f64().max(0.001);
+            progress.bytes_per_second = smooth_rate(progress.bytes_per_second, instant, elapsed);
             last_report = now;
-            last_report_bytes = received;
+            last_report_bytes = progress.received;
             let _ = sender.try_send(Event::Progress {
-                received,
-                total,
-                bytes_per_second,
+                received: progress.received,
+                total: progress.total,
+                bytes_per_second: progress.bytes_per_second,
             });
         }
     }
 
     file.flush()
-        .map_err(|error| DownloadError::Failed(format!("Could not save the update: {error}")))?;
+        .map_err(|error| Attempt::Fatal(format!("Could not save the update: {error}")))?;
     drop(file);
 
-    if received == 0 {
+    if let Some(total) = progress.total {
+        if progress.received < total {
+            return Err(Attempt::Retry("The download ended early.".to_string()));
+        }
+    }
+    Ok(())
+}
+
+/// Move the complete download into place once its size checks out.
+fn finish(partial: &Path, destination: &Path, progress: &Progress) -> Result<(), DownloadError> {
+    let size = fs::metadata(partial).map_or(0, |metadata| metadata.len());
+    if size == 0 {
         return Err(DownloadError::Failed(
             "The server sent an empty download.".to_string(),
         ));
     }
-
+    if progress.total.is_some_and(|total| total != size) {
+        return Err(DownloadError::Failed(
+            "The download is incomplete.".to_string(),
+        ));
+    }
     // `rename` replaces on Unix; Windows wants the destination gone first.
     let _ = fs::remove_file(destination);
     fs::rename(partial, destination)
-        .map_err(|error| DownloadError::Failed(format!("Could not finish the update: {error}")))?;
-    Ok(())
+        .map_err(|error| DownloadError::Failed(format!("Could not finish the update: {error}")))
 }
 
 /// `ureq`'s error text already names the stage; keep it on one line and free
@@ -379,5 +537,40 @@ mod tests {
             partial_path(destination),
             Path::new(r"C:\Updates\ApexShot-0.2.37-setup.exe.part")
         );
+    }
+
+    #[test]
+    fn content_range_gives_the_full_size() {
+        assert_eq!(content_range_total(Some("bytes 100-199/200")), Some(200));
+        assert_eq!(
+            content_range_total(Some("bytes 0-0/181576975")),
+            Some(181_576_975)
+        );
+        assert_eq!(content_range_total(Some("bytes 100-199/*")), None);
+        assert_eq!(content_range_total(None), None);
+    }
+
+    #[test]
+    fn passing_server_trouble_is_retried_and_a_missing_file_is_not() {
+        assert!(is_retryable_status(503));
+        assert!(is_retryable_status(429));
+        assert!(is_retryable_status(408));
+        assert!(!is_retryable_status(404));
+        assert!(!is_retryable_status(403));
+    }
+
+    #[test]
+    fn the_shown_speed_settles_instead_of_jumping() {
+        let tick = Duration::from_millis(100);
+        assert_eq!(smooth_rate(0.0, 2_000_000.0, tick), 2_000_000.0);
+        // One 100 ms dip to zero barely moves a steady 2 MB/s reading.
+        let dipped = smooth_rate(2_000_000.0, 0.0, tick);
+        assert!(dipped > 1_850_000.0 && dipped < 2_000_000.0);
+        // A sustained change is followed within a few seconds.
+        let mut rate = 2_000_000.0;
+        for _ in 0..60 {
+            rate = smooth_rate(rate, 1_000_000.0, tick);
+        }
+        assert!((rate - 1_000_000.0).abs() < 60_000.0);
     }
 }
