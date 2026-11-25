@@ -300,7 +300,7 @@ if [[ "$DASH_HITS" -eq 0 && "$dash_exec_verdict" == "clean" ]]; then
 elif [[ "$DASH_HITS" -eq 0 ]]; then
     info "no lint hits (execution test inconclusive on this host)"
 else
-    info "see docs/CLOUDFLARE_CDN_SETUP.md step 9 for the POSIX rewrite"
+    info "install.sh and update.sh must stay POSIX: they are advertised as 'curl … | sh'"
 fi
 
 rm -f "$tmp"

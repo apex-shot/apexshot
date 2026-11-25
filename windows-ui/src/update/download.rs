@@ -58,7 +58,17 @@ pub fn start(
     let worker_destination = destination.clone();
 
     std::thread::spawn(move || {
-        match download(&url, &worker_destination, &partial, &cancel, &sender) {
+        // The mirror is tried first; GitHub stays the source of truth, so any
+        // mirror failure (not yet synced, unreachable, cut off) restarts the
+        // download from GitHub.
+        let mut result = Err(DownloadError::Failed(String::new()));
+        if let Some(mirror) = mirror_url(&url) {
+            result = download(&mirror, &worker_destination, &partial, &cancel, &sender);
+        }
+        if matches!(result, Err(DownloadError::Failed(_))) {
+            result = download(&url, &worker_destination, &partial, &cancel, &sender);
+        }
+        match result {
             Ok(()) => {
                 let _ = sender.send_blocking(Event::Finished(worker_destination));
             }
@@ -74,6 +84,17 @@ pub fn start(
     });
 
     Ok((receiver, destination))
+}
+
+const GITHUB_RELEASE_DOWNLOADS: &str = "https://github.com/apex-shot/apexshot/releases/download/";
+/// The Cloudflare mirror holds the latest releases at the same `<tag>/<name>`
+/// paths as GitHub's release downloads.
+const RELEASE_MIRROR: &str = "https://dl.apexshot.org/";
+
+/// The mirror's copy of a GitHub release asset, if `url` is one.
+fn mirror_url(url: &str) -> Option<String> {
+    let path = url.strip_prefix(GITHUB_RELEASE_DOWNLOADS)?;
+    (!path.is_empty()).then(|| format!("{RELEASE_MIRROR}{path}"))
 }
 
 /// `%LOCALAPPDATA%\apexshot\updates` on Windows, the platform cache directory
@@ -272,6 +293,25 @@ pub fn size_text(received: u64, total: Option<u64>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn release_assets_are_fetched_from_the_mirror_first() {
+        assert_eq!(
+            mirror_url(
+                "https://github.com/apex-shot/apexshot/releases/download/v0.3.1/ApexShot-0.3.1-setup.exe"
+            )
+            .as_deref(),
+            Some("https://dl.apexshot.org/v0.3.1/ApexShot-0.3.1-setup.exe")
+        );
+        assert_eq!(
+            mirror_url("https://example.test/ApexShot-0.3.1-setup.exe"),
+            None
+        );
+        assert_eq!(
+            mirror_url("https://github.com/apex-shot/apexshot/releases/download/"),
+            None
+        );
+    }
 
     #[test]
     fn sizes_use_decimal_units_and_two_decimals() {
