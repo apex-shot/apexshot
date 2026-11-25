@@ -244,16 +244,17 @@ fn key_form(root: &GtkBox) -> GtkBox {
         let root = root.downgrade();
         move |_| match activate_token(&entry.text()) {
             Ok(()) => {
+                // The status card's Active badge already says it worked.
                 let message = match current_status() {
-                    StudioStatus::Active { .. } => t("Studio activated for this build."),
-                    StudioStatus::UpdateAccessEnded { .. } => t(
+                    StudioStatus::Active { .. } => None,
+                    StudioStatus::UpdateAccessEnded { .. } => Some(t(
                         "Entitlement saved. This build isn't covered by the included updates; install a covered build to use Studio output.",
-                    ),
-                    other => other.message(),
+                    )),
+                    other => Some(other.message()),
                 };
                 if let Some(root) = root.upgrade() {
                     // Rebuilding drops this form; let the click finish first.
-                    glib::idle_add_local_once(move || render(&root, Some(message)));
+                    glib::idle_add_local_once(move || render(&root, message));
                 }
             }
             Err(error) => {

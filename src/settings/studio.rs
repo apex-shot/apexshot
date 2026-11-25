@@ -283,15 +283,17 @@ fn build_activation_controls(
                 status.set_text(&short_message(status_snapshot));
                 refresh_status_pill(&pill, status_snapshot);
                 apply_action_label(&studio_page, status_snapshot);
+                // The status pill already says Active; only explain the
+                // outcomes it cannot.
                 let feedback_message = match status_snapshot {
-                    StudioStatus::Active { .. } => t("Studio activated for this build."),
-                    StudioStatus::UpdateAccessEnded { .. } => t(
+                    StudioStatus::Active { .. } => None,
+                    StudioStatus::UpdateAccessEnded { .. } => Some(t(
                         "Entitlement saved. This build isn't covered by the included updates; install a covered build to use Studio output.",
-                    ),
-                    other => other.message(),
+                    )),
+                    other => Some(other.message()),
                 };
-                feedback.set_text(&feedback_message);
-                feedback.set_visible(true);
+                feedback.set_text(feedback_message.as_deref().unwrap_or_default());
+                feedback.set_visible(feedback_message.is_some());
                 on_activated();
             }
             Err(error) => {

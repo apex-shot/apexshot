@@ -63,12 +63,23 @@ fn hint(text: &str) -> Label {
 }
 
 /// The quiet tier marker on a Studio group's header. The controls stay
-/// usable; the badge only says which tier owns them.
-fn studio_badge() -> Label {
+/// usable; the badge only says which tier owns them, so it hides once Studio
+/// is unlocked. Activation can happen while the editor is open, so the check
+/// runs again whenever the header is shown.
+fn studio_badge(header: &GtkBox) -> Label {
     let badge = Label::new(Some(&t("Studio")));
     badge.add_css_class("image-editor-studio-badge");
     badge.set_valign(Align::Center);
     badge.set_tooltip_text(Some(&t("Included with Studio")));
+    badge.set_visible(!crate::studio_entitlement::studio_unlocked());
+    header.connect_map({
+        let badge = badge.downgrade();
+        move |_| {
+            if let Some(badge) = badge.upgrade() {
+                badge.set_visible(!crate::studio_entitlement::studio_unlocked());
+            }
+        }
+    });
     badge
 }
 
@@ -96,7 +107,7 @@ fn disclosure_row_with_badge(title: &str, body: &GtkBox, scale: f64, studio: boo
     chevron.add_css_class("image-editor-disclosure-chevron");
     header.append(&heading);
     if studio {
-        header.append(&studio_badge());
+        header.append(&studio_badge(&header));
     }
     header.append(&chevron);
     card.append(&header);
@@ -232,7 +243,7 @@ pub(super) fn export_quality(
     title.set_xalign(0.0);
     title.set_hexpand(true);
     header.append(&title);
-    header.append(&studio_badge());
+    header.append(&studio_badge(&header));
     card.append(&header);
 
     let tray = GtkBox::new(Orientation::Horizontal, 0);
