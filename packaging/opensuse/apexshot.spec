@@ -1,5 +1,5 @@
 Name:           apexshot
-Version:        0.3.1
+Version:        0.3.2
 Release:        0
 Summary:        Linux screenshot, annotation, OCR, and screen recording tool
 License:        GPL-3.0-or-later
@@ -157,6 +157,12 @@ fi
 %{_datadir}/apexshot/
 
 %changelog
+* Wed Nov 25 2026 codegoddy <codegoddy@gmail.com> - 0.3.2-0
+- Pick the Mic and Speaker devices from the recording toolbar, with live levels
+- Record every app, one app, or no system sound
+- Faster downloads and updates from ApexShot's own download servers
+- Recordings started without the controls bar can be stopped from the tray or CLI
+
 * Mon Nov 23 2026 codegoddy <codegoddy@gmail.com> - 0.3.1-0
 - ApexShot on X11 desktops such as Cinnamon, Xfce, and MATE, with scrolling capture
 - Screen recording on Fedora, with cursor, clicks, and Auto Zoom on KDE Plasma

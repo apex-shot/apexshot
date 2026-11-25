@@ -1,6 +1,6 @@
 # Maintainer: codegoddy <codegoddy@gmail.com>
 pkgname=apexshot
-pkgver=0.3.1
+pkgver=0.3.2
 pkgrel=1
 pkgdesc="Open-source Linux screenshot, annotation, OCR, and screen recording tool"
 arch=('x86_64')
@@ -82,7 +82,7 @@ makedepends=(
     'gtk4'
     'libadwaita'
 )
-source=("apexshot-0.3.1.tar.gz::https://github.com/apex-shot/apexshot/archive/v0.3.1.tar.gz")
+source=("apexshot-0.3.2.tar.gz::https://github.com/apex-shot/apexshot/archive/v0.3.2.tar.gz")
 sha256sums=('SKIP')  # Update with actual checksum on release
 
 build() {

@@ -5380,3 +5380,45 @@ msgstr "一个开关隐藏光标"
 
 msgid "Turn on Hide cursor in the Cursor panel to take the cursor out of the whole video."
 msgstr "在“光标”面板中打开“隐藏光标”，即可从整个视频中去掉光标。"
+
+msgid "Recording works again"
+msgstr "录制恢复正常"
+
+msgid "Screen and webcam recordings start again. In 0.3.1 the bundled ffmpeg stopped every recording from starting."
+msgstr "屏幕和摄像头录制可以再次开始。在 0.3.1 中，内置的 ffmpeg 导致所有录制都无法开始。"
+
+msgid "Choose your mic and speaker"
+msgstr "选择麦克风和扬声器"
+
+msgid "In Video mode, right-click Mic or Speaker to pick a device. The toolbar shows the device you chose and a live level meter."
+msgstr "在“Video”模式下，右键点击“Mic”或“Speaker”即可选择设备。工具栏会显示所选设备和实时音量表。"
+
+msgid "Record one app's sound"
+msgstr "录制单个应用的声音"
+
+msgid "The Speaker menu records every app, a single app, or no system sound at all."
+msgstr "“Speaker”菜单可以录制所有应用、单个应用，或不录制任何系统声音。"
+
+msgid "Faster downloads and updates"
+msgstr "更快的下载和更新"
+
+msgid "ApexShot now downloads from its own download servers, so installs and updates finish sooner."
+msgstr "ApexShot 现在从自己的下载服务器获取文件，安装和更新更快完成。"
+
+msgid "Updates skip the setup wizard"
+msgstr "更新跳过安装向导"
+
+msgid "Updating goes straight to installing, without asking you to accept the licence again."
+msgstr "更新会直接开始安装，不再要求你重新接受许可协议。"
+
+msgid "Quick Access in your recordings"
+msgstr "录制中显示快捷操作"
+
+msgid "A Quick Access card that appears while you record now shows in the video, so you can record yourself capturing and editing."
+msgstr "录制时出现的快捷操作卡片现在会显示在视频中，方便你录下截图和编辑的过程。"
+
+msgid "Stop any recording"
+msgstr "停止任何录制"
+
+msgid "A recording started without the controls bar now stops from the tray, with apexshot record stop, or with Ctrl+C."
+msgstr "不带控制栏开始的录制，现在可以从托盘、apexshot record stop 或 Ctrl+C 停止。"

@@ -5470,3 +5470,45 @@ msgstr "Скрыть курсор одним переключателем"
 
 msgid "Turn on Hide cursor in the Cursor panel to take the cursor out of the whole video."
 msgstr "Включите «Скрыть курсор» на панели «Курсор», чтобы убрать курсор из всего видео."
+
+msgid "Recording works again"
+msgstr "Запись снова работает"
+
+msgid "Screen and webcam recordings start again. In 0.3.1 the bundled ffmpeg stopped every recording from starting."
+msgstr "Запись экрана и веб-камеры снова запускается. В 0.3.1 встроенный ffmpeg не давал начать ни одну запись."
+
+msgid "Choose your mic and speaker"
+msgstr "Выбор микрофона и динамиков"
+
+msgid "In Video mode, right-click Mic or Speaker to pick a device. The toolbar shows the device you chose and a live level meter."
+msgstr "В режиме «Video» щёлкните правой кнопкой по «Mic» или «Speaker», чтобы выбрать устройство. Панель показывает выбранное устройство и индикатор уровня в реальном времени."
+
+msgid "Record one app's sound"
+msgstr "Запись звука одного приложения"
+
+msgid "The Speaker menu records every app, a single app, or no system sound at all."
+msgstr "Меню «Speaker» записывает все приложения, одно приложение или вовсе без системного звука."
+
+msgid "Faster downloads and updates"
+msgstr "Быстрее загрузки и обновления"
+
+msgid "ApexShot now downloads from its own download servers, so installs and updates finish sooner."
+msgstr "ApexShot теперь загружается с собственных серверов, поэтому установка и обновления завершаются быстрее."
+
+msgid "Updates skip the setup wizard"
+msgstr "Обновления без мастера установки"
+
+msgid "Updating goes straight to installing, without asking you to accept the licence again."
+msgstr "Обновление сразу переходит к установке и больше не просит снова принять лицензию."
+
+msgid "Quick Access in your recordings"
+msgstr "Быстрый доступ в ваших записях"
+
+msgid "A Quick Access card that appears while you record now shows in the video, so you can record yourself capturing and editing."
+msgstr "Карточка быстрого доступа, появившаяся во время записи, теперь видна на видео, так что можно записать, как вы делаете снимки и редактируете."
+
+msgid "Stop any recording"
+msgstr "Остановка любой записи"
+
+msgid "A recording started without the controls bar now stops from the tray, with apexshot record stop, or with Ctrl+C."
+msgstr "Запись, начатую без панели управления, теперь можно остановить из трея, командой apexshot record stop или клавишами Ctrl+C."

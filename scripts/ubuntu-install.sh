@@ -819,7 +819,7 @@ capture_backend_summary() {
     fi
 }
 
-# Installed package version (e.g. 0.3.1), empty if not present.
+# Installed package version (e.g. 0.3.2), empty if not present.
 installed_apexshot_version() {
     if ! command -v apexshot >/dev/null 2>&1 && [[ ! -x /usr/bin/apexshot ]]; then
         return 0

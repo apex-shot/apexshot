@@ -5480,3 +5480,45 @@ msgstr "Oculte o cursor com um botão"
 
 msgid "Turn on Hide cursor in the Cursor panel to take the cursor out of the whole video."
 msgstr "Ative “Ocultar o cursor” no painel “Cursor” para tirar o cursor do vídeo inteiro."
+
+msgid "Recording works again"
+msgstr "A gravação voltou a funcionar"
+
+msgid "Screen and webcam recordings start again. In 0.3.1 the bundled ffmpeg stopped every recording from starting."
+msgstr "As gravações de tela e de webcam voltaram a iniciar. Na 0.3.1, o ffmpeg incluído impedia que qualquer gravação começasse."
+
+msgid "Choose your mic and speaker"
+msgstr "Escolha seu microfone e alto-falante"
+
+msgid "In Video mode, right-click Mic or Speaker to pick a device. The toolbar shows the device you chose and a live level meter."
+msgstr "No modo \"Video\", clique com o botão direito em \"Mic\" ou \"Speaker\" para escolher um dispositivo. A barra mostra o dispositivo escolhido e um medidor de nível ao vivo."
+
+msgid "Record one app's sound"
+msgstr "Grave o som de um único app"
+
+msgid "The Speaker menu records every app, a single app, or no system sound at all."
+msgstr "O menu \"Speaker\" grava todos os apps, um único app ou nenhum som do sistema."
+
+msgid "Faster downloads and updates"
+msgstr "Downloads e atualizações mais rápidos"
+
+msgid "ApexShot now downloads from its own download servers, so installs and updates finish sooner."
+msgstr "O ApexShot agora baixa dos próprios servidores de download, então instalações e atualizações terminam mais rápido."
+
+msgid "Updates skip the setup wizard"
+msgstr "Atualizações sem o assistente de instalação"
+
+msgid "Updating goes straight to installing, without asking you to accept the licence again."
+msgstr "A atualização vai direto para a instalação, sem pedir para você aceitar a licença de novo."
+
+msgid "Quick Access in your recordings"
+msgstr "Acesso rápido nas suas gravações"
+
+msgid "A Quick Access card that appears while you record now shows in the video, so you can record yourself capturing and editing."
+msgstr "Um cartão de acesso rápido que aparece durante a gravação agora aparece no vídeo, para você gravar a si mesmo capturando e editando."
+
+msgid "Stop any recording"
+msgstr "Pare qualquer gravação"
+
+msgid "A recording started without the controls bar now stops from the tray, with apexshot record stop, or with Ctrl+C."
+msgstr "Uma gravação iniciada sem a barra de controles agora para pela bandeja, com apexshot record stop ou com Ctrl+C."

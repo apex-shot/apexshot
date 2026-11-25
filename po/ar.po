@@ -5413,3 +5413,45 @@ msgstr "إخفاء المؤشر بمفتاح واحد"
 
 msgid "Turn on Hide cursor in the Cursor panel to take the cursor out of the whole video."
 msgstr "فعّل «إخفاء المؤشر» في لوحة «المؤشر» لإزالة المؤشر من الفيديو بأكمله."
+
+msgid "Recording works again"
+msgstr "عاد التسجيل يعمل"
+
+msgid "Screen and webcam recordings start again. In 0.3.1 the bundled ffmpeg stopped every recording from starting."
+msgstr "أصبح تسجيل الشاشة وكاميرا الويب يبدأ من جديد. في الإصدار 0.3.1 كان ffmpeg المرفق يمنع بدء أي تسجيل."
+
+msgid "Choose your mic and speaker"
+msgstr "اختر الميكروفون ومكبر الصوت"
+
+msgid "In Video mode, right-click Mic or Speaker to pick a device. The toolbar shows the device you chose and a live level meter."
+msgstr "في وضع «Video»، انقر بزر الفأرة الأيمن على «Mic» أو «Speaker» لاختيار جهاز. يعرض شريط الأدوات الجهاز الذي اخترته ومقياس مستوى مباشرًا."
+
+msgid "Record one app's sound"
+msgstr "سجّل صوت تطبيق واحد"
+
+msgid "The Speaker menu records every app, a single app, or no system sound at all."
+msgstr "تسجّل قائمة «Speaker» صوت كل التطبيقات أو تطبيق واحد أو بدون أي صوت للنظام."
+
+msgid "Faster downloads and updates"
+msgstr "تنزيلات وتحديثات أسرع"
+
+msgid "ApexShot now downloads from its own download servers, so installs and updates finish sooner."
+msgstr "يُنزَّل ApexShot الآن من خوادم التنزيل الخاصة به، فتنتهي عمليات التثبيت والتحديث أسرع."
+
+msgid "Updates skip the setup wizard"
+msgstr "التحديثات تتخطى معالج الإعداد"
+
+msgid "Updating goes straight to installing, without asking you to accept the licence again."
+msgstr "ينتقل التحديث مباشرة إلى التثبيت دون أن يطلب منك قبول الترخيص مرة أخرى."
+
+msgid "Quick Access in your recordings"
+msgstr "الوصول السريع في تسجيلاتك"
+
+msgid "A Quick Access card that appears while you record now shows in the video, so you can record yourself capturing and editing."
+msgstr "بطاقة الوصول السريع التي تظهر أثناء التسجيل تظهر الآن في الفيديو، لتسجّل نفسك وأنت تلتقط وتحرر."
+
+msgid "Stop any recording"
+msgstr "أوقف أي تسجيل"
+
+msgid "A recording started without the controls bar now stops from the tray, with apexshot record stop, or with Ctrl+C."
+msgstr "التسجيل الذي يبدأ دون شريط التحكم يتوقف الآن من علبة النظام، أو بالأمر apexshot record stop، أو بـ Ctrl+C."

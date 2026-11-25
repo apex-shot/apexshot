@@ -61,50 +61,57 @@ pub struct ReleaseNotes {
 /// Free improvements for a release go first in this list before shipping, so
 /// the window leads with what every copy gains.
 pub const RELEASES: &[ReleaseNotes] = &[ReleaseNotes {
-    version: "0.3.1",
+    version: "0.3.2",
     subtitle: None,
     highlights: &[
         Highlight {
-            title: "ApexShot on X11 desktops",
-            body: "Cinnamon, Xfce, MATE, and other X11 desktops now get shortcuts, window recordings, scrolling capture, and Auto Zoom.",
+            title: "Recording works again",
+            body: "Screen and webcam recordings start again. In 0.3.1 the bundled ffmpeg stopped every recording from starting.",
+            studio: false,
+            without_studio_only: false,
+            platform: Platform::Windows,
+        },
+        Highlight {
+            title: "Choose your mic and speaker",
+            body: "In Video mode, right-click Mic or Speaker to pick a device. The toolbar shows the device you chose and a live level meter.",
             studio: false,
             without_studio_only: false,
             platform: Platform::Linux,
         },
         Highlight {
-            title: "Record on Fedora",
-            body: "Screen recording now works on Fedora. On KDE Plasma, recordings keep an editable cursor, clicks, and Auto Zoom.",
+            title: "Record one app's sound",
+            body: "The Speaker menu records every app, a single app, or no system sound at all.",
             studio: false,
             without_studio_only: false,
             platform: Platform::Linux,
         },
         Highlight {
-            title: "Presets in the video editor",
-            body: "Save a recording's background, cursor, and click sound as a preset, apply it in one click, or make it the default for new recordings.",
+            title: "Faster downloads and updates",
+            body: "ApexShot now downloads from its own download servers, so installs and updates finish sooner.",
+            studio: false,
+            without_studio_only: false,
+            platform: Platform::All,
+        },
+        Highlight {
+            title: "Updates skip the setup wizard",
+            body: "Updating goes straight to installing, without asking you to accept the licence again.",
+            studio: false,
+            without_studio_only: false,
+            platform: Platform::Windows,
+        },
+        Highlight {
+            title: "Quick Access in your recordings",
+            body: "A Quick Access card that appears while you record now shows in the video, so you can record yourself capturing and editing.",
+            studio: false,
+            without_studio_only: false,
+            platform: Platform::Windows,
+        },
+        Highlight {
+            title: "Stop any recording",
+            body: "A recording started without the controls bar now stops from the tray, with apexshot record stop, or with Ctrl+C.",
             studio: false,
             without_studio_only: false,
             platform: Platform::Linux,
-        },
-        Highlight {
-            title: "Hide the cursor with one switch",
-            body: "Turn on Hide cursor in the Cursor panel to take the cursor out of the whole video.",
-            studio: false,
-            without_studio_only: false,
-            platform: Platform::All,
-        },
-        Highlight {
-            title: "Try Studio free",
-            body: "Your next 3 Studio exports are on us. After each one, ApexShot shows how many are left.",
-            studio: true,
-            without_studio_only: true,
-            platform: Platform::All,
-        },
-        Highlight {
-            title: "Buying Studio takes one step",
-            body: "Choose Studio in ApexShot, sign in, and pay. ApexShot turns Studio on for you, with no licence file to copy or import.",
-            studio: false,
-            without_studio_only: true,
-            platform: Platform::All,
         },
     ],
 }];
@@ -272,35 +279,35 @@ mod tests {
 
     #[test]
     fn notes_to_show_needs_a_previous_version_and_stays_within_the_range() {
-        assert_eq!(notes_to_show("0.3.1", None), None);
+        assert_eq!(notes_to_show("0.3.2", None), None);
 
-        let notes = notes_to_show("0.3.1", Some("0.3.0")).expect("the new release qualifies");
-        assert_eq!(notes.version, "0.3.1");
+        let notes = notes_to_show("0.3.2", Some("0.3.1")).expect("the new release qualifies");
+        assert_eq!(notes.version, "0.3.2");
 
         // The recorded version already covers the release.
-        assert_eq!(notes_to_show("0.3.1", Some("0.3.1")), None);
+        assert_eq!(notes_to_show("0.3.2", Some("0.3.2")), None);
         // A build older than the entry shows nothing.
-        assert_eq!(notes_to_show("0.3.0", Some("0.2.9")), None);
+        assert_eq!(notes_to_show("0.3.1", Some("0.3.0")), None);
         // A recorded version newer than the running build is a downgrade.
-        assert_eq!(notes_to_show("0.3.0", Some("0.4.0")), None);
+        assert_eq!(notes_to_show("0.3.1", Some("0.4.0")), None);
     }
 
     #[test]
     fn the_newest_qualifying_entry_is_the_one_returned() {
-        let notes = notes_to_show("0.3.1", Some("0.1.0")).expect("the release qualifies");
+        let notes = notes_to_show("0.3.2", Some("0.1.0")).expect("the release qualifies");
         assert_eq!(notes.version, RELEASES[0].version);
     }
 
     #[test]
     fn the_current_release_leads_with_free_improvements_and_has_no_subtitle() {
-        let notes = notes_for("0.3.1").expect("the current release");
+        let notes = notes_for("0.3.2").expect("the current release");
         assert_eq!(notes.subtitle, None);
         // Free improvements come before anything Studio-related.
         let first_studio = notes
             .highlights
             .iter()
             .position(|h| h.studio || h.without_studio_only)
-            .expect("a Studio highlight");
+            .unwrap_or(notes.highlights.len());
         assert!(first_studio > 0);
         assert!(notes.highlights[first_studio..]
             .iter()
@@ -309,15 +316,15 @@ mod tests {
 
     #[test]
     fn notes_for_returns_the_newest_entry_covered_by_the_build() {
-        assert_eq!(notes_for("0.3.1").map(|notes| notes.version), Some("0.3.1"));
-        assert_eq!(notes_for("0.4.0").map(|notes| notes.version), Some("0.3.1"));
-        assert_eq!(notes_for("0.3.0"), None);
+        assert_eq!(notes_for("0.3.2").map(|notes| notes.version), Some("0.3.2"));
+        assert_eq!(notes_for("0.4.0").map(|notes| notes.version), Some("0.3.2"));
+        assert_eq!(notes_for("0.3.1"), None);
     }
 
     #[test]
     fn a_fresh_install_marks_the_version_without_showing() {
         assert_eq!(
-            decide_on_startup("0.3.1", None, false),
+            decide_on_startup("0.3.2", None, false),
             StartupDecision::MarkSeen
         );
     }
@@ -325,8 +332,8 @@ mod tests {
     #[test]
     fn a_finished_install_with_no_record_shows_the_current_notes() {
         assert!(matches!(
-            decide_on_startup("0.3.1", None, true),
-            StartupDecision::Show(notes) if notes.version == "0.3.1"
+            decide_on_startup("0.3.2", None, true),
+            StartupDecision::Show(notes) if notes.version == "0.3.2"
         ));
     }
 
@@ -341,15 +348,15 @@ mod tests {
     #[test]
     fn an_upgrade_shows_the_entries_after_the_recorded_version() {
         assert!(matches!(
-            decide_on_startup("0.3.1", Some("0.2.0"), true),
-            StartupDecision::Show(notes) if notes.version == "0.3.1"
+            decide_on_startup("0.3.2", Some("0.2.0"), true),
+            StartupDecision::Show(notes) if notes.version == "0.3.2"
         ));
     }
 
     #[test]
     fn the_same_version_does_nothing() {
         assert_eq!(
-            decide_on_startup("0.3.1", Some("0.3.1"), true),
+            decide_on_startup("0.3.2", Some("0.3.2"), true),
             StartupDecision::Nothing
         );
     }
@@ -357,7 +364,7 @@ mod tests {
     #[test]
     fn a_downgrade_records_the_running_version() {
         assert_eq!(
-            decide_on_startup("0.3.0", Some("0.3.1"), true),
+            decide_on_startup("0.3.1", Some("0.3.2"), true),
             StartupDecision::MarkSeen
         );
     }
@@ -365,7 +372,7 @@ mod tests {
     #[test]
     fn an_upgrade_past_the_newest_entry_records_the_running_version() {
         assert_eq!(
-            decide_on_startup("0.3.2", Some("0.3.1"), true),
+            decide_on_startup("0.3.3", Some("0.3.2"), true),
             StartupDecision::MarkSeen
         );
     }
@@ -461,17 +468,30 @@ mod tests {
             assert!(!owners.is_empty());
             assert!(owners.iter().all(|h| !h.studio && !h.without_studio_only));
         }
-        // The X11, Fedora, and presets work is Linux-only.
-        let windows: Vec<&str> = highlights_for(&RELEASES[0], false, Platform::Windows)
-            .iter()
-            .map(|h| h.title)
-            .collect();
+        let titles = |build| -> Vec<&str> {
+            highlights_for(&RELEASES[0], false, build)
+                .iter()
+                .map(|h| h.title)
+                .collect()
+        };
+        // The device menus, one-app audio, and the stop fix are Linux-only;
+        // the recorder fix, the silent update, and Quick Access are Windows-only.
         assert_eq!(
-            windows,
+            titles(Platform::Linux),
             [
-                "Hide the cursor with one switch",
-                "Try Studio free",
-                "Buying Studio takes one step"
+                "Choose your mic and speaker",
+                "Record one app's sound",
+                "Faster downloads and updates",
+                "Stop any recording"
+            ]
+        );
+        assert_eq!(
+            titles(Platform::Windows),
+            [
+                "Recording works again",
+                "Faster downloads and updates",
+                "Updates skip the setup wizard",
+                "Quick Access in your recordings"
             ]
         );
     }
