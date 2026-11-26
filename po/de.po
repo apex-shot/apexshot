@@ -257,6 +257,21 @@ msgstr "Hochladen mit"
 msgid "Upload after capture"
 msgstr "Nach der Aufnahme hochladen"
 
+msgid "Send a link instead?"
+msgstr "Stattdessen einen Link senden?"
+
+msgid "Copied. Send a link instead?"
+msgstr "Kopiert. Stattdessen einen Link senden?"
+
+msgid "Free account · 20 links a month"
+msgstr "Kostenloses Konto · 20 Links pro Monat"
+
+msgid "Get link"
+msgstr "Link holen"
+
+msgid "Suggest ApexShot Cloud when copying"
+msgstr "ApexShot Cloud beim Kopieren vorschlagen"
+
 msgid ""
 "Uploads each saved screenshot and copies the share link. Does nothing until you Connect."
 msgstr ""

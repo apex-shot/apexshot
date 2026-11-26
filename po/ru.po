@@ -256,6 +256,21 @@ msgstr "Загружать через"
 msgid "Upload after capture"
 msgstr "Загружать после снимка"
 
+msgid "Send a link instead?"
+msgstr "Отправить ссылку вместо этого?"
+
+msgid "Copied. Send a link instead?"
+msgstr "Скопировано. Отправить ссылку вместо этого?"
+
+msgid "Free account · 20 links a month"
+msgstr "Бесплатный аккаунт · 20 ссылок в месяц"
+
+msgid "Get link"
+msgstr "Получить ссылку"
+
+msgid "Suggest ApexShot Cloud when copying"
+msgstr "Предлагать ApexShot Cloud при копировании"
+
 msgid ""
 "Uploads each saved screenshot and copies the share link. Does nothing until you Connect."
 msgstr ""

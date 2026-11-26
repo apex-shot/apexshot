@@ -87,6 +87,7 @@ pub struct SaveInputs {
     pub cloud_apexshot: CheckButton,
     pub cloud_xbackbone: CheckButton,
     pub cloud_auto_upload: CheckButton,
+    pub cloud_nudge: CheckButton,
     pub xbackbone_url: Entry,
     pub xbackbone_api_token: Entry,
     pub ui_theme: ThemePicker,
@@ -348,6 +349,7 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<SaveOutcome> {
         "apexshot".to_string()
     };
     config.cloud_auto_upload_after_capture = inputs.cloud_auto_upload.is_active();
+    config.cloud_nudge_enabled = inputs.cloud_nudge.is_active();
     config.xbackbone_url = inputs.xbackbone_url.text().to_string();
     config.xbackbone_api_token = inputs.xbackbone_api_token.text().to_string();
 
@@ -523,6 +525,7 @@ fn write_shell_settings_to(path: &Path, config: &AppConfig) -> anyhow::Result<()
         "cloud": {
             "auto_upload_after_capture": config.cloud_auto_upload_after_capture,
             "configured": crate::cloud::upload::is_configured(config),
+            "nudge_enabled": config.cloud_nudge_enabled,
         },
         "studio": {
             "unlocked": crate::studio_entitlement::studio_unlocked(),

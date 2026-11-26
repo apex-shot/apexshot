@@ -255,6 +255,21 @@ msgstr "アップロード方法"
 msgid "Upload after capture"
 msgstr "キャプチャ後にアップロード"
 
+msgid "Send a link instead?"
+msgstr "代わりにリンクを送りますか？"
+
+msgid "Copied. Send a link instead?"
+msgstr "コピーしました。代わりにリンクを送りますか？"
+
+msgid "Free account · 20 links a month"
+msgstr "無料アカウント · 月20リンク"
+
+msgid "Get link"
+msgstr "リンクを取得"
+
+msgid "Suggest ApexShot Cloud when copying"
+msgstr "コピー時に ApexShot Cloud を提案"
+
 msgid ""
 "Uploads each saved screenshot and copies the share link. Does nothing until you Connect."
 msgstr "保存した各ショットをアップロードし、共有リンクをコピーします。接続するまでは何もしません。"

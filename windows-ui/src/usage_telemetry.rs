@@ -164,6 +164,25 @@ pub fn record_studio_buy_clicked() {
     bump_counter("studio_buy_clicked");
 }
 
+/// The Quick Access Cloud nudge was revealed after a Copy. Recorded by the
+/// Windows Quick Access nudge once it lands, matching the Linux counters.
+#[allow(dead_code)]
+pub fn record_cloud_nudge_shown() {
+    bump_counter("cloud_nudge_shown");
+}
+
+/// The Quick Access Cloud nudge's Get link button was pressed.
+#[allow(dead_code)]
+pub fn record_cloud_nudge_clicked() {
+    bump_counter("cloud_nudge_clicked");
+}
+
+/// The Quick Access Cloud nudge was dismissed.
+#[allow(dead_code)]
+pub fn record_cloud_nudge_dismissed() {
+    bump_counter("cloud_nudge_dismissed");
+}
+
 #[cfg(test)]
 pub(crate) fn ensure_install_id() -> Option<String> {
     Some("12345678-1234-4123-8123-123456789abc".into())
