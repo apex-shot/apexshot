@@ -200,7 +200,7 @@ pub fn persist_cloud_nudge_dismissal() {
 
 /// Path of the shell's local Studio nudge counters, beside its settings mirror.
 fn studio_nudges_path() -> Option<PathBuf> {
-    crate::settings::actions::shell_settings_path()?.with_file_name(STUDIO_NUDGES_FILE)
+    Some(crate::settings::actions::shell_settings_path()?.with_file_name(STUDIO_NUDGES_FILE))
 }
 
 #[cfg(test)]
