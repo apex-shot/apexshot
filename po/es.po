@@ -256,6 +256,31 @@ msgstr "Subir con"
 msgid "Upload after capture"
 msgstr "Subir después de capturar"
 
+msgid "Send a link instead?"
+msgstr "¿Enviar un enlace en su lugar?"
+
+msgid "Copied. Send a link instead?"
+msgstr "Copiado. ¿Enviar un enlace en su lugar?"
+
+msgid "Free account · 20 links a month"
+msgstr "Cuenta gratis · 20 enlaces al mes"
+
+msgid "Copied. Want a link instead?"
+msgstr "Copiado. ¿Quieres un enlace en su lugar?"
+
+msgid ""
+"A free ApexShot account turns every capture into a share link, with 20 links "
+"a month."
+msgstr ""
+"Una cuenta gratuita de ApexShot convierte cada captura en un enlace para "
+"compartir, con 20 enlaces al mes."
+
+msgid "Get link"
+msgstr "Obtener enlace"
+
+msgid "Suggest ApexShot Cloud when copying"
+msgstr "Sugerir ApexShot Cloud al copiar"
+
 msgid ""
 "Uploads each saved screenshot and copies the share link. Does nothing until you Connect."
 msgstr ""

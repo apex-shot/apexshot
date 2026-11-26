@@ -48,6 +48,7 @@ pub struct CloudSettingsWidgets {
     pub apexshot_check: CheckButton,
     pub xbackbone_check: CheckButton,
     pub auto_upload_check: CheckButton,
+    pub cloud_nudge_check: CheckButton,
     #[cfg(not(target_os = "windows"))]
     pub auto_upload_sync: Rc<AutoUploadSync>,
     pub xb_url_entry: Entry,
@@ -141,6 +142,18 @@ pub fn build_cloud_section(config: &AppConfig) -> CloudSettingsWidgets {
     auto_hbox.append(&auto_upload_check);
     dest_frame.append(&build_row!(&auto_hbox, true));
 
+    let cloud_nudge_check = CheckButton::new();
+    cloud_nudge_check.set_active(config.cloud_nudge_enabled);
+
+    let nudge_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    nudge_hbox.set_hexpand(true);
+    let nudge_label = Label::new(Some(&t("Suggest ApexShot Cloud when copying")));
+    nudge_label.set_xalign(0.0);
+    nudge_label.set_hexpand(true);
+    nudge_hbox.append(&nudge_label);
+    nudge_hbox.append(&cloud_nudge_check);
+    dest_frame.append(&build_row!(&nudge_hbox, true));
+
     section.append(&dest_frame);
 
     #[cfg(not(target_os = "windows"))]
@@ -183,6 +196,7 @@ pub fn build_cloud_section(config: &AppConfig) -> CloudSettingsWidgets {
         apexshot_check,
         xbackbone_check,
         auto_upload_check,
+        cloud_nudge_check,
         #[cfg(not(target_os = "windows"))]
         auto_upload_sync,
         xb_url_entry: xb_panel.url_entry,

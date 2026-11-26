@@ -495,11 +495,14 @@ fn setup_preview_window(
     );
     let copy_btn = copy_pill_button(&t("Copy"));
     let save_btn = save_pill_button(&t("Save"));
-    let edit_btn = copy_pill_button(&t("Edit"));
-    edit_btn.set_tooltip_text(Some(&t("Open in the editor")));
+    let (edit_btn, _) = corner_icon_button(
+        crate::capture::editor::window::icon_names::custom::PENCIL_SYMBOLIC,
+        &t("Edit"),
+        Align::End,
+        Align::End,
+    );
 
-    // Framed card: screenshot with corner actions and centered Copy / Save /
-    // Edit pills.
+    // Framed card: screenshot with corner actions and centered Copy / Save pills.
     let card = Overlay::new();
     card.set_widget_name("capture-preview-card");
     card.set_hexpand(false);
@@ -508,24 +511,25 @@ fn setup_preview_window(
     card.add_overlay(&close_btn);
     card.add_overlay(&pin_btn);
     card.add_overlay(&upload_btn);
+    card.add_overlay(&edit_btn);
     let action_pills = GtkBox::new(Orientation::Horizontal, 6);
     action_pills.set_halign(Align::Center);
     action_pills.set_valign(Align::Center);
     action_pills.append(&copy_btn);
     action_pills.append(&save_btn);
-    action_pills.append(&edit_btn);
     card.add_overlay(&action_pills);
     card.set_measure_overlay(&close_btn, false);
     card.set_measure_overlay(&pin_btn, false);
     card.set_measure_overlay(&upload_btn, false);
+    card.set_measure_overlay(&edit_btn, false);
     card.set_measure_overlay(&action_pills, false);
 
     // A quiet hint on the tenth, thirtieth and sixtieth lifetime capture.
     // It is a measure-transparent overlay so the card keeps exactly the
     // geometry the layer-shell placement measured before it existed.
-    if crate::studio_nudges::should_show_editor_hint(screenshot_count)
-        && !crate::studio_entitlement::studio_unlocked()
-    {
+    let editor_hint_shown = crate::studio_nudges::should_show_editor_hint(screenshot_count)
+        && !crate::studio_entitlement::studio_unlocked();
+    if editor_hint_shown {
         let hint = Button::with_label(&t("Edit: add a background, frame, or 3D tilt."));
         hint.set_has_frame(false);
         hint.set_focusable(false);
@@ -843,8 +847,28 @@ fn setup_preview_window(
         copy_btn_actions.connect_clicked(move |_| {
             if let Err(e) = copy_screenshot_to_clipboard(&path_copy) {
                 eprintln!("Copy failed: {e}");
+                return;
             }
+            maybe_show_cloud_nudge(&path_copy, screenshot_count, editor_hint_shown);
         });
+
+        // With copy-after-capture on, the capture is already on the clipboard
+        // and the Copy pill rarely gets clicked, so the preview opening counts
+        // as that copy. Show the card just after the result so the capture is
+        // seen first.
+        if load_config().after_capture_copy_file_to_clipboard {
+            let path_nudge = path_actions.clone();
+            let window_nudge = window.downgrade();
+            glib::timeout_add_local_once(Duration::from_millis(1500), move || {
+                let Some(window) = window_nudge.upgrade() else {
+                    return;
+                };
+                if !window.is_visible() {
+                    return;
+                }
+                maybe_show_cloud_nudge(&path_nudge, screenshot_count, editor_hint_shown);
+            });
+        }
 
         let path_save_as = path_actions.clone();
         let window_weak_save_as = window.downgrade();
@@ -942,31 +966,11 @@ fn setup_preview_window(
                             return;
                         }
                     }
-                    let config = crate::config::load_config();
-                    let path = retry_path.clone();
                     // The preview may already be gone, so this card can be the
-                    // process's only window. Hold the application open until
-                    // the upload finishes instead of letting the card's close
-                    // end the process mid-request.
-                    let mut guard = gtk4::gio::Application::default().map(|app| app.hold());
-                    let done = Arc::new(AtomicBool::new(false));
-                    let done_thread = done.clone();
-                    std::thread::spawn(move || {
-                        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            let _ = crate::cloud::upload::upload_file_with_notifications(
-                                &config, &path,
-                            );
-                        }));
-                        done_thread.store(true, Ordering::Release);
-                    });
-                    glib::timeout_add_local(Duration::from_millis(100), move || {
-                        if done.load(Ordering::Acquire) {
-                            guard.take();
-                            ControlFlow::Break
-                        } else {
-                            ControlFlow::Continue
-                        }
-                    });
+                    // process's only window. The shared helper holds the
+                    // application open until the upload finishes instead of
+                    // letting the card's close end the process mid-request.
+                    crate::cloud::sign_in::upload_after_sign_in(retry_path.clone());
                 });
                 return;
             }
@@ -1120,7 +1124,10 @@ fn setup_preview_window(
     let edit_opened_close = edit_opened.clone();
     let preview_id_close = preview_id.clone();
     window.connect_close_request(move |_| {
-        if !edit_opened_close.load(Ordering::Relaxed) {
+        // A card opened from the preview (sign-in, Cloud nudge) is its own
+        // window, so the preview closing must not take it down with the
+        // application. With the preview alone, this quits as before.
+        if !edit_opened_close.load(Ordering::Relaxed) && app_close.windows().len() <= 1 {
             app_close.quit();
         }
         if emit_extension_events {
@@ -1359,12 +1366,10 @@ fn install_preview_css() {
                 color: #ffffff;
             }
 
-            /* Three pills share the smallest card, so they run a little
-             * tighter than the original two-pill row. */
             button.preview-copy-btn {
-                min-width: 40px;
+                min-width: 52px;
                 min-height: 30px;
-                padding: 0 6px;
+                padding: 0 10px;
                 border-radius: 999px;
                 border: none;
                 background: #f3f4f6;
@@ -1501,6 +1506,34 @@ fn install_preview_css() {
             gtk4::STYLE_PROVIDER_PRIORITY_USER,
         );
     }
+}
+
+/// Count this Copy and offer the Cloud card when the nudge counters allow it.
+///
+/// The offer is a card of its own, so it no longer changes the preview's
+/// geometry or keeps its auto-close running.
+fn maybe_show_cloud_nudge(path: &Path, screenshots: u64, editor_hint_shown: bool) {
+    // Every successful Copy counts, even when something else keeps the nudge
+    // off this capture.
+    crate::studio_nudges::bump_copy();
+    // The editor hint and the nudge never share a capture.
+    if editor_hint_shown {
+        return;
+    }
+
+    let state = crate::studio_nudges::cloud_nudge_state();
+    let config = load_config();
+    let today = crate::studio_nudges::today_local();
+    if !crate::studio_nudges::cloud_nudge_due(&state, &config, &today, screenshots) {
+        return;
+    }
+
+    crate::studio_nudges::mark_cloud_nudge_shown(&today);
+    crate::usage_telemetry::record_cloud_nudge_shown();
+    crate::cloud::sign_in::prompt_cloud_nudge(
+        path.to_path_buf(),
+        crate::studio_nudges::mark_cloud_nudge_dismissed,
+    );
 }
 
 fn icon_button(icon_name: &str, tooltip: &str) -> (Button, gtk4::Image) {
@@ -2079,14 +2112,13 @@ mod tests {
                 && production.contains("preview-close-btn")
                 && production.contains("corner_icon_button")
                 && production.contains("copy_pill_button")
-                && production.contains("let edit_btn = copy_pill_button(&t(\"Edit\"));")
-                && production.contains("action_pills.append(&edit_btn);")
-                && !production.contains("PENCIL_SYMBOLIC")
+                && production.contains("PENCIL_SYMBOLIC")
+                && production.contains("card.add_overlay(&edit_btn);")
                 && production.contains("ARROW_EXPORT_UP_REGULAR")
                 && production.contains("copy_screenshot_to_clipboard")
                 && !production.contains("preview-tools")
                 && !production.contains("preview-close-label"),
-            "quick-access overlay must be a framed screenshot with corner actions and Copy/Save/Edit pills"
+            "quick-access overlay must be a framed screenshot with corner actions and a Copy pill"
         );
     }
 

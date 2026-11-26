@@ -69,7 +69,8 @@ fn main() {
     }
 
     // The capture shell has no Cloud transport of its own; it runs this
-    // binary in helper mode to upload a finished capture.
+    // binary in helper mode to upload a finished capture, or to draw the Quick
+    // Access Cloud nudge card for a copied one.
     if let Some(command) = app::cloud::helper::command_from_args(std::env::args_os().skip(1)) {
         std::process::exit(app::cloud::helper::run(command));
     }

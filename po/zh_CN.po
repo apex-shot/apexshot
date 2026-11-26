@@ -254,6 +254,30 @@ msgstr "上传方式"
 msgid "Upload after capture"
 msgstr "截图后上传"
 
+msgid "Send a link instead?"
+msgstr "改为发送链接？"
+
+msgid "Copied. Send a link instead?"
+msgstr "已复制。改为发送链接？"
+
+msgid "Free account · 20 links a month"
+msgstr "免费账户 · 每月 20 个链接"
+
+msgid "Copied. Want a link instead?"
+msgstr "已复制。想要一个链接吗？"
+
+msgid ""
+"A free ApexShot account turns every capture into a share link, with 20 links "
+"a month."
+msgstr ""
+"免费的 ApexShot 账户可将每次截图变成分享链接，每月 20 个链接。"
+
+msgid "Get link"
+msgstr "获取链接"
+
+msgid "Suggest ApexShot Cloud when copying"
+msgstr "复制时推荐 ApexShot Cloud"
+
 msgid ""
 "Uploads each saved screenshot and copies the share link. Does nothing until you Connect."
 msgstr "上传每张已保存截图并复制分享链接。连接账号前不会执行。"

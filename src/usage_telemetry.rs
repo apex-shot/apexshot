@@ -44,6 +44,9 @@ struct UsageState {
     studio_trial_export: u64,
     studio_upsell_shown: u64,
     studio_buy_clicked: u64,
+    cloud_nudge_shown: u64,
+    cloud_nudge_clicked: u64,
+    cloud_nudge_dismissed: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -68,6 +71,9 @@ struct HeartbeatPayload {
     studio_trial_export: u64,
     studio_upsell_shown: u64,
     studio_buy_clicked: u64,
+    cloud_nudge_shown: u64,
+    cloud_nudge_clicked: u64,
+    cloud_nudge_dismissed: u64,
 }
 
 /// Whether telemetry is allowed for this process.
@@ -294,6 +300,21 @@ pub fn record_studio_buy_clicked() {
     bump_counter(|s| s.studio_buy_clicked = s.studio_buy_clicked.saturating_add(1));
 }
 
+/// The Quick Access Cloud nudge was revealed after a Copy.
+pub fn record_cloud_nudge_shown() {
+    bump_counter(|s| s.cloud_nudge_shown = s.cloud_nudge_shown.saturating_add(1));
+}
+
+/// The Quick Access Cloud nudge's Get link button was pressed.
+pub fn record_cloud_nudge_clicked() {
+    bump_counter(|s| s.cloud_nudge_clicked = s.cloud_nudge_clicked.saturating_add(1));
+}
+
+/// The Quick Access Cloud nudge was dismissed.
+pub fn record_cloud_nudge_dismissed() {
+    bump_counter(|s| s.cloud_nudge_dismissed = s.cloud_nudge_dismissed.saturating_add(1));
+}
+
 fn bump_counter(f: impl FnOnce(&mut UsageState)) {
     let config = load_config().sanitized();
     if !telemetry_enabled(&config) {
@@ -375,6 +396,9 @@ fn maybe_send_heartbeat_with_config(config: &AppConfig) -> bool {
         studio_trial_export: state.studio_trial_export,
         studio_upsell_shown: state.studio_upsell_shown,
         studio_buy_clicked: state.studio_buy_clicked,
+        cloud_nudge_shown: state.cloud_nudge_shown,
+        cloud_nudge_clicked: state.cloud_nudge_clicked,
+        cloud_nudge_dismissed: state.cloud_nudge_dismissed,
     };
 
     if !post_heartbeat(&payload) {
@@ -396,6 +420,9 @@ fn maybe_send_heartbeat_with_config(config: &AppConfig) -> bool {
     state.studio_trial_export = 0;
     state.studio_upsell_shown = 0;
     state.studio_buy_clicked = 0;
+    state.cloud_nudge_shown = 0;
+    state.cloud_nudge_clicked = 0;
+    state.cloud_nudge_dismissed = 0;
     save_state(&state_path, &state);
     true
 }
@@ -522,6 +549,9 @@ mod tests {
             studio_trial_export: 11,
             studio_upsell_shown: 12,
             studio_buy_clicked: 13,
+            cloud_nudge_shown: 14,
+            cloud_nudge_clicked: 15,
+            cloud_nudge_dismissed: 16,
         };
 
         let value = serde_json::to_value(&payload).expect("heartbeat payload serializes");
@@ -536,6 +566,9 @@ mod tests {
             ("studio_trial_export", 11),
             ("studio_upsell_shown", 12),
             ("studio_buy_clicked", 13),
+            ("cloud_nudge_shown", 14),
+            ("cloud_nudge_clicked", 15),
+            ("cloud_nudge_dismissed", 16),
         ] {
             assert_eq!(value[field].as_u64(), Some(count), "missing {field}");
         }

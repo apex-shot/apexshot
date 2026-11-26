@@ -1469,7 +1469,7 @@ private:
 // ----------------------------------------------------- quick access card ---
 // The card after a capture, dressed like the Linux preview card: the capture
 // fills a 190x135 frame (times Overlay size), Close and Pin ride the top
-// corners, Upload the bottom left, and Copy, Save and Edit sit centred.
+// corners, Upload and Edit the bottom ones, and Copy and Save sit centred.
 constexpr int kCardPreviewWidth = 190;
 constexpr int kCardPreviewHeight = 135;
 constexpr int kCardEdgeMargin = 24;
@@ -1480,6 +1480,9 @@ constexpr int kCardShadowPad = 10;
 constexpr int kCardButtonSize = 30;
 /// How long the Settings preview card stays up.
 constexpr int kCardSampleMs = 2500;
+/// The Cloud nudge follows an automatic Copy after this pause, so the result
+/// card is seen before it arrives.
+constexpr int kCloudNudgeAutoCopyDelayMs = 1500;
 /// Gap kept between the top card of a stack and the top of the screen.
 constexpr int kCardStackTopMargin = 24;
 constexpr int kCardMotionMs = 180;
@@ -1487,6 +1490,7 @@ constexpr ushort kGlyphCardCheck = 0xE06C;  // check
 constexpr ushort kGlyphCardClose = 0xE1B2;  // x
 constexpr ushort kGlyphCardPin = 0xE259;    // pin
 constexpr ushort kGlyphCardUpload = 0xE19E; // upload
+constexpr ushort kGlyphCardEdit = 0xE1F9;   // pencil
 
 class CardButton : public QAbstractButton
 {
@@ -1594,7 +1598,8 @@ class ResultCard : public QWidget
     enum class UploadState { Idle, Uploading, Done, Failed };
 
 public:
-    ResultCard(const QImage& image, const QString& path, bool video, bool sample = false)
+    ResultCard(const QImage& image, const QString& path, bool video, bool sample = false,
+               bool autoCopied = false)
         : m_image(image), m_path(path), m_video(video), m_sample(sample)
     {
         setWindowFlags(Qt::Tool | Qt::FramelessWindowHint);
@@ -1671,9 +1676,9 @@ public:
                                     this);
         save->setToolTip(m_video ? QStringLiteral("Select recording save location")
                                  : QStringLiteral("Select screenshot save location"));
-        auto* edit = new CardButton(CardButton::Kind::Pill, 0, QStringLiteral("Edit"), m_scale,
-                                    this);
-        edit->setToolTip(QStringLiteral("Open in the editor"));
+        auto* edit = new CardButton(CardButton::Kind::Corner, kGlyphCardEdit,
+                                    QStringLiteral("Edit"), m_scale, this);
+        edit->setGeometry(right, bottom, button, button);
         edit->setEnabled(m_sample || !m_path.isEmpty());
         connect(edit, &QAbstractButton::clicked, this, [this] { openEditor(); });
         QFont pillFont = uiFont(qRound(13 * m_scale), true);
@@ -1685,16 +1690,12 @@ public:
             std::max(minPill, metrics.horizontalAdvance(copy->text()) + 2 * pillPadding);
         const int saveWidth =
             std::max(minPill, metrics.horizontalAdvance(save->text()) + 2 * pillPadding);
-        const int editWidth =
-            std::max(minPill, metrics.horizontalAdvance(edit->text()) + 2 * pillPadding);
         const int gap = qRound(6 * m_scale);
-        const int pillsLeft = m_cardRect.left()
-            + (m_cardRect.width() - (copyWidth + gap + saveWidth + gap + editWidth)) / 2;
+        const int pillsLeft =
+            m_cardRect.left() + (m_cardRect.width() - (copyWidth + gap + saveWidth)) / 2;
         const int pillsTop = m_cardRect.top() + (m_cardRect.height() - button) / 2;
         copy->setGeometry(pillsLeft, pillsTop, copyWidth, button);
         save->setGeometry(pillsLeft + copyWidth + gap, pillsTop, saveWidth, button);
-        edit->setGeometry(pillsLeft + copyWidth + gap + saveWidth + gap, pillsTop, editWidth,
-                          button);
         const bool hasContent = m_video ? !m_path.isEmpty() : !m_image.isNull();
         copy->setEnabled(hasContent);
         save->setEnabled(hasContent);
@@ -1707,6 +1708,7 @@ public:
         // the card keeps exactly the size the placement measured before it.
         if (!m_video && !m_sample && Platform::shouldShowEditorHint(screenshotCards)
             && !settings.studio.unlocked) {
+            m_editorHintShown = true;
             auto* hint = new CardButton(CardButton::Kind::Hint, 0, QString(), m_scale, this);
             const QString hintText =
                 QStringLiteral("Edit: add a background, frame, or 3D tilt.");
@@ -1741,6 +1743,11 @@ public:
             connect(hint, &QAbstractButton::clicked, this, [this] { openEditor(); });
             m_controls.append(hint);
         }
+
+        // The nudge is its own card drawn by the helper, so this card keeps
+        // exactly the look and size it always had.
+        if (!m_video && !m_sample && !m_editorHintShown && autoCopied)
+            startCloudNudgeIfDue(true);
 
         m_pin->setActive(m_pinned);
         m_pin->setToolTip(m_pinned ? QStringLiteral("Unpin") : QStringLiteral("Pin"));
@@ -2017,6 +2024,48 @@ private:
         }
     }
 
+    /// Count the Copy and start the Cloud nudge when the counters say so.
+    /// Every successful Copy counts, even when the editor hint keeps the
+    /// nudge off this card. The helper owns the nudge card and the clicks
+    /// and dismissals on it, so this card keeps no state for it.
+    void startCloudNudgeIfDue(bool autoCopy)
+    {
+        if (m_video || m_sample)
+            return;
+        const quint64 copies = Platform::bumpCopyCount();
+        if (m_editorHintShown)
+            return;
+
+        const Platform::ShellSettings settings = Platform::loadShellSettings();
+        const Platform::StudioNudges nudges = Platform::loadStudioNudges();
+        Platform::CloudNudgeState state;
+        state.copies = copies;
+        state.shows = nudges.cloudNudgeShows;
+        state.dismissals = nudges.cloudNudgeDismissals;
+        state.lastDay = nudges.cloudNudgeLastDay;
+        const int today =
+            QDate::currentDate().toString(QStringLiteral("yyyyMMdd")).toInt();
+        if (!Platform::cloudNudgeDue(state, settings.cloud.configured,
+                                     settings.cloud.nudgeEnabled, today,
+                                     nudges.screenshotCards, Platform::cloudNudgeForced()))
+            return;
+
+        Platform::markCloudNudgeShown(today);
+        Platform::incrementUsageCounter(QStringLiteral("cloud_nudge_shown"));
+        const QString path = QDir::toNativeSeparators(m_path);
+        if (!autoCopy) {
+            QProcess::startDetached(settingsExecutable(),
+                                    {QStringLiteral("--cloud-nudge"), path});
+            return;
+        }
+        // The capture card was just placed, so let it be seen first. The
+        // helper runs detached, so the card may close before the pause ends.
+        QTimer::singleShot(kCloudNudgeAutoCopyDelayMs, qApp, [path] {
+            QProcess::startDetached(settingsExecutable(),
+                                    {QStringLiteral("--cloud-nudge"), path});
+        });
+    }
+
     /// Auto-close, a finished drag, a finished upload, and a full stack all
     /// follow the Settings action: Hide shelves the card for the tray, Close
     /// removes it.
@@ -2072,6 +2121,7 @@ private:
         if (isTemporaryCapture(m_path) && mode == QLatin1String("File & Image (default)"))
             mode = QStringLiteral("Image Only");
         Platform::copyCaptureToClipboard(m_image, m_path, mode);
+        startCloudNudgeIfDue(false);
     }
 
     void saveAs()
@@ -2219,6 +2269,7 @@ private:
     std::function<void()> m_onShelved;
     QList<CardButton*> m_controls;
     CardButton* m_cancelUpload = nullptr;
+    bool m_editorHintShown = false;
     UploadState m_uploadState = UploadState::Idle;
     double m_uploadProgress = 0.0;
     QPointer<QProcess> m_uploadProcess;
@@ -2480,11 +2531,12 @@ public:
 
     /// A new card joins the stack in its screen's corner. The oldest cards on
     /// that screen leave first until it fits.
-    void showResultCard(const QImage& image, const QString& path, bool video)
+    void showResultCard(const QImage& image, const QString& path, bool video,
+                        bool autoCopied = false)
     {
         // The capture this card belongs to is done, so the others return too.
         resumeCards();
-        auto* card = new ResultCard(image, path, video);
+        auto* card = new ResultCard(image, path, video, false, autoCopied);
         card->setRecordable(m_recordingLive);
         card->setSequence(++m_cardSequence);
         card->setOnShelved([this] { scheduleCardLayout(); });
@@ -4146,7 +4198,7 @@ private:
             return;
         }
 
-        showResultCard(image, path, false);
+        showResultCard(image, path, false, settings.screenshots.afterCopyToClipboard);
     }
 
     void presentRecording(const QImage& thumbnail,
@@ -4256,7 +4308,11 @@ private:
             return;
         }
 
-        showResultCard(image, path, false);
+        // OCR copies text instead of the capture, so only the plain path count
+        // as an automatic copy for the Cloud nudge.
+        const bool autoCopied =
+            !options.ocr && settings.screenshots.afterCopyToClipboard;
+        showResultCard(image, path, false, autoCopied);
     }
 
     bool m_menuOpen = false;

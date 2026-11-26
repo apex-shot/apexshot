@@ -705,6 +705,7 @@ fn build_settings_window(app: &Application) {
         cloud_apexshot: cloud.apexshot_check.clone(),
         cloud_xbackbone: cloud.xbackbone_check.clone(),
         cloud_auto_upload: cloud.auto_upload_check.clone(),
+        cloud_nudge: cloud.cloud_nudge_check.clone(),
         xbackbone_url: cloud.xb_url_entry.clone(),
         xbackbone_api_token: cloud.xb_token_entry.clone(),
         ui_theme: general.theme_input.clone(),
@@ -1011,6 +1012,7 @@ fn install_save_dirty_tracking(inputs: &Rc<SaveInputs>, mark_dirty: Rc<dyn Fn()>
     wire_check(&inputs.cloud_apexshot);
     wire_check(&inputs.cloud_xbackbone);
     wire_check(&inputs.cloud_auto_upload);
+    wire_check(&inputs.cloud_nudge);
     wire_entry(&inputs.xbackbone_url);
     wire_entry(&inputs.xbackbone_api_token);
     wire_theme(&inputs.ui_theme);

@@ -104,6 +104,7 @@ pub struct SaveInputs {
     pub cloud_apexshot: CheckButton,
     pub cloud_xbackbone: CheckButton,
     pub cloud_auto_upload: CheckButton,
+    pub cloud_nudge: CheckButton,
     pub cloud_auto_upload_sync: std::rc::Rc<AutoUploadSync>,
     pub xbackbone_url: Entry,
     pub xbackbone_api_token: Entry,
@@ -417,6 +418,7 @@ pub fn save_settings(inputs: &SaveInputs, state: &mut SaveState) -> anyhow::Resu
         "apexshot".to_string()
     };
     config.cloud_auto_upload_after_capture = inputs.cloud_auto_upload.is_active();
+    config.cloud_nudge_enabled = inputs.cloud_nudge.is_active();
     config.xbackbone_url = inputs.xbackbone_url.text().to_string();
     config.xbackbone_api_token = inputs.xbackbone_api_token.text().to_string();
 
