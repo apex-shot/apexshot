@@ -9,8 +9,7 @@ use gtk4::{
     glib::{self, ControlFlow},
     prelude::*,
     Align, ApplicationWindow, Box as GtkBox, Button, CssProvider, DragSource, DrawingArea,
-    EventControllerKey, EventControllerMotion, FileChooserNative, Label, Orientation, Overlay,
-    WidgetPaintable, Window,
+    EventControllerKey, FileChooserNative, Orientation, Overlay, WidgetPaintable, Window,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use std::cell::{Cell, RefCell};
@@ -450,12 +449,6 @@ fn setup_preview_window(
     let save_chooser: Rc<RefCell<Option<FileChooserNative>>> = Rc::new(RefCell::new(None));
     let auto_close_anchor = Arc::new(Mutex::new(Instant::now()));
     let source_bytes = Arc::new(Mutex::new(None::<Arc<Vec<u8>>>));
-    // The Cloud nudge strip is revealed on some Copy clicks. These flags let
-    // the one-second auto-close tick pause while the strip is visible or
-    // hovered, without changing the card's measured geometry.
-    let nudge_visible = Rc::new(Cell::new(false));
-    let nudge_hovered = Rc::new(Cell::new(false));
-    let nudge_shown_at: Rc<Cell<Option<Instant>>> = Rc::new(Cell::new(None));
 
     probe.log("before-build-preview-area");
     let preview_area = build_preview_area(
@@ -549,22 +542,6 @@ fn setup_preview_window(
         card.set_measure_overlay(&hint, false);
         let edit_btn_hint = edit_btn.clone();
         hint.connect_clicked(move |_| edit_btn_hint.emit_clicked());
-    }
-
-    // The ApexShot Cloud nudge: a one-line strip revealed on a Copy click when
-    // `studio_nudges::cloud_nudge_due` allows it. It shares the hint's
-    // placement family and is measure-transparent for the same reason. The
-    // hint and the nudge never share a card, so the surprise stays gentle.
-    let (nudge_strip, nudge_title, nudge_get_link, nudge_dismiss) = cloud_nudge_strip();
-    card.add_overlay(&nudge_strip);
-    card.set_measure_overlay(&nudge_strip, false);
-    {
-        let hovered = nudge_hovered.clone();
-        let motion = EventControllerMotion::new();
-        motion.connect_enter(move |_, _, _| hovered.set(true));
-        let hovered = nudge_hovered.clone();
-        motion.connect_leave(move |_| hovered.set(false));
-        nudge_strip.add_controller(motion);
     }
 
     let chrome = GtkBox::new(Orientation::Vertical, 0);
@@ -768,12 +745,6 @@ fn setup_preview_window(
     let emit_extension_events_actions = emit_extension_events;
     let save_dialog_open_actions = save_dialog_open.clone();
     let save_chooser_actions = save_chooser.clone();
-    let nudge_strip_actions = nudge_strip.clone();
-    let nudge_get_link_actions = nudge_get_link.clone();
-    let nudge_dismiss_actions = nudge_dismiss.clone();
-    let nudge_visible_actions = nudge_visible.clone();
-    let nudge_hovered_actions = nudge_hovered.clone();
-    let nudge_shown_at_actions = nudge_shown_at.clone();
 
     glib::idle_add_local_once(move || {
         let Some(window) = window_actions.upgrade() else {
@@ -873,38 +844,30 @@ fn setup_preview_window(
         });
 
         let path_copy = path_actions.clone();
-        let nudge_strip_copy = nudge_strip_actions.clone();
-        let nudge_visible_copy = nudge_visible_actions.clone();
-        let nudge_hovered_copy = nudge_hovered_actions.clone();
-        let nudge_shown_at_copy = nudge_shown_at_actions.clone();
         copy_btn_actions.connect_clicked(move |_| {
             if let Err(e) = copy_screenshot_to_clipboard(&path_copy) {
                 eprintln!("Copy failed: {e}");
                 return;
             }
-            reveal_cloud_nudge_after_copy(
-                &nudge_strip_copy,
-                &nudge_visible_copy,
-                &nudge_hovered_copy,
-                &nudge_shown_at_copy,
-                screenshot_count,
-                editor_hint_shown,
-            );
+            maybe_show_cloud_nudge(&path_copy, screenshot_count, editor_hint_shown);
         });
 
         // With copy-after-capture on, the capture is already on the clipboard
         // and the Copy pill rarely gets clicked, so the preview opening counts
-        // as that copy and the strip says so.
+        // as that copy. Show the card just after the result so the capture is
+        // seen first.
         if load_config().after_capture_copy_file_to_clipboard {
-            nudge_title.set_text(&t("Copied. Send a link instead?"));
-            reveal_cloud_nudge_after_copy(
-                &nudge_strip_actions,
-                &nudge_visible_actions,
-                &nudge_hovered_actions,
-                &nudge_shown_at_actions,
-                screenshot_count,
-                editor_hint_shown,
-            );
+            let path_nudge = path_actions.clone();
+            let window_nudge = window.downgrade();
+            glib::timeout_add_local_once(Duration::from_millis(1500), move || {
+                let Some(window) = window_nudge.upgrade() else {
+                    return;
+                };
+                if !window.is_visible() {
+                    return;
+                }
+                maybe_show_cloud_nudge(&path_nudge, screenshot_count, editor_hint_shown);
+            });
         }
 
         let path_save_as = path_actions.clone();
@@ -986,21 +949,11 @@ fn setup_preview_window(
         let uploading_click = uploading.clone();
         let upload_btn_click = upload_btn_actions.clone();
         let upload_btn_retry = upload_btn_actions.downgrade();
-        let nudge_strip_upload = nudge_strip_actions.clone();
-        let nudge_visible_upload = nudge_visible_actions.clone();
-        let nudge_hovered_upload = nudge_hovered_actions.clone();
         upload_btn_actions.connect_clicked(move |_| {
             // Ignore re-entrant clicks while an upload is already in flight.
             if uploading_click.get() {
                 return;
             }
-            // The strip belongs to the card's idle state; hide it whenever an
-            // upload starts, including the retry that follows sign-in.
-            hide_cloud_nudge(
-                &nudge_strip_upload,
-                &nudge_visible_upload,
-                &nudge_hovered_upload,
-            );
 
             let config = load_config();
             if crate::cloud::sign_in::needs_apexshot_sign_in(&config) {
@@ -1013,31 +966,11 @@ fn setup_preview_window(
                             return;
                         }
                     }
-                    let config = crate::config::load_config();
-                    let path = retry_path.clone();
                     // The preview may already be gone, so this card can be the
-                    // process's only window. Hold the application open until
-                    // the upload finishes instead of letting the card's close
-                    // end the process mid-request.
-                    let mut guard = gtk4::gio::Application::default().map(|app| app.hold());
-                    let done = Arc::new(AtomicBool::new(false));
-                    let done_thread = done.clone();
-                    std::thread::spawn(move || {
-                        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            let _ = crate::cloud::upload::upload_file_with_notifications(
-                                &config, &path,
-                            );
-                        }));
-                        done_thread.store(true, Ordering::Release);
-                    });
-                    glib::timeout_add_local(Duration::from_millis(100), move || {
-                        if done.load(Ordering::Acquire) {
-                            guard.take();
-                            ControlFlow::Break
-                        } else {
-                            ControlFlow::Continue
-                        }
-                    });
+                    // process's only window. The shared helper holds the
+                    // application open until the upload finishes instead of
+                    // letting the card's close end the process mid-request.
+                    crate::cloud::sign_in::upload_after_sign_in(retry_path.clone());
                 });
                 return;
             }
@@ -1084,31 +1017,6 @@ fn setup_preview_window(
                 });
             });
         });
-
-        // "Get link" reuses the Upload button's click path, so the existing
-        // sign-in card, its retry, and the "upload this capture, then copy the
-        // link" behaviour all stay in one place.
-        {
-            let strip = nudge_strip_actions.clone();
-            let visible = nudge_visible_actions.clone();
-            let hovered = nudge_hovered_actions.clone();
-            let upload_btn = upload_btn_actions.clone();
-            nudge_get_link_actions.connect_clicked(move |_| {
-                hide_cloud_nudge(&strip, &visible, &hovered);
-                crate::usage_telemetry::record_cloud_nudge_clicked();
-                upload_btn.emit_clicked();
-            });
-        }
-        {
-            let strip = nudge_strip_actions.clone();
-            let visible = nudge_visible_actions.clone();
-            let hovered = nudge_hovered_actions.clone();
-            nudge_dismiss_actions.connect_clicked(move |_| {
-                hide_cloud_nudge(&strip, &visible, &hovered);
-                crate::studio_nudges::mark_cloud_nudge_dismissed();
-                crate::usage_telemetry::record_cloud_nudge_dismissed();
-            });
-        }
 
         let path_edit = path_actions.clone();
         let source_bytes_edit = source_bytes_actions.clone();
@@ -1184,9 +1092,6 @@ fn setup_preview_window(
     let edit_opened_timeout = edit_opened.clone();
     let save_dialog_open_timeout = save_dialog_open.clone();
     let auto_close_anchor_timeout = auto_close_anchor.clone();
-    let nudge_visible_timeout = nudge_visible.clone();
-    let nudge_hovered_timeout = nudge_hovered.clone();
-    let nudge_shown_at_timeout = nudge_shown_at.clone();
     let timeout_dismiss_action = dismiss_action;
     glib::timeout_add_seconds_local(1, move || {
         if edit_opened_timeout.load(Ordering::Relaxed) {
@@ -1198,22 +1103,6 @@ fn setup_preview_window(
                 *anchor = Instant::now();
             }
             return ControlFlow::Continue;
-        }
-
-        // A visible Cloud nudge holds the countdown for eight seconds after it
-        // appears, and for as long as it is hovered, so a rare offer is never
-        // pulled out from under the person reading it.
-        if nudge_visible_timeout.get() {
-            let recently_shown = nudge_shown_at_timeout
-                .get()
-                .map(|shown| shown.elapsed() < Duration::from_secs(8))
-                .unwrap_or(false);
-            if recently_shown || nudge_hovered_timeout.get() {
-                if let Ok(mut anchor) = auto_close_anchor_timeout.lock() {
-                    *anchor = Instant::now();
-                }
-                return ControlFlow::Continue;
-            }
         }
 
         let auto_close_elapsed = auto_close_anchor_timeout
@@ -1235,7 +1124,10 @@ fn setup_preview_window(
     let edit_opened_close = edit_opened.clone();
     let preview_id_close = preview_id.clone();
     window.connect_close_request(move |_| {
-        if !edit_opened_close.load(Ordering::Relaxed) {
+        // A card opened from the preview (sign-in, Cloud nudge) is its own
+        // window, so the preview closing must not take it down with the
+        // application. With the preview alone, this quits as before.
+        if !edit_opened_close.load(Ordering::Relaxed) && app_close.windows().len() <= 1 {
             app_close.quit();
         }
         if emit_extension_events {
@@ -1543,90 +1435,6 @@ fn install_preview_css() {
                 box-shadow: none;
             }
 
-            /* A one-line Cloud nudge revealed after some Copy clicks. It sits
-             * in the same bottom-center slot as the editor hint, which it
-             * never shares a card with. */
-            .preview-cloud-nudge {
-                padding: 6px 10px;
-                border-radius: 12px;
-                border: 1px solid rgba(255, 255, 255, 0.12);
-                background: rgba(18, 18, 18, 0.94);
-                background-image: none;
-                box-shadow: none;
-            }
-
-            .preview-cloud-nudge-title {
-                color: rgba(255, 255, 255, 0.96);
-                font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
-                font-size: 12px;
-                font-weight: 600;
-            }
-
-            .preview-cloud-nudge-subtitle {
-                color: rgba(255, 255, 255, 0.62);
-                font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
-                font-size: 10px;
-                font-weight: 500;
-            }
-
-            button.preview-cloud-nudge-action {
-                min-height: 22px;
-                padding: 0 8px;
-                border-radius: 999px;
-                border: none;
-                background: #f3f4f6;
-                background-image: none;
-                color: #111111;
-                font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
-                font-size: 11px;
-                font-weight: 600;
-                box-shadow: none;
-                outline-width: 0;
-            }
-
-            button.preview-cloud-nudge-action:hover {
-                background: #ffffff;
-                background-image: none;
-                color: #111111;
-            }
-
-            button.preview-cloud-nudge-action:active {
-                background: #e5e7eb;
-                background-image: none;
-                color: #111111;
-            }
-
-            button.preview-cloud-nudge-action:focus,
-            button.preview-cloud-nudge-action:focus-visible {
-                outline: none;
-                box-shadow: none;
-            }
-
-            button.preview-cloud-nudge-close {
-                min-width: 20px;
-                min-height: 20px;
-                padding: 0;
-                border-radius: 999px;
-                border: none;
-                background: transparent;
-                background-image: none;
-                color: rgba(255, 255, 255, 0.68);
-                box-shadow: none;
-                outline-width: 0;
-            }
-
-            button.preview-cloud-nudge-close:hover {
-                background: rgba(255, 255, 255, 0.12);
-                background-image: none;
-                color: #ffffff;
-            }
-
-            button.preview-cloud-nudge-close:focus,
-            button.preview-cloud-nudge-close:focus-visible {
-                outline: none;
-                box-shadow: none;
-            }
-
             /* ── Light theme ──
              * The preview floats over the desktop with no themed window root,
              * so these hang off the class the chrome carries itself. */
@@ -1689,47 +1497,6 @@ fn install_preview_css() {
                 background: rgba(17, 24, 39, 0.08);
                 color: #1d2129;
             }
-
-            .editor-theme-light .preview-cloud-nudge {
-                border-color: rgba(17, 24, 39, 0.12);
-                background: rgba(255, 255, 255, 0.96);
-            }
-
-            .editor-theme-light .preview-cloud-nudge-title {
-                color: #1d2129;
-            }
-
-            .editor-theme-light .preview-cloud-nudge-subtitle {
-                color: rgba(29, 33, 41, 0.62);
-            }
-
-            .editor-theme-light button.preview-cloud-nudge-action {
-                background: #1d2129;
-                background-image: none;
-                color: #ffffff;
-            }
-
-            .editor-theme-light button.preview-cloud-nudge-action:hover {
-                background: #2b303b;
-                background-image: none;
-                color: #ffffff;
-            }
-
-            .editor-theme-light button.preview-cloud-nudge-action:active {
-                background: #111827;
-                background-image: none;
-                color: #ffffff;
-            }
-
-            .editor-theme-light button.preview-cloud-nudge-close {
-                color: rgba(29, 33, 41, 0.66);
-            }
-
-            .editor-theme-light button.preview-cloud-nudge-close:hover {
-                background: rgba(17, 24, 39, 0.08);
-                background-image: none;
-                color: #1d2129;
-            }
             ",
         );
 
@@ -1741,54 +1508,16 @@ fn install_preview_css() {
     }
 }
 
-fn cloud_nudge_strip() -> (GtkBox, Label, Button, Button) {
-    let strip = GtkBox::new(Orientation::Horizontal, 8);
-    strip.set_widget_name("preview-cloud-nudge");
-    strip.add_css_class("preview-cloud-nudge");
-    strip.set_halign(Align::Center);
-    strip.set_valign(Align::End);
-    strip.set_margin_bottom(PREVIEW_CORNER_MARGIN);
-    strip.set_visible(false);
-
-    let title = Label::new(Some(&t("Send a link instead?")));
-    title.add_css_class("preview-cloud-nudge-title");
-    title.set_valign(Align::Center);
-    let subtitle = Label::new(Some(&t("Free account · 20 links a month")));
-    subtitle.add_css_class("preview-cloud-nudge-subtitle");
-    subtitle.set_valign(Align::Center);
-    strip.append(&title);
-    strip.append(&subtitle);
-
-    let get_link = Button::with_label(&t("Get link"));
-    get_link.set_has_frame(false);
-    get_link.set_focusable(false);
-    get_link.add_css_class("preview-cloud-nudge-action");
-    strip.append(&get_link);
-
-    let (dismiss, _) = icon_button(
-        crate::capture::editor::window::icon_names::DISMISS_REGULAR,
-        &t("Not now"),
-    );
-    dismiss.add_css_class("preview-cloud-nudge-close");
-    strip.append(&dismiss);
-
-    (strip, title, get_link, dismiss)
-}
-
-/// Reveal the Cloud nudge after a successful Copy, if the counters allow it.
-fn reveal_cloud_nudge_after_copy(
-    strip: &GtkBox,
-    visible: &Rc<Cell<bool>>,
-    hovered: &Rc<Cell<bool>>,
-    shown_at: &Rc<Cell<Option<Instant>>>,
-    screenshots: u64,
-    editor_hint_shown: bool,
-) {
+/// Count this Copy and offer the Cloud card when the nudge counters allow it.
+///
+/// The offer is a card of its own, so it no longer changes the preview's
+/// geometry or keeps its auto-close running.
+fn maybe_show_cloud_nudge(path: &Path, screenshots: u64, editor_hint_shown: bool) {
     // Every successful Copy counts, even when something else keeps the nudge
-    // off this card.
+    // off this capture.
     crate::studio_nudges::bump_copy();
-    // One nudge per card, and never beside the editor hint.
-    if visible.get() || editor_hint_shown {
+    // The editor hint and the nudge never share a capture.
+    if editor_hint_shown {
         return;
     }
 
@@ -1801,16 +1530,10 @@ fn reveal_cloud_nudge_after_copy(
 
     crate::studio_nudges::mark_cloud_nudge_shown(&today);
     crate::usage_telemetry::record_cloud_nudge_shown();
-    hovered.set(false);
-    shown_at.set(Some(Instant::now()));
-    visible.set(true);
-    strip.set_visible(true);
-}
-
-fn hide_cloud_nudge(strip: &GtkBox, visible: &Rc<Cell<bool>>, hovered: &Rc<Cell<bool>>) {
-    strip.set_visible(false);
-    visible.set(false);
-    hovered.set(false);
+    crate::cloud::sign_in::prompt_cloud_nudge(
+        path.to_path_buf(),
+        crate::studio_nudges::mark_cloud_nudge_dismissed,
+    );
 }
 
 fn icon_button(icon_name: &str, tooltip: &str) -> (Button, gtk4::Image) {

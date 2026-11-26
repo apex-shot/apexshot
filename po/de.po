@@ -266,6 +266,16 @@ msgstr "Kopiert. Stattdessen einen Link senden?"
 msgid "Free account · 20 links a month"
 msgstr "Kostenloses Konto · 20 Links pro Monat"
 
+msgid "Copied. Want a link instead?"
+msgstr "Kopiert. Möchtest du stattdessen einen Link?"
+
+msgid ""
+"A free ApexShot account turns every capture into a share link, with 20 links "
+"a month."
+msgstr ""
+"Ein kostenloses ApexShot-Konto macht aus jeder Aufnahme einen Freigabelink, "
+"20 Links pro Monat."
+
 msgid "Get link"
 msgstr "Link holen"
 

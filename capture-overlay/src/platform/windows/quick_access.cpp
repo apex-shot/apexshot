@@ -58,7 +58,6 @@
 #include <QPropertyAnimation>
 #include <QPushButton>
 #include <QRegion>
-#include <QResizeEvent>
 #include <QScreen>
 #include <QSettings>
 #include <QStandardPaths>
@@ -1481,9 +1480,9 @@ constexpr int kCardShadowPad = 10;
 constexpr int kCardButtonSize = 30;
 /// How long the Settings preview card stays up.
 constexpr int kCardSampleMs = 2500;
-/// The Cloud nudge keeps the card up this long after it appears, even when
-/// the auto-close interval is shorter.
-constexpr int kCloudNudgeGraceMs = 8000;
+/// The Cloud nudge follows an automatic Copy after this pause, so the result
+/// card is seen before it arrives.
+constexpr int kCloudNudgeAutoCopyDelayMs = 1500;
 /// Gap kept between the top card of a stack and the top of the screen.
 constexpr int kCardStackTopMargin = 24;
 constexpr int kCardMotionMs = 180;
@@ -1496,7 +1495,7 @@ constexpr ushort kGlyphCardEdit = 0xE1F9;   // pencil
 class CardButton : public QAbstractButton
 {
 public:
-    enum class Kind { Corner, Close, Pill, Hint, Action };
+    enum class Kind { Corner, Close, Pill, Hint };
 
     CardButton(Kind kind, ushort glyph, const QString& label, qreal scale, QWidget* parent)
         : QAbstractButton(parent), m_kind(kind), m_glyph(glyph), m_scale(scale)
@@ -1535,29 +1534,18 @@ protected:
         const bool hovered = underMouse() && isEnabled();
         const bool pressed = isDown();
 
-        if (m_kind == Kind::Hint || m_kind == Kind::Action) {
+        if (m_kind == Kind::Hint) {
             QColor fill = pressed ? QColor(12, 12, 12, 240)
                 : hovered         ? QColor(42, 42, 42, 240)
                                   : QColor(18, 18, 18, 219);
-            QColor border = Qt::transparent;
-            if (m_kind == Kind::Action) {
-                // A quiet capsule that still reads as the strip's action.
-                fill = pressed ? QColor(255, 255, 255, 18)
-                    : hovered  ? QColor(255, 255, 255, 48)
-                               : QColor(255, 255, 255, 30);
-                border = QColor(255, 255, 255, 61);
-            }
             if (!isEnabled())
                 fill.setAlpha(120);
-            painter.setPen(QPen(border, 1.0));
+            painter.setPen(Qt::NoPen);
             painter.setBrush(fill);
             painter.drawRoundedRect(r, r.height() / 2.0, r.height() / 2.0);
             painter.setFont(font());
             painter.setPen(QColor(255, 255, 255,
-                                  !isEnabled() ? 120
-                                  : (hovered || pressed)
-                                      ? 255
-                                      : (m_kind == Kind::Action ? 235 : 219)));
+                                  !isEnabled() ? 120 : (hovered || pressed ? 255 : 219)));
             painter.drawText(rect(), Qt::AlignCenter, text());
             return;
         }
@@ -1603,111 +1591,6 @@ private:
     ushort m_glyph;
     qreal m_scale;
     bool m_active = false;
-};
-
-/// The Cloud suggestion on a screenshot result card: one dark strip carrying
-/// a two-line message, a Get link action, and a Not now close. It rides the
-/// band between the pill row and the bottom corner row, the same place as the
-/// editor hint, so the card never changes size for it.
-class CloudNudgeStrip : public QWidget
-{
-public:
-    CloudNudgeStrip(qreal scale, bool autoCopy, QWidget* parent)
-        : QWidget(parent), m_scale(scale)
-    {
-        setAutoCopy(autoCopy);
-        setAttribute(Qt::WA_Hover, true);
-
-        m_action = new CardButton(CardButton::Kind::Action, 0, QStringLiteral("Get link"),
-                                  scale, this);
-        m_action->setToolTip(QStringLiteral("Get a share link"));
-        QFont actionFont = uiFont(qRound(7 * m_scale), true);
-        actionFont.setWeight(QFont::DemiBold);
-        m_action->setFont(actionFont);
-
-        m_close = new CardButton(CardButton::Kind::Close, kGlyphCardClose,
-                                 QStringLiteral("Not now"), scale, this);
-        m_close->setToolTip(QStringLiteral("Not now"));
-
-        connect(m_action, &QAbstractButton::clicked, this, [this] {
-            if (m_onAction)
-                m_onAction();
-        });
-        connect(m_close, &QAbstractButton::clicked, this, [this] {
-            if (m_onDismiss)
-                m_onDismiss();
-        });
-    }
-
-    void setAutoCopy(bool autoCopy)
-    {
-        m_autoCopy = autoCopy;
-        update();
-    }
-
-    void setOnAction(std::function<void()> callback) { m_onAction = std::move(callback); }
-    void setOnDismiss(std::function<void()> callback) { m_onDismiss = std::move(callback); }
-
-protected:
-    void resizeEvent(QResizeEvent*) override
-    {
-        const int pad = qRound(4 * m_scale);
-        const int gap = qRound(2 * m_scale);
-        const int closeSize =
-            std::max(1, std::min(height() - qRound(4 * m_scale), qRound(17 * m_scale)));
-        const int actionHeight = std::max(1, height() - qRound(5 * m_scale));
-        const QFontMetrics actionMetrics(m_action->font());
-        const int actionWidth = std::max(
-            qRound(36 * m_scale),
-            actionMetrics.horizontalAdvance(m_action->text()) + qRound(8 * m_scale));
-        const int closeLeft = width() - pad - closeSize;
-        const int actionLeft = closeLeft - gap - actionWidth;
-        m_action->setGeometry(actionLeft, (height() - actionHeight) / 2, actionWidth,
-                              actionHeight);
-        m_close->setGeometry(closeLeft, (height() - closeSize) / 2, closeSize, closeSize);
-    }
-
-    void paintEvent(QPaintEvent*) override
-    {
-        QPainter painter(this);
-        painter.setRenderHint(QPainter::Antialiasing, true);
-        const QRectF r = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
-        painter.setPen(QPen(QColor(255, 255, 255, 20), 1.0));
-        painter.setBrush(QColor(18, 18, 18, 231));
-        painter.drawRoundedRect(r, r.height() / 2.0, r.height() / 2.0);
-
-        const int pad = qRound(5 * m_scale);
-        const int textRight = m_action->geometry().left() - qRound(3 * m_scale);
-        const int textWidth = std::max(1, textRight - pad);
-        const QFont primary = uiFont(qRound(8 * m_scale), true);
-        const QFont secondary = uiFont(qRound(7 * m_scale));
-        const QFontMetrics primaryMetrics(primary);
-        const QFontMetrics secondaryMetrics(secondary);
-        painter.setFont(primary);
-        painter.setPen(QColor(255, 255, 255, 235));
-        painter.drawText(
-            QRect(pad, 0, textWidth, height() / 2), Qt::AlignLeft | Qt::AlignVCenter,
-            primaryMetrics.elidedText(
-                m_autoCopy ? QStringLiteral("Copied. Send a link instead?")
-                           : QStringLiteral("Send a link instead?"),
-                Qt::ElideRight, textWidth));
-        painter.setFont(secondary);
-        painter.setPen(QColor(255, 255, 255, 168));
-        painter.drawText(
-            QRect(pad, height() / 2, textWidth, height() - height() / 2),
-            Qt::AlignLeft | Qt::AlignVCenter,
-            secondaryMetrics.elidedText(
-                QStringLiteral("Free account \u00b7 20 links a month"), Qt::ElideRight,
-                textWidth));
-    }
-
-private:
-    qreal m_scale = 1.0;
-    bool m_autoCopy = false;
-    CardButton* m_action = nullptr;
-    CardButton* m_close = nullptr;
-    std::function<void()> m_onAction;
-    std::function<void()> m_onDismiss;
 };
 
 class ResultCard : public QWidget
@@ -1861,13 +1744,10 @@ public:
             m_controls.append(hint);
         }
 
-        // The Cloud nudge uses the same band as the editor hint, so the two
-        // can never collide, and sharing it keeps the card's size untouched.
-        m_nudgeBand = QRect(m_frameRect.left() + qRound(4 * m_scale), pillsTop + button,
-                            std::max(1, m_frameRect.width() - qRound(8 * m_scale)),
-                            std::max(1, bottom - (pillsTop + button)));
+        // The nudge is its own card drawn by the helper, so this card keeps
+        // exactly the look and size it always had.
         if (!m_video && !m_sample && !m_editorHintShown && autoCopied)
-            showCloudNudgeIfDue(true);
+            startCloudNudgeIfDue(true);
 
         m_pin->setActive(m_pinned);
         m_pin->setToolTip(m_pinned ? QStringLiteral("Unpin") : QStringLiteral("Pin"));
@@ -1908,8 +1788,6 @@ public:
             m_motion.start();
         }
         m_autoCloseClock.restart();
-        if (m_nudgeVisible)
-            m_nudgeClock.start();
         m_tick.start();
     }
 
@@ -1954,8 +1832,6 @@ public:
         raise();
         Platform::setTopmost(static_cast<quintptr>(winId()), m_pinned);
         m_autoCloseClock.restart();
-        if (m_nudgeVisible)
-            m_nudgeClock.start();
         m_tick.start();
     }
 
@@ -2142,33 +2018,22 @@ private:
             m_autoCloseClock.restart();
             return;
         }
-        if (m_nudgeVisible) {
-            // Hold the countdown for eight seconds after the strip appears,
-            // and for as long as it is hovered, so the offer is never pulled
-            // out from under the person reading it.
-            const bool hovering = m_cloudNudge && m_cloudNudge->isVisible()
-                && m_cloudNudge->rect().contains(
-                       m_cloudNudge->mapFromGlobal(QCursor::pos()));
-            if (hovering || m_nudgeClock.elapsed() < kCloudNudgeGraceMs) {
-                m_autoCloseClock.restart();
-                return;
-            }
-        }
         if (!m_pinned && m_autoCloseClock.elapsed() >= qint64(m_autoCloseSeconds) * 1000) {
             m_tick.stop();
             dismiss();
         }
     }
 
-    /// Count the Copy and reveal the Cloud suggestion when the counters say so.
-    /// Every successful Copy counts, even when the editor hint keeps the nudge
-    /// off this card; the hint still has the card to itself.
-    void showCloudNudgeIfDue(bool autoCopy)
+    /// Count the Copy and start the Cloud nudge when the counters say so.
+    /// Every successful Copy counts, even when the editor hint keeps the
+    /// nudge off this card. The helper owns the nudge card and the clicks
+    /// and dismissals on it, so this card keeps no state for it.
+    void startCloudNudgeIfDue(bool autoCopy)
     {
         if (m_video || m_sample)
             return;
         const quint64 copies = Platform::bumpCopyCount();
-        if (m_editorHintShown || m_nudgeVisible)
+        if (m_editorHintShown)
             return;
 
         const Platform::ShellSettings settings = Platform::loadShellSettings();
@@ -2187,37 +2052,18 @@ private:
 
         Platform::markCloudNudgeShown(today);
         Platform::incrementUsageCounter(QStringLiteral("cloud_nudge_shown"));
-        m_nudgeVisible = true;
-        if (!m_cloudNudge) {
-            m_cloudNudge = new CloudNudgeStrip(m_scale, autoCopy, this);
-            m_cloudNudge->setGeometry(m_nudgeBand);
-            m_cloudNudge->setOnAction([this] {
-                Platform::incrementUsageCounter(QStringLiteral("cloud_nudge_clicked"));
-                hideCloudNudge();
-                upload();
-            });
-            m_cloudNudge->setOnDismiss([this] {
-                Platform::markCloudNudgeDismissed();
-                Platform::incrementUsageCounter(QStringLiteral("cloud_nudge_dismissed"));
-                hideCloudNudge();
-            });
-        } else {
-            m_cloudNudge->setAutoCopy(autoCopy);
+        const QString path = QDir::toNativeSeparators(m_path);
+        if (!autoCopy) {
+            QProcess::startDetached(settingsExecutable(),
+                                    {QStringLiteral("--cloud-nudge"), path});
+            return;
         }
-        m_cloudNudge->show();
-        m_cloudNudge->raise();
-        m_nudgeClock.start();
-        m_autoCloseClock.restart();
-    }
-
-    /// Take the strip away; the counters decide whether a later Copy may offer
-    /// it again. The dismissal is counted by the Not now handler; the action
-    /// path only hides it.
-    void hideCloudNudge()
-    {
-        m_nudgeVisible = false;
-        if (m_cloudNudge)
-            m_cloudNudge->hide();
+        // The capture card was just placed, so let it be seen first. The
+        // helper runs detached, so the card may close before the pause ends.
+        QTimer::singleShot(kCloudNudgeAutoCopyDelayMs, qApp, [path] {
+            QProcess::startDetached(settingsExecutable(),
+                                    {QStringLiteral("--cloud-nudge"), path});
+        });
     }
 
     /// Auto-close, a finished drag, a finished upload, and a full stack all
@@ -2275,7 +2121,7 @@ private:
         if (isTemporaryCapture(m_path) && mode == QLatin1String("File & Image (default)"))
             mode = QStringLiteral("Image Only");
         Platform::copyCaptureToClipboard(m_image, m_path, mode);
-        showCloudNudgeIfDue(false);
+        startCloudNudgeIfDue(false);
     }
 
     void saveAs()
@@ -2299,9 +2145,6 @@ private:
     {
         if (m_uploadState != UploadState::Idle || m_path.isEmpty())
             return;
-        // The strip belongs to the card's idle state: hide it whenever an
-        // upload starts, including the sign-in helper the unsigned path opens.
-        hideCloudNudge();
         // Without a destination the helper explains how to connect one.
         if (!Platform::loadShellSettings().cloud.configured) {
             QProcess::startDetached(settingsExecutable(),
@@ -2376,10 +2219,6 @@ private:
         for (CardButton* control : m_controls)
             control->setVisible(idle);
         m_cancelUpload->setVisible(state == UploadState::Uploading);
-        if (m_cloudNudge)
-            m_cloudNudge->setVisible(idle && m_nudgeVisible);
-        if (idle && m_nudgeVisible)
-            m_nudgeClock.start();
         update();
     }
 
@@ -2430,11 +2269,7 @@ private:
     std::function<void()> m_onShelved;
     QList<CardButton*> m_controls;
     CardButton* m_cancelUpload = nullptr;
-    CloudNudgeStrip* m_cloudNudge = nullptr;
-    QRect m_nudgeBand;
-    QElapsedTimer m_nudgeClock;
     bool m_editorHintShown = false;
-    bool m_nudgeVisible = false;
     UploadState m_uploadState = UploadState::Idle;
     double m_uploadProgress = 0.0;
     QPointer<QProcess> m_uploadProcess;

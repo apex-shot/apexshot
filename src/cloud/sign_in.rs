@@ -5,7 +5,10 @@
 //! lets the originating action retry itself.
 
 use std::cell::{Cell, RefCell};
+use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gtk4::{
@@ -38,6 +41,40 @@ enum PrimaryAction {
     Retry,
 }
 
+/// The card's introduction step: the same one-time-code flow, framed by the
+/// caller that asked for it.
+#[derive(Clone)]
+struct Intro {
+    headline: String,
+    lede: String,
+    primary: String,
+}
+
+impl Intro {
+    /// The introduction an upload needs when the device has no account yet.
+    fn sign_in() -> Self {
+        Self {
+            headline: t("Sign in to get a share link"),
+            lede: t(
+                "Your capture is saved. Connect a free ApexShot account and every upload becomes a link in your clipboard.",
+            ),
+            primary: t("Connect account"),
+        }
+    }
+
+    /// The introduction after a capture was copied: the person already has
+    /// the image and only needs the link.
+    fn cloud_nudge() -> Self {
+        Self {
+            headline: t("Copied. Want a link instead?"),
+            lede: t(
+                "A free ApexShot account turns every capture into a share link, with 20 links a month.",
+            ),
+            primary: t("Get link"),
+        }
+    }
+}
+
 /// True when the selected destination is ApexShot Cloud and this device has no
 /// account yet. XBackBone keeps its existing setup notification.
 pub fn needs_apexshot_sign_in(config: &AppConfig) -> bool {
@@ -53,8 +90,11 @@ pub fn prompt_for_upload(parent: Option<&Window>, retry: impl Fn() + 'static) {
         None,
         SignInOptions {
             start_at_device: false,
+            intro: Intro::sign_in(),
             success_lede: t("Uploading your capture…"),
+            on_start: Rc::new(|| {}),
             on_success: Rc::new(retry),
+            on_dismiss: Rc::new(|| {}),
         },
     );
 }
@@ -66,10 +106,95 @@ pub fn show_connect(parent: Option<&Window>, on_connected: impl Fn() + 'static) 
         None,
         SignInOptions {
             start_at_device: true,
+            intro: Intro::sign_in(),
             success_lede: t("Your next capture gets a share link."),
+            on_start: Rc::new(|| {}),
             on_success: Rc::new(on_connected),
+            on_dismiss: Rc::new(|| {}),
         },
     );
+}
+
+/// Show the Cloud nudge card for a capture that was just copied.
+///
+/// The card is a window of its own, attached to the running application like
+/// the no-parent sign-in path, so it never changes the preview's geometry or
+/// its auto-close. Its "Get link" continues into the same device-code flow as
+/// "Connect account", and a successful connect uploads `path` and copies the
+/// finished link.
+///
+/// `on_dismiss` records the caller's own dismissal counter; the card records
+/// the usage telemetry itself.
+pub fn prompt_cloud_nudge(path: PathBuf, on_dismiss: impl Fn() + 'static) {
+    build_nudge_card(None, path, Rc::new(on_dismiss));
+}
+
+/// Run the nudge card as this process's own GTK application.
+///
+/// The Windows capture shell starts `--cloud-nudge <path>` detached for a copy
+/// that earned the nudge, so this process owns the whole card. Returns 0.
+pub fn run_standalone_cloud_nudge(path: PathBuf, on_dismiss: impl Fn() + 'static) -> i32 {
+    let app = Application::builder()
+        .application_id(crate::app_identity::app_id())
+        .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+        .build();
+
+    let path = Rc::new(path);
+    let on_dismiss: Rc<dyn Fn()> = Rc::new(on_dismiss);
+    app.connect_activate(move |app| {
+        if app.windows().iter().any(|window| window.is_visible()) {
+            return;
+        }
+        build_nudge_card(Some(app), (*path).clone(), Rc::clone(&on_dismiss));
+    });
+
+    let _ = app.run_with_args::<String>(&[]);
+    0
+}
+
+fn build_nudge_card(app: Option<&Application>, path: PathBuf, on_dismiss: Rc<dyn Fn()>) {
+    let upload_path = path.clone();
+    build_card(
+        None,
+        app,
+        SignInOptions {
+            start_at_device: false,
+            intro: Intro::cloud_nudge(),
+            success_lede: t("Uploading your capture…"),
+            on_start: Rc::new(crate::usage_telemetry::record_cloud_nudge_clicked),
+            on_success: Rc::new(move || upload_after_sign_in(upload_path.clone())),
+            on_dismiss: Rc::new(move || {
+                crate::usage_telemetry::record_cloud_nudge_dismissed();
+                on_dismiss();
+            }),
+        },
+    );
+}
+
+/// Upload `path` on a worker thread and copy the finished share link.
+///
+/// The card can be the process's only window, so this holds the application
+/// until the request finishes instead of letting the card's close end the
+/// process mid-upload.
+pub fn upload_after_sign_in(path: PathBuf) {
+    let config = crate::config::load_config();
+    let mut guard = gtk4::gio::Application::default().map(|app| app.hold());
+    let done = Arc::new(AtomicBool::new(false));
+    let done_thread = done.clone();
+    std::thread::spawn(move || {
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = crate::cloud::upload::upload_file_with_notifications(&config, &path);
+        }));
+        done_thread.store(true, Ordering::Release);
+    });
+    glib::timeout_add_local(Duration::from_millis(100), move || {
+        if done.load(Ordering::Acquire) {
+            guard.take();
+            glib::ControlFlow::Break
+        } else {
+            glib::ControlFlow::Continue
+        }
+    });
 }
 
 /// Run the upload card as this process's own GTK application.
@@ -95,8 +220,11 @@ pub fn run_standalone_for_upload() -> bool {
             Some(app),
             SignInOptions {
                 start_at_device: false,
+                intro: Intro::sign_in(),
                 success_lede: t("Uploading your capture…"),
+                on_start: Rc::new(|| {}),
                 on_success: Rc::new(move || flag.set(true)),
+                on_dismiss: Rc::new(|| {}),
             },
         );
     });
@@ -115,8 +243,13 @@ fn current_gtk_application() -> Option<Application> {
 
 struct SignInOptions {
     start_at_device: bool,
+    intro: Intro,
     success_lede: String,
+    /// Runs when the primary button starts the flow (before the device code).
+    on_start: Rc<dyn Fn()>,
     on_success: Rc<dyn Fn()>,
+    /// Runs when the card closes without ever connecting.
+    on_dismiss: Rc<dyn Fn()>,
 }
 
 fn build_card(parent: Option<&Window>, app: Option<&Application>, options: SignInOptions) {
@@ -125,8 +258,11 @@ fn build_card(parent: Option<&Window>, app: Option<&Application>, options: SignI
 
     let SignInOptions {
         start_at_device,
+        intro: intro_copy,
         success_lede,
+        on_start,
         on_success,
+        on_dismiss,
     } = options;
 
     // Keep the card attached to the running application. A card opened over a
@@ -196,7 +332,7 @@ fn build_card(parent: Option<&Window>, app: Option<&Application>, options: SignI
     card.append(&body);
 
     let intro = GtkBox::new(Orientation::Vertical, 0);
-    let connect_btn = primary_button(&t("Connect account"));
+    let connect_btn = primary_button(&intro_copy.primary);
     connect_btn.add_css_class("apexshot-studio-cta");
     connect_btn.set_halign(Align::Center);
     connect_btn.set_size_request(px(320.0), -1);
@@ -293,8 +429,12 @@ fn build_card(parent: Option<&Window>, app: Option<&Application>, options: SignI
         primary_action: Rc::new(Cell::new(PrimaryAction::OpenBrowser)),
         code: Rc::new(RefCell::new(String::new())),
         uri: Rc::new(RefCell::new(String::new())),
+        intro_copy,
         success_lede,
+        connected: Rc::new(Cell::new(false)),
+        on_start,
         on_success,
+        on_dismiss,
     };
     ui.wire_actions(&connect_btn, &not_now, &close);
 
@@ -302,6 +442,9 @@ fn build_card(parent: Option<&Window>, app: Option<&Application>, options: SignI
         let ui = ui.clone();
         window.connect_close_request(move |_| {
             ui.abandon();
+            if !ui.connected.get() {
+                (ui.on_dismiss)();
+            }
             glib::Propagation::Proceed
         });
     }
@@ -354,8 +497,13 @@ struct SignInUi {
     primary_action: Rc<Cell<PrimaryAction>>,
     code: Rc<RefCell<String>>,
     uri: Rc<RefCell<String>>,
+    intro_copy: Intro,
     success_lede: String,
+    /// Set once the account connects, so closing the card is not a dismissal.
+    connected: Rc<Cell<bool>>,
+    on_start: Rc<dyn Fn()>,
     on_success: Rc<dyn Fn()>,
+    on_dismiss: Rc<dyn Fn()>,
 }
 
 impl SignInUi {
@@ -370,7 +518,10 @@ impl SignInUi {
     fn wire_actions(&self, connect_btn: &Button, not_now: &Button, close: &Button) {
         {
             let ui = self.clone();
-            connect_btn.connect_clicked(move |_| ui.start());
+            connect_btn.connect_clicked(move |_| {
+                (ui.on_start)();
+                ui.start();
+            });
         }
 
         {
@@ -435,10 +586,8 @@ impl SignInUi {
         self.body.set_visible(true);
         self.intro.set_visible(true);
         self.device.set_visible(false);
-        self.headline.set_text(&t("Sign in to get a share link"));
-        self.lede.set_text(&t(
-            "Your capture is saved. Connect a free ApexShot account and every upload becomes a link in your clipboard.",
-        ));
+        self.headline.set_text(&self.intro_copy.headline);
+        self.lede.set_text(&self.intro_copy.lede);
         self.primary_action.set(PrimaryAction::OpenBrowser);
     }
 
@@ -606,6 +755,7 @@ impl SignInUi {
 
     fn connected(&self, account: &CloudAccount) {
         self.session.set(self.session.get() + 1);
+        self.connected.set(true);
         self.spinner.stop();
         self.body.set_visible(false);
         let email = account.email.trim();

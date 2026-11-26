@@ -7,6 +7,11 @@
 //! auto-upload enabled and the destination is configured). The helper finishes
 //! the request and waits for its notification before exiting, because the
 //! notification is drawn from this process's own hidden window.
+//!
+//! `--cloud-nudge <path>` is the same pattern for the Quick Access Cloud
+//! nudge: the shell counts the show itself, then starts this binary detached
+//! to draw the card, and the helper records only the card's click, dismissal
+//! and the shell's dismissal counter.
 
 use std::cell::Cell;
 use std::ffi::OsString;
@@ -28,6 +33,8 @@ pub enum UploadCommand {
     UploadWithProgress(PathBuf),
     /// Upload only when Settings enables auto-upload after capture.
     AutoUpload(PathBuf),
+    /// Show the Quick Access Cloud nudge card for `path`.
+    CloudNudge(PathBuf),
 }
 
 /// Read an upload command from the process arguments, ignoring anything else.
@@ -52,6 +59,12 @@ pub fn command_from_args(args: impl IntoIterator<Item = OsString>) -> Option<Upl
                     .map(PathBuf::from)
                     .map(UploadCommand::AutoUpload)
             }
+            Some("--cloud-nudge") => {
+                return args
+                    .next()
+                    .map(PathBuf::from)
+                    .map(UploadCommand::CloudNudge)
+            }
             _ => {}
         }
     }
@@ -75,13 +88,17 @@ pub fn cloud_limit_from_args(
     crate::cloud::upgrade::parse_cli_limit(&args[position + 1..]).ok()
 }
 
-/// Run one upload; the exit code is 0 when nothing needed to happen or the
-/// upload completed, and 1 when a requested upload failed.
+/// Run one helper command; the exit code is 0 when nothing needed to happen
+/// or the work completed, and 1 when a requested upload failed.
 pub fn run(command: UploadCommand) -> i32 {
     match command {
         UploadCommand::Upload(path) => upload_now(&path, false, false),
         UploadCommand::UploadWithProgress(path) => upload_now(&path, false, true),
         UploadCommand::AutoUpload(path) => upload_now(&path, true, false),
+        UploadCommand::CloudNudge(path) => crate::cloud::sign_in::run_standalone_cloud_nudge(
+            path,
+            crate::usage_telemetry::persist_cloud_nudge_dismissal,
+        ),
     }
 }
 
@@ -218,9 +235,20 @@ mod tests {
     }
 
     #[test]
+    fn parses_a_cloud_nudge_and_its_path() {
+        assert_eq!(
+            command_from_args(args(&["--cloud-nudge", r"C:\Shots\shot.png"])),
+            Some(UploadCommand::CloudNudge(PathBuf::from(
+                r"C:\Shots\shot.png"
+            )))
+        );
+    }
+
+    #[test]
     fn an_upload_flag_without_a_path_is_not_a_command() {
         assert_eq!(command_from_args(args(&["--upload"])), None);
         assert_eq!(command_from_args(args(&["--auto-upload"])), None);
+        assert_eq!(command_from_args(args(&["--cloud-nudge"])), None);
     }
 
     #[test]
@@ -261,6 +289,10 @@ mod tests {
     fn an_upload_command_does_not_also_read_as_a_cloud_limit() {
         assert_eq!(
             cloud_limit_from_args(args(&["--upload", r"C:\Shots\shot.png"])),
+            None
+        );
+        assert_eq!(
+            cloud_limit_from_args(args(&["--cloud-nudge", r"C:\Shots\shot.png"])),
             None
         );
     }

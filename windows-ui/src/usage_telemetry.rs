@@ -14,6 +14,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Counter file shared with the C++ capture shell.
 const STATE_FILE: &str = "windows-usage-telemetry.json";
+/// The shell's file for the local Studio nudge counters.
+const STUDIO_NUDGES_FILE: &str = "studio-nudges.json";
+/// The dismissal counter the card increments in that file.
+const CLOUD_NUDGE_DISMISSALS: &str = "cloud_nudge_dismissals";
 /// The shell stores counters as signed ints, so stay well inside that range.
 const MAX_COUNT: u64 = 999_999_999;
 /// Keeps temporary names apart when two writes start in the same nanosecond.
@@ -172,15 +176,31 @@ pub fn record_cloud_nudge_shown() {
 }
 
 /// The Quick Access Cloud nudge's Get link button was pressed.
-#[allow(dead_code)]
 pub fn record_cloud_nudge_clicked() {
     bump_counter("cloud_nudge_clicked");
 }
 
 /// The Quick Access Cloud nudge was dismissed.
-#[allow(dead_code)]
 pub fn record_cloud_nudge_dismissed() {
     bump_counter("cloud_nudge_dismissed");
+}
+
+/// One Cloud nudge dismissal, for the shell's own `studio-nudges.json`.
+///
+/// The shell counts the shows itself and owns that file; the nudge card runs
+/// in this process, so this is a read-modify-write that keeps every other key
+/// the shell stores there. It is not telemetry, so the telemetry switch does
+/// not gate it.
+pub fn persist_cloud_nudge_dismissal() {
+    let Some(path) = studio_nudges_path() else {
+        return;
+    };
+    let _ = increment_counter(&path, CLOUD_NUDGE_DISMISSALS);
+}
+
+/// Path of the shell's local Studio nudge counters, beside its settings mirror.
+fn studio_nudges_path() -> Option<PathBuf> {
+    crate::settings::actions::shell_settings_path()?.with_file_name(STUDIO_NUDGES_FILE)
 }
 
 #[cfg(test)]

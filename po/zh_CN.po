@@ -263,6 +263,15 @@ msgstr "已复制。改为发送链接？"
 msgid "Free account · 20 links a month"
 msgstr "免费账户 · 每月 20 个链接"
 
+msgid "Copied. Want a link instead?"
+msgstr "已复制。想要一个链接吗？"
+
+msgid ""
+"A free ApexShot account turns every capture into a share link, with 20 links "
+"a month."
+msgstr ""
+"免费的 ApexShot 账户可将每次截图变成分享链接，每月 20 个链接。"
+
 msgid "Get link"
 msgstr "获取链接"
 

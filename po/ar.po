@@ -264,6 +264,15 @@ msgstr "تم النسخ. أرسل رابطًا بدلًا من ذلك؟"
 msgid "Free account · 20 links a month"
 msgstr "حساب مجاني · 20 رابطًا شهريًا"
 
+msgid "Copied. Want a link instead?"
+msgstr "تم النسخ. هل تريد رابطًا بدلًا من ذلك؟"
+
+msgid ""
+"A free ApexShot account turns every capture into a share link, with 20 links "
+"a month."
+msgstr ""
+"يحوّل حساب ApexShot المجاني كل لقطة إلى رابط مشاركة، مع 20 رابطًا شهريًا."
+
 msgid "Get link"
 msgstr "احصل على الرابط"
 
