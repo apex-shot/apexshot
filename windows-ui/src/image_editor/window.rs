@@ -93,6 +93,13 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     canvas.root.add_overlay(&sub_bars.root);
     canvas.root.add_overlay(&toolbar.history);
 
+    // The first image-editor opens with an image offer a styled look. The
+    // empty shell does not count, and a window without one never bumps.
+    let editor_open_count = initial
+        .filter(|path| path.is_file())
+        .map(|_| super::look_chip::bump_editor_open());
+    let look_chip = super::look_chip::build(scale, &canvas.host, editor_open_count);
+
     // Upload keeps its own busy state so a document change mid-request cannot
     // re-enable the button.
     let uploading = Rc::new(Cell::new(false));
@@ -278,13 +285,15 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
                 copy_image(&window, &host);
                 return;
             }
-            // A Motion frame of a Studio-styled composition is a styled still.
-            let Some(capabilities) =
-                host.read(|st| crate::studio_entitlement::StudioCapabilities {
-                    studio_style: st.uses_studio_style(),
-                    ..Default::default()
-                })
-            else {
+            // A Motion frame of a Studio-styled or posed composition is a
+            // styled still: the copy carries the same gate the still export
+            // applies, so it cannot bypass it.
+            let Some(capabilities) = host.read(|st| {
+                crate::studio_entitlement::capabilities_for_image_style(
+                    st.static_image_transform,
+                    st.uses_studio_style(),
+                )
+            }) else {
                 return;
             };
             let retry_host = Rc::downgrade(&host);
@@ -500,6 +509,11 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     top_right.set_hexpand(true);
     top_chrome.append(&top_left);
     top_chrome.append(&toolbar_stack);
+    if let Some(chip) = &look_chip {
+        // The chip shares the header row with the tool bar and sits right
+        // after it, with the same top edge, so the two read as one row.
+        top_chrome.append(&chip.root);
+    }
     top_chrome.append(&top_right);
     windowing::install_window_drag(&top_chrome, &window);
 

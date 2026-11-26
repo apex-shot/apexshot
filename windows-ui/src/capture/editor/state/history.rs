@@ -161,6 +161,45 @@ impl EditorState {
         self.redo_history.clear();
     }
 
+    /// Drop the last undo step when it is still exactly the document as it
+    /// stands, so the styled-look chip can remove its own step without leaving
+    /// a stale entry behind. A step followed by a later user edit is kept.
+    pub(crate) fn discard_last_history_step_if_current(&mut self) -> bool {
+        let current = self.document_snapshot();
+        if self
+            .undo_history
+            .last()
+            .is_some_and(|transaction| transaction.after.same_document(&current))
+        {
+            self.undo_history.pop();
+            self.clear_redo_history();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Put a styled-look snapshot back without recording an edit. The chip
+    /// owns the look's value snapshot and drops the look's history step itself,
+    /// so the editor's own Undo keeps pointing at the user's previous edit.
+    pub(crate) fn restore_look_snapshot(
+        &mut self,
+        background: Appearance,
+        shadow: crate::recording::editor::model::MotionSceneShadow,
+        transform: StaticImageTransform,
+    ) {
+        // Any look still mid-load leaves an open interaction; clearing it
+        // means neither the restore nor the abandoned load records a step.
+        self.history_interaction_before = None;
+        let revision = self.background.revision;
+        self.background = background;
+        self.background.revision = revision;
+        self.background.changed();
+        self.scene_shadow = shadow.clamped();
+        self.static_image_transform = transform.sanitized();
+        self.mark_working_image_dirty();
+    }
+
     fn restore_document_snapshot(&mut self, snapshot: DocumentSnapshot) {
         let dimensions_changed = self.base_image.dimensions() != snapshot.base_image.dimensions();
         self.base_image = snapshot.base_image;

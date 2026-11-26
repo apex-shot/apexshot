@@ -653,10 +653,27 @@ impl EditorHost {
         *self.studio_unlock_cache.borrow_mut() = None;
     }
 
-    /// Whether the mark is due: the document uses a Studio style and no
-    /// licence covers this build.
+    /// Whether a preview that always carries Studio content (Motion, the
+    /// export comparison) should paint the mark: the licence is locked.
+    pub(super) fn studio_preview_locked(&self) -> bool {
+        !self.studio_unlocked_cached()
+    }
+
+    /// The mark's text width per height, measured once and cached.
+    pub(super) fn studio_mark_ratio(&self, context: &gtk4::cairo::Context) -> f64 {
+        self.studio_text_ratio.get().unwrap_or_else(|| {
+            let ratio = crate::capture::editor::studio_watermark::text_ratio(context);
+            self.studio_text_ratio.set(Some(ratio));
+            ratio
+        })
+    }
+
+    /// Whether the mark is due: the document needs a Studio preview mark
+    /// (a style or a gated pose) and no licence covers this build.
     pub(crate) fn studio_mark_active(&self) -> bool {
-        self.read(|st| st.uses_studio_style()).unwrap_or(false) && !self.studio_unlocked_cached()
+        self.read(|st| st.needs_studio_preview_mark())
+            .unwrap_or(false)
+            && !self.studio_unlocked_cached()
     }
 
     /// Paint the Studio preview mark in screen pixels over the visible canvas.
@@ -674,11 +691,44 @@ impl EditorHost {
         let Some(region) = canvas.intersect(visible) else {
             return;
         };
-        let ratio = self.studio_text_ratio.get().unwrap_or_else(|| {
-            let ratio = mark::text_ratio(context);
-            self.studio_text_ratio.set(Some(ratio));
-            ratio
-        });
+        let ratio = self.studio_mark_ratio(context);
+        let stage = mark::Stage {
+            canvas,
+            image,
+            visible,
+        };
+        let Some(rect) = mark::place(stage, ratio) else {
+            return;
+        };
+        let ink = self
+            .read(|st| mark::ink_for_image(&st.working_image, rect, image))
+            .unwrap_or_else(mark::Ink::light);
+        let _ = context.save();
+        context.rectangle(region.x, region.y, region.width, region.height);
+        context.clip();
+        mark::paint(context, rect, ink);
+        let _ = context.restore();
+    }
+
+    /// Paint the mark over a preview whose content always counts as Studio
+    /// (the Motion stage): no document check, only the licence. The ink is
+    /// sampled from the working image under the mark, because the preview
+    /// paints straight into the widget instead of keeping a frame surface.
+    pub(super) fn paint_preview_studio_mark(
+        &self,
+        context: &gtk4::cairo::Context,
+        canvas: crate::capture::editor::studio_watermark::ScreenRect,
+        image: crate::capture::editor::studio_watermark::ScreenRect,
+        visible: crate::capture::editor::studio_watermark::ScreenRect,
+    ) {
+        use crate::capture::editor::studio_watermark as mark;
+        if !self.studio_preview_locked() {
+            return;
+        }
+        let Some(region) = canvas.intersect(visible) else {
+            return;
+        };
+        let ratio = self.studio_mark_ratio(context);
         let stage = mark::Stage {
             canvas,
             image,

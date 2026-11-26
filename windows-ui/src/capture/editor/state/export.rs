@@ -214,6 +214,14 @@ impl EditorState {
         ))
     }
 
+    /// Whether the canvas should carry the Studio preview mark: a Studio
+    /// style, or a pose (tilt or position) that the export would also gate.
+    pub(crate) fn needs_studio_preview_mark(&self) -> bool {
+        self.uses_studio_style()
+            || crate::studio_entitlement::capabilities_for_static_image(self.static_image_transform)
+                .static_presentation
+    }
+
     /// Whether the appearance uses a Studio presentation control: a frame
     /// style, or a scene shadow the layout leaves visible around the image.
     /// The Background panel (fill, padding, blur, radius, noise) and frame
@@ -424,6 +432,19 @@ mod tests {
 
     fn document() -> EditorState {
         EditorState::new(RgbaImage::from_pixel(100, 80, Rgba([240, 0, 0, 255])))
+    }
+
+    #[test]
+    fn a_pose_alone_still_carries_the_studio_preview_mark() {
+        let mut state = document();
+        assert!(!state.needs_studio_preview_mark());
+
+        // The export gates a moved or tilted card, so the preview must mark it
+        // even with no frame, border, or shadow.
+        state.static_image_transform.pos_x = -0.33;
+        assert!(!state.uses_studio_style());
+        assert!(state.needs_studio_preview_mark());
+        assert!(state.studio_capabilities().static_presentation);
     }
 
     /// An inset stroke meets transparency at the card edge without carrying the

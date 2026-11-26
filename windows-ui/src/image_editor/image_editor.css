@@ -145,6 +145,94 @@ button.image-editor-tool-button image {
     background: rgba(17, 24, 39, 0.10);
 }
 
+/* ── First-run styled-look chip ────────────────────────────────────── */
+
+/* Built from the toolbar's own surface, radius, padding and button metrics,
+ * so it reads as part of the same header row. */
+.image-editor-look-chip {
+    padding: 6px;
+    background: #0f0f0f;
+    border: none;
+    border-radius: 9px;
+    box-shadow: none;
+}
+
+.editor-theme-light .image-editor-look-chip {
+    background: #eef0f5;
+    border: none;
+    box-shadow: none;
+}
+
+button.image-editor-look-chip-action {
+    min-height: 34px;
+    padding: 0 10px;
+    margin: 0;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: rgba(255, 255, 255, 0.88);
+    font-weight: 500;
+}
+
+button.image-editor-look-chip-action:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: #ffffff;
+}
+
+button.image-editor-look-chip-action:active {
+    background: rgba(255, 255, 255, 0.10);
+}
+
+button.image-editor-look-chip-dismiss {
+    min-width: 34px;
+    min-height: 34px;
+    padding: 0;
+    margin: 0;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+button.image-editor-look-chip-dismiss:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.90);
+}
+
+.editor-theme-light button.image-editor-look-chip-action {
+    color: #1d2129;
+}
+
+.editor-theme-light button.image-editor-look-chip-action:hover {
+    background: rgba(17, 24, 39, 0.06);
+    color: #1d2129;
+}
+
+.editor-theme-light button.image-editor-look-chip-action:active {
+    background: rgba(17, 24, 39, 0.10);
+}
+
+.editor-theme-light button.image-editor-look-chip-dismiss {
+    color: rgba(29, 33, 41, 0.55);
+}
+
+.editor-theme-light button.image-editor-look-chip-dismiss:hover {
+    background: rgba(17, 24, 39, 0.08);
+    color: #1d2129;
+}
+
+button.image-editor-look-chip-action:focus,
+button.image-editor-look-chip-action:focus-visible,
+button.image-editor-look-chip-dismiss:focus,
+button.image-editor-look-chip-dismiss:focus-visible {
+    outline: none;
+    box-shadow: none;
+}
+
 /* ── Docked tool option bars ───────────────────────────────────────── */
 
 .image-editor-sub-bar {
