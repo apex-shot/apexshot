@@ -43,7 +43,6 @@ impl AutoUploadSync {
 
 pub struct CloudSettingsWidgets {
     pub section: GtkBox,
-    #[cfg(target_os = "windows")]
     pub connect_btn: Button,
     pub apexshot_check: CheckButton,
     pub xbackbone_check: CheckButton,
@@ -191,7 +190,6 @@ pub fn build_cloud_section(config: &AppConfig) -> CloudSettingsWidgets {
 
     CloudSettingsWidgets {
         section,
-        #[cfg(target_os = "windows")]
         connect_btn: apexshot_panel.connect_btn,
         apexshot_check,
         xbackbone_check,
@@ -206,7 +204,6 @@ pub fn build_cloud_section(config: &AppConfig) -> CloudSettingsWidgets {
 
 struct ApexShotPanel {
     container: GtkBox,
-    #[cfg(target_os = "windows")]
     connect_btn: Button,
 }
 
@@ -356,7 +353,6 @@ fn build_apexshot_panel(config: &AppConfig) -> ApexShotPanel {
 
     ApexShotPanel {
         container,
-        #[cfg(target_os = "windows")]
         connect_btn,
     }
 }

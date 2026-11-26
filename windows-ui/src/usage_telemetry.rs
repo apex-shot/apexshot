@@ -185,6 +185,11 @@ pub fn record_cloud_nudge_dismissed() {
     bump_counter("cloud_nudge_dismissed");
 }
 
+/// The website opened the app through its Cloud connect link.
+pub fn record_connect_link_opened() {
+    bump_counter("connect_link_opened");
+}
+
 /// One Cloud nudge dismissal, for the shell's own `studio-nudges.json`.
 ///
 /// The shell counts the shows itself and owns that file; the nudge card runs

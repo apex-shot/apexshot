@@ -47,6 +47,7 @@ struct UsageState {
     cloud_nudge_shown: u64,
     cloud_nudge_clicked: u64,
     cloud_nudge_dismissed: u64,
+    connect_link_opened: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -74,6 +75,7 @@ struct HeartbeatPayload {
     cloud_nudge_shown: u64,
     cloud_nudge_clicked: u64,
     cloud_nudge_dismissed: u64,
+    connect_link_opened: u64,
 }
 
 /// Whether telemetry is allowed for this process.
@@ -315,6 +317,11 @@ pub fn record_cloud_nudge_dismissed() {
     bump_counter(|s| s.cloud_nudge_dismissed = s.cloud_nudge_dismissed.saturating_add(1));
 }
 
+/// The website opened the app through its Cloud connect link.
+pub fn record_connect_link_opened() {
+    bump_counter(|s| s.connect_link_opened = s.connect_link_opened.saturating_add(1));
+}
+
 fn bump_counter(f: impl FnOnce(&mut UsageState)) {
     let config = load_config().sanitized();
     if !telemetry_enabled(&config) {
@@ -399,6 +406,7 @@ fn maybe_send_heartbeat_with_config(config: &AppConfig) -> bool {
         cloud_nudge_shown: state.cloud_nudge_shown,
         cloud_nudge_clicked: state.cloud_nudge_clicked,
         cloud_nudge_dismissed: state.cloud_nudge_dismissed,
+        connect_link_opened: state.connect_link_opened,
     };
 
     if !post_heartbeat(&payload) {
@@ -423,6 +431,7 @@ fn maybe_send_heartbeat_with_config(config: &AppConfig) -> bool {
     state.cloud_nudge_shown = 0;
     state.cloud_nudge_clicked = 0;
     state.cloud_nudge_dismissed = 0;
+    state.connect_link_opened = 0;
     save_state(&state_path, &state);
     true
 }
@@ -552,6 +561,7 @@ mod tests {
             cloud_nudge_shown: 14,
             cloud_nudge_clicked: 15,
             cloud_nudge_dismissed: 16,
+            connect_link_opened: 17,
         };
 
         let value = serde_json::to_value(&payload).expect("heartbeat payload serializes");
@@ -569,6 +579,7 @@ mod tests {
             ("cloud_nudge_shown", 14),
             ("cloud_nudge_clicked", 15),
             ("cloud_nudge_dismissed", 16),
+            ("connect_link_opened", 17),
         ] {
             assert_eq!(value[field].as_u64(), Some(count), "missing {field}");
         }

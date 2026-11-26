@@ -229,6 +229,10 @@ pub(crate) struct ConnectFlow {
 impl ConnectFlow {
     pub(crate) fn begin(&self) {
         self.ui.stack.set_visible_child_name("connect");
+        // A live session already owns the view; presenting it is enough.
+        if self.ui.active.get() {
+            return;
+        }
         self.ui.start();
     }
 }
