@@ -689,6 +689,7 @@ mod tests {
         RecordingConfig {
             output_path: PathBuf::from("/tmp/apexshot-test.mp4"),
             target: super::super::RecordingTarget::Screen,
+            output: None,
             width: Some(1920),
             height: Some(1200),
             x: Some(0),

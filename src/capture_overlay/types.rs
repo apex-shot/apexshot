@@ -58,6 +58,10 @@ pub struct RecordingRequest {
     pub controls: bool,
     pub mic: bool,
     pub speaker: bool,
+    /// Connector name of the display a full-screen request targets. Empty
+    /// when unknown.
+    #[serde(default)]
+    pub output: String,
     /// Linux: the Pulse source chosen in the Quick Capture device menu, and
     /// the one app whose audio the Speaker item records. Empty values mean
     /// "use the saved choice, then every app / the server default".
@@ -100,6 +104,7 @@ impl Default for RecordingRequest {
             controls: false,
             mic: false,
             speaker: false,
+            output: String::new(),
             mic_device: String::new(),
             speaker_app: String::new(),
             speaker_app_pid: 0,

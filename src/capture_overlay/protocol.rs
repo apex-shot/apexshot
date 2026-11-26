@@ -151,6 +151,7 @@ fn parse_recording_json(json: &str) -> Result<RecordingRequest, SelectionError> 
     let mic_device = extract_string(json, "mic_device").unwrap_or_default();
     let speaker_app = extract_string(json, "speaker_app").unwrap_or_default();
     let speaker_app_pid = extract_int(json, "speaker_app_pid").unwrap_or(0).max(0) as u32;
+    let output = extract_string(json, "output").unwrap_or_default();
 
     // General tab settings
     let display_rec_time = extract_bool(json, "display_rec_time").unwrap_or(false);
@@ -180,6 +181,7 @@ fn parse_recording_json(json: &str) -> Result<RecordingRequest, SelectionError> 
         controls,
         mic,
         speaker,
+        output,
         mic_device,
         speaker_app,
         speaker_app_pid,
