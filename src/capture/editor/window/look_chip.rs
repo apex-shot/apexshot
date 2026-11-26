@@ -14,6 +14,12 @@
 //! stacks two looks and removing one never leaves a tilted card on the previous
 //! wallpaper.
 //!
+//! The wallpaper pixels are part of that snapshot. Applying a look shows the
+//! bundled thumbnail and queues the full-size decode on a worker thread, and
+//! restoring puts the saved surface back, exactly the way the Background
+//! panel's wallpaper tiles work: no click here decodes a multi-megapixel
+//! wallpaper on the GTK main thread.
+//!
 //! It is a local nudge only: the persisted open counter lives in
 //! [`crate::studio_nudges`], and the chip disappears once Studio is unlocked
 //! or the document already carries a Studio style.
@@ -35,7 +41,7 @@ use crate::recording::editor::model::{
 
 use super::background_panel;
 use super::icon_names;
-use super::motion_mode::MotionSession;
+use super::motion_mode::{appearance, MotionSession};
 
 /// Image-editor opens that offer the chip.
 const NUDGE_OPENS: u64 = 3;
@@ -140,9 +146,22 @@ const LOOKS: [Look; 4] = [
     },
 ];
 
+/// The wallpaper pixels the canvas was showing when the snapshot was taken.
+/// Cloning a `gtk4::cairo::ImageSurface` is a refcount, not a decode, so
+/// saving and restoring one never touches the image files.
+#[derive(Clone, Default)]
+struct LookSurface {
+    surface: Option<gtk4::cairo::ImageSurface>,
+    /// Path whose pixels `surface` holds.
+    path: Option<String>,
+    /// True while `surface` only holds the cached thumbnail, which the restore
+    /// still has to replace with the full-size decode.
+    is_preview: bool,
+}
+
 /// The values a look overwrites, saved before it is applied so the chip can put
 /// the document back exactly as it found it.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone)]
 struct LookSnapshot {
     fill_type: MotionBackgroundFillType,
     wallpaper_image_name: Option<String>,
@@ -154,6 +173,7 @@ struct LookSnapshot {
     border_fill_color: [f64; 4],
     shadow: MotionSceneShadow,
     transform: StaticImageTransform,
+    surface: LookSurface,
 }
 
 impl LookSnapshot {
@@ -161,6 +181,7 @@ impl LookSnapshot {
         appearance: &MotionAppearance,
         shadow: &MotionSceneShadow,
         transform: StaticImageTransform,
+        surface: LookSurface,
     ) -> Self {
         Self {
             fill_type: appearance.background_fill_type.clone(),
@@ -173,6 +194,7 @@ impl LookSnapshot {
             border_fill_color: appearance.border_fill_color,
             shadow: shadow.clone(),
             transform,
+            surface,
         }
     }
 
@@ -395,6 +417,11 @@ fn capture_look_snapshot(session: &MotionSession, state: &Arc<Mutex<EditorState>
         &runtime.motion.appearance,
         &runtime.motion.scene_shadow,
         transform,
+        LookSurface {
+            surface: runtime.background_surface.clone(),
+            path: runtime.background_surface_path.clone(),
+            is_preview: runtime.background_surface_is_preview,
+        },
     )
 }
 
@@ -412,12 +439,19 @@ fn apply_look(
     let Some(wallpaper) = look_wallpaper(look.wallpaper_file) else {
         return false;
     };
-    let path = PathBuf::from(&wallpaper);
-    let surface = background_panel::load_background_preview_image(
-        &path,
-        background_panel::PREVIEW_BACKGROUND_MAX_EDGE,
-    )
-    .and_then(|image| crate::capture::editor::render::rgba_image_to_surface(&image));
+    // The tile recipe: the bundled, cached thumbnail paints immediately and the
+    // full-size wallpaper decodes on a worker thread. The catalog wallpapers are
+    // up to 6000x4000, so decoding one here would freeze the window.
+    let thumbnail = appearance::cached_wallpaper_preview_surface(
+        &background_panel::motion_wallpaper_preview_asset_path(
+            // The resolved file, so a fallback wallpaper gets its own thumbnail.
+            std::path::Path::new(&wallpaper)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or(look.wallpaper_file),
+        )
+        .to_string_lossy(),
+    );
     let short = card_short_edge(state);
 
     {
@@ -433,7 +467,7 @@ fn apply_look(
             &wallpaper,
             short,
         );
-        runtime.set_background_surface(Some(wallpaper), surface, false);
+        runtime.set_background_surface(Some(wallpaper.clone()), thumbnail, true);
         runtime.preview_frame = None;
         runtime.backdrop_cache = None;
     }
@@ -445,6 +479,11 @@ fn apply_look(
     }
 
     preview.queue_draw();
+    appearance::load_motion_wallpaper_asynchronously(
+        PathBuf::from(wallpaper),
+        session.clone(),
+        preview.clone(),
+    );
     true
 }
 
@@ -502,16 +541,37 @@ fn restore_look(
     snapshot: &LookSnapshot,
 ) {
     let short = card_short_edge(state);
-    {
+    let pending_wallpaper = {
         let mut runtime = session.runtime.borrow_mut();
         let motion = &mut runtime.motion;
         snapshot.restore_into(&mut motion.appearance, &mut motion.scene_shadow, short);
-        // The fill may name a different file now; re-decode it the way Undo
-        // does after it restores a Motion state.
         runtime.preview_content_gen = runtime.preview_content_gen.wrapping_add(1);
-        runtime.refresh_motion_surfaces();
+        // Put the pixels the canvas already had back with the fill: a surface
+        // clone is a refcount, so removing a look never re-decodes a wallpaper.
+        runtime.set_background_surface(
+            snapshot.surface.path.clone(),
+            snapshot.surface.surface.clone(),
+            snapshot.surface.is_preview,
+        );
         runtime.preview_frame = None;
         runtime.discard_current_motion_checkpoint();
+        // A snapshot taken while only the thumbnail was on screen still owes
+        // the full-size decode the Background panel's tiles would have queued.
+        let is_wallpaper =
+            runtime.motion.appearance.background_fill_type == MotionBackgroundFillType::Wallpaper;
+        let needs_full = snapshot.surface.is_preview || snapshot.surface.surface.is_none();
+        if is_wallpaper && needs_full {
+            runtime.motion.appearance.wallpaper_image_name.clone()
+        } else {
+            None
+        }
+    };
+    if let Some(wallpaper) = pending_wallpaper {
+        appearance::load_motion_wallpaper_asynchronously(
+            PathBuf::from(wallpaper),
+            session.clone(),
+            preview.clone(),
+        );
     }
     if let Ok(mut editor) = state.lock() {
         editor.static_image_transform = snapshot.transform;
@@ -638,8 +698,12 @@ mod tests {
             pos_x: 0.2,
             ..RESTING_POSE
         };
-        let snapshot =
-            LookSnapshot::capture(&original_appearance, &original_shadow, original_transform);
+        let snapshot = LookSnapshot::capture(
+            &original_appearance,
+            &original_shadow,
+            original_transform,
+            LookSurface::default(),
+        );
 
         let mut appearance = original_appearance.clone();
         let mut shadow = original_shadow.clone();
