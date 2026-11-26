@@ -2269,7 +2269,9 @@ const WALLPAPER_THUMB_MAX_EDGE: u32 = 256;
 /// without scrolling the whole sidebar.
 const WALLPAPER_PAGE_HEIGHT: i32 = 260;
 
-fn cached_wallpaper_preview_surface(path: &str) -> Option<gtk4::cairo::ImageSurface> {
+pub(in crate::capture::editor::window) fn cached_wallpaper_preview_surface(
+    path: &str,
+) -> Option<gtk4::cairo::ImageSurface> {
     if let Some(hit) = WALLPAPER_PREVIEW_CACHE.with(|cache| cache.borrow().get(path).cloned()) {
         return Some(hit);
     }
@@ -2511,7 +2513,7 @@ fn motion_wallpaper_thumbnail_area(surface: Option<gtk4::cairo::ImageSurface>) -
 /// ponytail: bound preview pixels, not a loader pool; pool when still slow.
 const PREVIEW_WALLPAPER_MAX_EDGE: u32 = 1600;
 
-fn load_motion_wallpaper_asynchronously(
+pub(in crate::capture::editor::window) fn load_motion_wallpaper_asynchronously(
     path: PathBuf,
     session: MotionSession,
     preview: DrawingArea,

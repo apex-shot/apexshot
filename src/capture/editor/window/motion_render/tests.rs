@@ -58,6 +58,20 @@ mod tests {
         assert_eq!(super::fit_stage_aspect(100.0, 50.0, None), (100.0, 50.0));
     }
 
+    /// The preview's mark is placed against the card's on-screen box, so the
+    /// box must be the posed card's bounding rectangle around the stage
+    /// centre.
+    #[test]
+    fn the_card_view_bounds_centre_on_the_stage() {
+        let card = black_card(400, 300);
+        let motion = MotionState::default();
+        let layout = super::motion_preview_card_layout(&card, 800.0, 600.0, &motion, 0.0);
+        let (x, y, width, height) = layout.view_bounds();
+        assert!(width > 0.0 && height > 0.0);
+        assert!((x + width / 2.0 - 400.0).abs() < 1e-6, "{x} {width}");
+        assert!((y + height / 2.0 - 300.0).abs() < 1e-6, "{y} {height}");
+    }
+
     #[test]
     fn neural_motion_enhancement_preserves_frame_dimensions_and_source_coordinates() {
         use crate::capture::editor::upscale::SourceUpscale;

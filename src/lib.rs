@@ -38,6 +38,7 @@ pub mod qr;
 pub mod recording;
 pub mod settings;
 pub(crate) mod studio_entitlement;
+pub(crate) mod studio_nudges;
 pub(crate) mod studio_trial;
 pub(crate) mod studio_trial_toast;
 pub(crate) mod studio_upsell;

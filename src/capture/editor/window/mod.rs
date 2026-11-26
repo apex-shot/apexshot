@@ -323,6 +323,7 @@ mod focus_bar;
 mod footer;
 mod highlighter_bar;
 mod inspectors;
+mod look_chip;
 mod motion_host;
 pub(in crate::capture::editor::window) mod motion_mode;
 // Cast light painter is shared with the static preview/export paths.
@@ -352,6 +353,8 @@ pub fn open_image_editor(path: PathBuf) -> Result<(), EditorError> {
         return Err(EditorError::MissingFile(path));
     }
 
+    crate::usage_telemetry::record_editor_opened();
+
     let app = Application::builder()
         .application_id(crate::app_identity::app_id())
         .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
@@ -369,6 +372,8 @@ pub fn open_image_editor(path: PathBuf) -> Result<(), EditorError> {
 /// Open the image editor without a pre-selected file.
 /// Shows a drop-zone / file-picker window so the user can bring their own image.
 pub fn open_image_editor_empty() -> Result<(), EditorError> {
+    crate::usage_telemetry::record_editor_opened();
+
     let app = Application::builder()
         .application_id(crate::app_identity::app_id())
         .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
@@ -626,6 +631,13 @@ fn setup_editor_window_full(
     };
 
     let (img_width, img_height) = image.dimensions();
+    // One persisted open per window that actually has an image. The
+    // empty-drop-zone shell does not count until a file loads into it.
+    let editor_open_count = if empty_drop_zone {
+        0
+    } else {
+        crate::studio_nudges::bump_editor_open()
+    };
     let state = Arc::new(Mutex::new(EditorState::new(image)));
     {
         let mut st = state.lock().unwrap();
@@ -2628,6 +2640,66 @@ fn setup_editor_window_full(
     root_overlay.set_overflow(gtk4::Overflow::Hidden);
     root_overlay.set_child(Some(&root));
 
+    // The first-run look chip. Applying the look rewrites the shared Motion
+    // runtime, so rebuild the docked Background inspector from it afterwards:
+    // a panel built before the click would still show the old fill and frame.
+    let refresh_background_inspector: Rc<dyn Fn()> = Rc::new({
+        let window = window.downgrade();
+        let session = motion_host.session();
+        let preview = drawing_area.clone();
+        let state = state.clone();
+        let interact = background_interact_forwarder.clone();
+        let slot = static_appearance_slot.clone();
+        let stack = inspector_stack.clone();
+        let sync_slot = static_transform_sync_slot.clone();
+        let in_motion = in_motion.clone();
+        move || {
+            let Some(window) = window.upgrade() else {
+                return;
+            };
+            let previous = slot.borrow().clone();
+            let fresh = background_panel::build_shared_background_panel(
+                &window,
+                &session,
+                &preview,
+                &state,
+                Some(interact.clone()),
+                &sync_slot,
+            );
+            fresh.set_visible(true);
+            stack.remove(&previous);
+            stack.add_named(&fresh, Some("background"));
+            *slot.borrow_mut() = fresh;
+            if !in_motion.get() && stack.visible_child_name().as_deref() == Some("background") {
+                stack.set_visible_child_name("background");
+            }
+        }
+    });
+    // The chip applies a whole look (fill, frame, shadow and pose), so after
+    // any of its clicks the docked inspector is rebuilt from the shared
+    // runtime, the Background tool takes the canvas back, and the Transform
+    // sliders are re-seated: the same end state a panel interaction leaves.
+    let refresh_look_chip: Rc<dyn Fn()> = {
+        let interact = background_interact_forwarder.clone();
+        let sync_static_transform = sync_static_transform.clone();
+        Rc::new(move || {
+            refresh_background_inspector();
+            interact();
+            sync_static_transform();
+        })
+    };
+    let look_chip = if empty_drop_zone {
+        None
+    } else {
+        look_chip::build_look_chip(
+            &motion_host.session(),
+            &state,
+            &drawing_area,
+            editor_open_count,
+            refresh_look_chip,
+        )
+    };
+
     let window_chrome = chrome::install_window_chrome(chrome::WindowChromeInputs {
         canvas_with_toolbar: &canvas_with_toolbar,
         root_overlay: &root_overlay,
@@ -2640,6 +2712,7 @@ fn setup_editor_window_full(
         motion_btn: &motion_host.parts.shell.motion_btn,
         history_group: &history_group,
         zoom_popup: &zoom_popup,
+        look_chip: look_chip.as_ref(),
     });
     motion_host.install(motion_host::MotionHostInstallInputs {
         window: &window,

@@ -5,7 +5,7 @@
 //! is not flattened until export.
 
 mod anchor_pad;
-mod appearance;
+pub(in crate::capture::editor::window) mod appearance;
 mod build;
 mod controls;
 mod pad_handle;

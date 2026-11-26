@@ -278,6 +278,22 @@ impl MotionRuntime {
         self.preview_frame = None;
     }
 
+    /// Drop the checkpoint the look chip pushed when the runtime is already
+    /// back at it.
+    ///
+    /// The chip saves the appearance fields it overwrites and writes them back
+    /// itself when its look is removed or replaced, so the checkpoint behind the
+    /// look is not a step the editor's Undo should spend a press on. Popping it
+    /// (and the redo entries the original push cleared) leaves the Motion
+    /// history exactly as if the look had never run.
+    pub(in crate::capture::editor::window) fn discard_current_motion_checkpoint(&mut self) {
+        if self.undo_stack.last() == Some(&self.motion) {
+            self.undo_stack.pop();
+            self.redo_stack.clear();
+            self.last_edit = None;
+        }
+    }
+
     pub(in crate::capture::editor::window) fn undo_motion(&mut self) -> bool {
         self.stop_auto_preview();
         // A drag that ended without changing anything still leaves a

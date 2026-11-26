@@ -78,9 +78,14 @@ pub fn record_trial_export() -> u32 {
             return 0;
         }
     }
-    trial_path()
-        .map(|path| record_trial_export_at_path(&path))
-        .unwrap_or(STUDIO_FREE_EXPORTS)
+    let remaining = trial_path().map(|path| record_trial_export_at_path(&path));
+    // A scoped test trial is a real record for the caller but must not reach
+    // the developer's telemetry counters.
+    #[cfg(not(test))]
+    if remaining.is_some() {
+        crate::usage_telemetry::record_studio_trial_export();
+    }
+    remaining.unwrap_or(STUDIO_FREE_EXPORTS)
 }
 
 /// Record one finished Studio output in the trial state stored at `path`.

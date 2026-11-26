@@ -611,7 +611,7 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
                     || interactive_preview.active(),
                 // The Studio preview mark is due for this document. The check is
                 // arithmetic, so it stays under the same lock as the rest.
-                st.uses_studio_style(),
+                st.needs_studio_preview_mark(),
             )
         };
 

@@ -281,6 +281,29 @@ impl CardLayout {
         (self.cx + x, self.cy + y)
     }
 
+    /// Widget-space bounding box of the posed card, as `(x, y, width,
+    /// height)`. Perspective warps the quad, so the box is taken from the four
+    /// projected corners rather than the untransformed card.
+    pub(crate) fn view_bounds(&self) -> (f64, f64, f64, f64) {
+        let corners = [
+            self.project(0.0, 0.0),
+            self.project(self.img_w(), 0.0),
+            self.project(self.img_w(), self.img_h()),
+            self.project(0.0, self.img_h()),
+        ];
+        let min_x = corners.iter().map(|p| p.0).fold(f64::INFINITY, f64::min);
+        let min_y = corners.iter().map(|p| p.1).fold(f64::INFINITY, f64::min);
+        let max_x = corners
+            .iter()
+            .map(|p| p.0)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let max_y = corners
+            .iter()
+            .map(|p| p.1)
+            .fold(f64::NEG_INFINITY, f64::max);
+        (min_x, min_y, max_x - min_x, max_y - min_y)
+    }
+
     fn local_matrix(&self, image_x: f64, image_y: f64) -> Option<Matrix> {
         let origin = self.project(image_x, image_y);
         let x = self.project(image_x + 1.0, image_y);

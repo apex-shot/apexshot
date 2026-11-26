@@ -360,6 +360,8 @@ fn setup_preview_window(
     probe.log("setup-preview-window-enter");
     let startup = probe.startup;
     let path = path.to_path_buf();
+    // One bump per Quick Access preview, independent of telemetry.
+    let screenshot_count = crate::studio_nudges::bump_screenshot();
 
     static INIT_ICONS: Once = Once::new();
     INIT_ICONS.call_once(|| {
@@ -491,16 +493,13 @@ fn setup_preview_window(
         Align::Start,
         Align::End,
     );
-    let (edit_btn, _) = corner_icon_button(
-        crate::capture::editor::window::icon_names::custom::PENCIL_SYMBOLIC,
-        &t("Edit"),
-        Align::End,
-        Align::End,
-    );
     let copy_btn = copy_pill_button(&t("Copy"));
     let save_btn = save_pill_button(&t("Save"));
+    let edit_btn = copy_pill_button(&t("Edit"));
+    edit_btn.set_tooltip_text(Some(&t("Open in the editor")));
 
-    // Framed card: screenshot with corner actions and centered Copy / Save pills.
+    // Framed card: screenshot with corner actions and centered Copy / Save /
+    // Edit pills.
     let card = Overlay::new();
     card.set_widget_name("capture-preview-card");
     card.set_hexpand(false);
@@ -509,18 +508,37 @@ fn setup_preview_window(
     card.add_overlay(&close_btn);
     card.add_overlay(&pin_btn);
     card.add_overlay(&upload_btn);
-    card.add_overlay(&edit_btn);
     let action_pills = GtkBox::new(Orientation::Horizontal, 6);
     action_pills.set_halign(Align::Center);
     action_pills.set_valign(Align::Center);
     action_pills.append(&copy_btn);
     action_pills.append(&save_btn);
+    action_pills.append(&edit_btn);
     card.add_overlay(&action_pills);
     card.set_measure_overlay(&close_btn, false);
     card.set_measure_overlay(&pin_btn, false);
     card.set_measure_overlay(&upload_btn, false);
-    card.set_measure_overlay(&edit_btn, false);
     card.set_measure_overlay(&action_pills, false);
+
+    // A quiet hint on the tenth, thirtieth and sixtieth lifetime capture.
+    // It is a measure-transparent overlay so the card keeps exactly the
+    // geometry the layer-shell placement measured before it existed.
+    if crate::studio_nudges::should_show_editor_hint(screenshot_count)
+        && !crate::studio_entitlement::studio_unlocked()
+    {
+        let hint = Button::with_label(&t("Edit: add a background, frame, or 3D tilt."));
+        hint.set_has_frame(false);
+        hint.set_focusable(false);
+        hint.add_css_class("preview-hint");
+        hint.set_halign(Align::Center);
+        hint.set_valign(Align::End);
+        hint.set_margin_bottom(PREVIEW_CORNER_MARGIN);
+        hint.set_tooltip_text(Some(&t("Open in the editor")));
+        card.add_overlay(&hint);
+        card.set_measure_overlay(&hint, false);
+        let edit_btn_hint = edit_btn.clone();
+        hint.connect_clicked(move |_| edit_btn_hint.emit_clicked());
+    }
 
     let chrome = GtkBox::new(Orientation::Vertical, 0);
     chrome.set_widget_name("capture-preview-chrome");
@@ -1341,10 +1359,12 @@ fn install_preview_css() {
                 color: #ffffff;
             }
 
+            /* Three pills share the smallest card, so they run a little
+             * tighter than the original two-pill row. */
             button.preview-copy-btn {
-                min-width: 52px;
+                min-width: 40px;
                 min-height: 30px;
-                padding: 0 10px;
+                padding: 0 6px;
                 border-radius: 999px;
                 border: none;
                 background: #f3f4f6;
@@ -1373,6 +1393,39 @@ fn install_preview_css() {
 
             button.preview-copy-btn:focus,
             button.preview-copy-btn:focus-visible {
+                outline: none;
+                box-shadow: none;
+            }
+
+            button.preview-hint {
+                min-height: 22px;
+                padding: 0 6px;
+                border-radius: 999px;
+                border: none;
+                background: rgba(18, 18, 18, 0.86);
+                background-image: none;
+                color: rgba(255, 255, 255, 0.86);
+                font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
+                font-size: 10px;
+                font-weight: 500;
+                box-shadow: none;
+                outline-width: 0;
+            }
+
+            button.preview-hint:hover {
+                background: rgba(42, 42, 42, 0.94);
+                background-image: none;
+                color: #ffffff;
+            }
+
+            button.preview-hint:active {
+                background: rgba(12, 12, 12, 0.94);
+                background-image: none;
+                color: rgba(255, 255, 255, 0.88);
+            }
+
+            button.preview-hint:focus,
+            button.preview-hint:focus-visible {
                 outline: none;
                 box-shadow: none;
             }
@@ -1423,6 +1476,21 @@ fn install_preview_css() {
             .editor-theme-light button.preview-copy-btn:active {
                 background: #111827;
                 color: #ffffff;
+            }
+
+            .editor-theme-light button.preview-hint {
+                background: rgba(255, 255, 255, 0.92);
+                color: #1d2129;
+            }
+
+            .editor-theme-light button.preview-hint:hover {
+                background: #ffffff;
+                color: #1d2129;
+            }
+
+            .editor-theme-light button.preview-hint:active {
+                background: rgba(17, 24, 39, 0.08);
+                color: #1d2129;
             }
             ",
         );
@@ -2011,11 +2079,14 @@ mod tests {
                 && production.contains("preview-close-btn")
                 && production.contains("corner_icon_button")
                 && production.contains("copy_pill_button")
+                && production.contains("let edit_btn = copy_pill_button(&t(\"Edit\"));")
+                && production.contains("action_pills.append(&edit_btn);")
+                && !production.contains("PENCIL_SYMBOLIC")
                 && production.contains("ARROW_EXPORT_UP_REGULAR")
                 && production.contains("copy_screenshot_to_clipboard")
                 && !production.contains("preview-tools")
                 && !production.contains("preview-close-label"),
-            "quick-access overlay must be a framed screenshot with corner actions and a Copy pill"
+            "quick-access overlay must be a framed screenshot with corner actions and Copy/Save/Edit pills"
         );
     }
 
