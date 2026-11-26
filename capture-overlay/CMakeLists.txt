@@ -182,7 +182,7 @@ if(WIN32)
         add_dependencies(apexshot-webcam-preview-tests apexshot-fake-webcam)
         add_test(NAME apexshot-webcam-preview-tests COMMAND apexshot-webcam-preview-tests)
         set_tests_properties(apexshot-webcam-preview-tests PROPERTIES
-            ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen" SKIP_RETURN_CODE 77)
 
         add_executable(apexshot-recording-tests
             tests/WindowsRecordingTests.cpp

@@ -368,6 +368,15 @@ int main(int argc, char** argv)
         std::fprintf(stderr, "webcam controls failed\n");
         return 1;
     }
+    // The recording half drives a real ffmpeg. Without one, skip it the way
+    // the recording tests do, unless the job requires media tools.
+    const QByteArray configuredFfmpeg = qgetenv("APEXSHOT_FFMPEG");
+    const bool hasFfmpeg = !configuredFfmpeg.isEmpty()
+        || !QStandardPaths::findExecutable(QStringLiteral("ffmpeg")).isEmpty();
+    if (!hasFfmpeg && qgetenv("APEXSHOT_REQUIRE_MEDIA_TESTS") != "1") {
+        std::printf("SKIP: ffmpeg is unavailable; webcam controls passed\n");
+        return 77;
+    }
     const QString fake = QCoreApplication::applicationDirPath()
                          + QStringLiteral("/apexshot-fake-webcam.exe");
     if (!checkRecording(fake, true) || !checkRecording(fake, false))
