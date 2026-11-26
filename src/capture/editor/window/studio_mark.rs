@@ -6,7 +6,7 @@
 //! uploads go through the Studio card, which stops them before any pixels are
 //! written.
 
-use gtk4::cairo::{Context, Operator};
+use gtk4::cairo::{Context, ImageSurface, Operator};
 use gtk4::{glib, prelude::*, DrawingArea};
 use image::RgbaImage;
 use std::cell::Cell;
@@ -55,6 +55,80 @@ impl StudioMark {
         self.unlocked.set(None);
     }
 
+    /// Whether the mark is due for a preview that always carries Studio
+    /// content, such as the Motion preview and the export comparison.
+    pub(super) fn locked(&self) -> bool {
+        !self.unlocked()
+    }
+
+    /// The mark's text width per height, measured once and cached.
+    pub(super) fn ratio(&self, context: &Context) -> f64 {
+        self.text_ratio.get().unwrap_or_else(|| {
+            let ratio = mark::text_ratio(context);
+            self.text_ratio.set(Some(ratio));
+            ratio
+        })
+    }
+
+    /// Paint the mark at `rect`, clipped to `clip`.
+    pub(super) fn paint_clipped(
+        &self,
+        context: &Context,
+        clip: ScreenRect,
+        rect: mark::MarkRect,
+        ink: mark::Ink,
+    ) {
+        let _ = context.save();
+        context.set_operator(Operator::Over);
+        context.rectangle(clip.x, clip.y, clip.width, clip.height);
+        context.clip();
+        mark::paint(context, rect, ink);
+        let _ = context.restore();
+    }
+
+    /// Paint the mark over a preview that never builds a per-frame
+    /// `RgbaImage`: the ink is sampled from the composited frame under the
+    /// mark, and light ink is used when no frame at the widget's size is
+    /// available.
+    pub(super) fn paint_frame(
+        &self,
+        context: &Context,
+        frame: Option<&ImageSurface>,
+        canvas: ScreenRect,
+        image: ScreenRect,
+        visible: ScreenRect,
+    ) {
+        if !self.locked() {
+            return;
+        }
+        let Some(region) = canvas.intersect(visible) else {
+            return;
+        };
+        let stage = mark::Stage {
+            canvas,
+            image,
+            visible,
+        };
+        let Some(rect) = mark::place(stage, self.ratio(context)) else {
+            return;
+        };
+        let ink = frame
+            .map(|surface| {
+                mark::ink_for_surface(
+                    surface,
+                    rect,
+                    ScreenRect {
+                        x: 0.0,
+                        y: 0.0,
+                        width: f64::from(surface.width()),
+                        height: f64::from(surface.height()),
+                    },
+                )
+            })
+            .unwrap_or_else(mark::Ink::light);
+        self.paint_clipped(context, region, rect, ink);
+    }
+
     /// Paint the mark over the visible part of the canvas. Every rectangle is
     /// in widget pixels: `canvas` is the whole composition (wallpaper
     /// included), `image` the screenshot card and `visible` the drawing area.
@@ -73,26 +147,16 @@ impl StudioMark {
         let Some(region) = canvas.intersect(visible) else {
             return;
         };
-        let ratio = self.text_ratio.get().unwrap_or_else(|| {
-            let ratio = mark::text_ratio(context);
-            self.text_ratio.set(Some(ratio));
-            ratio
-        });
         let stage = mark::Stage {
             canvas,
             image,
             visible,
         };
-        let Some(rect) = mark::place(stage, ratio) else {
+        let Some(rect) = mark::place(stage, self.ratio(context)) else {
             return;
         };
         let ink = mark::ink_for_image(working_image, rect, image);
-        let _ = context.save();
-        context.set_operator(Operator::Over);
-        context.rectangle(region.x, region.y, region.width, region.height);
-        context.clip();
-        mark::paint(context, rect, ink);
-        let _ = context.restore();
+        self.paint_clipped(context, region, rect, ink);
     }
 }
 
@@ -110,13 +174,8 @@ pub(super) fn install_refresh(
     state: Arc<Mutex<EditorState>>,
     studio_mark: StudioMark,
 ) {
-    let weak = drawing_area.downgrade();
-    let last = Cell::new(false);
     let recorded = Cell::new(false);
-    glib::timeout_add_local(REFRESH_INTERVAL, move || {
-        let Some(area) = weak.upgrade() else {
-            return glib::ControlFlow::Break;
-        };
+    install_redraw_when(drawing_area, move || {
         let uses_style = state
             .lock()
             .map(|st| st.needs_studio_preview_mark())
@@ -125,6 +184,21 @@ pub(super) fn install_refresh(
         if due && !recorded.replace(true) {
             crate::usage_telemetry::record_studio_tool_opened();
         }
+        due
+    });
+}
+
+/// Redraw a preview whenever `due` changes, so a mark appears or goes away
+/// without a restart. `due` runs every `REFRESH_INTERVAL` and should stay
+/// cheap; the licence read behind it is cached.
+pub(super) fn install_redraw_when(drawing_area: &DrawingArea, due: impl Fn() -> bool + 'static) {
+    let weak = drawing_area.downgrade();
+    let last = Cell::new(false);
+    glib::timeout_add_local(REFRESH_INTERVAL, move || {
+        let Some(area) = weak.upgrade() else {
+            return glib::ControlFlow::Break;
+        };
+        let due = due();
         if due != last.replace(due) {
             area.queue_draw();
         }

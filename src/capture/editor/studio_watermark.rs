@@ -192,6 +192,68 @@ pub(crate) fn ink_for_image(
             count += a;
         }
     }
+    ink_for_luminance(total, count)
+}
+
+/// Ink for a mark over a Cairo surface showing the image, for previews that
+/// never build an `RgbaImage` of the frame. `image_rect` is where the surface
+/// is shown on screen.
+pub(crate) fn ink_for_surface(
+    surface: &ImageSurface,
+    mark: MarkRect,
+    image_rect: ScreenRect,
+) -> Ink {
+    let width = f64::from(surface.width());
+    let height = f64::from(surface.height());
+    if width <= 0.0 || height <= 0.0 || image_rect.width <= 0.0 || image_rect.height <= 0.0 {
+        return Ink::light();
+    }
+    let Ok(stride) = usize::try_from(surface.stride()) else {
+        return Ink::light();
+    };
+    let sx = width / image_rect.width;
+    let sy = height / image_rect.height;
+    let mut total = 0.0;
+    let mut count = 0.0;
+    // `with_data` reads a shared surface; `data()` needs sole ownership,
+    // which the cached preview frame never has.
+    let read = surface.with_data(|data| {
+        for row in 0..5 {
+            for column in 0..5 {
+                let x = mark.x + mark.width * (f64::from(column) + 0.5) / 5.0;
+                let y = mark.y + mark.height * (f64::from(row) + 0.5) / 5.0;
+                let ix = ((x - image_rect.x) * sx).floor();
+                let iy = ((y - image_rect.y) * sy).floor();
+                if ix < 0.0 || iy < 0.0 || ix >= width || iy >= height {
+                    continue;
+                }
+                let offset = iy as usize * stride + ix as usize * 4;
+                let Some(pixel) = data.get(offset..offset + 4) else {
+                    continue;
+                };
+                // Cairo's ARGB32 is premultiplied and native-endian: reading the
+                // four bytes as a native u32 puts alpha in the top byte either way.
+                let argb = u32::from_ne_bytes([pixel[0], pixel[1], pixel[2], pixel[3]]);
+                let a = f64::from(argb >> 24) / 255.0;
+                // Premultiplied channels already carry the alpha, so the weighted
+                // luminance below is already alpha-scaled like `ink_for_image`'s.
+                total += (0.2126 * f64::from((argb >> 16) & 0xff)
+                    + 0.7152 * f64::from((argb >> 8) & 0xff)
+                    + 0.0722 * f64::from(argb & 0xff))
+                    / 255.0;
+                count += a;
+            }
+        }
+    });
+    if read.is_err() {
+        return Ink::light();
+    }
+    ink_for_luminance(total, count)
+}
+
+/// Dark ink over pale pixels, light ink otherwise. `total` is the alpha-scaled
+/// luminance and `count` the alpha it covered.
+fn ink_for_luminance(total: f64, count: f64) -> Ink {
     if count > 0.0 && total / count > DARK_INK_ABOVE {
         Ink::dark()
     } else {
@@ -435,6 +497,34 @@ mod tests {
         assert_eq!(ink_for_image(&image, mark, rect), Ink::dark());
         let image = image::RgbaImage::from_pixel(100, 100, image::Rgba([20, 20, 30, 255]));
         assert_eq!(ink_for_image(&image, mark, rect), Ink::light());
+    }
+
+    #[test]
+    fn a_frame_surface_picks_ink_from_its_pixels() {
+        let sample = |level: u8| {
+            let surface = ImageSurface::create(Format::ARgb32, 100, 100).unwrap();
+            {
+                let context = Context::new(&surface).unwrap();
+                let v = f64::from(level) / 255.0;
+                context.set_source_rgb(v, v, v);
+                context.paint().unwrap();
+            }
+            surface.flush();
+            surface
+        };
+        let mark = MarkRect {
+            x: 20.0,
+            y: 20.0,
+            width: 40.0,
+            height: 20.0,
+            on_card: true,
+        };
+        let image = rect(0.0, 0.0, 100.0, 100.0);
+        assert_eq!(ink_for_surface(&sample(10), mark, image), Ink::light());
+        assert_eq!(ink_for_surface(&sample(240), mark, image), Ink::dark());
+        // A mark entirely off the surface falls back to light ink.
+        let off = MarkRect { x: 300.0, ..mark };
+        assert_eq!(ink_for_surface(&sample(240), off, image), Ink::light());
     }
 
     #[test]

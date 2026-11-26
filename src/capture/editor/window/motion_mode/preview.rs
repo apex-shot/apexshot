@@ -5,12 +5,96 @@ use std::rc::Rc;
 use std::sync::mpsc;
 
 use super::{MotionHoverTrack, MotionRuntime};
+use crate::capture::editor::studio_watermark::ScreenRect;
 use crate::capture::editor::window::motion_render::{
-    motion_canvas, motion_preview_scene_rect, motion_source_size,
+    motion_canvas, motion_preview_card_layout, motion_preview_scene_rect, motion_source_size,
 };
 use crate::recording::editor::model::{MotionAppearance, MotionState};
 
+use super::super::studio_mark::StudioMark;
+
 pub(super) fn draw_motion_preview(
+    context: &Context,
+    width: i32,
+    height: i32,
+    runtime: &Rc<RefCell<MotionRuntime>>,
+    prefers_dark: bool,
+    studio_mark: &StudioMark,
+) {
+    draw_preview_frame(context, width, height, runtime, prefers_dark);
+    paint_studio_mark(context, width, height, runtime, studio_mark);
+}
+
+/// The Studio mark over the rendered stage. Exporting Motion needs Studio, so
+/// while the licence is locked the preview carries the mark over the
+/// composition and the posed card, exactly where they are drawn.
+fn paint_studio_mark(
+    context: &Context,
+    width: i32,
+    height: i32,
+    runtime: &Rc<RefCell<MotionRuntime>>,
+    studio_mark: &StudioMark,
+) {
+    if !studio_mark.locked() {
+        return;
+    }
+    let Ok(runtime) = runtime.try_borrow() else {
+        return;
+    };
+    let Some(card) = runtime.card.as_ref() else {
+        return;
+    };
+    let (widget_width, widget_height) = (f64::from(width.max(1)), f64::from(height.max(1)));
+    let (source_w, source_h) = motion_source_size(card, 1.0);
+    let composition = motion_canvas(
+        source_w,
+        source_h,
+        &runtime.motion.appearance,
+        &runtime.motion.frame,
+    );
+    let (scene_x, scene_y, scene_w, scene_h) = motion_preview_scene_rect(
+        widget_width,
+        widget_height,
+        composition.canvas_width,
+        composition.canvas_height,
+    );
+    let canvas = ScreenRect {
+        x: scene_x,
+        y: scene_y,
+        width: scene_w,
+        height: scene_h,
+    };
+    let layout = motion_preview_card_layout(
+        card,
+        widget_width,
+        widget_height,
+        &runtime.motion,
+        preview_time(&runtime),
+    );
+    let (card_x, card_y, card_w, card_h) = layout.view_bounds();
+    let image = ScreenRect {
+        x: card_x,
+        y: card_y,
+        width: card_w,
+        height: card_h,
+    }
+    .intersect(canvas)
+    .unwrap_or(canvas);
+    let visible = ScreenRect {
+        x: 0.0,
+        y: 0.0,
+        width: widget_width,
+        height: widget_height,
+    };
+    let frame = runtime
+        .preview_frame
+        .as_ref()
+        .filter(|frame| frame.width == width.max(1) && frame.height == height.max(1))
+        .map(|frame| &frame.surface);
+    studio_mark.paint_frame(context, frame, canvas, image, visible);
+}
+
+fn draw_preview_frame(
     context: &Context,
     width: i32,
     height: i32,

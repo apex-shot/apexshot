@@ -20,8 +20,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use super::super::motion_render;
+use super::super::studio_mark::StudioMark;
 use super::MotionSession;
-use crate::capture::editor::{render, state::EditorState, upscale::SourceUpscale};
+use crate::capture::editor::{
+    render, state::EditorState, studio_watermark as mark, upscale::SourceUpscale,
+};
 use crate::i18n::{t, tfmt};
 use crate::recording::editor::model::{MotionBackgroundFillType, MotionState};
 
@@ -72,6 +75,7 @@ struct Stage {
     dark: bool,
     hadjustment: Adjustment,
     vadjustment: Adjustment,
+    studio_mark: StudioMark,
 }
 
 impl Stage {
@@ -146,6 +150,7 @@ impl Stage {
             height,
             ..
         } = placement;
+        let (visible_left, visible_top, visible_right, visible_bottom) = self.visible(area);
 
         // The export sits in a softly rounded frame. The grid marks
         // transparency in the export only, so it stays under the image
@@ -186,6 +191,18 @@ impl Stage {
             (split, x + width - split),
             filter,
         );
+        self.paint_studio_mark(
+            context,
+            comparison,
+            placement,
+            split,
+            mark::ScreenRect {
+                x: visible_left,
+                y: visible_top,
+                width: visible_right - visible_left,
+                height: visible_bottom - visible_top,
+            },
+        );
 
         // A flat white rule with a one-pixel keyline either side, so it
         // reads over light and dark pixels alike. It stays inside the frame.
@@ -214,7 +231,6 @@ impl Stage {
         );
         context.stroke().ok();
 
-        let (visible_left, visible_top, visible_right, visible_bottom) = self.visible(area);
         let top = y.max(visible_top);
         let bottom = (y + height).min(visible_bottom);
 
@@ -257,6 +273,89 @@ impl Stage {
             after.paint(context, after_x, tag_top);
         }
     }
+
+    /// The Studio mark over the enhanced half while the licence is locked.
+    /// The standard half stays clean, and the mark is clipped to the after
+    /// half so no part of it suggests the standard enlargement carries it.
+    fn paint_studio_mark(
+        &self,
+        context: &Context,
+        comparison: &Comparison,
+        placement: Placement,
+        split: f64,
+        visible: mark::ScreenRect,
+    ) {
+        if !self.studio_mark.locked() {
+            return;
+        }
+        let image = mark::ScreenRect {
+            x: placement.x,
+            y: placement.y,
+            width: placement.width,
+            height: placement.height,
+        };
+        let Some((rect, clip)) = after_mark(image, split, visible, self.studio_mark.ratio(context))
+        else {
+            return;
+        };
+        let ink = mark::ink_for_surface(&comparison.after, rect, image);
+        self.studio_mark.paint_clipped(context, clip, rect, ink);
+    }
+}
+
+/// The rendered export's after half: the image right of the divider, clipped
+/// to the stage's visible scroll area.
+fn after_half(
+    image: mark::ScreenRect,
+    split: f64,
+    visible: mark::ScreenRect,
+) -> Option<mark::ScreenRect> {
+    let left = split.max(image.x);
+    let right = image.x + image.width;
+    if right <= left {
+        return None;
+    }
+    mark::ScreenRect {
+        x: left,
+        y: image.y,
+        width: right - left,
+        height: image.height,
+    }
+    .intersect(visible)
+}
+
+/// Where the sheet's Studio mark sits and the region it is clipped to, both
+/// in drawing-area pixels. The mark keeps its whole-image size and is centred
+/// on the after half when that fits; a narrower half pushes it to the divider
+/// and clips it, so part of the mark stays visible wherever the divider is
+/// dragged.
+fn after_mark(
+    image: mark::ScreenRect,
+    split: f64,
+    visible: mark::ScreenRect,
+    text_ratio: f64,
+) -> Option<(mark::MarkRect, mark::ScreenRect)> {
+    let after = after_half(image, split, visible)?;
+    let whole = mark::place(
+        mark::Stage {
+            canvas: image,
+            image,
+            visible,
+        },
+        text_ratio,
+    )?;
+    let x_max = (after.x + after.width - whole.width).max(after.x);
+    let y_max = (after.y + after.height - whole.height).max(after.y);
+    let rect = mark::MarkRect {
+        x: (after.x + (after.width - whole.width) / 2.0)
+            .min(x_max)
+            .max(after.x),
+        y: (after.y + (after.height - whole.height) / 2.0)
+            .min(y_max)
+            .max(after.y),
+        ..whole
+    };
+    Some((rect, after))
 }
 
 fn paint_half(
@@ -593,6 +692,7 @@ pub(super) fn show(window: &gtk4::ApplicationWindow, session: &MotionSession, mo
     scrim.append(&row);
     scrim.append(&bottom_gap);
 
+    let studio_mark = StudioMark::new();
     let stage = Rc::new(Stage {
         shown: RefCell::new(None),
         divider: Cell::new(0.5),
@@ -601,7 +701,11 @@ pub(super) fn show(window: &gtk4::ApplicationWindow, session: &MotionSession, mo
         dark,
         hadjustment: scroll.hadjustment(),
         vadjustment: scroll.vadjustment(),
+        studio_mark: studio_mark.clone(),
     });
+    // A licence activated while the sheet is open takes the mark away without
+    // closing and reopening it.
+    super::super::studio_mark::install_redraw_when(&drawing, move || studio_mark.locked());
     let cache: Rc<RefCell<[Option<Rc<Comparison>>; 2]>> = Rc::new(RefCell::new([None, None]));
     let generation = Rc::new(Cell::new(0u64));
     let active: Rc<RefCell<Option<Arc<AtomicBool>>>> = Rc::new(RefCell::new(None));
@@ -1192,10 +1296,79 @@ mod tests {
     use image::RgbaImage;
 
     use super::{
-        checked_motion_comparison_size, checkpoint, progress_message, render_comparison,
-        MAX_MOTION_COMPARISON_EDGE, MAX_MOTION_COMPARISON_PIXELS,
+        after_half, after_mark, checked_motion_comparison_size, checkpoint, progress_message,
+        render_comparison, MAX_MOTION_COMPARISON_EDGE, MAX_MOTION_COMPARISON_PIXELS,
     };
+    use crate::capture::editor::studio_watermark as mark;
     use std::time::Duration;
+
+    fn rect(x: f64, y: f64, width: f64, height: f64) -> mark::ScreenRect {
+        mark::ScreenRect {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    #[test]
+    fn the_after_half_runs_from_the_divider_and_stays_inside_the_scroll_port() {
+        let image = rect(100.0, 50.0, 800.0, 600.0);
+        let visible = rect(0.0, 0.0, 1200.0, 900.0);
+        assert_eq!(
+            after_half(image, 500.0, visible),
+            Some(rect(500.0, 50.0, 400.0, 600.0))
+        );
+        // A divider at or past the image's right edge leaves no after half.
+        assert_eq!(after_half(image, 900.0, visible), None);
+        assert_eq!(after_half(image, 950.0, visible), None);
+        // The scroll port clips the half, not the image.
+        assert_eq!(
+            after_half(image, 500.0, rect(0.0, 0.0, 600.0, 300.0)),
+            Some(rect(500.0, 50.0, 100.0, 250.0))
+        );
+    }
+
+    #[test]
+    fn a_wide_after_half_holds_the_mark_whole_and_centred() {
+        let image = rect(100.0, 50.0, 800.0, 600.0);
+        let visible = rect(0.0, 0.0, 1200.0, 900.0);
+        let (mark_rect, clip) = after_mark(image, 500.0, visible, 2.0).unwrap();
+        assert_eq!(clip, rect(500.0, 50.0, 400.0, 600.0));
+        assert!(mark_rect.x >= clip.x && mark_rect.x + mark_rect.width <= clip.x + clip.width);
+        let centre = mark_rect.x + mark_rect.width / 2.0;
+        assert!(
+            (centre - (clip.x + clip.width / 2.0)).abs() < 1e-6,
+            "{centre}"
+        );
+    }
+
+    #[test]
+    fn a_narrow_after_half_clips_the_mark_but_keeps_part_of_it_visible() {
+        let image = rect(100.0, 50.0, 800.0, 600.0);
+        let visible = rect(0.0, 0.0, 1200.0, 900.0);
+        let (mark_rect, clip) = after_mark(image, 870.0, visible, 2.0).unwrap();
+        assert_eq!(clip, rect(870.0, 50.0, 30.0, 600.0));
+        // The whole-image placement is pushed to the divider, so the icon
+        // starts the visible slice while the rest runs under the clip edge.
+        assert!((mark_rect.x - 870.0).abs() < 1e-6, "{}", mark_rect.x);
+        assert!(mark_rect.x + mark_rect.width > clip.x + clip.width);
+        assert!(mark_rect.y >= clip.y && mark_rect.y + mark_rect.height <= clip.y + clip.height);
+        // Even a sliver narrower than the placement's minimum keeps the mark
+        // anchored at the divider.
+        let (_, sliver) = after_mark(image, 895.0, visible, 2.0).unwrap();
+        assert_eq!(sliver.width, 5.0);
+        let (mark_rect, _) = after_mark(image, 895.0, visible, 2.0).unwrap();
+        assert!((mark_rect.x - 895.0).abs() < 1e-6, "{}", mark_rect.x);
+    }
+
+    #[test]
+    fn no_mark_is_placed_when_the_after_half_is_gone() {
+        let image = rect(100.0, 50.0, 800.0, 600.0);
+        let visible = rect(0.0, 0.0, 1200.0, 900.0);
+        assert!(after_mark(image, 900.0, visible, 2.0).is_none());
+        assert!(after_mark(image, 500.0, rect(0.0, 0.0, 10.0, 10.0), 2.0).is_none());
+    }
 
     /// A large image must say how long it will take instead of spinning;
     /// a quick one only shows its progress.

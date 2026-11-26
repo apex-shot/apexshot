@@ -24,6 +24,7 @@ use crate::recording::editor::model::{
 };
 use crate::recording::editor::window::tool_sidebar::FillSlider;
 
+use super::super::studio_mark::StudioMark;
 use super::anchor_pad::MotionAnchorPad;
 use super::appearance::build_motion_appearance_panel;
 use super::parts::{
@@ -594,11 +595,35 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
     confirm_overlay.set_visible(false);
     confirm_overlay.set_can_target(true);
 
+    // The Motion preview is Studio content, so it carries the preview mark
+    // while the licence is locked. The cached licence read keeps painting
+    // off the entitlement file, and the timer redraws the preview when the
+    // mark appears or goes away so it never needs an editor restart.
+    let studio_mark = StudioMark::new();
+    {
+        let runtime = session.runtime.clone();
+        let studio_mark = studio_mark.clone();
+        super::super::studio_mark::install_redraw_when(&preview, move || {
+            studio_mark.locked()
+                && runtime
+                    .try_borrow()
+                    .map(|runtime| runtime.card.is_some())
+                    .unwrap_or(false)
+        });
+    }
     preview.set_draw_func({
         let session_runtime = session.runtime.clone();
+        let studio_mark = studio_mark.clone();
         let prefers_dark = session.prefers_dark;
         move |_, context, width, height| {
-            super::draw_motion_preview(context, width, height, &session_runtime, prefers_dark);
+            super::draw_motion_preview(
+                context,
+                width,
+                height,
+                &session_runtime,
+                prefers_dark,
+                &studio_mark,
+            );
         }
     });
 
