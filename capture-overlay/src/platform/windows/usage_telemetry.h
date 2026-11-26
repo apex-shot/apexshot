@@ -8,6 +8,11 @@
 
 namespace Platform {
 
+/// Add one to a shared usage counter in the shell's telemetry state file.
+/// The counters are shared with the Rust editors, so the key names must match
+/// theirs. A no-op when telemetry is off or the state cannot be written.
+void incrementUsageCounter(const QString& key);
+
 /// Windows telemetry is opt-in and never includes capture contents or paths.
 class UsageTelemetry : public QObject
 {

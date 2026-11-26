@@ -60,6 +60,9 @@ const QStringList editorCounters{
     QStringLiteral("studio_trial_export"),
     QStringLiteral("studio_upsell_shown"),
     QStringLiteral("studio_buy_clicked"),
+    QStringLiteral("cloud_nudge_shown"),
+    QStringLiteral("cloud_nudge_clicked"),
+    QStringLiteral("cloud_nudge_dismissed"),
 };
 } // namespace
 
@@ -103,7 +106,7 @@ int main(int argc, char** argv)
     mergeState(editorCounts);
     telemetry.poll();
     CHECK(sent == 1);
-    CHECK(payload.size() == 20);
+    CHECK(payload.size() == 23);
     CHECK(payload.value(QStringLiteral("event")).toString() == QStringLiteral("heartbeat"));
     CHECK(payload.value(QStringLiteral("distro")).toString() == QStringLiteral("windows"));
     CHECK(!payload.value(QStringLiteral("install_id")).toString().isEmpty());
@@ -130,9 +133,15 @@ int main(int argc, char** argv)
     telemetry.poll();
     CHECK(sent == 1);
 
+    // The Cloud nudge counters go through the same read-modify-write helper.
+    Platform::incrementUsageCounter(QStringLiteral("cloud_nudge_shown"));
+    CHECK(state().value(QStringLiteral("cloud_nudge_shown")).toInt() == 1);
+
     setEnabled(false);
     telemetry.recordScreenshot();
+    Platform::incrementUsageCounter(QStringLiteral("cloud_nudge_clicked"));
     CHECK(state().value(QStringLiteral("screenshots")).toInt() == 1);
+    CHECK(state().value(QStringLiteral("cloud_nudge_clicked")).toInt() == 0);
     telemetry.poll();
     CHECK(sent == 1);
 

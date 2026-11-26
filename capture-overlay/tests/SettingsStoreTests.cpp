@@ -10,6 +10,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QMimeData>
 #include <QTemporaryDir>
 #include <QTime>
@@ -97,6 +99,7 @@ void checkDefaults(const QTemporaryDir& dir)
     CHECK(!settings.quickAccess.closeAfterUploading);
     CHECK(!settings.cloud.autoUploadAfterCapture);
     CHECK(!settings.cloud.configured);
+    CHECK(settings.cloud.nudgeEnabled);
     CHECK(!settings.studio.unlocked);
     CHECK(settings.ocr.language == QStringLiteral("eng"));
     CHECK(settings.ocr.keepLineBreaks);
@@ -163,7 +166,8 @@ void checkParsing(const QTemporaryDir& dir)
   },
   "cloud": {
     "auto_upload_after_capture": true,
-    "configured": true
+    "configured": true,
+    "nudge_enabled": false
   },
   "studio": {
     "unlocked": true
@@ -226,6 +230,7 @@ void checkParsing(const QTemporaryDir& dir)
     CHECK(settings.quickAccess.closeAfterUploading);
     CHECK(settings.cloud.autoUploadAfterCapture);
     CHECK(settings.cloud.configured);
+    CHECK(!settings.cloud.nudgeEnabled);
     CHECK(settings.studio.unlocked);
     CHECK(settings.ocr.language == QStringLiteral("deu"));
     CHECK(!settings.ocr.keepLineBreaks);
@@ -346,6 +351,136 @@ void checkStudioNudges(const QTemporaryDir& dir)
     QFile::remove(path);
 }
 
+Platform::CloudNudgeState nudgeState(quint64 copies, quint64 shows = 0,
+                                     quint64 dismissals = 0, int lastDay = 0)
+{
+    Platform::CloudNudgeState state;
+    state.copies = copies;
+    state.shows = shows;
+    state.dismissals = dismissals;
+    state.lastDay = lastDay;
+    return state;
+}
+
+void checkCloudNudgeMirror(const QTemporaryDir& dir)
+{
+    // A mirror written before the toggle existed leaves the nudge on.
+    writeSettings(dir, R"({"cloud": {"configured": false}})");
+    CHECK(Platform::loadShellSettings().cloud.nudgeEnabled);
+
+    writeSettings(dir, R"({"cloud": {"nudge_enabled": false}})");
+    CHECK(!Platform::loadShellSettings().cloud.nudgeEnabled);
+
+    writeSettings(dir, R"({"cloud": {"nudge_enabled": true}})");
+    CHECK(Platform::loadShellSettings().cloud.nudgeEnabled);
+
+    removeSettings(dir);
+}
+
+void checkCloudNudges(const QTemporaryDir& dir)
+{
+    const int today = 20261126;
+    const int yesterday = 20261125;
+
+    // The eligibility table: signed out, toggle on, five lifetime screenshots.
+    CHECK(!Platform::cloudNudgeDue(nudgeState(4), false, true, today, 10, false));
+    CHECK(Platform::cloudNudgeDue(nudgeState(5), false, true, today, 10, false));
+    CHECK(!Platform::cloudNudgeDue(nudgeState(6), false, true, today, 10, false));
+    CHECK(Platform::cloudNudgeDue(nudgeState(15), false, true, today, 10, false));
+    CHECK(!Platform::cloudNudgeDue(nudgeState(16), false, true, today, 10, false));
+    CHECK(Platform::cloudNudgeDue(nudgeState(40), false, true, today, 10, false));
+    CHECK(!Platform::cloudNudgeDue(nudgeState(41), false, true, today, 10, false));
+
+    // Both thresholds: fewer than five screenshots, a configured destination,
+    // or the Settings toggle keeps the suggestion quiet.
+    CHECK(!Platform::cloudNudgeDue(nudgeState(5), false, true, today, 4, false));
+    CHECK(Platform::cloudNudgeDue(nudgeState(5), false, true, today, 5, false));
+    CHECK(!Platform::cloudNudgeDue(nudgeState(5), true, true, today, 10, false));
+    CHECK(!Platform::cloudNudgeDue(nudgeState(5), false, false, today, 10, false));
+
+    // Once a day, three dismissals, and three lifetime shows silence it.
+    CHECK(!Platform::cloudNudgeDue(nudgeState(5, 1, 0, today), false, true, today, 10,
+                                   false));
+    CHECK(Platform::cloudNudgeDue(nudgeState(5, 1, 0, yesterday), false, true, today, 10,
+                                  false));
+    CHECK(Platform::cloudNudgeDue(nudgeState(5, 0, 2), false, true, today, 10, false));
+    CHECK(!Platform::cloudNudgeDue(nudgeState(5, 0, 3), false, true, today, 10, false));
+    CHECK(Platform::cloudNudgeDue(nudgeState(5, 2, 0), false, true, today, 10, false));
+    CHECK(!Platform::cloudNudgeDue(nudgeState(5, 3, 0), false, true, today, 10, false));
+
+    // Manual QA forces every Copy while signed out, but not a configured
+    // destination or the Settings toggle.
+    CHECK(Platform::cloudNudgeDue(nudgeState(0, 3, 3, today), false, true, today, 0, true));
+    CHECK(!Platform::cloudNudgeDue(nudgeState(5), true, true, today, 10, true));
+    CHECK(!Platform::cloudNudgeDue(nudgeState(5), false, false, today, 10, true));
+
+    const QString path = Platform::studioNudgesPath();
+    QFile::remove(path);
+    CHECK(Platform::loadStudioNudges().copies == 0);
+    for (int expected = 1; expected <= 15; ++expected)
+        CHECK(Platform::bumpCopyCount() == static_cast<quint64>(expected));
+    CHECK(Platform::loadStudioNudges().copies == 15);
+    CHECK(Platform::loadStudioNudges().screenshotCards == 0);
+
+    Platform::markCloudNudgeShown(today);
+    Platform::StudioNudges shown = Platform::loadStudioNudges();
+    CHECK(shown.cloudNudgeShows == 1);
+    CHECK(shown.cloudNudgeLastDay == today);
+    CHECK(shown.copies == 15);
+
+    Platform::markCloudNudgeShown(yesterday);
+    shown = Platform::loadStudioNudges();
+    CHECK(shown.cloudNudgeShows == 2);
+    CHECK(shown.cloudNudgeLastDay == yesterday);
+
+    Platform::markCloudNudgeDismissed();
+    Platform::markCloudNudgeDismissed();
+    CHECK(Platform::loadStudioNudges().cloudNudgeDismissals == 2);
+
+    // A bump keeps the other counters and any key the Rust editors added.
+    {
+        QFile file(path);
+        CHECK(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        file.write(R"({"screenshots": 9, "editor_opens": 7, "custom": "kept"})");
+        file.close();
+    }
+    CHECK(Platform::bumpCopyCount() == 1);
+    {
+        QFile file(path);
+        CHECK(file.open(QIODevice::ReadOnly));
+        const QJsonObject root = QJsonDocument::fromJson(file.readAll()).object();
+        file.close();
+        CHECK(root.value(QStringLiteral("screenshots")).toInt() == 9);
+        CHECK(root.value(QStringLiteral("editor_opens")).toInt() == 7);
+        CHECK(root.value(QStringLiteral("custom")).toString() == QStringLiteral("kept"));
+    }
+
+    // A corrupt file behaves like a fresh install instead of wedging the nudge.
+    {
+        QFile file(path);
+        CHECK(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        file.write("not json");
+        file.close();
+    }
+    const Platform::StudioNudges fresh = Platform::loadStudioNudges();
+    CHECK(fresh.copies == 0);
+    CHECK(fresh.cloudNudgeShows == 0);
+    CHECK(fresh.cloudNudgeDismissals == 0);
+    CHECK(fresh.cloudNudgeLastDay == 0);
+    CHECK(Platform::bumpCopyCount() == 1);
+
+    qunsetenv("APEXSHOT_FORCE_CLOUD_NUDGE");
+    CHECK(!Platform::cloudNudgeForced());
+    qputenv("APEXSHOT_FORCE_CLOUD_NUDGE", "1");
+    CHECK(Platform::cloudNudgeForced());
+    qputenv("APEXSHOT_FORCE_CLOUD_NUDGE", "0");
+    CHECK(!Platform::cloudNudgeForced());
+    qunsetenv("APEXSHOT_FORCE_CLOUD_NUDGE");
+
+    QFile::remove(path);
+    Q_UNUSED(dir);
+}
+
 void checkSaving(const QTemporaryDir& dir)
 {
     Platform::ShellSettings settings;
@@ -459,6 +594,8 @@ int main(int argc, char** argv)
     checkPaths(dir);
     checkRecordingDeviceChoices(dir);
     checkStudioNudges(dir);
+    checkCloudNudgeMirror(dir);
+    checkCloudNudges(dir);
     checkSaving(dir);
     checkClipboardData();
 

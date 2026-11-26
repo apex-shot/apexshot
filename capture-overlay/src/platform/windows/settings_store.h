@@ -107,6 +107,9 @@ struct ShellSettings {
     struct Cloud {
         bool autoUploadAfterCapture = false;
         bool configured = false;
+        /// The Settings toggle for the occasional Cloud suggestion. A mirror
+        /// written before the toggle existed leaves it on.
+        bool nudgeEnabled = true;
     } cloud;
 
     /// A licence covering this build, so the result card can drop its
@@ -176,6 +179,20 @@ void saveRecordingDeviceChoices(const RecordingDeviceChoices& choices);
 /// behaves like a fresh install instead of blocking the capture path.
 struct StudioNudges {
     quint64 screenshotCards = 0;
+    /// Successful Copy clicks, manual or automatic, shared by the Cloud nudge.
+    quint64 copies = 0;
+    quint64 cloudNudgeShows = 0;
+    quint64 cloudNudgeDismissals = 0;
+    /// Local day (`yyyymmdd`) of the last Cloud nudge; 0 means never shown.
+    int cloudNudgeLastDay = 0;
+};
+
+/// The counters that decide the Cloud nudge, read once after a Copy.
+struct CloudNudgeState {
+    quint64 copies = 0;
+    quint64 shows = 0;
+    quint64 dismissals = 0;
+    int lastDay = 0;
 };
 
 /// `%APPDATA%/apexshot/studio-nudges.json`.
@@ -185,8 +202,30 @@ StudioNudges loadStudioNudges();
 /// count. A storage failure returns 0 so the caller behaves as on the first
 /// capture.
 quint64 bumpScreenshotCardCount();
+/// Persist one more successful Copy and return the new lifetime count. A
+/// storage failure returns 0 so no nudge is shown from a counter that could
+/// not be recorded.
+quint64 bumpCopyCount();
 /// Whether a lifetime count is one of the quiet editor-hint slots.
 bool shouldShowEditorHint(quint64 screenshotCardCount);
+
+/// Whether a Copy should reveal the Cloud nudge. Pure so the eligibility
+/// table is tested directly; `todayKey` is the local day as `yyyymmdd` and
+/// `force` is the manual-QA override from `cloudNudgeForced()`.
+///
+/// The settings mirror carries only whether a destination is ready, not which
+/// one it is, so `cloudConfigured` is the whole configuration test here.
+bool cloudNudgeDue(const CloudNudgeState& state,
+                   bool cloudConfigured,
+                   bool nudgeEnabled,
+                   int todayKey,
+                   quint64 screenshots,
+                   bool force);
+/// `APEXSHOT_FORCE_CLOUD_NUDGE=1`, manual QA only.
+bool cloudNudgeForced();
+/// Record a reveal on `todayKey`, and one dismissal.
+void markCloudNudgeShown(int todayKey);
+void markCloudNudgeDismissed();
 
 /// Read the JSON mirror, applying defaults for missing or invalid values.
 ShellSettings loadShellSettings();

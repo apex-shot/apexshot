@@ -98,6 +98,54 @@ QString uniquePath(const QString& directory, const QString& fileName)
     return QString();
 }
 
+/// The nudge file as written, so a counter bump keeps every other key. Missing
+/// or unreadable files read as an empty object, which behaves like a fresh
+/// install instead of blocking the capture path.
+QJsonObject readStudioNudgesObject()
+{
+    QFile file(Platform::studioNudgesPath());
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+
+    QJsonParseError error{};
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &error);
+    if (error.error != QJsonParseError::NoError || !document.isObject())
+        return {};
+    return document.object();
+}
+
+bool writeStudioNudgesObject(const QJsonObject& root)
+{
+    const QString path = Platform::studioNudgesPath();
+    if (!QDir().mkpath(QFileInfo(path).absolutePath()))
+        return false;
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return false;
+    const QByteArray data = QJsonDocument(root).toJson(QJsonDocument::Indented);
+    return file.write(data) == data.size();
+}
+
+quint64 studioNudgeCounter(const QJsonObject& root, const QString& key)
+{
+    const QJsonValue value = root.value(key);
+    if (!value.isDouble() || value.toDouble() <= 0.0)
+        return 0;
+    if (value.toDouble() >= 9.0e18)
+        return std::numeric_limits<quint64>::max();
+    return static_cast<quint64>(value.toDouble());
+}
+
+quint64 bumpStudioNudgeCounter(const QString& key)
+{
+    QJsonObject root = readStudioNudgesObject();
+    quint64 value = studioNudgeCounter(root, key);
+    if (value < std::numeric_limits<quint64>::max())
+        ++value;
+    root.insert(key, static_cast<double>(value));
+    return writeStudioNudgesObject(root) ? value : 0;
+}
+
 }  // namespace
 
 namespace Platform {
@@ -224,42 +272,84 @@ QString studioNudgesPath()
 StudioNudges loadStudioNudges()
 {
     StudioNudges nudges;
-    QFile file(studioNudgesPath());
-    if (!file.open(QIODevice::ReadOnly))
-        return nudges;
-
-    QJsonParseError error{};
-    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &error);
-    if (error.error != QJsonParseError::NoError || !document.isObject())
-        return nudges;
-
-    const QJsonValue screenshots = document.object().value(QStringLiteral("screenshots"));
-    if (screenshots.isDouble() && screenshots.toDouble() > 0.0)
-        nudges.screenshotCards = static_cast<quint64>(screenshots.toDouble());
+    const QJsonObject root = readStudioNudgesObject();
+    nudges.screenshotCards =
+        studioNudgeCounter(root, QStringLiteral("screenshots"));
+    nudges.copies = studioNudgeCounter(root, QStringLiteral("copies"));
+    nudges.cloudNudgeShows =
+        studioNudgeCounter(root, QStringLiteral("cloud_nudge_shows"));
+    nudges.cloudNudgeDismissals =
+        studioNudgeCounter(root, QStringLiteral("cloud_nudge_dismissals"));
+    nudges.cloudNudgeLastDay =
+        root.value(QStringLiteral("cloud_nudge_last_day")).toInt(0);
     return nudges;
 }
 
 quint64 bumpScreenshotCardCount()
 {
-    StudioNudges nudges = loadStudioNudges();
-    if (nudges.screenshotCards < std::numeric_limits<quint64>::max())
-        ++nudges.screenshotCards;
+    return bumpStudioNudgeCounter(QStringLiteral("screenshots"));
+}
 
-    QJsonObject root;
-    root.insert(QStringLiteral("screenshots"), static_cast<double>(nudges.screenshotCards));
-    const QString path = studioNudgesPath();
-    QDir().mkpath(QFileInfo(path).absolutePath());
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
-        return 0;
-    file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
-    return nudges.screenshotCards;
+quint64 bumpCopyCount()
+{
+    return bumpStudioNudgeCounter(QStringLiteral("copies"));
 }
 
 bool shouldShowEditorHint(quint64 screenshotCardCount)
 {
     return screenshotCardCount == 10 || screenshotCardCount == 30
         || screenshotCardCount == 60;
+}
+
+bool cloudNudgeForced()
+{
+    return qEnvironmentVariable("APEXSHOT_FORCE_CLOUD_NUDGE").trimmed()
+        == QLatin1String("1");
+}
+
+bool cloudNudgeDue(const CloudNudgeState& state,
+                   bool cloudConfigured,
+                   bool nudgeEnabled,
+                   int todayKey,
+                   quint64 screenshots,
+                   bool force)
+{
+    // The suggestion only makes sense while the shell knows no destination,
+    // and the Settings toggle stays in charge even for manual QA.
+    if (cloudConfigured || !nudgeEnabled)
+        return false;
+    if (force)
+        return true;
+    if (screenshots < 5)
+        return false;
+    if (state.copies != 5 && state.copies != 15 && state.copies != 40)
+        return false;
+    if (todayKey != 0 && state.lastDay == todayKey)
+        return false;
+    return state.dismissals < 3 && state.shows < 3;
+}
+
+void markCloudNudgeShown(int todayKey)
+{
+    QJsonObject root = readStudioNudgesObject();
+    quint64 shows = studioNudgeCounter(root, QStringLiteral("cloud_nudge_shows"));
+    if (shows < std::numeric_limits<quint64>::max())
+        ++shows;
+    root.insert(QStringLiteral("cloud_nudge_shows"), static_cast<double>(shows));
+    root.insert(QStringLiteral("cloud_nudge_last_day"), todayKey);
+    writeStudioNudgesObject(root);
+}
+
+void markCloudNudgeDismissed()
+{
+    QJsonObject root = readStudioNudgesObject();
+    quint64 dismissals =
+        studioNudgeCounter(root, QStringLiteral("cloud_nudge_dismissals"));
+    if (dismissals < std::numeric_limits<quint64>::max())
+        ++dismissals;
+    root.insert(QStringLiteral("cloud_nudge_dismissals"),
+                static_cast<double>(dismissals));
+    writeStudioNudgesObject(root);
 }
 
 ShellSettings loadShellSettings()
@@ -405,6 +495,8 @@ ShellSettings loadShellSettings()
             .toBool(out.cloud.autoUploadAfterCapture);
     out.cloud.configured =
         cloud.value(QStringLiteral("configured")).toBool(out.cloud.configured);
+    out.cloud.nudgeEnabled =
+        cloud.value(QStringLiteral("nudge_enabled")).toBool(out.cloud.nudgeEnabled);
 
     const QJsonObject studio = root.value(QStringLiteral("studio")).toObject();
     out.studio.unlocked =

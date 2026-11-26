@@ -69,6 +69,9 @@ const QStringList& counterKeys()
         QStringLiteral("studio_trial_export"),
         QStringLiteral("studio_upsell_shown"),
         QStringLiteral("studio_buy_clicked"),
+        QStringLiteral("cloud_nudge_shown"),
+        QStringLiteral("cloud_nudge_clicked"),
+        QStringLiteral("cloud_nudge_dismissed"),
     };
     return keys;
 }
@@ -136,6 +139,15 @@ bool UsageTelemetry::enabled() const
     return telemetryEnabled();
 }
 
+void incrementUsageCounter(const QString& key)
+{
+    if (!telemetryEnabled())
+        return;
+    QJsonObject state = readState();
+    state.insert(key, std::min(count(state, key), 999999999) + 1);
+    writeState(state);
+}
+
 void UsageTelemetry::start()
 {
     m_timer.start();
@@ -144,11 +156,7 @@ void UsageTelemetry::start()
 
 void UsageTelemetry::increment(const QString& key)
 {
-    if (!enabled())
-        return;
-    QJsonObject state = readState();
-    state.insert(key, std::min(count(state, key), 999999999) + 1);
-    writeState(state);
+    incrementUsageCounter(key);
 }
 
 void UsageTelemetry::recordScreenshot() { increment(QStringLiteral("screenshots")); }
