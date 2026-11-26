@@ -502,11 +502,14 @@ fn setup_preview_window(
     );
     let copy_btn = copy_pill_button(&t("Copy"));
     let save_btn = save_pill_button(&t("Save"));
-    let edit_btn = copy_pill_button(&t("Edit"));
-    edit_btn.set_tooltip_text(Some(&t("Open in the editor")));
+    let (edit_btn, _) = corner_icon_button(
+        crate::capture::editor::window::icon_names::custom::PENCIL_SYMBOLIC,
+        &t("Edit"),
+        Align::End,
+        Align::End,
+    );
 
-    // Framed card: screenshot with corner actions and centered Copy / Save /
-    // Edit pills.
+    // Framed card: screenshot with corner actions and centered Copy / Save pills.
     let card = Overlay::new();
     card.set_widget_name("capture-preview-card");
     card.set_hexpand(false);
@@ -515,16 +518,17 @@ fn setup_preview_window(
     card.add_overlay(&close_btn);
     card.add_overlay(&pin_btn);
     card.add_overlay(&upload_btn);
+    card.add_overlay(&edit_btn);
     let action_pills = GtkBox::new(Orientation::Horizontal, 6);
     action_pills.set_halign(Align::Center);
     action_pills.set_valign(Align::Center);
     action_pills.append(&copy_btn);
     action_pills.append(&save_btn);
-    action_pills.append(&edit_btn);
     card.add_overlay(&action_pills);
     card.set_measure_overlay(&close_btn, false);
     card.set_measure_overlay(&pin_btn, false);
     card.set_measure_overlay(&upload_btn, false);
+    card.set_measure_overlay(&edit_btn, false);
     card.set_measure_overlay(&action_pills, false);
 
     // A quiet hint on the tenth, thirtieth and sixtieth lifetime capture.
@@ -1470,12 +1474,10 @@ fn install_preview_css() {
                 color: #ffffff;
             }
 
-            /* Three pills share the smallest card, so they run a little
-             * tighter than the original two-pill row. */
             button.preview-copy-btn {
-                min-width: 40px;
+                min-width: 52px;
                 min-height: 30px;
-                padding: 0 6px;
+                padding: 0 10px;
                 border-radius: 999px;
                 border: none;
                 background: #f3f4f6;
@@ -2387,14 +2389,13 @@ mod tests {
                 && production.contains("preview-close-btn")
                 && production.contains("corner_icon_button")
                 && production.contains("copy_pill_button")
-                && production.contains("let edit_btn = copy_pill_button(&t(\"Edit\"));")
-                && production.contains("action_pills.append(&edit_btn);")
-                && !production.contains("PENCIL_SYMBOLIC")
+                && production.contains("PENCIL_SYMBOLIC")
+                && production.contains("card.add_overlay(&edit_btn);")
                 && production.contains("ARROW_EXPORT_UP_REGULAR")
                 && production.contains("copy_screenshot_to_clipboard")
                 && !production.contains("preview-tools")
                 && !production.contains("preview-close-label"),
-            "quick-access overlay must be a framed screenshot with corner actions and Copy/Save/Edit pills"
+            "quick-access overlay must be a framed screenshot with corner actions and a Copy pill"
         );
     }
 
