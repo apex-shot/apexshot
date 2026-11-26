@@ -29,6 +29,21 @@ msgstr "试试精美外观"
 msgid "Undo look"
 msgstr "撤销外观"
 
+msgid "Next look"
+msgstr "下一个外观"
+
+msgid "Next look: {name}"
+msgstr "下一个外观：{name}"
+
+msgid "Frost"
+msgstr "霜冻"
+
+msgid "Bleed"
+msgstr "出血"
+
+msgid "Float"
+msgstr "悬浮"
+
 msgid "Welcome to ApexShot"
 msgstr "欢迎使用 ApexShot"
 

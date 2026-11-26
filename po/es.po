@@ -29,6 +29,21 @@ msgstr "Prueba un aspecto con estilo"
 msgid "Undo look"
 msgstr "Deshacer el aspecto"
 
+msgid "Next look"
+msgstr "Siguiente aspecto"
+
+msgid "Next look: {name}"
+msgstr "Siguiente aspecto: {name}"
+
+msgid "Frost"
+msgstr "Escarcha"
+
+msgid "Bleed"
+msgstr "Sangrado"
+
+msgid "Float"
+msgstr "Flotante"
+
 msgid "Welcome to ApexShot"
 msgstr "Bienvenido a ApexShot"
 

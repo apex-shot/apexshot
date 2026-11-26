@@ -29,6 +29,21 @@ msgstr "Essayez un rendu stylisé"
 msgid "Undo look"
 msgstr "Annuler le rendu"
 
+msgid "Next look"
+msgstr "Rendu suivant"
+
+msgid "Next look: {name}"
+msgstr "Rendu suivant : {name}"
+
+msgid "Frost"
+msgstr "Givre"
+
+msgid "Bleed"
+msgstr "Fond perdu"
+
+msgid "Float"
+msgstr "Flottant"
+
 msgid "Welcome to ApexShot"
 msgstr "Bienvenue dans ApexShot"
 

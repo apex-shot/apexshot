@@ -29,6 +29,21 @@ msgstr "Попробуйте оформленный вид"
 msgid "Undo look"
 msgstr "Отменить вид"
 
+msgid "Next look"
+msgstr "Следующий вид"
+
+msgid "Next look: {name}"
+msgstr "Следующий вид: {name}"
+
+msgid "Frost"
+msgstr "Иней"
+
+msgid "Bleed"
+msgstr "Вылет"
+
+msgid "Float"
+msgstr "Парение"
+
 msgid "Welcome to ApexShot"
 msgstr "Добро пожаловать в ApexShot"
 

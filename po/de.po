@@ -29,6 +29,21 @@ msgstr "Probiere einen gestalteten Look"
 msgid "Undo look"
 msgstr "Look rückgängig machen"
 
+msgid "Next look"
+msgstr "Nächster Look"
+
+msgid "Next look: {name}"
+msgstr "Nächster Look: {name}"
+
+msgid "Frost"
+msgstr "Frost"
+
+msgid "Bleed"
+msgstr "Anschnitt"
+
+msgid "Float"
+msgstr "Schweben"
+
 msgid "Welcome to ApexShot"
 msgstr "Willkommen bei ApexShot"
 

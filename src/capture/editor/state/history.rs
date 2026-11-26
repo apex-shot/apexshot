@@ -142,6 +142,30 @@ impl EditorState {
         self.redo_history.clear();
     }
 
+    /// Drop the newest pose step when the document is already back at the state
+    /// it started from.
+    ///
+    /// The first-run look chip writes the pose through
+    /// [`EditorState::set_static_image_transform`], then removes its look by
+    /// restoring the pose it saved. Without this, the editor's Undo would spend
+    /// a press re-applying a change the chip already reverted. Only the chip's
+    /// own `StaticTransform` step can match, so a canvas edit or a crop in
+    /// between leaves the history untouched.
+    pub(crate) fn discard_reverted_static_transform_step(&mut self) {
+        let Some(transaction) = self.undo_history.last() else {
+            return;
+        };
+        if !matches!(&transaction.kind, HistoryKind::StaticTransform) {
+            return;
+        }
+        if !transaction.before.same_document(&self.document_snapshot()) {
+            return;
+        }
+        self.undo_history.pop();
+        self.redo_history.clear();
+        self.redo_actions.clear();
+    }
+
     pub(crate) fn attach_motion_history_to_latest_crop(
         &mut self,
         before: MotionState,

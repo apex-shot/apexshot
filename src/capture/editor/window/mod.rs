@@ -2675,6 +2675,19 @@ fn setup_editor_window_full(
             }
         }
     });
+    // The chip applies a whole look (fill, frame, shadow and pose), so after
+    // any of its clicks the docked inspector is rebuilt from the shared
+    // runtime, the Background tool takes the canvas back, and the Transform
+    // sliders are re-seated: the same end state a panel interaction leaves.
+    let refresh_look_chip: Rc<dyn Fn()> = {
+        let interact = background_interact_forwarder.clone();
+        let sync_static_transform = sync_static_transform.clone();
+        Rc::new(move || {
+            refresh_background_inspector();
+            interact();
+            sync_static_transform();
+        })
+    };
     let look_chip = if empty_drop_zone {
         None
     } else {
@@ -2683,7 +2696,7 @@ fn setup_editor_window_full(
             &state,
             &drawing_area,
             editor_open_count,
-            refresh_background_inspector,
+            refresh_look_chip,
         )
     };
 

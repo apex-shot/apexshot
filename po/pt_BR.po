@@ -29,6 +29,21 @@ msgstr "Experimente um visual estilizado"
 msgid "Undo look"
 msgstr "Desfazer o visual"
 
+msgid "Next look"
+msgstr "Próximo visual"
+
+msgid "Next look: {name}"
+msgstr "Próximo visual: {name}"
+
+msgid "Frost"
+msgstr "Geada"
+
+msgid "Bleed"
+msgstr "Sangria"
+
+msgid "Float"
+msgstr "Flutuante"
+
 msgid "Welcome to ApexShot"
 msgstr "Bem-vindo ao ApexShot"
 

@@ -29,6 +29,21 @@ msgstr "جرّب مظهرًا منسّقًا"
 msgid "Undo look"
 msgstr "تراجع عن المظهر"
 
+msgid "Next look"
+msgstr "المظهر التالي"
+
+msgid "Next look: {name}"
+msgstr "المظهر التالي: {name}"
+
+msgid "Frost"
+msgstr "صقيع"
+
+msgid "Bleed"
+msgstr "تجاوز الحافة"
+
+msgid "Float"
+msgstr "طافٍ"
+
 msgid "Welcome to ApexShot"
 msgstr "مرحبًا بك في ApexShot"
 
