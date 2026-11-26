@@ -130,8 +130,7 @@
             }
 
             .editor-root.editor-theme-light .editor-look-chip {
-                background: #eef0f5;
-                border-color: alpha(#111827, 0.12);
+                background-color: #eef0f5;
             }
 
             .editor-root.editor-theme-light button.editor-look-chip-action {

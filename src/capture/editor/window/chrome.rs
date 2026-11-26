@@ -90,8 +90,10 @@ pub(super) fn install_window_chrome(input: WindowChromeInputs<'_>) -> WindowChro
     if let Some(chip) = look_chip {
         // The chip shares the header row with the Static/Motion mode stack and
         // sits immediately after it. It only exists for the first few opens.
+        // Same top edge and margin as the toolbar so the two read as one row.
         chip.set_halign(Align::Center);
-        chip.set_valign(Align::Center);
+        chip.set_valign(Align::Start);
+        chip.set_margin_top(8);
         chip.set_margin_start(8);
         top_chrome.append(chip);
     }

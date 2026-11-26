@@ -1,21 +1,23 @@
-            /* First-run header chip: a quiet pill next to the mode stack. */
+            /* First-run header chip: a small panel beside the toolbar, built
+               from the toolbar's own surface, radius and button metrics. */
             .editor-look-chip {
-                padding: 1px 2px 1px 8px;
-                border: 1px solid rgba(255, 255, 255, 0.12);
-                border-radius: 999px;
-                background: #1b1b1f;
+                padding: 6px;
+                background-color: #0f0f0f;
+                border: none;
+                border-radius: 9px;
+                box-shadow: none;
             }
 
             button.editor-look-chip-action {
-                min-height: 24px;
-                padding: 0 6px;
+                min-height: 28px;
+                padding: 0 10px;
+                margin: 0;
                 border: none;
-                border-radius: 999px;
+                border-radius: 6px;
                 background: transparent;
                 color: rgba(255, 255, 255, 0.88);
-                font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
-                font-size: 12px;
-                font-weight: 600;
+                font-size: 13px;
+                font-weight: 500;
                 box-shadow: none;
             }
 
@@ -26,22 +28,22 @@
 
             button.editor-look-chip-action:active {
                 background: alpha(white, 0.10);
-                color: rgba(255, 255, 255, 0.88);
             }
 
             button.editor-look-chip-dismiss {
-                min-width: 22px;
-                min-height: 22px;
+                min-width: 28px;
+                min-height: 28px;
                 padding: 0;
+                margin: 0;
                 border: none;
-                border-radius: 999px;
+                border-radius: 6px;
                 background: transparent;
                 color: rgba(255, 255, 255, 0.55);
                 box-shadow: none;
             }
 
             button.editor-look-chip-dismiss:hover {
-                background: alpha(white, 0.08);
+                background: alpha(white, 0.06);
                 color: rgba(255, 255, 255, 0.90);
             }
 

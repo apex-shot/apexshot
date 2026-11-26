@@ -1,7 +1,7 @@
 //! The first-run "Try a styled look" chip in the image editor header.
 //!
 //! The chip offers one undoable starting point for an unstyled still: the
-//! first bundled wallpaper plus the Frame panel's Frost preset. Both edits go
+//! light blue wallpaper plus the Frame panel's Frost preset. Both edits go
 //! through the shared Motion history, so the editor's ordinary Undo button
 //! and the chip's own "Undo look" state undo the whole look in one step.
 //!
@@ -130,7 +130,7 @@ pub(super) fn build_look_chip(
 /// preset. `begin_motion_command` clears the coalesce window first, so the
 /// following panel edit is a separate Undo step.
 fn apply_styled_look(session: &MotionSession, preview: &DrawingArea) -> bool {
-    let Some(wallpaper) = background_panel::default_motion_wallpaper() else {
+    let Some(wallpaper) = look_wallpaper() else {
         return false;
     };
     let path = PathBuf::from(&wallpaper);
@@ -173,3 +173,16 @@ fn apply_styled_look(session: &MotionSession, preview: &DrawingArea) -> bool {
     preview.queue_draw();
     true
 }
+
+/// The look's wallpaper: the light blue one, falling back to the first bundled
+/// wallpaper when an install ships without it.
+fn look_wallpaper() -> Option<String> {
+    let path = background_panel::background_gradient_asset_path(LOOK_WALLPAPER_FILE);
+    if path.is_file() {
+        return Some(path.to_string_lossy().into_owned());
+    }
+    background_panel::default_motion_wallpaper()
+}
+
+/// File name of the wallpaper the look applies.
+const LOOK_WALLPAPER_FILE: &str = "wallpaper-001.jpg";
