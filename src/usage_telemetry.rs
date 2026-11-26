@@ -39,6 +39,11 @@ struct UsageState {
     login_completed: u64,
     upgrade_card_shown: u64,
     upgrade_clicked: u64,
+    editor_opened: u64,
+    studio_tool_opened: u64,
+    studio_trial_export: u64,
+    studio_upsell_shown: u64,
+    studio_buy_clicked: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -58,6 +63,11 @@ struct HeartbeatPayload {
     login_completed: u64,
     upgrade_card_shown: u64,
     upgrade_clicked: u64,
+    editor_opened: u64,
+    studio_tool_opened: u64,
+    studio_trial_export: u64,
+    studio_upsell_shown: u64,
+    studio_buy_clicked: u64,
 }
 
 /// Whether telemetry is allowed for this process.
@@ -258,6 +268,32 @@ pub fn record_upgrade_clicked() {
     bump_counter(|s| s.upgrade_clicked = s.upgrade_clicked.saturating_add(1));
 }
 
+/// An image editor window was opened.
+pub fn record_editor_opened() {
+    bump_counter(|s| s.editor_opened = s.editor_opened.saturating_add(1));
+}
+
+/// An unlicensed document reached the Studio preview mark for the first time
+/// in an editor window.
+pub fn record_studio_tool_opened() {
+    bump_counter(|s| s.studio_tool_opened = s.studio_tool_opened.saturating_add(1));
+}
+
+/// A finished Studio output consumed a free trial export.
+pub fn record_studio_trial_export() {
+    bump_counter(|s| s.studio_trial_export = s.studio_trial_export.saturating_add(1));
+}
+
+/// The Studio card was raised over an editor to block an export.
+pub fn record_studio_upsell_shown() {
+    bump_counter(|s| s.studio_upsell_shown = s.studio_upsell_shown.saturating_add(1));
+}
+
+/// The Studio card's upgrade button opened the purchase page.
+pub fn record_studio_buy_clicked() {
+    bump_counter(|s| s.studio_buy_clicked = s.studio_buy_clicked.saturating_add(1));
+}
+
 fn bump_counter(f: impl FnOnce(&mut UsageState)) {
     let config = load_config().sanitized();
     if !telemetry_enabled(&config) {
@@ -334,6 +370,11 @@ fn maybe_send_heartbeat_with_config(config: &AppConfig) -> bool {
         login_completed: state.login_completed,
         upgrade_card_shown: state.upgrade_card_shown,
         upgrade_clicked: state.upgrade_clicked,
+        editor_opened: state.editor_opened,
+        studio_tool_opened: state.studio_tool_opened,
+        studio_trial_export: state.studio_trial_export,
+        studio_upsell_shown: state.studio_upsell_shown,
+        studio_buy_clicked: state.studio_buy_clicked,
     };
 
     if !post_heartbeat(&payload) {
@@ -350,6 +391,11 @@ fn maybe_send_heartbeat_with_config(config: &AppConfig) -> bool {
     state.login_completed = 0;
     state.upgrade_card_shown = 0;
     state.upgrade_clicked = 0;
+    state.editor_opened = 0;
+    state.studio_tool_opened = 0;
+    state.studio_trial_export = 0;
+    state.studio_upsell_shown = 0;
+    state.studio_buy_clicked = 0;
     save_state(&state_path, &state);
     true
 }
@@ -471,6 +517,11 @@ mod tests {
             login_completed: 6,
             upgrade_card_shown: 7,
             upgrade_clicked: 8,
+            editor_opened: 9,
+            studio_tool_opened: 10,
+            studio_trial_export: 11,
+            studio_upsell_shown: 12,
+            studio_buy_clicked: 13,
         };
 
         let value = serde_json::to_value(&payload).expect("heartbeat payload serializes");
@@ -480,6 +531,11 @@ mod tests {
             ("login_completed", 6),
             ("upgrade_card_shown", 7),
             ("upgrade_clicked", 8),
+            ("editor_opened", 9),
+            ("studio_tool_opened", 10),
+            ("studio_trial_export", 11),
+            ("studio_upsell_shown", 12),
+            ("studio_buy_clicked", 13),
         ] {
             assert_eq!(value[field].as_u64(), Some(count), "missing {field}");
         }

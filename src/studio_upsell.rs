@@ -467,6 +467,7 @@ pub(crate) fn gate(
         );
         return false;
     };
+    crate::usage_telemetry::record_studio_upsell_shown();
     present(&overlay, &error, capabilities, dark, Rc::new(retry));
     false
 }
@@ -704,6 +705,9 @@ fn build_card(
 fn connect_primary(primary: &Button, action: PrimaryAction, dismiss: &Rc<dyn Fn()>) {
     if let Some(url) = action.url() {
         primary.connect_clicked(move |_| {
+            if action == PrimaryAction::Upgrade {
+                crate::usage_telemetry::record_studio_buy_clicked();
+            }
             let _ = crate::utils::open::open_url(&url);
         });
     } else {

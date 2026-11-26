@@ -129,6 +129,29 @@
                 background: #eef0f5;
             }
 
+            .editor-root.editor-theme-light .editor-look-chip {
+                background: #eef0f5;
+                border-color: alpha(#111827, 0.12);
+            }
+
+            .editor-root.editor-theme-light button.editor-look-chip-action {
+                color: #1d2129;
+            }
+
+            .editor-root.editor-theme-light button.editor-look-chip-action:hover {
+                background: alpha(#111827, 0.06);
+                color: #1d2129;
+            }
+
+            .editor-root.editor-theme-light button.editor-look-chip-dismiss {
+                color: alpha(#1d2129, 0.55);
+            }
+
+            .editor-root.editor-theme-light button.editor-look-chip-dismiss:hover {
+                background: alpha(#111827, 0.08);
+                color: #1d2129;
+            }
+
             .editor-root.editor-theme-light .editor-text-floating-bar {
                 background-color: #eef0f5;
                 color: #1d2129;

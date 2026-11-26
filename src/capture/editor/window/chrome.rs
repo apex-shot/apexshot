@@ -25,6 +25,8 @@ pub(super) struct WindowChromeInputs<'a> {
     pub motion_btn: &'a Button,
     pub history_group: &'a GtkBox,
     pub zoom_popup: &'a GtkBox,
+    /// The first-run "Try a styled look" chip, placed after the mode stack.
+    pub look_chip: Option<&'a GtkBox>,
 }
 
 pub(super) struct WindowChrome {
@@ -48,6 +50,7 @@ pub(super) fn install_window_chrome(input: WindowChromeInputs<'_>) -> WindowChro
         motion_btn,
         history_group,
         zoom_popup,
+        look_chip,
     } = input;
 
     // Transparent full-width strip over the checkerboard: drag the window + host toolbar.
@@ -84,6 +87,14 @@ pub(super) fn install_window_chrome(input: WindowChromeInputs<'_>) -> WindowChro
 
     top_chrome.append(&top_chrome_left);
     top_chrome.append(&mode_stack);
+    if let Some(chip) = look_chip {
+        // The chip shares the header row with the Static/Motion mode stack and
+        // sits immediately after it. It only exists for the first few opens.
+        chip.set_halign(Align::Center);
+        chip.set_valign(Align::Center);
+        chip.set_margin_start(8);
+        top_chrome.append(chip);
+    }
     top_chrome.append(&top_chrome_right);
     canvas_with_toolbar.add_overlay(&top_chrome);
 

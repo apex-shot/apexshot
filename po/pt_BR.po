@@ -8,11 +8,26 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
+msgid "Edit: add a background, frame, or 3D tilt."
+msgstr "Editar: adicione um plano de fundo, uma moldura ou uma inclinação 3D."
+
+msgid "Hide suggestion"
+msgstr "Ocultar sugestão"
+
+msgid "Open in the editor"
+msgstr "Abrir no editor"
+
 msgid "System default"
 msgstr "Padrão do sistema"
 
 msgid "Record shortcut"
 msgstr "Gravar atalho"
+
+msgid "Try a styled look"
+msgstr "Experimente um visual estilizado"
+
+msgid "Undo look"
+msgstr "Desfazer o visual"
 
 msgid "Welcome to ApexShot"
 msgstr "Bem-vindo ao ApexShot"

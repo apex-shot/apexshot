@@ -20,6 +20,21 @@ pub fn record_upgrade_card_shown() {}
 /// This build sends no telemetry; the counter exists so shared code compiles.
 pub fn record_upgrade_clicked() {}
 
+/// This build sends no telemetry; the counter exists so shared code compiles.
+pub fn record_editor_opened() {}
+
+/// This build sends no telemetry; the counter exists so shared code compiles.
+pub fn record_studio_tool_opened() {}
+
+/// This build sends no telemetry; the counter exists so shared code compiles.
+pub fn record_studio_trial_export() {}
+
+/// This build sends no telemetry; the counter exists so shared code compiles.
+pub fn record_studio_upsell_shown() {}
+
+/// This build sends no telemetry; the counter exists so shared code compiles.
+pub fn record_studio_buy_clicked() {}
+
 #[cfg(test)]
 pub(crate) fn ensure_install_id() -> Option<String> {
     Some("12345678-1234-4123-8123-123456789abc".into())

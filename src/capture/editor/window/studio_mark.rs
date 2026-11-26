@@ -112,6 +112,7 @@ pub(super) fn install_refresh(
 ) {
     let weak = drawing_area.downgrade();
     let last = Cell::new(false);
+    let recorded = Cell::new(false);
     glib::timeout_add_local(REFRESH_INTERVAL, move || {
         let Some(area) = weak.upgrade() else {
             return glib::ControlFlow::Break;
@@ -121,6 +122,9 @@ pub(super) fn install_refresh(
             .map(|st| st.uses_studio_style())
             .unwrap_or(false);
         let due = mark_due(uses_style, || studio_mark.unlocked());
+        if due && !recorded.replace(true) {
+            crate::usage_telemetry::record_studio_tool_opened();
+        }
         if due != last.replace(due) {
             area.queue_draw();
         }

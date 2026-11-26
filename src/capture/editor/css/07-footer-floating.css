@@ -1,3 +1,58 @@
+            /* First-run header chip: a quiet pill next to the mode stack. */
+            .editor-look-chip {
+                padding: 1px 2px 1px 8px;
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                border-radius: 999px;
+                background: #1b1b1f;
+            }
+
+            button.editor-look-chip-action {
+                min-height: 24px;
+                padding: 0 6px;
+                border: none;
+                border-radius: 999px;
+                background: transparent;
+                color: rgba(255, 255, 255, 0.88);
+                font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
+                font-size: 12px;
+                font-weight: 600;
+                box-shadow: none;
+            }
+
+            button.editor-look-chip-action:hover {
+                background: alpha(white, 0.06);
+                color: #ffffff;
+            }
+
+            button.editor-look-chip-action:active {
+                background: alpha(white, 0.10);
+                color: rgba(255, 255, 255, 0.88);
+            }
+
+            button.editor-look-chip-dismiss {
+                min-width: 22px;
+                min-height: 22px;
+                padding: 0;
+                border: none;
+                border-radius: 999px;
+                background: transparent;
+                color: rgba(255, 255, 255, 0.55);
+                box-shadow: none;
+            }
+
+            button.editor-look-chip-dismiss:hover {
+                background: alpha(white, 0.08);
+                color: rgba(255, 255, 255, 0.90);
+            }
+
+            button.editor-look-chip-action:focus,
+            button.editor-look-chip-action:focus-visible,
+            button.editor-look-chip-dismiss:focus,
+            button.editor-look-chip-dismiss:focus-visible {
+                outline: none;
+                box-shadow: none;
+            }
+
             /* --- Footer (settings-UI design language: flat, alpha-white states) --- */
             .editor-footer {
                 padding: 6px 10px;
