@@ -105,15 +105,15 @@ const LOOKS: [Look; 4] = [
         padding: 56.0,
         radius: Some(18.0),
         shadow: MotionSceneShadow {
-            preset: MotionSceneShadowPreset::Spread,
+            preset: MotionSceneShadowPreset::Hug,
             opacity: 0.9,
             light: (0.65, 0.65),
         },
     },
     Look {
         name_key: "Bleed",
-        wallpaper_file: "gradient-01.jpg",
-        frame_style: FrameStyle::Outline,
+        wallpaper_file: "wallpaper-021.jpg",
+        frame_style: FrameStyle::Default,
         // Pushed down and right so the card runs off the canvas: the camera
         // looks up and left. The pad scales with the canvas (pos 1 moves the
         // card half a canvas), so these keep the card's top-left ~55-60% in
@@ -124,7 +124,7 @@ const LOOKS: [Look; 4] = [
             ..RESTING_POSE
         },
         padding: 56.0,
-        radius: Some(0.0),
+        radius: Some(18.0),
         shadow: MotionSceneShadow {
             preset: MotionSceneShadowPreset::None,
             opacity: 1.0,
@@ -139,7 +139,7 @@ const LOOKS: [Look; 4] = [
         padding: 64.0,
         radius: Some(26.0),
         shadow: MotionSceneShadow {
-            preset: MotionSceneShadowPreset::Adaptive,
+            preset: MotionSceneShadowPreset::Hug,
             opacity: 0.85,
             light: (0.65, 0.65),
         },
@@ -678,7 +678,8 @@ mod tests {
         assert!(bleed.transform.pos_y < 0.0);
         assert_eq!(bleed.transform.yaw, 0.0);
         assert_eq!(bleed.transform.pitch, 0.0);
-        assert_eq!(bleed.frame_style, FrameStyle::Outline);
+        assert_eq!(bleed.frame_style, FrameStyle::Default);
+        assert_eq!(bleed.radius, Some(18.0));
     }
 
     #[test]
