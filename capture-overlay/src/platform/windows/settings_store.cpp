@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace {
 
@@ -214,6 +215,53 @@ void saveRecordingDeviceChoices(const RecordingDeviceChoices& choices)
     file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
 }
 
+QString studioNudgesPath()
+{
+    return QFileInfo(shellSettingsPath()).absoluteDir().filePath(
+        QStringLiteral("studio-nudges.json"));
+}
+
+StudioNudges loadStudioNudges()
+{
+    StudioNudges nudges;
+    QFile file(studioNudgesPath());
+    if (!file.open(QIODevice::ReadOnly))
+        return nudges;
+
+    QJsonParseError error{};
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &error);
+    if (error.error != QJsonParseError::NoError || !document.isObject())
+        return nudges;
+
+    const QJsonValue screenshots = document.object().value(QStringLiteral("screenshots"));
+    if (screenshots.isDouble() && screenshots.toDouble() > 0.0)
+        nudges.screenshotCards = static_cast<quint64>(screenshots.toDouble());
+    return nudges;
+}
+
+quint64 bumpScreenshotCardCount()
+{
+    StudioNudges nudges = loadStudioNudges();
+    if (nudges.screenshotCards < std::numeric_limits<quint64>::max())
+        ++nudges.screenshotCards;
+
+    QJsonObject root;
+    root.insert(QStringLiteral("screenshots"), static_cast<double>(nudges.screenshotCards));
+    const QString path = studioNudgesPath();
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return 0;
+    file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+    return nudges.screenshotCards;
+}
+
+bool shouldShowEditorHint(quint64 screenshotCardCount)
+{
+    return screenshotCardCount == 10 || screenshotCardCount == 30
+        || screenshotCardCount == 60;
+}
+
 ShellSettings loadShellSettings()
 {
     ShellSettings out;
@@ -357,6 +405,10 @@ ShellSettings loadShellSettings()
             .toBool(out.cloud.autoUploadAfterCapture);
     out.cloud.configured =
         cloud.value(QStringLiteral("configured")).toBool(out.cloud.configured);
+
+    const QJsonObject studio = root.value(QStringLiteral("studio")).toObject();
+    out.studio.unlocked =
+        studio.value(QStringLiteral("unlocked")).toBool(out.studio.unlocked);
 
     const QJsonObject ocr = root.value(QStringLiteral("ocr")).toObject();
     out.ocr.language = ocr.value(QStringLiteral("language")).toString(out.ocr.language).trimmed();
