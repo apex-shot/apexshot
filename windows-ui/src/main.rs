@@ -63,26 +63,27 @@ fn main() {
                 }
                 return;
             }
-            app::app_links::AppLink::Studio => match app::studio_entitlement::activate_from_url(&url)
-            {
-                Ok(()) => {
-                    app::utils::notify::desktop_notification_and_wait(
-                        &app::i18n::t("Studio is active on this device"),
-                        "",
-                        false,
-                    );
-                    std::process::exit(0);
+            app::app_links::AppLink::Studio => {
+                match app::studio_entitlement::activate_from_url(&url) {
+                    Ok(()) => {
+                        app::utils::notify::desktop_notification_and_wait(
+                            &app::i18n::t("Studio is active on this device"),
+                            "",
+                            false,
+                        );
+                        std::process::exit(0);
+                    }
+                    Err(error) => {
+                        eprintln!("{error}");
+                        app::utils::notify::desktop_notification_and_wait(
+                            &app::i18n::t("Studio activation failed"),
+                            &error.to_string(),
+                            true,
+                        );
+                        std::process::exit(1);
+                    }
                 }
-                Err(error) => {
-                    eprintln!("{error}");
-                    app::utils::notify::desktop_notification_and_wait(
-                        &app::i18n::t("Studio activation failed"),
-                        &error.to_string(),
-                        true,
-                    );
-                    std::process::exit(1);
-                }
-            },
+            }
             app::app_links::AppLink::Unknown => {}
         }
     }

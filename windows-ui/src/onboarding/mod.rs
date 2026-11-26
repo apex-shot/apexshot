@@ -333,7 +333,14 @@ fn build_window_at(app: &Application, outcome: Rc<RefCell<Outcome>>, cloud_conne
     } else {
         OnboardingStep::Welcome
     };
-    let widgets = install_at(&window, scale, animations, outcome, initial_step, cloud_connect);
+    let widgets = install_at(
+        &window,
+        scale,
+        animations,
+        outcome,
+        initial_step,
+        cloud_connect,
+    );
     ONBOARDING_WIDGETS.with(|slot| *slot.borrow_mut() = Some(widgets));
     window.present();
 }
@@ -466,11 +473,7 @@ fn show_step(widgets: &OnboardingWidgets, step: OnboardingStep) {
     show_step_inner(widgets, step, false);
 }
 
-fn show_step_inner(
-    widgets: &OnboardingWidgets,
-    step: OnboardingStep,
-    start_cloud_connect: bool,
-) {
+fn show_step_inner(widgets: &OnboardingWidgets, step: OnboardingStep, start_cloud_connect: bool) {
     widgets.current_step.set(Some(step));
     widgets.cancel_animations();
     let id = widgets.generation.get() + 1;
