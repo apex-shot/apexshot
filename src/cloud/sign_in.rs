@@ -674,7 +674,7 @@ impl SignInUi {
     fn waiting(&self, login: &DeviceLogin) {
         set_code_cells(&self.code_row, &login.user_code);
         self.code.replace(login.user_code.clone());
-        self.uri.replace(login.verification_uri.clone());
+        self.uri.replace(login.browser_uri().to_string());
         self.copy_btn.set_sensitive(true);
         self.open_btn.set_sensitive(true);
         self.status.set_text(&t("Waiting for you to authorize…"));
@@ -682,7 +682,7 @@ impl SignInUi {
         set_expiry(&self.expiry, login.expires_in_secs);
         self.expiry_box.set_visible(true);
 
-        self.open_browser(&login.verification_uri);
+        self.open_browser(login.browser_uri());
     }
 
     /// Poll on the server's interval, and end the session on the device code's

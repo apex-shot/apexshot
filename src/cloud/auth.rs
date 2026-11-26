@@ -27,6 +27,9 @@ struct DeviceCodeResponse {
     device_code: String,
     user_code: String,
     verification_uri: String,
+    /// The device page with the code prefilled. Older servers omit it.
+    #[serde(default)]
+    verification_uri_complete: Option<String>,
     expires_in: i32,
     interval: i32,
 }
@@ -116,8 +119,20 @@ pub struct DeviceLogin {
     /// Ready to display, grouped for readability (e.g. `ABCD-EFGH`).
     pub user_code: String,
     pub verification_uri: String,
+    /// The same page with the code already filled in, when the server sends it.
+    pub verification_uri_complete: Option<String>,
     pub interval_secs: u64,
     pub expires_in_secs: u64,
+}
+
+impl DeviceLogin {
+    /// The page to open in the browser: the prefilled one when the server sent
+    /// it, so people never retype the code, else the plain device page.
+    pub fn browser_uri(&self) -> &str {
+        self.verification_uri_complete
+            .as_deref()
+            .unwrap_or(&self.verification_uri)
+    }
 }
 
 #[derive(Debug)]
@@ -221,6 +236,9 @@ pub fn begin_device_login() -> Result<DeviceLogin, LoginError> {
         device_code: device_resp.device_code,
         user_code: format_user_code(&device_resp.user_code),
         verification_uri: device_resp.verification_uri,
+        verification_uri_complete: device_resp
+            .verification_uri_complete
+            .filter(|uri| uri.starts_with("https://") || uri.starts_with("http://")),
         interval_secs: device_resp.interval.max(1) as u64,
         expires_in_secs: match device_resp.expires_in {
             seconds if seconds > 0 => seconds as u64,
@@ -318,13 +336,13 @@ pub fn login() -> Result<(), LoginError> {
     println!("First copy your one-time code: {}", start.user_code);
     println!(
         "Press Enter to open {} in your browser...",
-        start.verification_uri
+        start.browser_uri()
     );
 
     let mut _input = String::new();
     let _ = std::io::stdin().read_line(&mut _input);
 
-    open_browser(&start.verification_uri);
+    open_browser(start.browser_uri());
 
     let interval = start.interval_secs.max(1);
     let elapsed = std::time::Instant::now();
@@ -523,6 +541,39 @@ fn generate_install_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn login(complete: Option<&str>) -> DeviceLogin {
+        DeviceLogin {
+            device_code: "dev".into(),
+            user_code: "ABCD-EFGH".into(),
+            verification_uri: "https://apexshot.org/auth/device".into(),
+            verification_uri_complete: complete.map(str::to_string),
+            interval_secs: 5,
+            expires_in_secs: 1800,
+        }
+    }
+
+    #[test]
+    fn the_browser_opens_the_prefilled_page_when_the_server_sends_one() {
+        let prefilled = login(Some("https://apexshot.org/auth/device?code=ABCDEFGH"));
+        assert_eq!(
+            prefilled.browser_uri(),
+            "https://apexshot.org/auth/device?code=ABCDEFGH"
+        );
+        assert_eq!(
+            login(None).browser_uri(),
+            "https://apexshot.org/auth/device"
+        );
+    }
+
+    #[test]
+    fn an_older_server_without_the_prefilled_page_still_parses() {
+        let response: DeviceCodeResponse = serde_json::from_str(
+            r#"{"device_code":"d","user_code":"ABCDEFGH","verification_uri":"https://apexshot.org/auth/device","expires_in":1800,"interval":5}"#,
+        )
+        .expect("older response parses");
+        assert!(response.verification_uri_complete.is_none());
+    }
 
     #[test]
     fn pending_poll_keeps_waiting() {
