@@ -119,7 +119,7 @@ pub(super) fn install_refresh(
         };
         let uses_style = state
             .lock()
-            .map(|st| st.uses_studio_style())
+            .map(|st| st.needs_studio_preview_mark())
             .unwrap_or(false);
         let due = mark_due(uses_style, || studio_mark.unlocked());
         if due && !recorded.replace(true) {

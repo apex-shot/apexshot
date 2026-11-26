@@ -1661,3 +1661,16 @@ fn dump_scene_shadow_styles() {
         }
     }
 }
+
+#[test]
+fn a_pose_alone_still_carries_the_studio_preview_mark() {
+    let mut state = EditorState::new(RgbaImage::new(320, 200));
+    assert!(!state.needs_studio_preview_mark());
+
+    // The export gates a moved or tilted card, so the preview must mark it
+    // even with no frame, border, or shadow.
+    state.static_image_transform.pos_x = -0.33;
+    assert!(!state.uses_studio_style());
+    assert!(state.needs_studio_preview_mark());
+    assert!(state.studio_capabilities().static_presentation);
+}

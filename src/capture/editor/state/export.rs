@@ -536,6 +536,14 @@ impl EditorState {
         self.render_final_image()
     }
 
+    /// Whether the canvas should carry the Studio preview mark: a Studio style,
+    /// or a pose (tilt or position) that the export would also gate.
+    pub(crate) fn needs_studio_preview_mark(&self) -> bool {
+        self.uses_studio_style()
+            || crate::studio_entitlement::capabilities_for_static_image(self.static_image_transform)
+                .static_presentation
+    }
+
     /// Whether the still uses a Studio presentation control: a frame style or
     /// an outside border, or a scene shadow the background layout leaves
     /// visible around the image. The Background panel (fill, padding, insert,

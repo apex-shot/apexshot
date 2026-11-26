@@ -241,7 +241,7 @@ pub(super) fn build_look_chip(
     }
     let already_styled = state
         .lock()
-        .map(|state| state.uses_studio_style())
+        .map(|state| state.needs_studio_preview_mark())
         .unwrap_or(true);
     if already_styled {
         return None;
