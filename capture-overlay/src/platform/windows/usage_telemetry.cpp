@@ -13,6 +13,7 @@
 #include <QFutureWatcher>
 #include <QPointer>
 #include <QSaveFile>
+#include <QStringList>
 #include <QtConcurrent/QtConcurrentRun>
 #include <QUuid>
 
@@ -49,6 +50,27 @@ bool writeState(const QJsonObject& state)
 int count(const QJsonObject& state, const QString& key)
 {
     return std::max(0, state.value(key).toInt());
+}
+
+/// Counters shared with the Rust editors, which write the same state file.
+const QStringList& counterKeys()
+{
+    static const QStringList keys{
+        QStringLiteral("screenshots"),
+        QStringLiteral("recordings"),
+        QStringLiteral("ocr"),
+        QStringLiteral("upload_click_signed_out"),
+        QStringLiteral("login_started"),
+        QStringLiteral("login_completed"),
+        QStringLiteral("upgrade_card_shown"),
+        QStringLiteral("upgrade_clicked"),
+        QStringLiteral("editor_opened"),
+        QStringLiteral("studio_tool_opened"),
+        QStringLiteral("studio_trial_export"),
+        QStringLiteral("studio_upsell_shown"),
+        QStringLiteral("studio_buy_clicked"),
+    };
+    return keys;
 }
 
 bool postHeartbeat(const QByteArray& data)
@@ -156,10 +178,8 @@ void UsageTelemetry::poll()
         if (!writeState(state))
             return;
     }
-    const int screenshots = count(state, QStringLiteral("screenshots"));
-    const int recordings = count(state, QStringLiteral("recordings"));
-    const int ocr = count(state, QStringLiteral("ocr"));
-    const QJsonObject payload{
+    QJsonObject sentCounts;
+    QJsonObject payload{
         {QStringLiteral("event"), QStringLiteral("heartbeat")},
         {QStringLiteral("install_id"), id},
         {QStringLiteral("app_version"), QStringLiteral(APEXSHOT_VERSION)},
@@ -167,14 +187,16 @@ void UsageTelemetry::poll()
         {QStringLiteral("distro"), QStringLiteral("windows")},
         {QStringLiteral("desktop"), QStringLiteral("windows")},
         {QStringLiteral("session"), QStringLiteral("windows")},
-        {QStringLiteral("screenshots"), screenshots},
-        {QStringLiteral("recordings"), recordings},
-        {QStringLiteral("ocr"), ocr},
     };
+    for (const QString& key : counterKeys()) {
+        const int value = count(state, key);
+        sentCounts.insert(key, value);
+        payload.insert(key, value);
+    }
     m_lastAttempt = now;
     m_inFlight = true;
     QPointer<UsageTelemetry> self(this);
-    Completion finished = [self, id, now, screenshots, recordings, ocr](bool success) {
+    Completion finished = [self, id, now, sentCounts](bool success) {
         if (!self)
             return;
         self->m_inFlight = false;
@@ -184,12 +206,12 @@ void UsageTelemetry::poll()
         if (current.value(QStringLiteral("install_id")).toString() != id)
             return;
         current.insert(QStringLiteral("last_heartbeat"), static_cast<double>(now));
-        current.insert(QStringLiteral("screenshots"),
-                       std::max(0, count(current, QStringLiteral("screenshots")) - screenshots));
-        current.insert(QStringLiteral("recordings"),
-                       std::max(0, count(current, QStringLiteral("recordings")) - recordings));
-        current.insert(QStringLiteral("ocr"),
-                       std::max(0, count(current, QStringLiteral("ocr")) - ocr));
+        // Counters that landed while the request was in flight stay in the
+        // difference, so only the amounts actually sent are cleared.
+        for (auto it = sentCounts.constBegin(); it != sentCounts.constEnd(); ++it) {
+            current.insert(it.key(),
+                           std::max(0, count(current, it.key()) - it.value().toInt()));
+        }
         writeState(current);
     };
     if (m_sender)
