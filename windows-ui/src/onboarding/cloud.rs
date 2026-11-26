@@ -367,7 +367,7 @@ impl ConnectUi {
     fn waiting(&self, login: &DeviceLogin) {
         self.code_label.set_text(&login.user_code);
         self.code.replace(login.user_code.clone());
-        self.uri.replace(login.verification_uri.clone());
+        self.uri.replace(login.browser_uri().to_string());
         self.copy_btn.set_sensitive(true);
         self.copy_link_btn.set_sensitive(true);
         self.open_btn.set_sensitive(true);
@@ -380,7 +380,7 @@ impl ConnectUi {
         ));
         self.expiry.set_visible(true);
 
-        open_link(&login.verification_uri, &self.browser_status);
+        open_link(login.browser_uri(), &self.browser_status);
     }
 
     /// Poll on the server's interval, and end the session on the device code's
