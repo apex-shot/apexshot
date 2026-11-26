@@ -1301,7 +1301,7 @@ fn upload_image(
         .read(|st| crate::studio_entitlement::studio_access(st.studio_capabilities()))
         .is_some_and(|access| access.is_trial());
 
-    let Some(config) = configured_cloud() else {
+    let Some(config) = configured_cloud(window, button) else {
         return;
     };
     let snapshot = match host.upload_snapshot() {
@@ -1327,8 +1327,23 @@ fn upload_image(
     );
 }
 
-fn configured_cloud() -> Option<crate::config::AppConfig> {
+fn configured_cloud(
+    window: &ApplicationWindow,
+    button: &gtk4::Button,
+) -> Option<crate::config::AppConfig> {
     let config = crate::config::load_config().sanitized();
+    if crate::cloud::sign_in::needs_apexshot_sign_in(&config) {
+        let retry = button.downgrade();
+        crate::cloud::sign_in::prompt_for_upload(
+            Some(window.upcast_ref::<gtk4::Window>()),
+            move || {
+                if let Some(button) = retry.upgrade() {
+                    button.emit_clicked();
+                }
+            },
+        );
+        return None;
+    }
     if !crate::cloud::upload::is_configured(&config) {
         let (title, body) = crate::cloud::upload::not_configured_notification(&config);
         crate::utils::notify::desktop_notification_important(&title, &body);
@@ -1403,7 +1418,7 @@ fn upload_motion_video(
         return;
     }
 
-    let Some(config) = configured_cloud() else {
+    let Some(config) = configured_cloud(window, button) else {
         return;
     };
     let directory = upload_temp_dir();

@@ -7,7 +7,8 @@
 //! - Random `install_id` stored at `~/.config/apexshot/install_id` (same file
 //!   as the install scripts' download telemetry, so installs can be joined to
 //!   usage without linking to people).
-//! - No screenshot content, paths, OCR text, URLs, hostnames, or accounts.
+//! - No screenshot content, paths, OCR text, URLs, hostnames, or account
+//!   identities; sign-in events are counted only.
 //! - Rate limited to at most one successful heartbeat per 24 hours.
 //! - Opt-out via Settings → Advanced → Privacy, or `APEXSHOT_TELEMETRY=0`.
 //! - Fail-open: network errors never block the app.
@@ -33,6 +34,11 @@ struct UsageState {
     screenshots: u64,
     recordings: u64,
     ocr: u64,
+    upload_click_signed_out: u64,
+    login_started: u64,
+    login_completed: u64,
+    upgrade_card_shown: u64,
+    upgrade_clicked: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -47,6 +53,11 @@ struct HeartbeatPayload {
     screenshots: u64,
     recordings: u64,
     ocr: u64,
+    upload_click_signed_out: u64,
+    login_started: u64,
+    login_completed: u64,
+    upgrade_card_shown: u64,
+    upgrade_clicked: u64,
 }
 
 /// Whether telemetry is allowed for this process.
@@ -222,6 +233,31 @@ pub fn record_ocr() {
     bump_counter(|s| s.ocr = s.ocr.saturating_add(1));
 }
 
+/// An Upload button was pressed while signed out of ApexShot Cloud.
+pub fn record_upload_click_signed_out() {
+    bump_counter(|s| s.upload_click_signed_out = s.upload_click_signed_out.saturating_add(1));
+}
+
+/// A device sign-in flow started.
+pub fn record_login_started() {
+    bump_counter(|s| s.login_started = s.login_started.saturating_add(1));
+}
+
+/// A device sign-in flow finished and the session was saved.
+pub fn record_login_completed() {
+    bump_counter(|s| s.login_completed = s.login_completed.saturating_add(1));
+}
+
+/// The Cloud upgrade card was shown.
+pub fn record_upgrade_card_shown() {
+    bump_counter(|s| s.upgrade_card_shown = s.upgrade_card_shown.saturating_add(1));
+}
+
+/// The upgrade card's Go Pro button was pressed.
+pub fn record_upgrade_clicked() {
+    bump_counter(|s| s.upgrade_clicked = s.upgrade_clicked.saturating_add(1));
+}
+
 fn bump_counter(f: impl FnOnce(&mut UsageState)) {
     let config = load_config().sanitized();
     if !telemetry_enabled(&config) {
@@ -293,6 +329,11 @@ fn maybe_send_heartbeat_with_config(config: &AppConfig) -> bool {
         screenshots: state.screenshots,
         recordings: state.recordings,
         ocr: state.ocr,
+        upload_click_signed_out: state.upload_click_signed_out,
+        login_started: state.login_started,
+        login_completed: state.login_completed,
+        upgrade_card_shown: state.upgrade_card_shown,
+        upgrade_clicked: state.upgrade_clicked,
     };
 
     if !post_heartbeat(&payload) {
@@ -304,6 +345,11 @@ fn maybe_send_heartbeat_with_config(config: &AppConfig) -> bool {
     state.screenshots = 0;
     state.recordings = 0;
     state.ocr = 0;
+    state.upload_click_signed_out = 0;
+    state.login_started = 0;
+    state.login_completed = 0;
+    state.upgrade_card_shown = 0;
+    state.upgrade_clicked = 0;
     save_state(&state_path, &state);
     true
 }
@@ -405,6 +451,38 @@ mod tests {
             ..AppConfig::default()
         };
         assert!(!maybe_send_heartbeat_with_config(&cfg));
+    }
+
+    #[test]
+    fn heartbeat_payload_serializes_the_cloud_funnel_counters() {
+        let payload = HeartbeatPayload {
+            event: "heartbeat",
+            install_id: "00000000-0000-4000-8000-000000000000".to_string(),
+            app_version: "0.0.0".to_string(),
+            channel: "daemon",
+            distro: "test".to_string(),
+            desktop: "test".to_string(),
+            session: "test".to_string(),
+            screenshots: 1,
+            recordings: 2,
+            ocr: 3,
+            upload_click_signed_out: 4,
+            login_started: 5,
+            login_completed: 6,
+            upgrade_card_shown: 7,
+            upgrade_clicked: 8,
+        };
+
+        let value = serde_json::to_value(&payload).expect("heartbeat payload serializes");
+        for (field, count) in [
+            ("upload_click_signed_out", 4),
+            ("login_started", 5),
+            ("login_completed", 6),
+            ("upgrade_card_shown", 7),
+            ("upgrade_clicked", 8),
+        ] {
+            assert_eq!(value[field].as_u64(), Some(count), "missing {field}");
+        }
     }
 
     #[test]

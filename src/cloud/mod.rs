@@ -4,6 +4,7 @@ pub mod auth;
 pub mod destination;
 pub mod limit_prompt;
 pub mod listing;
+pub mod sign_in;
 pub mod upgrade;
 pub mod upload;
 pub mod usage;

@@ -5,6 +5,21 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::Path;
 
+/// This build sends no telemetry; the counter exists so shared code compiles.
+pub fn record_upload_click_signed_out() {}
+
+/// This build sends no telemetry; the counter exists so shared code compiles.
+pub fn record_login_started() {}
+
+/// This build sends no telemetry; the counter exists so shared code compiles.
+pub fn record_login_completed() {}
+
+/// This build sends no telemetry; the counter exists so shared code compiles.
+pub fn record_upgrade_card_shown() {}
+
+/// This build sends no telemetry; the counter exists so shared code compiles.
+pub fn record_upgrade_clicked() {}
+
 #[cfg(test)]
 pub(crate) fn ensure_install_id() -> Option<String> {
     Some("12345678-1234-4123-8123-123456789abc".into())

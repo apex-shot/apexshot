@@ -163,8 +163,19 @@ impl CloudPage {
 
         {
             let page = Rc::clone(self);
+            #[cfg(not(target_os = "windows"))]
+            let page_connect = Rc::clone(self);
             sign_in.connect_clicked(move |btn| {
+                #[cfg(target_os = "windows")]
                 crate::settings::cloud::spawn_apexshot_login();
+                #[cfg(not(target_os = "windows"))]
+                {
+                    let parent = btn.root().and_downcast::<gtk4::Window>();
+                    let page = Rc::clone(&page_connect);
+                    crate::cloud::sign_in::show_connect(parent.as_ref(), move || {
+                        page.render_current_state();
+                    });
+                }
                 btn.set_label(&t("Waiting for sign-in…"));
                 btn.set_sensitive(false);
                 page.start_login_polling();
@@ -174,13 +185,13 @@ impl CloudPage {
         state.append(&sign_in);
         self.body.append(&state);
 
-        // A terminal login may already be in flight from a previous click; keep
+        // A sign-in may already be in flight from a previous click; keep
         // watching so the page flips to the grid the moment it lands.
         self.start_login_polling();
     }
 
-    /// Watch config for a session to appear after `spawn_apexshot_login`, then
-    /// re-render. Runs at most one timer at a time.
+    /// Watch config for a session to appear after the sign-in card connects,
+    /// then re-render. Runs at most one timer at a time.
     fn start_login_polling(self: &Rc<Self>) {
         if self.polling.get() {
             return;

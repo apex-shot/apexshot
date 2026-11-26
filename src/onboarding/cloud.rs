@@ -61,7 +61,7 @@ fn intro(view: &View) {
     view.begin();
     view.body.append(&heading(
         &t("Share captures as links"),
-        &t("Optional. Connect ApexShot Cloud to turn a capture into a link you can paste anywhere. ApexShot works offline without an account, so you can skip this."),
+        &t("Every capture becomes a link in your clipboard. Free: 20 uploads a month."),
     ));
 
     let hosted_title = t("ApexShot Cloud");

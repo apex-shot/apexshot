@@ -5455,3 +5455,45 @@ msgstr "أوقف أي تسجيل"
 
 msgid "A recording started without the controls bar now stops from the tray, with apexshot record stop, or with Ctrl+C."
 msgstr "التسجيل الذي يبدأ دون شريط التحكم يتوقف الآن من علبة النظام، أو بالأمر apexshot record stop، أو بـ Ctrl+C."
+
+msgid "Not now"
+msgstr "ليس الآن"
+
+msgid "Your capture is saved. Connect a free ApexShot account and every upload becomes a link in your clipboard."
+msgstr "تم حفظ اللقطة. اربط حساب ApexShot مجانيًا ليصبح كل رفع رابطًا في الحافظة."
+
+msgid "Connected as {email}"
+msgstr "متصل باسم {email}"
+
+msgid "Uploading your capture…"
+msgstr "جارٍ رفع لقطتك…"
+
+msgid "Your next capture gets a share link."
+msgstr "ستحصل لقطتك التالية على رابط مشاركة."
+
+msgid "Sign in to get a share link"
+msgstr "سجّل الدخول للحصول على رابط مشاركة."
+
+msgid "Connect your ApexShot account in Settings → Cloud to get share links."
+msgstr "اربط حساب ApexShot في «الإعدادات ← السحابة» للحصول على روابط المشاركة."
+
+msgid ""
+"Every capture becomes a link in your clipboard. Free: 20 uploads a month."
+msgstr "كل لقطة تصبح رابطًا في الحافظة. مجانًا: 20 عملية رفع شهريًا."
+
+msgid "Go Pro for unlimited uploads and links that last 90 days."
+msgstr "قم بالترقية إلى Pro لعمليات رفع غير محدودة وروابط تبقى لمدة 90 يومًا."
+
+msgid ""
+"Link copied. Free links stay up for 7 days.\n"
+"{url}"
+msgstr ""
+"تم نسخ الرابط. تبقى الروابط المجانية متاحة لمدة 7 أيام.\n"
+"{url}"
+
+msgid ""
+"Free links stay up for 7 days.\n"
+"{url}"
+msgstr ""
+"تبقى الروابط المجانية متاحة لمدة 7 أيام.\n"
+"{url}"

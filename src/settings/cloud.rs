@@ -5,8 +5,6 @@ use gtk4::{glib, Align, Box as GtkBox, Button, CheckButton, Entry, Label, Orient
 #[cfg(not(target_os = "windows"))]
 use std::cell::Cell;
 #[cfg(not(target_os = "windows"))]
-use std::process::Command;
-#[cfg(not(target_os = "windows"))]
 use std::rc::Rc;
 
 #[cfg(not(target_os = "windows"))]
@@ -279,8 +277,9 @@ fn build_apexshot_panel(config: &AppConfig) -> ApexShotPanel {
 
     #[cfg(not(target_os = "windows"))]
     {
-        connect_btn.connect_clicked(move |_| {
-            spawn_apexshot_login();
+        connect_btn.connect_clicked(move |btn| {
+            let parent = btn.root().and_downcast::<gtk4::Window>();
+            crate::cloud::sign_in::show_connect(parent.as_ref(), || {});
         });
     }
 
@@ -625,16 +624,10 @@ fn install_auto_upload_observer(
     }
 }
 
-/// How a signed-out user connects. Linux can fall back to the terminal; on
-/// Windows the Connect button's dialog is the only path, so say so.
-#[cfg(target_os = "windows")]
+/// How a signed-out user connects: the Connect button opens the device-code
+/// sign-in card on both platforms.
 fn connect_hint() -> String {
     t("Click Connect to link this device with a one-time code.")
-}
-
-#[cfg(not(target_os = "windows"))]
-fn connect_hint() -> String {
-    t("Run `apexshot login` in a terminal, or click Connect below.")
 }
 
 fn initial(email: &str) -> String {
@@ -645,36 +638,6 @@ fn initial(email: &str) -> String {
         .filter(|c| c.is_ascii_alphabetic())
         .unwrap_or('?');
     ch.to_ascii_uppercase().to_string()
-}
-
-/// Start the device-code login in a terminal so the user never has to sign in
-/// again through a browser session of their own. Shared with the History
-/// window's Cloud page, which watches the config for the session to land.
-/// Windows has no terminal: that build opens Settings, which signs in through
-/// the inline connect view in `crate::settings::cloud_login`.
-#[cfg(not(target_os = "windows"))]
-pub(crate) fn spawn_apexshot_login() {
-    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
-    // Try a few terminal launchers; the first one that spawns wins.
-    let attempts: Vec<Vec<&str>> = vec![
-        vec!["x-terminal-emulator", "-e"],
-        vec!["gnome-terminal", "--"],
-        vec!["konsole", "-e"],
-        vec!["xterm", "-e"],
-        vec!["kgx", "-e"],
-        vec!["alacritty", "-e"],
-    ];
-    for mut attempt in attempts {
-        attempt.push(exe.to_str().unwrap_or("apexshot"));
-        attempt.push("login");
-        if Command::new(attempt[0]).args(&attempt[1..]).spawn().is_ok() {
-            return;
-        }
-    }
-    crate::utils::notify::desktop_notification(
-        "Could not open a terminal",
-        "Run `apexshot login` manually in a terminal to connect your ApexShot Cloud account.",
-    );
 }
 
 /// Windows signs in through the inline connect view in the Settings window's

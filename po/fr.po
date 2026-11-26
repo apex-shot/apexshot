@@ -5542,3 +5542,48 @@ msgstr "Arrêter n'importe quel enregistrement"
 
 msgid "A recording started without the controls bar now stops from the tray, with apexshot record stop, or with Ctrl+C."
 msgstr "Un enregistrement lancé sans la barre de contrôle s'arrête maintenant depuis la zone de notification, avec apexshot record stop ou avec Ctrl+C."
+
+msgid "Not now"
+msgstr "Pas maintenant"
+
+msgid "Your capture is saved. Connect a free ApexShot account and every upload becomes a link in your clipboard."
+msgstr "Votre capture est enregistrée. Connectez un compte ApexShot gratuit et chaque envoi devient un lien dans votre presse-papiers."
+
+msgid "Connected as {email}"
+msgstr "Connecté en tant que {email}"
+
+msgid "Uploading your capture…"
+msgstr "Envoi de votre capture…"
+
+msgid "Your next capture gets a share link."
+msgstr "Votre prochaine capture aura un lien de partage."
+
+msgid "Sign in to get a share link"
+msgstr "Connectez-vous pour obtenir un lien de partage."
+
+msgid "Connect your ApexShot account in Settings → Cloud to get share links."
+msgstr ""
+"Connectez votre compte ApexShot dans Paramètres → Cloud pour obtenir des liens de partage."
+
+msgid ""
+"Every capture becomes a link in your clipboard. Free: 20 uploads a month."
+msgstr ""
+"Chaque capture devient un lien dans votre presse-papiers. Gratuit : 20 téléversements par mois."
+
+msgid "Go Pro for unlimited uploads and links that last 90 days."
+msgstr ""
+"Passez à Pro pour des téléversements illimités et des liens qui durent 90 jours."
+
+msgid ""
+"Link copied. Free links stay up for 7 days.\n"
+"{url}"
+msgstr ""
+"Lien copié. Les liens gratuits restent actifs pendant 7 jours.\n"
+"{url}"
+
+msgid ""
+"Free links stay up for 7 days.\n"
+"{url}"
+msgstr ""
+"Les liens gratuits restent actifs pendant 7 jours.\n"
+"{url}"

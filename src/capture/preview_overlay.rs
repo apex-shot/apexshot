@@ -3,6 +3,7 @@ use crate::config::load_config;
 use crate::i18n::t;
 use gdk4x11::X11Surface;
 use gtk4::gdk::Key;
+use gtk4::gio::prelude::ApplicationExtManual;
 use gtk4::{
     gdk,
     glib::{self, ControlFlow},
@@ -905,6 +906,7 @@ fn setup_preview_window(
         });
         let uploading_click = uploading.clone();
         let upload_btn_click = upload_btn_actions.clone();
+        let upload_btn_retry = upload_btn_actions.downgrade();
         upload_btn_actions.connect_clicked(move |_| {
             // Ignore re-entrant clicks while an upload is already in flight.
             if uploading_click.get() {
@@ -912,6 +914,44 @@ fn setup_preview_window(
             }
 
             let config = load_config();
+            if crate::cloud::sign_in::needs_apexshot_sign_in(&config) {
+                let retry_button = upload_btn_retry.clone();
+                let retry_path = path_upload.clone();
+                crate::cloud::sign_in::prompt_for_upload(None, move || {
+                    if let Some(button) = retry_button.upgrade() {
+                        if button.is_mapped() {
+                            button.emit_clicked();
+                            return;
+                        }
+                    }
+                    let config = crate::config::load_config();
+                    let path = retry_path.clone();
+                    // The preview may already be gone, so this card can be the
+                    // process's only window. Hold the application open until
+                    // the upload finishes instead of letting the card's close
+                    // end the process mid-request.
+                    let mut guard = gtk4::gio::Application::default().map(|app| app.hold());
+                    let done = Arc::new(AtomicBool::new(false));
+                    let done_thread = done.clone();
+                    std::thread::spawn(move || {
+                        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            let _ = crate::cloud::upload::upload_file_with_notifications(
+                                &config, &path,
+                            );
+                        }));
+                        done_thread.store(true, Ordering::Release);
+                    });
+                    glib::timeout_add_local(Duration::from_millis(100), move || {
+                        if done.load(Ordering::Acquire) {
+                            guard.take();
+                            ControlFlow::Break
+                        } else {
+                            ControlFlow::Continue
+                        }
+                    });
+                });
+                return;
+            }
             if !crate::cloud::upload::is_configured(&config) {
                 let (title, body) = crate::cloud::upload::not_configured_notification(&config);
                 crate::utils::notify::desktop_notification_important(&title, &body);

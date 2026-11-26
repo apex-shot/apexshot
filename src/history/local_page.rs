@@ -762,8 +762,19 @@ fn show_action_popover(
         let state = Rc::clone(state);
         let entry = entry.clone();
         let popover = popover.clone();
-        upload_btn.connect_clicked(move |_| {
+        upload_btn.connect_clicked(move |btn| {
             popover.popdown();
+            let config = crate::config::load_config();
+            if crate::cloud::sign_in::needs_apexshot_sign_in(&config) {
+                let retry = btn.downgrade();
+                let parent = btn.root().and_downcast::<gtk4::Window>();
+                crate::cloud::sign_in::prompt_for_upload(parent.as_ref(), move || {
+                    if let Some(button) = retry.upgrade() {
+                        button.emit_clicked();
+                    }
+                });
+                return;
+            }
             state.toast.show(&t("Uploading…"), ToastKind::Neutral, None);
             let (tx, rx) = mpsc::channel::<Result<String, String>>();
             let entry_bg = entry.clone();

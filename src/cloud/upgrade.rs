@@ -53,7 +53,9 @@ pub fn lede(limit: &CloudLimit) -> String {
                     None => t("Uploads come back next month."),
                 },
             );
-            sentences.push(t("Go Pro for unlimited uploads."));
+            sentences.push(t(
+                "Go Pro for unlimited uploads and links that last 90 days.",
+            ));
             sentences.join(" ")
         }
         CloudLimitKind::Storage => {
@@ -73,7 +75,7 @@ pub fn lede(limit: &CloudLimit) -> String {
         CloudLimitKind::Other => {
             let message = limit.message.trim();
             if message.is_empty() {
-                t("Go Pro for unlimited uploads.")
+                t("Go Pro for unlimited uploads and links that last 90 days.")
             } else {
                 message.to_string()
             }
@@ -92,7 +94,9 @@ pub fn lede_almost(limit: &CloudLimit) -> String {
                     &[("used", &used.to_string()), ("max", &max.to_string())],
                 ));
             }
-            sentences.push(t("Go Pro for unlimited uploads."));
+            sentences.push(t(
+                "Go Pro for unlimited uploads and links that last 90 days.",
+            ));
             sentences.join(" ")
         }
         CloudLimitKind::Storage => {
@@ -326,6 +330,7 @@ pub fn show_standalone(limit: CloudLimit, almost: bool) -> Result<(), String> {
 }
 
 fn build_card(window: &Window, dark: bool, limit: &CloudLimit, almost: bool) {
+    crate::usage_telemetry::record_upgrade_card_shown();
     window.add_css_class("apexshot-studio-prompt");
 
     let card = GtkBox::new(Orientation::Vertical, 0);
@@ -386,6 +391,7 @@ fn build_card(window: &Window, dark: bool, limit: &CloudLimit, almost: bool) {
     go_pro.connect_clicked({
         let window = window.downgrade();
         move |_| {
+            crate::usage_telemetry::record_upgrade_clicked();
             open_link(BILLING_URL, t("Could not open billing"));
             if let Some(window) = window.upgrade() {
                 window.close();
@@ -484,7 +490,7 @@ mod tests {
         let local_date =
             format_reset_date("2026-12-01T00:00:00Z").expect("a formattable reset date");
         assert!(copy.contains(&local_date));
-        assert!(copy.contains("Go Pro for unlimited uploads."));
+        assert!(copy.contains("Go Pro for unlimited uploads and links that last 90 days."));
     }
 
     #[test]
@@ -492,7 +498,7 @@ mod tests {
         let limit = limit(CloudLimitKind::MonthlyUploads);
         assert_eq!(
             lede(&limit),
-            "Uploads come back next month. Go Pro for unlimited uploads."
+            "Uploads come back next month. Go Pro for unlimited uploads and links that last 90 days."
         );
     }
 
@@ -503,7 +509,7 @@ mod tests {
         limit.max = Some(20);
         assert_eq!(
             lede(&limit),
-            "12 of 20 free uploads used. Uploads come back next month. Go Pro for unlimited uploads."
+            "12 of 20 free uploads used. Uploads come back next month. Go Pro for unlimited uploads and links that last 90 days."
         );
     }
 
@@ -551,7 +557,7 @@ mod tests {
         assert_eq!(headline_almost(monthly.kind), "Almost out of free uploads");
         assert_eq!(
             lede_almost(&monthly),
-            "19 of 20 used this month. Go Pro for unlimited uploads."
+            "19 of 20 used this month. Go Pro for unlimited uploads and links that last 90 days."
         );
 
         let mut storage = limit(CloudLimitKind::Storage);

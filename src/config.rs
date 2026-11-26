@@ -179,6 +179,9 @@ pub struct AppConfig {
     /// automatically after a screenshot is saved (in addition to the manual
     /// Upload button on Quick Access / the editor).
     pub cloud_auto_upload_after_capture: bool,
+    /// Set after the first successful ApexShot Cloud upload on a free plan, so
+    /// the result toast mentions link expiry only once.
+    pub cloud_link_expiry_notice_shown: bool,
     // Advanced settings
     pub adv_retina_suffix: bool,
     pub adv_clipboard_mode: String,
@@ -318,6 +321,7 @@ impl Default for AppConfig {
             xbackbone_url: String::new(),
             xbackbone_api_token: String::new(),
             cloud_auto_upload_after_capture: true,
+            cloud_link_expiry_notice_shown: false,
             adv_retina_suffix: true,
             adv_clipboard_mode: "File & Image (default)".to_string(),
             adv_ocr_language: "eng".to_string(),

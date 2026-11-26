@@ -86,9 +86,17 @@ pub fn run(command: UploadCommand) -> i32 {
 }
 
 fn upload_now(path: &Path, automatic: bool, report_progress: bool) -> i32 {
-    let config = load_config().sanitized();
+    let mut config = load_config().sanitized();
     if automatic && !upload::should_auto_upload_after_capture(&config) {
         return 0;
+    }
+    // The capture shell starts the explicit upload detached while signed out,
+    // so this process owns the sign-in and the upload that follows it.
+    if !automatic && crate::cloud::sign_in::needs_apexshot_sign_in(&config) {
+        if !crate::cloud::sign_in::run_standalone_for_upload() {
+            return 1;
+        }
+        config = load_config().sanitized();
     }
     if !upload::is_configured(&config) {
         if automatic {
