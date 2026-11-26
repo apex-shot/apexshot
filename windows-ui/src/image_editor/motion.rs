@@ -11,6 +11,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use gtk4::cairo::{Context as CairoContext, Format, ImageSurface, Operator};
+use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{Align, Box as GtkBox, Button, DrawingArea, GestureDrag, Image, Orientation, Overlay};
 
@@ -21,6 +22,7 @@ use super::timeline;
 use super::ui_support::px;
 use super::watermark;
 use crate::capture::editor::state::background::Layout;
+use crate::capture::editor::studio_watermark::ScreenRect;
 use crate::capture::editor::types::ViewTransform;
 use crate::capture::editor::window::icon_names::{custom, shipped};
 use crate::i18n::t;
@@ -394,6 +396,34 @@ pub(super) fn build(
                         watermark::paint(context, card, &state, &surface);
                     }
                     let _ = context.restore();
+                    // Motion export always needs Studio, so while the licence
+                    // is locked the preview carries the shared mark over the
+                    // composition and the card, never clean on screen.
+                    let canvas_rect = ScreenRect {
+                        x: transform.canvas_offset_x,
+                        y: transform.canvas_offset_y,
+                        width: transform.canvas_width * transform.canvas_scale,
+                        height: transform.canvas_height * transform.canvas_scale,
+                    };
+                    let card_rect = ScreenRect {
+                        x: transform.offset_x,
+                        y: transform.offset_y,
+                        width: image_width * transform.scale,
+                        height: image_height * transform.scale,
+                    }
+                    .intersect(canvas_rect)
+                    .unwrap_or(canvas_rect);
+                    host.paint_preview_studio_mark(
+                        context,
+                        canvas_rect,
+                        card_rect,
+                        ScreenRect {
+                            x: 0.0,
+                            y: 0.0,
+                            width,
+                            height,
+                        },
+                    );
                 }
             }
         }
@@ -406,6 +436,24 @@ pub(super) fn build(
             }
         })
     });
+    // A parked preview still needs to drop the mark when Studio is activated
+    // elsewhere: check the cached licence twice a second and repaint on a
+    // change, so no restart is needed.
+    {
+        let host = canvas.host.clone();
+        let preview = preview.downgrade();
+        let last = Cell::new(host.studio_preview_locked());
+        glib::timeout_add_local(Duration::from_millis(500), move || {
+            let Some(preview) = preview.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
+            let locked = host.studio_preview_locked();
+            if locked != last.replace(locked) {
+                preview.queue_draw();
+            }
+            glib::ControlFlow::Continue
+        });
+    }
     timeline.set_thumbnail_source({
         let host = canvas.host.clone();
         Rc::new(move || host.motion_thumbnail())

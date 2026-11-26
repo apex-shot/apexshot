@@ -146,7 +146,7 @@ jobs:
       - name: Build
         shell: pwsh
         run: |
-          cmake -S capture-overlay -B capture-overlay/build -G Ninja -DCMAKE_BUILD_TYPE=Release "-DQt5_DIR=${{ steps.qt.outputs.qt-root-dir }}/lib/cmake/Qt5"
+          cmake -S capture-overlay -B capture-overlay/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DAPEXSHOT_CAPTURE_BUILD_TESTS=ON "-DQt5_DIR=${{ steps.qt.outputs.qt-root-dir }}/lib/cmake/Qt5"
           cmake --build capture-overlay/build
 
       - name: Test

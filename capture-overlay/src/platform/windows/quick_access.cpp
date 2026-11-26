@@ -1469,7 +1469,7 @@ private:
 // ----------------------------------------------------- quick access card ---
 // The card after a capture, dressed like the Linux preview card: the capture
 // fills a 190x135 frame (times Overlay size), Close and Pin ride the top
-// corners, Upload and Edit the bottom ones, and Copy and Save sit centred.
+// corners, Upload the bottom left, and Copy, Save and Edit sit centred.
 constexpr int kCardPreviewWidth = 190;
 constexpr int kCardPreviewHeight = 135;
 constexpr int kCardEdgeMargin = 24;
@@ -1487,12 +1487,11 @@ constexpr ushort kGlyphCardCheck = 0xE06C;  // check
 constexpr ushort kGlyphCardClose = 0xE1B2;  // x
 constexpr ushort kGlyphCardPin = 0xE259;    // pin
 constexpr ushort kGlyphCardUpload = 0xE19E; // upload
-constexpr ushort kGlyphCardEdit = 0xE1F9;   // pencil
 
 class CardButton : public QAbstractButton
 {
 public:
-    enum class Kind { Corner, Close, Pill };
+    enum class Kind { Corner, Close, Pill, Hint };
 
     CardButton(Kind kind, ushort glyph, const QString& label, qreal scale, QWidget* parent)
         : QAbstractButton(parent), m_kind(kind), m_glyph(glyph), m_scale(scale)
@@ -1530,6 +1529,22 @@ protected:
         const QRectF r = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
         const bool hovered = underMouse() && isEnabled();
         const bool pressed = isDown();
+
+        if (m_kind == Kind::Hint) {
+            QColor fill = pressed ? QColor(12, 12, 12, 240)
+                : hovered         ? QColor(42, 42, 42, 240)
+                                  : QColor(18, 18, 18, 219);
+            if (!isEnabled())
+                fill.setAlpha(120);
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(fill);
+            painter.drawRoundedRect(r, r.height() / 2.0, r.height() / 2.0);
+            painter.setFont(font());
+            painter.setPen(QColor(255, 255, 255,
+                                  !isEnabled() ? 120 : (hovered || pressed ? 255 : 219)));
+            painter.drawText(rect(), Qt::AlignCenter, text());
+            return;
+        }
 
         if (m_kind == Kind::Pill) {
             QColor fill = pressed ? QColor(0xe5, 0xe7, 0xeb)
@@ -1594,6 +1609,10 @@ public:
 
         const Platform::ShellSettings settings = Platform::loadShellSettings();
         m_scale = uiScale();
+        // One bump per real screenshot card. The Settings sample and the
+        // recording cards never reach the hint slots.
+        const quint64 screenshotCards =
+            (!m_video && !m_sample) ? Platform::bumpScreenshotCardCount() : 0;
         // Without auto-close the card stays until dismissed, so it starts pinned.
         m_pinned = !settings.quickAccess.autoCloseEnabled;
         m_autoCloseSeconds = settings.quickAccess.autoCloseSeconds;
@@ -1640,12 +1659,6 @@ public:
         m_upload->setEnabled(m_sample || !m_path.isEmpty());
         connect(m_upload, &QAbstractButton::clicked, this, [this] { upload(); });
 
-        auto* edit = new CardButton(CardButton::Kind::Corner, kGlyphCardEdit,
-                                    QStringLiteral("Edit"), m_scale, this);
-        edit->setGeometry(right, bottom, button, button);
-        edit->setEnabled(m_sample || !m_path.isEmpty());
-        connect(edit, &QAbstractButton::clicked, this, [this] { openEditor(); });
-
         m_cancelUpload = new CardButton(CardButton::Kind::Close, kGlyphCardClose,
                                         QStringLiteral("Cancel upload"), m_scale, this);
         m_cancelUpload->setGeometry(right, bottom, button, button);
@@ -1658,6 +1671,11 @@ public:
                                     this);
         save->setToolTip(m_video ? QStringLiteral("Select recording save location")
                                  : QStringLiteral("Select screenshot save location"));
+        auto* edit = new CardButton(CardButton::Kind::Pill, 0, QStringLiteral("Edit"), m_scale,
+                                    this);
+        edit->setToolTip(QStringLiteral("Open in the editor"));
+        edit->setEnabled(m_sample || !m_path.isEmpty());
+        connect(edit, &QAbstractButton::clicked, this, [this] { openEditor(); });
         QFont pillFont = uiFont(qRound(13 * m_scale), true);
         pillFont.setWeight(QFont::DemiBold);
         const QFontMetrics metrics(pillFont);
@@ -1667,18 +1685,62 @@ public:
             std::max(minPill, metrics.horizontalAdvance(copy->text()) + 2 * pillPadding);
         const int saveWidth =
             std::max(minPill, metrics.horizontalAdvance(save->text()) + 2 * pillPadding);
+        const int editWidth =
+            std::max(minPill, metrics.horizontalAdvance(edit->text()) + 2 * pillPadding);
         const int gap = qRound(6 * m_scale);
-        const int pillsLeft =
-            m_cardRect.left() + (m_cardRect.width() - (copyWidth + gap + saveWidth)) / 2;
+        const int pillsLeft = m_cardRect.left()
+            + (m_cardRect.width() - (copyWidth + gap + saveWidth + gap + editWidth)) / 2;
         const int pillsTop = m_cardRect.top() + (m_cardRect.height() - button) / 2;
         copy->setGeometry(pillsLeft, pillsTop, copyWidth, button);
         save->setGeometry(pillsLeft + copyWidth + gap, pillsTop, saveWidth, button);
+        edit->setGeometry(pillsLeft + copyWidth + gap + saveWidth + gap, pillsTop, editWidth,
+                          button);
         const bool hasContent = m_video ? !m_path.isEmpty() : !m_image.isNull();
         copy->setEnabled(hasContent);
         save->setEnabled(hasContent);
         connect(copy, &QAbstractButton::clicked, this, [this] { copyToClipboard(); });
         connect(save, &QAbstractButton::clicked, this, [this] { saveAs(); });
         m_controls = {close, m_pin, m_upload, edit, copy, save};
+
+        // A quiet hint on the tenth, thirtieth and sixtieth lifetime capture,
+        // while Studio is not unlocked. It is a child laid over the frame, so
+        // the card keeps exactly the size the placement measured before it.
+        if (!m_video && !m_sample && Platform::shouldShowEditorHint(screenshotCards)
+            && !settings.studio.unlocked) {
+            auto* hint = new CardButton(CardButton::Kind::Hint, 0, QString(), m_scale, this);
+            const QString hintText =
+                QStringLiteral("Edit: add a background, frame, or 3D tilt.");
+            const int hintPadding = qRound(4 * m_scale);
+            const int hintRoom = std::max(1, m_frameRect.width() - qRound(8 * m_scale));
+            // Keep the sentence whole by giving up a little size before the
+            // text has to elide on a small card.
+            int hintPixels = std::max(1, qRound(9 * m_scale));
+            const int hintPixelsFloor = std::max(1, qRound(7 * m_scale));
+            QFont hintFont = uiFont(hintPixels);
+            QFontMetrics hintMetrics(hintFont);
+            while (hintPixels > hintPixelsFloor
+                   && hintMetrics.horizontalAdvance(hintText) + 2 * hintPadding > hintRoom) {
+                --hintPixels;
+                hintFont = uiFont(hintPixels);
+                hintMetrics = QFontMetrics(hintFont);
+            }
+            hint->setFont(hintFont);
+            hint->setText(hintMetrics.elidedText(hintText, Qt::ElideRight,
+                                                 std::max(1, hintRoom - 2 * hintPadding)));
+            hint->setToolTip(QStringLiteral("Open in the editor"));
+            const int hintWidth =
+                std::min(hintRoom, hintMetrics.horizontalAdvance(hint->text()) + 2 * hintPadding);
+            const int hintHeight = qRound(20 * m_scale);
+            // Centred in the strip between the pill row and the bottom corner
+            // row, so it never covers Upload or the cancel button.
+            const int hintTop = pillsTop + button
+                + std::max(0, (bottom - (pillsTop + button) - hintHeight) / 2);
+            hint->setGeometry(m_frameRect.left() + (m_frameRect.width() - hintWidth) / 2,
+                              hintTop, hintWidth, hintHeight);
+            hint->setEnabled(m_sample || !m_path.isEmpty());
+            connect(hint, &QAbstractButton::clicked, this, [this] { openEditor(); });
+            m_controls.append(hint);
+        }
 
         m_pin->setActive(m_pinned);
         m_pin->setToolTip(m_pinned ? QStringLiteral("Unpin") : QStringLiteral("Pin"));

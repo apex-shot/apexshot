@@ -97,6 +97,7 @@ void checkDefaults(const QTemporaryDir& dir)
     CHECK(!settings.quickAccess.closeAfterUploading);
     CHECK(!settings.cloud.autoUploadAfterCapture);
     CHECK(!settings.cloud.configured);
+    CHECK(!settings.studio.unlocked);
     CHECK(settings.ocr.language == QStringLiteral("eng"));
     CHECK(settings.ocr.keepLineBreaks);
 }
@@ -164,6 +165,9 @@ void checkParsing(const QTemporaryDir& dir)
     "auto_upload_after_capture": true,
     "configured": true
   },
+  "studio": {
+    "unlocked": true
+  },
   "ocr": {
     "language": "deu",
     "keep_line_breaks": false
@@ -222,6 +226,7 @@ void checkParsing(const QTemporaryDir& dir)
     CHECK(settings.quickAccess.closeAfterUploading);
     CHECK(settings.cloud.autoUploadAfterCapture);
     CHECK(settings.cloud.configured);
+    CHECK(settings.studio.unlocked);
     CHECK(settings.ocr.language == QStringLiteral("deu"));
     CHECK(!settings.ocr.keepLineBreaks);
 }
@@ -311,6 +316,34 @@ void checkRecordingDeviceChoices(const QTemporaryDir& dir)
     CHECK(loaded.systemAudioApplication == QStringLiteral("Google Chrome"));
     CHECK(loaded.cameraEnabled);
     CHECK(loaded.cameraDevice == QStringLiteral("Integrated Camera"));
+}
+
+void checkStudioNudges(const QTemporaryDir& dir)
+{
+    const QString path = Platform::studioNudgesPath();
+    CHECK(path == QDir(dir.path()).filePath(QStringLiteral("apexshot/studio-nudges.json")));
+    QFile::remove(path);
+    CHECK(Platform::loadStudioNudges().screenshotCards == 0);
+    CHECK(!Platform::shouldShowEditorHint(0));
+    CHECK(!Platform::shouldShowEditorHint(1));
+
+    for (int expected = 1; expected <= 60; ++expected) {
+        const quint64 count = Platform::bumpScreenshotCardCount();
+        CHECK(count == static_cast<quint64>(expected));
+        CHECK(Platform::shouldShowEditorHint(count)
+              == (expected == 10 || expected == 30 || expected == 60));
+    }
+    CHECK(Platform::loadStudioNudges().screenshotCards == 60);
+
+    // A corrupt file behaves like a fresh install instead of wedging the count.
+    QFile corrupt(path);
+    CHECK(corrupt.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    corrupt.write("not json");
+    corrupt.close();
+    CHECK(Platform::loadStudioNudges().screenshotCards == 0);
+    CHECK(Platform::bumpScreenshotCardCount() == 1);
+
+    QFile::remove(path);
 }
 
 void checkSaving(const QTemporaryDir& dir)
@@ -425,6 +458,7 @@ int main(int argc, char** argv)
     checkSanitizing(dir);
     checkPaths(dir);
     checkRecordingDeviceChoices(dir);
+    checkStudioNudges(dir);
     checkSaving(dir);
     checkClipboardData();
 

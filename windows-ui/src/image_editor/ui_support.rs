@@ -121,6 +121,14 @@ const IMAGE_EDITOR_TYPE_CSS: &str = r#"
         button.image-editor-zoom-label {
             font-size: 13px;
         }
+        button.image-editor-look-chip-action,
+        button.image-editor-look-chip-action label,
+        button.image-editor-look-chip-dismiss {
+            font-size: 13px;
+        }
+        .image-editor-look-chip-dismiss-label {
+            font-size: 16px;
+        }
         button.image-editor-zoom-step {
             font-size: 16px;
         }

@@ -109,6 +109,12 @@ struct ShellSettings {
         bool configured = false;
     } cloud;
 
+    /// A licence covering this build, so the result card can drop its
+    /// occasional editor hint. Mirrored from the Rust entitlement store.
+    struct Studio {
+        bool unlocked = false;
+    } studio;
+
     struct Ocr {
         /// Tesseract-style code from the Rust config (`eng`, `spa`, ...).
         QString language = QStringLiteral("eng");
@@ -161,6 +167,26 @@ void saveWebcamPlacement(const WebcamPlacement& placement);
 QString recordingDeviceChoicesPath();
 RecordingDeviceChoices loadRecordingDeviceChoices();
 void saveRecordingDeviceChoices(const RecordingDeviceChoices& choices);
+
+/// Lifetime counts for the quiet nudges.
+///
+/// They live beside the settings mirror rather than inside it: the Rust
+/// settings window rewrites settings.json wholesale, and these are shell-owned
+/// counters the Rust side neither edits nor reads. A missing or unreadable file
+/// behaves like a fresh install instead of blocking the capture path.
+struct StudioNudges {
+    quint64 screenshotCards = 0;
+};
+
+/// `%APPDATA%/apexshot/studio-nudges.json`.
+QString studioNudgesPath();
+StudioNudges loadStudioNudges();
+/// Persist one more real screenshot result card and return the new lifetime
+/// count. A storage failure returns 0 so the caller behaves as on the first
+/// capture.
+quint64 bumpScreenshotCardCount();
+/// Whether a lifetime count is one of the quiet editor-hint slots.
+bool shouldShowEditorHint(quint64 screenshotCardCount);
 
 /// Read the JSON mirror, applying defaults for missing or invalid values.
 ShellSettings loadShellSettings();

@@ -185,7 +185,14 @@ pub fn studio_unlocked() -> bool {
 pub fn activate_token(token: &str) -> Result<(), StudioEntitlementError> {
     let configuration = build_configuration()?;
     let path = entitlement_path()?;
-    activate_token_at_path(&path, token, &configuration)
+    activate_token_at_path(&path, token, &configuration)?;
+    // The Windows capture shell reads the licence state from its settings
+    // mirror, so publish the activation instead of waiting for Settings.
+    #[cfg(all(target_os = "windows", not(test)))]
+    if let Err(error) = crate::settings::actions::sync_shell_settings_on_start() {
+        eprintln!("[studio] could not refresh the shell settings: {error}");
+    }
+    Ok(())
 }
 
 /// Activates the licence carried by an `apexshot://studio/activate` link.

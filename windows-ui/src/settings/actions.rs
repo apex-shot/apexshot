@@ -524,6 +524,9 @@ fn write_shell_settings_to(path: &Path, config: &AppConfig) -> anyhow::Result<()
             "auto_upload_after_capture": config.cloud_auto_upload_after_capture,
             "configured": crate::cloud::upload::is_configured(config),
         },
+        "studio": {
+            "unlocked": crate::studio_entitlement::studio_unlocked(),
+        },
         "ocr": {
             "language": config.adv_ocr_language,
             "keep_line_breaks": config.adv_ocr_keep_line_breaks,
@@ -757,6 +760,9 @@ mod tests {
         assert_eq!(value["quick_access"]["close_after_uploading"], true);
         assert_eq!(value["cloud"]["auto_upload_after_capture"], true);
         assert_eq!(value["cloud"]["configured"], true);
+        // The value follows this machine's entitlement, so only its shape is
+        // asserted here.
+        assert!(value["studio"]["unlocked"].is_boolean());
         assert_eq!(value["ocr"]["language"], "deu");
         assert_eq!(value["ocr"]["keep_line_breaks"], false);
         assert_eq!(value["telemetry"]["enabled"], true);

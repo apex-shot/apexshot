@@ -20,6 +20,7 @@ mod custom_color;
 mod effect_control;
 mod effect_mode;
 mod inspector;
+mod look_chip;
 mod mode_confirm;
 mod motion;
 mod motion_controls;
