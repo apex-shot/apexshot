@@ -278,6 +278,18 @@ pub(super) fn wire_output_lifecycle(
         let trial_access = crate::studio_entitlement::studio_access(image_capabilities);
 
         let config = crate::config::load_config();
+        if crate::cloud::sign_in::needs_apexshot_sign_in(&config) {
+            let retry = upload_retry.clone();
+            crate::cloud::sign_in::prompt_for_upload(
+                Some(window.upcast_ref::<gtk4::Window>()),
+                move || {
+                    if let Some(button) = retry.upgrade() {
+                        button.emit_clicked();
+                    }
+                },
+            );
+            return;
+        }
         if !crate::cloud::upload::is_configured(&config) {
             let (title, body) = crate::cloud::upload::not_configured_notification(&config);
             crate::utils::notify::desktop_notification_important(&title, &body);

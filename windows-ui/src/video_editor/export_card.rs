@@ -134,11 +134,28 @@ pub(super) fn show(
     };
     upload.connect_clicked({
         let ui = upload_ui.clone();
+        let retry = upload.downgrade();
+        let parent_window = window.downgrade();
         move |_| match ui.phase.get() {
             UploadPhase::Uploading => {}
             UploadPhase::Complete => ui.copy_share_link(),
             UploadPhase::Ready | UploadPhase::Failed => {
                 let config = crate::config::load_config().sanitized();
+                if crate::cloud::sign_in::needs_apexshot_sign_in(&config) {
+                    let parent = parent_window.upgrade();
+                    let retry = retry.clone();
+                    crate::cloud::sign_in::prompt_for_upload(
+                        parent
+                            .as_ref()
+                            .map(|window| window.upcast_ref::<gtk4::Window>()),
+                        move || {
+                            if let Some(button) = retry.upgrade() {
+                                button.emit_clicked();
+                            }
+                        },
+                    );
+                    return;
+                }
                 if !crate::cloud::upload::is_configured(&config) {
                     let (title, body) = crate::cloud::upload::not_configured_notification(&config);
                     crate::utils::notify::desktop_notification_important(&title, &body);

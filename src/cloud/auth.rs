@@ -216,6 +216,7 @@ pub fn begin_device_login() -> Result<DeviceLogin, LoginError> {
         .into_json()
         .map_err(|e| LoginError::Server(format!("Invalid response: {e}")))?;
 
+    crate::usage_telemetry::record_login_started();
     Ok(DeviceLogin {
         device_code: device_resp.device_code,
         user_code: format_user_code(&device_resp.user_code),
@@ -303,6 +304,7 @@ fn finish_login(token: TokenResponse) -> Result<Option<CloudAccount>, LoginError
     account.apply_to_config(&mut config);
     config.cloud_auto_upload_after_capture = true;
     save_config(&config).map_err(|e| LoginError::Local(format!("{e:#}")))?;
+    crate::usage_telemetry::record_login_completed();
 
     Ok(Some(account))
 }

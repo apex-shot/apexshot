@@ -5532,3 +5532,47 @@ msgstr "Jede Aufnahme stoppen"
 
 msgid "A recording started without the controls bar now stops from the tray, with apexshot record stop, or with Ctrl+C."
 msgstr "Eine Aufnahme ohne Steuerleiste lässt sich jetzt über das Tray-Symbol, mit apexshot record stop oder mit Strg+C beenden."
+
+msgid "Not now"
+msgstr "Nicht jetzt"
+
+msgid "Your capture is saved. Connect a free ApexShot account and every upload becomes a link in your clipboard."
+msgstr "Deine Aufnahme ist gespeichert. Verbinde ein kostenloses ApexShot-Konto, und jeder Upload wird zu einem Link in deiner Zwischenablage."
+
+msgid "Connected as {email}"
+msgstr "Verbunden als {email}"
+
+msgid "Uploading your capture…"
+msgstr "Deine Aufnahme wird hochgeladen…"
+
+msgid "Your next capture gets a share link."
+msgstr "Deine nächste Aufnahme erhält einen Freigabelink."
+
+msgid "Sign in to get a share link"
+msgstr "Melde dich an, um einen Freigabelink zu erhalten."
+
+msgid "Connect your ApexShot account in Settings → Cloud to get share links."
+msgstr ""
+"Verbinde dein ApexShot-Konto unter Einstellungen → Cloud, um Freigabelinks zu erhalten."
+
+msgid ""
+"Every capture becomes a link in your clipboard. Free: 20 uploads a month."
+msgstr ""
+"Jede Aufnahme wird zu einem Link in deiner Zwischenablage. Kostenlos: 20 Uploads pro Monat."
+
+msgid "Go Pro for unlimited uploads and links that last 90 days."
+msgstr "Hol dir Pro für unbegrenzte Uploads und Links, die 90 Tage halten."
+
+msgid ""
+"Link copied. Free links stay up for 7 days.\n"
+"{url}"
+msgstr ""
+"Link kopiert. Kostenlose Links bleiben 7 Tage verfügbar.\n"
+"{url}"
+
+msgid ""
+"Free links stay up for 7 days.\n"
+"{url}"
+msgstr ""
+"Kostenlose Links bleiben 7 Tage verfügbar.\n"
+"{url}"

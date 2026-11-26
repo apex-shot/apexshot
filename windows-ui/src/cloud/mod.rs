@@ -29,6 +29,10 @@ pub mod limit_prompt;
 #[rustfmt::skip]
 pub mod listing;
 
+#[path = "../../../src/cloud/sign_in.rs"]
+#[rustfmt::skip]
+pub mod sign_in;
+
 #[path = "../../../src/cloud/upgrade.rs"]
 #[rustfmt::skip]
 pub mod upgrade;

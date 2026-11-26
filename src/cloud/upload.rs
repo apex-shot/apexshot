@@ -134,6 +134,17 @@ pub fn should_auto_upload_after_capture(config: &AppConfig) -> bool {
     config.cloud_auto_upload_after_capture && is_configured(config)
 }
 
+/// Whether this upload's success toast should mention that free links expire.
+///
+/// Free ApexShot Cloud links last seven days, so the first successful upload
+/// says so once and the config remembers that it has.
+fn should_show_link_expiry_notice(config: &AppConfig) -> bool {
+    Destination::from_config(config) == Destination::ApexShot
+        && !config.cloud_link_expiry_notice_shown
+        && !config.cloud_pro_plan
+        && !super::account::is_subscribed_tier(&config.cloud_plan_tier)
+}
+
 pub fn upload_file(config: &AppConfig, path: &Path) -> Result<UploadResult, UploadError> {
     upload_file_with_progress(config, path, &|_, _| {})
 }
@@ -211,14 +222,34 @@ fn upload_and_notify(
         Ok(result) => {
             eprintln!("[cloud] Upload complete: {}", result.share_url);
             let mut body = result.share_url.to_string();
+            let mut copied = false;
             if copy_share_link {
                 if let Err(e) = crate::utils::clipboard::copy_text_to_clipboard(&result.share_url) {
                     eprintln!("[cloud] Failed to copy share link to clipboard: {e}");
                 } else {
+                    copied = true;
                     body = crate::i18n::tfmt(
                         "Copied to clipboard\n{url}",
                         &[("url", &result.share_url)],
                     );
+                }
+            }
+            if should_show_link_expiry_notice(config) {
+                body = if copied {
+                    crate::i18n::tfmt(
+                        "Link copied. Free links stay up for 7 days.\n{url}",
+                        &[("url", &result.share_url)],
+                    )
+                } else {
+                    crate::i18n::tfmt(
+                        "Free links stay up for 7 days.\n{url}",
+                        &[("url", &result.share_url)],
+                    )
+                };
+                let mut updated = load_config().sanitized();
+                updated.cloud_link_expiry_notice_shown = true;
+                if let Err(error) = crate::config::save_config(&updated) {
+                    eprintln!("[cloud] Could not remember the link expiry notice: {error}");
                 }
             }
             // Always include the URL in the body so the toast is useful even if
@@ -403,6 +434,50 @@ mod tests {
         cfg.cloud_api_token = "tok".to_string();
         cfg.cloud_auto_upload_after_capture = false;
         assert!(!should_defer_text_clipboard_to_share_url(&cfg));
+    }
+
+    #[test]
+    fn link_expiry_notice_shows_once_for_a_free_apexshot_account() {
+        let config = AppConfig {
+            cloud_destination: "apexshot".to_string(),
+            cloud_api_token: "tok".to_string(),
+            cloud_plan_tier: "free".to_string(),
+            ..AppConfig::default()
+        };
+        assert!(should_show_link_expiry_notice(&config));
+    }
+
+    #[test]
+    fn link_expiry_notice_stays_hidden_after_it_was_shown() {
+        let config = AppConfig {
+            cloud_link_expiry_notice_shown: true,
+            ..AppConfig::default()
+        };
+        assert!(!should_show_link_expiry_notice(&config));
+    }
+
+    #[test]
+    fn link_expiry_notice_skips_paid_plans() {
+        let by_flag = AppConfig {
+            cloud_pro_plan: true,
+            ..AppConfig::default()
+        };
+        assert!(!should_show_link_expiry_notice(&by_flag));
+
+        let by_tier = AppConfig {
+            cloud_plan_tier: "pro".to_string(),
+            ..AppConfig::default()
+        };
+        assert!(!should_show_link_expiry_notice(&by_tier));
+    }
+
+    #[test]
+    fn link_expiry_notice_skips_xbackbone() {
+        let config = AppConfig {
+            cloud_destination: "xbackbone".to_string(),
+            ..AppConfig::default()
+        };
+        assert!(!should_show_link_expiry_notice(&config));
     }
 
     #[test]

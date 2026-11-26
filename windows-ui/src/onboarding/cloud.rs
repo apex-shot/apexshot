@@ -68,7 +68,7 @@ fn intro(view: &View) {
     view.body.append(&heading(
         scale,
         &t("ApexShot Cloud"),
-        &t("Optional. Link your account to upload screenshots and recordings to ApexShot Cloud."),
+        &t("Every capture becomes a link in your clipboard. Free: 20 uploads a month."),
     ));
 
     let skip_btn = Button::with_label(&t("Skip for now"));

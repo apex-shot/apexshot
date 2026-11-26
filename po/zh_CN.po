@@ -5422,3 +5422,45 @@ msgstr "停止任何录制"
 
 msgid "A recording started without the controls bar now stops from the tray, with apexshot record stop, or with Ctrl+C."
 msgstr "不带控制栏开始的录制，现在可以从托盘、apexshot record stop 或 Ctrl+C 停止。"
+
+msgid "Not now"
+msgstr "稍后"
+
+msgid "Your capture is saved. Connect a free ApexShot account and every upload becomes a link in your clipboard."
+msgstr "你的截图已保存。连接免费的 ApexShot 账户，之后每次上传都会变成剪贴板中的链接。"
+
+msgid "Connected as {email}"
+msgstr "已连接为 {email}"
+
+msgid "Uploading your capture…"
+msgstr "正在上传你的截图…"
+
+msgid "Your next capture gets a share link."
+msgstr "你的下一次截图将获得分享链接。"
+
+msgid "Sign in to get a share link"
+msgstr "登录以获取分享链接。"
+
+msgid "Connect your ApexShot account in Settings → Cloud to get share links."
+msgstr "在“设置 → 云”中连接你的 ApexShot 账户以获取分享链接。"
+
+msgid ""
+"Every capture becomes a link in your clipboard. Free: 20 uploads a month."
+msgstr "每次截图都会成为剪贴板中的链接。免费：每月 20 次上传。"
+
+msgid "Go Pro for unlimited uploads and links that last 90 days."
+msgstr "升级到 Pro，上传不限次数，链接有效期 90 天。"
+
+msgid ""
+"Link copied. Free links stay up for 7 days.\n"
+"{url}"
+msgstr ""
+"链接已复制。免费链接有效期 7 天。\n"
+"{url}"
+
+msgid ""
+"Free links stay up for 7 days.\n"
+"{url}"
+msgstr ""
+"免费链接有效期 7 天。\n"
+"{url}"

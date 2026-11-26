@@ -5522,3 +5522,48 @@ msgstr "Pare qualquer gravação"
 
 msgid "A recording started without the controls bar now stops from the tray, with apexshot record stop, or with Ctrl+C."
 msgstr "Uma gravação iniciada sem a barra de controles agora para pela bandeja, com apexshot record stop ou com Ctrl+C."
+
+msgid "Not now"
+msgstr "Agora não"
+
+msgid "Your capture is saved. Connect a free ApexShot account and every upload becomes a link in your clipboard."
+msgstr "Sua captura foi salva. Conecte uma conta gratuita do ApexShot e cada envio vira um link na sua área de transferência."
+
+msgid "Connected as {email}"
+msgstr "Conectado como {email}"
+
+msgid "Uploading your capture…"
+msgstr "Enviando sua captura…"
+
+msgid "Your next capture gets a share link."
+msgstr "Sua próxima captura terá um link de compartilhamento."
+
+msgid "Sign in to get a share link"
+msgstr "Entre para obter um link de compartilhamento."
+
+msgid "Connect your ApexShot account in Settings → Cloud to get share links."
+msgstr ""
+"Conecte sua conta ApexShot em Configurações → Nuvem para obter links de compartilhamento."
+
+msgid ""
+"Every capture becomes a link in your clipboard. Free: 20 uploads a month."
+msgstr ""
+"Cada captura vira um link na sua área de transferência. Grátis: 20 uploads por mês."
+
+msgid "Go Pro for unlimited uploads and links that last 90 days."
+msgstr ""
+"Faça upgrade para o Pro para ter uploads ilimitados e links que duram 90 dias."
+
+msgid ""
+"Link copied. Free links stay up for 7 days.\n"
+"{url}"
+msgstr ""
+"Link copiado. Links gratuitos ficam disponíveis por 7 dias.\n"
+"{url}"
+
+msgid ""
+"Free links stay up for 7 days.\n"
+"{url}"
+msgstr ""
+"Links gratuitos ficam disponíveis por 7 dias.\n"
+"{url}"

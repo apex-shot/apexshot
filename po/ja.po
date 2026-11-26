@@ -5429,3 +5429,45 @@ msgstr "どの録画も停止可能に"
 
 msgid "A recording started without the controls bar now stops from the tray, with apexshot record stop, or with Ctrl+C."
 msgstr "コントロールバーなしで開始した録画も、トレイ、apexshot record stop、または Ctrl+C で停止できるようになりました。"
+
+msgid "Not now"
+msgstr "今はしない"
+
+msgid "Your capture is saved. Connect a free ApexShot account and every upload becomes a link in your clipboard."
+msgstr "キャプチャは保存されています。無料の ApexShot アカウントを接続すると、アップロードがクリップボードのリンクになります。"
+
+msgid "Connected as {email}"
+msgstr "{email} として接続しました"
+
+msgid "Uploading your capture…"
+msgstr "キャプチャをアップロードしています…"
+
+msgid "Your next capture gets a share link."
+msgstr "次回のキャプチャに共有リンクが付きます。"
+
+msgid "Sign in to get a share link"
+msgstr "ログインして共有リンクを取得しましょう。"
+
+msgid "Connect your ApexShot account in Settings → Cloud to get share links."
+msgstr "設定 → クラウドで ApexShot アカウントを接続すると、共有リンクを取得できます。"
+
+msgid ""
+"Every capture becomes a link in your clipboard. Free: 20 uploads a month."
+msgstr "キャプチャはすべてクリップボード内のリンクになります。無料: 月 20 回までアップロードできます。"
+
+msgid "Go Pro for unlimited uploads and links that last 90 days."
+msgstr "Pro にアップグレードして、アップロードを無制限にし、リンクを 90 日間保持しましょう。"
+
+msgid ""
+"Link copied. Free links stay up for 7 days.\n"
+"{url}"
+msgstr ""
+"リンクをコピーしました。無料リンクは 7 日間有効です。\n"
+"{url}"
+
+msgid ""
+"Free links stay up for 7 days.\n"
+"{url}"
+msgstr ""
+"無料リンクは 7 日間有効です。\n"
+"{url}"

@@ -110,8 +110,8 @@ pub(crate) fn is_configured(config: &AppConfig) -> bool {
 
 pub(crate) fn not_configured_notification(_config: &AppConfig) -> (String, String) {
     (
-        crate::i18n::t("Cloud upload not configured"),
-        crate::i18n::t("Connect ApexShot Cloud in Settings → Cloud, or switch destination to XBackBone and configure it."),
+        crate::i18n::t("Sign in to get a share link"),
+        crate::i18n::t("Connect your ApexShot account in Settings → Cloud to get share links."),
     )
 }
 
@@ -122,7 +122,7 @@ pub(crate) fn upload(
 ) -> Result<UploadResult, UploadError> {
     if !is_configured(config) {
         return Err(UploadError::NotConfigured(
-            "Cloud upload not configured. Run `apexshot login` to connect.".to_string(),
+            "Cloud upload not configured. Connect your account in Settings → Cloud.".to_string(),
         ));
     }
 

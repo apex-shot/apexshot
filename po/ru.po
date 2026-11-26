@@ -5512,3 +5512,47 @@ msgstr "Остановка любой записи"
 
 msgid "A recording started without the controls bar now stops from the tray, with apexshot record stop, or with Ctrl+C."
 msgstr "Запись, начатую без панели управления, теперь можно остановить из трея, командой apexshot record stop или клавишами Ctrl+C."
+
+msgid "Not now"
+msgstr "Не сейчас"
+
+msgid "Your capture is saved. Connect a free ApexShot account and every upload becomes a link in your clipboard."
+msgstr "Снимок сохранён. Подключите бесплатную учётную запись ApexShot, и каждая загрузка станет ссылкой в буфере обмена."
+
+msgid "Connected as {email}"
+msgstr "Вы вошли как {email}"
+
+msgid "Uploading your capture…"
+msgstr "Загрузка снимка…"
+
+msgid "Your next capture gets a share link."
+msgstr "У следующего снимка будет ссылка для публикации."
+
+msgid "Sign in to get a share link"
+msgstr "Войдите, чтобы получить ссылку для общего доступа."
+
+msgid "Connect your ApexShot account in Settings → Cloud to get share links."
+msgstr ""
+"Подключите свою учётную запись ApexShot в разделе «Настройки → Облако», чтобы получать ссылки для общего доступа."
+
+msgid ""
+"Every capture becomes a link in your clipboard. Free: 20 uploads a month."
+msgstr ""
+"Каждый снимок становится ссылкой в буфере обмена. Бесплатно: 20 загрузок в месяц."
+
+msgid "Go Pro for unlimited uploads and links that last 90 days."
+msgstr "Перейдите на Pro для неограниченных загрузок и ссылок, живущих 90 дней."
+
+msgid ""
+"Link copied. Free links stay up for 7 days.\n"
+"{url}"
+msgstr ""
+"Ссылка скопирована. Бесплатные ссылки доступны 7 дней.\n"
+"{url}"
+
+msgid ""
+"Free links stay up for 7 days.\n"
+"{url}"
+msgstr ""
+"Бесплатные ссылки доступны 7 дней.\n"
+"{url}"
