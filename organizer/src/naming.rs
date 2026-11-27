@@ -156,6 +156,16 @@ fn is_usable_subject(subject: &str) -> bool {
 /// Split a window title into its subject and the app name it ends with.
 pub fn split_window_title(title: &str) -> (String, Option<String>) {
     let title = strip_notification_count(title.trim());
+    // A known app name wins whichever dash introduces it: a page titled
+    // "Name — Tagline" still ends in " - Browser".
+    for sep in SEPARATORS {
+        if let Some(index) = title.rfind(sep) {
+            let last = title[index + sep.len()..].trim();
+            if let Some(display) = display_app_from_title_suffix(last) {
+                return (title[..index].trim().to_string(), Some(display));
+            }
+        }
+    }
     let separator = SEPARATORS.into_iter().find(|sep| title.contains(*sep));
     let Some(sep) = separator else {
         return (title.to_string(), None);
@@ -433,9 +443,12 @@ pub fn sanitize_stem(text: &str, max_chars: usize) -> String {
     stem
 }
 
+/// Drop trailing dots (Windows rejects them) and any separator a cut left
+/// dangling, such as "Title -".
 fn trim_trailing_dots(text: &str) -> String {
     let mut out = text.trim_end();
-    while let Some(rest) = out.strip_suffix('.') {
+    while let Some(rest) = out.strip_suffix(['.', '-', '\u{2013}', '\u{2014}', '\u{b7}', ',', ';'])
+    {
         out = rest.trim_end();
     }
     out.to_string()
@@ -541,6 +554,30 @@ mod tests {
         let (subject, app) = split_window_title("Downloads");
         assert_eq!(subject, "Downloads");
         assert_eq!(app, None);
+    }
+
+    #[test]
+    fn split_window_title_finds_the_browser_behind_an_em_dash_tagline() {
+        let title =
+            "FileOctopus \u{2014} Finder Alternative & File Manager for Mac - Google Chrome";
+        let (subject, app) = split_window_title(title);
+        assert_eq!(
+            subject,
+            "FileOctopus \u{2014} Finder Alternative & File Manager for Mac"
+        );
+        assert_eq!(app, Some("Chrome".to_string()));
+    }
+
+    #[test]
+    fn sanitize_stem_drops_a_dangling_separator() {
+        assert_eq!(
+            sanitize_stem("Release notes -", MAX_STEM_CHARS),
+            "Release notes"
+        );
+        assert_eq!(
+            sanitize_stem("Release notes \u{2014}", MAX_STEM_CHARS),
+            "Release notes"
+        );
     }
 
     #[test]

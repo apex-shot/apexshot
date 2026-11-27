@@ -64,6 +64,20 @@ pub fn is_excluded_app(app: Option<&str>, excluded: &[String]) -> bool {
     })
 }
 
+/// A trailing "@2x"-style density marker on a filename stem, or "".
+fn density_suffix(stem: &str) -> &str {
+    let Some(at) = stem.rfind('@') else {
+        return "";
+    };
+    let marker = &stem[at + 1..];
+    let digits = marker.strip_suffix('x').unwrap_or("");
+    if !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()) {
+        &stem[at..]
+    } else {
+        ""
+    }
+}
+
 fn normalize_app(app: &str) -> String {
     let app = app.trim().to_lowercase();
     app.strip_suffix(".exe").unwrap_or(&app).to_string()
@@ -106,8 +120,11 @@ pub fn organize_capture(
                 .file_stem()
                 .map(|stem| stem.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            if suggestion.stem != stem {
-                let target = unique_path(dir, &suggestion.stem, &ext);
+            // Keep a pixel-density suffix such as "@2x" the shell added.
+            let density = density_suffix(&stem);
+            let new_stem = format!("{}{density}", suggestion.stem);
+            if new_stem != stem {
+                let target = unique_path(dir, &new_stem, &ext);
                 if fs::rename(&request.path, &target).is_ok() {
                     path = target;
                     renamed = true;
@@ -256,6 +273,30 @@ mod tests {
         assert_eq!(index.entries()[0].app, Some("Word".to_string()));
         assert!(index.entries()[0].auto_named);
 
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn keeps_the_density_suffix() {
+        assert_eq!(density_suffix("ApexShot-2026-11-27_18-40-50@2x"), "@2x");
+        assert_eq!(density_suffix("me@example"), "");
+        assert_eq!(density_suffix("plain"), "");
+
+        let dir = temp_dir("density");
+        let path = dir.join("ApexShot-2026-11-27_18-40-50@2x.png");
+        fs::write(&path, b"png").unwrap();
+        let req = request(path, Some("Quarterly report - Word"));
+        let settings = OrganizeSettings {
+            auto_name: true,
+            ..OrganizeSettings::default()
+        };
+
+        let outcome = organize_capture(&req, &settings, &dir.join("index.json"), captured_at());
+
+        assert_eq!(
+            outcome.path.file_name().unwrap().to_string_lossy(),
+            "Quarterly report@2x.png"
+        );
         fs::remove_dir_all(&dir).unwrap();
     }
 
