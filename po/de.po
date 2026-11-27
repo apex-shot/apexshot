@@ -5760,3 +5760,27 @@ msgstr "Screenshots benennen sich selbst"
 
 msgid "Each capture is named from what you captured. Search by its text in History."
 msgstr "Jede Aufnahme wird nach ihrem Inhalt benannt. Suche im Verlauf nach ihrem Text."
+
+msgid "Your free AI names are used up"
+msgstr "Deine kostenlosen KI-Namen sind aufgebraucht"
+
+msgid "New screenshots are named from the window title again. Here is what AI names did for yours:"
+msgstr "Neue Screenshots werden wieder nach dem Fenstertitel benannt. Das haben KI-Namen für deine Screenshots getan:"
+
+msgid "$39 once · also includes Motion export, Upscale, and Studio styles"
+msgstr "39 $ einmalig · inklusive Motion-Export, Upscale und Studio-Stilen"
+
+msgid "Want clearer screenshot names?"
+msgstr "Klarere Screenshot-Namen?"
+
+msgid "Your screenshots are named from their window titles. AI names also reads what is on screen, using a small model on this PC."
+msgstr "Deine Screenshots werden nach ihren Fenstertiteln benannt. KI-Namen lesen zusätzlich, was auf dem Bildschirm zu sehen ist, mit einem kleinen Modell auf diesem PC."
+
+msgid "Try AI names"
+msgstr "KI-Namen testen"
+
+msgid "Set up AI names"
+msgstr "KI-Namen einrichten"
+
+msgid "{} free names, then part of Studio"
+msgstr "{} kostenlose Namen, danach Teil von Studio"

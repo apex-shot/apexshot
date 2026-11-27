@@ -5740,3 +5740,27 @@ msgstr "Снимки называют себя сами"
 
 msgid "Each capture is named from what you captured. Search by its text in History."
 msgstr "Каждый снимок называется по тому, что вы захватили. Ищите его по тексту в Истории."
+
+msgid "Your free AI names are used up"
+msgstr "Бесплатные имена с ИИ закончились"
+
+msgid "New screenshots are named from the window title again. Here is what AI names did for yours:"
+msgstr "Новые снимки снова называются по заголовку окна. Вот что имена с ИИ сделали для ваших:"
+
+msgid "$39 once · also includes Motion export, Upscale, and Studio styles"
+msgstr "39 $ один раз · также включает экспорт Motion, Upscale и стили Studio"
+
+msgid "Want clearer screenshot names?"
+msgstr "Хотите более понятные имена снимков?"
+
+msgid "Your screenshots are named from their window titles. AI names also reads what is on screen, using a small model on this PC."
+msgstr "Ваши снимки называются по заголовкам окон. Имена с ИИ также читают, что на экране, с помощью небольшой модели на этом ПК."
+
+msgid "Try AI names"
+msgstr "Попробовать имена с ИИ"
+
+msgid "Set up AI names"
+msgstr "Настроить имена с ИИ"
+
+msgid "{} free names, then part of Studio"
+msgstr "{} бесплатных имён, затем — часть Studio"

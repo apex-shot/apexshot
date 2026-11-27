@@ -5758,3 +5758,27 @@ msgstr "Las capturas se nombran solas"
 
 msgid "Each capture is named from what you captured. Search by its text in History."
 msgstr "Cada captura se nombra según lo que capturaste. Búscala por su texto en el Historial."
+
+msgid "Your free AI names are used up"
+msgstr "Tus nombres con IA gratuitos se han agotado"
+
+msgid "New screenshots are named from the window title again. Here is what AI names did for yours:"
+msgstr "Las nuevas capturas vuelven a nombrarse por el título de la ventana. Esto es lo que los nombres con IA hicieron con las tuyas:"
+
+msgid "$39 once · also includes Motion export, Upscale, and Studio styles"
+msgstr "39 $ una vez · también incluye exportación Motion, Upscale y estilos de Studio"
+
+msgid "Want clearer screenshot names?"
+msgstr "¿Quieres nombres de captura más claros?"
+
+msgid "Your screenshots are named from their window titles. AI names also reads what is on screen, using a small model on this PC."
+msgstr "Tus capturas se nombran por el título de su ventana. Los nombres con IA también leen lo que se ve en pantalla, con un modelo pequeño en este PC."
+
+msgid "Try AI names"
+msgstr "Probar nombres con IA"
+
+msgid "Set up AI names"
+msgstr "Configurar nombres con IA"
+
+msgid "{} free names, then part of Studio"
+msgstr "{} nombres gratis y después pasan a formar parte de Studio"

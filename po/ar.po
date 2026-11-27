@@ -5680,3 +5680,27 @@ msgstr "لقطات الشاشة تسمّي نفسها"
 
 msgid "Each capture is named from what you captured. Search by its text in History."
 msgstr "تُسمّى كل لقطة بحسب ما التقطته. ابحث عن نصّها في السجل."
+
+msgid "Your free AI names are used up"
+msgstr "نفدت أسماء الذكاء الاصطناعي المجانية"
+
+msgid "New screenshots are named from the window title again. Here is what AI names did for yours:"
+msgstr "تُسمّى اللقطات الجديدة بعنوان النافذة مرة أخرى. هذا ما فعله الذكاء الاصطناعي بأسمائها:"
+
+msgid "$39 once · also includes Motion export, Upscale, and Studio styles"
+msgstr "39 دولارًا مرة واحدة · يشمل أيضًا تصدير Motion ورفع الدقة وأنماط Studio"
+
+msgid "Want clearer screenshot names?"
+msgstr "هل تريد أسماء لقطات أوضح؟"
+
+msgid "Your screenshots are named from their window titles. AI names also reads what is on screen, using a small model on this PC."
+msgstr "تُسمّى لقطاتك حسب عناوين نوافذها. يقرأ الذكاء الاصطناعي أيضًا ما يظهر على الشاشة باستخدام نموذج صغير على هذا الكمبيوتر."
+
+msgid "Try AI names"
+msgstr "جرّب أسماء الذكاء الاصطناعي"
+
+msgid "Set up AI names"
+msgstr "إعداد أسماء الذكاء الاصطناعي"
+
+msgid "{} free names, then part of Studio"
+msgstr "{} أسماء مجانية، ثم تصبح جزءًا من Studio"

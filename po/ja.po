@@ -5655,3 +5655,27 @@ msgstr "スクリーンショットに自動で名前が付きます"
 
 msgid "Each capture is named from what you captured. Search by its text in History."
 msgstr "各キャプチャは撮影した内容から名前が付きます。履歴でそのテキストから検索できます。"
+
+msgid "Your free AI names are used up"
+msgstr "無料の AI ネームを使い切りました"
+
+msgid "New screenshots are named from the window title again. Here is what AI names did for yours:"
+msgstr "新しいスクリーンショットは再びウィンドウタイトルから名前が付きます。AI ネームがあなたのスクリーンショットに付けた名前はこちらです:"
+
+msgid "$39 once · also includes Motion export, Upscale, and Studio styles"
+msgstr "39 ドルの買い切り · Motion 書き出し、アップスケール、Studio スタイルも含まれます"
+
+msgid "Want clearer screenshot names?"
+msgstr "スクリーンショットの名前をもっと分かりやすくしますか？"
+
+msgid "Your screenshots are named from their window titles. AI names also reads what is on screen, using a small model on this PC."
+msgstr "スクリーンショットはウィンドウタイトルから名前が付きます。AI ネームは、この PC 上の小さなモデルで画面の内容も読み取ります。"
+
+msgid "Try AI names"
+msgstr "AI ネームを試す"
+
+msgid "Set up AI names"
+msgstr "AI ネームを設定"
+
+msgid "{} free names, then part of Studio"
+msgstr "無料の名前は {} 回、その後は Studio の一部になります"
