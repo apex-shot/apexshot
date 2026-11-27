@@ -1,4 +1,4 @@
-//! What this computer can run: memory, cores, and AVX2 decide the tier.
+//! Whether this computer can run the model fast enough: memory, cores, and AVX2.
 
 use super::catalog::ModelTier;
 
@@ -24,12 +24,11 @@ pub fn recommend() -> Recommendation {
 }
 
 pub fn recommend_for(ram_gb: f64, cores: usize, avx2: bool) -> Option<ModelTier> {
-    if !avx2 || ram_gb < 6.0 || cores < 4 {
+    // The model needs about 2 GB of memory while it names a capture.
+    if !avx2 || ram_gb < 7.5 || cores < 4 {
         None
-    } else if ram_gb >= 15.0 && cores >= 8 {
-        Some(ModelTier::Better)
     } else {
-        Some(ModelTier::Fast)
+        Some(ModelTier::Standard)
     }
 }
 
@@ -65,18 +64,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_large_machine_gets_the_better_model() {
-        assert_eq!(recommend_for(32.0, 20, true), Some(ModelTier::Better));
-    }
-
-    #[test]
-    fn a_small_machine_gets_the_fast_model() {
-        assert_eq!(recommend_for(8.0, 8, true), Some(ModelTier::Fast));
-    }
-
-    #[test]
-    fn memory_alone_does_not_earn_the_better_model() {
-        assert_eq!(recommend_for(16.0, 4, true), Some(ModelTier::Fast));
+    fn a_typical_machine_gets_the_model() {
+        assert_eq!(recommend_for(32.0, 20, true), Some(ModelTier::Standard));
+        assert_eq!(recommend_for(8.0, 4, true), Some(ModelTier::Standard));
     }
 
     #[test]

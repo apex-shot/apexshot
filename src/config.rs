@@ -198,7 +198,7 @@ pub struct AppConfig {
     pub organizer_excluded_apps: Vec<String>,
     /// Let a small local model write screenshot names (Studio).
     pub organizer_ai_enabled: bool,
-    /// Which local model names screenshots: "fast" or "better".
+    /// Which local model names screenshots ("standard").
     pub organizer_ai_model: String,
     /// Anonymous usage heartbeat (daemon). Opt out in Settings or via
     /// `APEXSHOT_TELEMETRY=0`. Default on to match install-script telemetry.
@@ -344,7 +344,7 @@ impl Default for AppConfig {
             organizer_name_style: "clean".to_string(),
             organizer_excluded_apps: Vec::new(),
             organizer_ai_enabled: false,
-            organizer_ai_model: "fast".to_string(),
+            organizer_ai_model: "standard".to_string(),
             // Flatpak: off until the user explicitly opts in (plan §10.3 / §9.4).
             telemetry_enabled: !cfg!(feature = "flatpak"),
             windows_telemetry_enabled: false,

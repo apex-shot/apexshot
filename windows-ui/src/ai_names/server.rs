@@ -129,7 +129,7 @@ pub fn complete(base_url: &str, system: &str, user: &str, deadline: Instant) -> 
             {"role": "user", "content": user},
         ],
         "max_tokens": 32,
-        "temperature": 0.2,
+        "temperature": 0.0,
         "chat_template_kwargs": {"enable_thinking": false},
     });
     let response = ureq::post(&format!("{base_url}/v1/chat/completions"))

@@ -7,7 +7,7 @@
 
 use crate::ai_names::{
     benchmark, install, is_installed, model_spec, recommend, remove, tier_from_setting,
-    tier_setting, trial_remaining, InstallProgress, ModelTier, TRIAL_NAMES,
+    trial_remaining, InstallProgress, ModelTier, TRIAL_NAMES,
 };
 use crate::config::{load_config, save_config};
 use crate::i18n::{t, tfmt};
@@ -16,8 +16,8 @@ use crate::studio_entitlement::{
 };
 use gtk4::prelude::*;
 use gtk4::{
-    glib, Align, Box as GtkBox, Button, DropDown, Entry, Label, Orientation, Overlay, ProgressBar,
-    Revealer, Switch,
+    glib, Align, Box as GtkBox, Button, Entry, Label, Orientation, Overlay, ProgressBar, Revealer,
+    Switch,
 };
 use std::cell::Cell;
 use std::rc::Rc;
@@ -315,52 +315,17 @@ fn ai_names_rows(frame: &GtkBox, root: &GtkBox, status: StudioStatus) {
     row.append(&examples);
     frame.append(&row);
 
-    // The model choice, with the recommendation for this PC.
+    // The model, and whether this PC runs it fast enough.
     let row = table_row();
-    let recommendation = recommend();
-    let hint = match recommendation.tier {
-        Some(recommended) => {
-            let recommended_spec = model_spec(recommended);
-            let label = t(recommended_spec.label);
-            let size = size_text(recommended_spec.bytes);
-            t_args(
-                "Recommended for this PC: {} ({})",
-                &[label.as_str(), size.as_str()],
-            )
-        }
+    let size = size_text(spec.bytes);
+    let hint = match recommend().tier {
+        Some(_) => t_args(
+            "Recommended for this PC: {} ({})",
+            &[spec.detail, size.as_str()],
+        ),
         None => t("This PC is below the recommended specs, so names may be slow."),
     };
     row.append(&row_text(&t("Model"), Some(&hint)));
-    let tiers = [ModelTier::Fast, ModelTier::Better];
-    let labels: Vec<String> = tiers
-        .iter()
-        .map(|tier| {
-            let spec = model_spec(*tier);
-            format!("{} · {}", t(spec.label), size_text(spec.bytes))
-        })
-        .collect();
-    let choices: Vec<&str> = labels.iter().map(String::as_str).collect();
-    let dropdown = DropDown::from_strings(&choices);
-    let selected = tiers.iter().position(|item| *item == tier).unwrap_or(0);
-    dropdown.set_selected(selected as u32);
-    dropdown.set_valign(Align::Center);
-    dropdown.connect_selected_notify({
-        let root = root.downgrade();
-        move |dropdown| {
-            if let Some(tier) = tiers.get(dropdown.selected() as usize) {
-                let mut config = load_config();
-                config.organizer_ai_model = tier_setting(*tier).to_string();
-                if let Err(error) = save_config(&config) {
-                    eprintln!("[studio] Could not save the AI model: {error}");
-                }
-            }
-            if let Some(root) = root.upgrade() {
-                // Rebuilding drops this row; let the change finish first.
-                glib::idle_add_local_once(move || render(&root, None));
-            }
-        }
-    });
-    row.append(&dropdown);
     frame.append(&row);
 
     // The chosen model: ready to use, or a one-time download.

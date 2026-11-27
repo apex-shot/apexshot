@@ -13,7 +13,16 @@ pub trait AiNamer {
     fn complete(&self, system: &str, user: &str) -> Option<String>;
 }
 
-pub const SYSTEM_PROMPT: &str = "You name screenshot files. Reply with only the file name: 3 to 8 plain words, no file extension, no quotes, no punctuation at the end. Say what the screenshot shows, the most specific thing first: the person, product, document, or topic, not the app. Never include passwords, keys, email addresses, phone numbers, or account numbers.";
+pub const SYSTEM_PROMPT: &str = "You write file names for screenshots. From the window title and the text on screen, find the main thing the screenshot is about and name it in 4 to 8 words.
+Rules:
+- Start with the subject: who wrote it, or what document, product, error, or topic it is. Then what it is about.
+- Use only names and facts that appear in the given text. Never invent names.
+- Ignore ads, menus, sidebars, and trending lists.
+- Never answer with only the app or website name.
+- No file extension, no quotes, no final punctuation.
+- Never include passwords, keys, email addresses, phone numbers, or account numbers.
+The shape of a good answer: \"<who or what> <about what>\", like \"<sender> invoice reminder due <date>\" or \"<author> post about <topic>\".
+Reply with the name only.";
 
 /// Longest on-screen text sent to the model, in characters.
 pub const MAX_PROMPT_TEXT_CHARS: usize = 1500;

@@ -2,10 +2,11 @@
 
 use std::path::PathBuf;
 
+/// The model AI names use. One for now: a smaller one named the app instead
+/// of the content too often to be worth offering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelTier {
-    Fast,
-    Better,
+    Standard,
 }
 
 pub struct ModelSpec {
@@ -25,22 +26,9 @@ pub struct RuntimeSpec {
     pub version: &'static str,
 }
 
-static FAST: ModelSpec = ModelSpec {
-    tier: ModelTier::Fast,
-    label: "Fast",
-    detail: "Qwen3.5 0.8B",
-    file_name: "qwen3.5-0.8b-q4_k_m.gguf",
-    url: concat!(
-        "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/",
-        "Qwen3.5-0.8B-Q4_K_M.gguf"
-    ),
-    sha256: "bd258782e35f7f458f8aced1adc053e6e92e89bc735ba3be89d38a06121dc517",
-    bytes: 533_000_000,
-};
-
-static BETTER: ModelSpec = ModelSpec {
-    tier: ModelTier::Better,
-    label: "Better",
+static STANDARD: ModelSpec = ModelSpec {
+    tier: ModelTier::Standard,
+    label: "Standard",
     detail: "Qwen3.5 2B",
     file_name: "qwen3.5-2b-q4_k_m.gguf",
     url: concat!(
@@ -63,8 +51,7 @@ static RUNTIME: RuntimeSpec = RuntimeSpec {
 
 pub fn model_spec(tier: ModelTier) -> &'static ModelSpec {
     match tier {
-        ModelTier::Fast => &FAST,
-        ModelTier::Better => &BETTER,
+        ModelTier::Standard => &STANDARD,
     }
 }
 
@@ -72,17 +59,13 @@ pub fn runtime_spec() -> &'static RuntimeSpec {
     &RUNTIME
 }
 
-pub fn tier_from_setting(value: &str) -> ModelTier {
-    match value.trim() {
-        "better" => ModelTier::Better,
-        _ => ModelTier::Fast,
-    }
+pub fn tier_from_setting(_value: &str) -> ModelTier {
+    ModelTier::Standard
 }
 
 pub fn tier_setting(tier: ModelTier) -> &'static str {
     match tier {
-        ModelTier::Fast => "fast",
-        ModelTier::Better => "better",
+        ModelTier::Standard => "standard",
     }
 }
 
