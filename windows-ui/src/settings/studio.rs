@@ -303,6 +303,30 @@ fn ai_names_rows(frame: &GtkBox, root: &GtkBox, status: StudioStatus) {
     row.append(&switch);
     frame.append(&row);
 
+    // Clean up misread letters and digits in copied text.
+    let row = table_row();
+    let hint = if !supported {
+        t("This PC is better off with the free names.")
+    } else if locked {
+        t("Your free AI names are used. Upgrade to Studio to keep them.")
+    } else {
+        t("When you capture text, the model fixes misread letters and digits. It never rewrites what the text says.")
+    };
+    row.append(&row_text(&t("Fix reading mistakes in copied text"), Some(&hint)));
+    let switch = Switch::new();
+    switch.set_active(config.ocr_ai_cleanup && !locked && supported);
+    switch.set_sensitive(is_installed(tier) && !locked && supported);
+    switch.set_valign(Align::Center);
+    switch.connect_active_notify(|switch| {
+        let mut config = load_config();
+        config.ocr_ai_cleanup = switch.is_active();
+        if let Err(error) = save_config(&config) {
+            eprintln!("[studio] Could not save the text cleanup setting: {error}");
+        }
+    });
+    row.append(&switch);
+    frame.append(&row);
+
     // How the free name and the AI name compare.
     let row = table_row();
     let examples = GtkBox::new(Orientation::Vertical, 6);
@@ -496,6 +520,12 @@ fn included_rows(frame: &GtkBox, status: StudioStatus) {
         active,
         &t("AI names"),
         &t("Clearer screenshot names from a small model on this PC."),
+    );
+    feature_row(
+        frame,
+        active,
+        &t("Clean text copies"),
+        &t("Copied text with reading mistakes fixed by a small model on this PC."),
     );
     feature_row(
         frame,

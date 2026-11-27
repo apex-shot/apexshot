@@ -5803,3 +5803,21 @@ msgstr "Para este PC, los nombres gratuitos son la mejor opción."
 
 msgid "AI names need at least 8 GB of memory, 4 processor cores, and AVX2."
 msgstr "Los nombres con IA necesitan al menos 8 GB de memoria, 4 núcleos de procesador y AVX2."
+
+msgid "Keep layout"
+msgstr "Mantener el diseño"
+
+msgid "Copied text keeps tables, code indentation, and paragraphs."
+msgstr "El texto copiado conserva tablas, la indentación del código y los párrafos."
+
+msgid "Fix reading mistakes in copied text"
+msgstr "Corregir errores de lectura en el texto copiado"
+
+msgid "When you capture text, the model fixes misread letters and digits. It never rewrites what the text says."
+msgstr "Al capturar texto, el modelo corrige letras y dígitos mal leídos. Nunca reescribe lo que dice el texto."
+
+msgid "Clean text copies"
+msgstr "Copias de texto limpias"
+
+msgid "Copied text with reading mistakes fixed by a small model on this PC."
+msgstr "Texto copiado con los errores de lectura corregidos por un modelo pequeño en este PC."

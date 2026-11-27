@@ -5692,3 +5692,21 @@ msgstr "这台电脑更适合使用免费命名。"
 
 msgid "AI names need at least 8 GB of memory, 4 processor cores, and AVX2."
 msgstr "AI 命名需要至少 8 GB 内存、4 个处理器核心并支持 AVX2。"
+
+msgid "Keep layout"
+msgstr "保留布局"
+
+msgid "Copied text keeps tables, code indentation, and paragraphs."
+msgstr "复制的文本会保留表格、代码缩进和段落。"
+
+msgid "Fix reading mistakes in copied text"
+msgstr "修正复制文本中的识别错误"
+
+msgid "When you capture text, the model fixes misread letters and digits. It never rewrites what the text says."
+msgstr "捕获文本时，模型会修正识别错的字母和数字，绝不改写文本内容。"
+
+msgid "Clean text copies"
+msgstr "干净文本副本"
+
+msgid "Copied text with reading mistakes fixed by a small model on this PC."
+msgstr "由本机小型模型修正识别错误的复制文本。"
