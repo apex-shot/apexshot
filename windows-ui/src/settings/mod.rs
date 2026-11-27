@@ -155,8 +155,16 @@ pub(crate) fn show_settings_toast(
     }
 }
 
+/// The page a freshly opened Settings window starts on.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum InitialPage {
+    Default,
+    Cloud,
+    Studio,
+}
+
 pub fn show_settings_window() -> anyhow::Result<()> {
-    show_settings_window_with(false)
+    show_settings_window_with(InitialPage::Default)
 }
 
 /// Open Settings on the Cloud page and start the connect flow.
@@ -164,37 +172,42 @@ pub fn show_settings_window() -> anyhow::Result<()> {
 /// A second process hands the request to the running window through the
 /// `cloud-connect` action instead of opening its own.
 pub fn show_settings_window_for_cloud_connect() -> anyhow::Result<()> {
-    show_settings_window_with(true)
+    show_settings_window_with(InitialPage::Cloud)
 }
 
-fn show_settings_window_with(cloud_connect: bool) -> anyhow::Result<()> {
+/// Open Settings straight on the Studio page.
+pub fn show_settings_window_for_studio() -> anyhow::Result<()> {
+    show_settings_window_with(InitialPage::Studio)
+}
+
+fn show_settings_window_with(initial_page: InitialPage) -> anyhow::Result<()> {
     let app = Application::builder()
         .application_id(crate::app_identity::app_id())
         .build();
 
     install_cloud_connect_action(&app);
-    let pending_cloud_connect = Rc::new(Cell::new(cloud_connect));
+    let pending_page = Rc::new(Cell::new(initial_page));
 
     app.connect_activate(move |application| {
         crate::capture::editor::ui_support::apply_theme_to_gtk();
         crate::platform::sharpen_text();
-        let wants_connect = pending_cloud_connect.replace(false);
+        let wants_page = pending_page.replace(InitialPage::Default);
         let windows = application.windows();
         if let Some(existing_window) = windows.first() {
             existing_window.present();
-            if wants_connect {
+            if wants_page == InitialPage::Cloud {
                 start_cloud_connect();
             }
             return;
         }
-        build_settings_window(application, wants_connect);
-        if wants_connect {
+        build_settings_window(application, wants_page);
+        if wants_page == InitialPage::Cloud {
             // Let the new window map first so the sign-in card has a parent.
             gtk4::glib::idle_add_local_once(start_cloud_connect);
         }
     });
 
-    if cloud_connect && hand_cloud_connect_to_primary(&app) {
+    if initial_page == InitialPage::Cloud && hand_cloud_connect_to_primary(&app) {
         return Ok(());
     }
 
@@ -217,7 +230,7 @@ fn open_settings_for_cloud_connect(app: &Application) {
     if let Some(window) = app.windows().first() {
         window.present();
     } else {
-        build_settings_window(app, true);
+        build_settings_window(app, InitialPage::Cloud);
     }
     gtk4::glib::idle_add_local_once(start_cloud_connect);
 }
@@ -267,7 +280,7 @@ fn hand_cloud_connect_to_primary(app: &Application) -> bool {
     true
 }
 
-fn build_settings_window(app: &Application, initial_cloud: bool) {
+fn build_settings_window(app: &Application, initial_page: InitialPage) {
     crate::icons::install();
 
     install_settings_css();
@@ -676,7 +689,11 @@ fn build_settings_window(app: &Application, initial_cloud: bool) {
     add_section(&stack, &studio, "9", &t("Studio"), text_scale);
     add_section(&stack, &about.section, "10", &t("About"), text_scale);
 
-    stack.set_visible_child_name(if initial_cloud { "6" } else { "0" });
+    stack.set_visible_child_name(match initial_page {
+        InitialPage::Cloud => "6",
+        InitialPage::Studio => "9",
+        InitialPage::Default => "0",
+    });
 
     // Development aid: open a specific page without driving the sidebar.
     if let Ok(page) = std::env::var("APEXSHOT_SETTINGS_PAGE") {
@@ -862,7 +879,7 @@ fn build_settings_window(app: &Application, initial_cloud: bool) {
 pub(crate) fn rebuild_settings_window(window: &ApplicationWindow) {
     if let Some(app) = window.application() {
         window.close();
-        build_settings_window(&app, false);
+        build_settings_window(&app, InitialPage::Default);
     }
 }
 

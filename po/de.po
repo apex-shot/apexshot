@@ -5754,3 +5754,9 @@ msgstr "{} · wird einmal heruntergeladen und funktioniert dann offline"
 
 msgid "{} of {} AI names left. After that, names stay rule-based until you upgrade."
 msgstr "{} von {} KI-Namen übrig. Danach bleiben Namen regelbasiert, bis du ein Upgrade durchführst."
+
+msgid "Screenshots name themselves"
+msgstr "Screenshots benennen sich selbst"
+
+msgid "Each capture is named from what you captured. Search by its text in History."
+msgstr "Jede Aufnahme wird nach ihrem Inhalt benannt. Suche im Verlauf nach ihrem Text."

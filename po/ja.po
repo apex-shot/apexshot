@@ -5649,3 +5649,9 @@ msgstr "{} · 一度ダウンロードすると、その後はオフラインで
 
 msgid "{} of {} AI names left. After that, names stay rule-based until you upgrade."
 msgstr "AI による名前があと {} / {} 回使えます。その後はアップグレードするまで名前はルールベースのままです。"
+
+msgid "Screenshots name themselves"
+msgstr "スクリーンショットに自動で名前が付きます"
+
+msgid "Each capture is named from what you captured. Search by its text in History."
+msgstr "各キャプチャは撮影した内容から名前が付きます。履歴でそのテキストから検索できます。"

@@ -19,15 +19,19 @@ pub fn build(body: &GtkBox, actions: &GtkBox, nav: &Nav) {
     let tray_body = t("Right-click for your capture menu.");
     let hotkeys_title = t("Hotkeys");
     let hotkeys_body = t("Your shortcuts work while ApexShot runs.");
+    let naming_title = t("Screenshots name themselves");
+    let naming_body =
+        t("Each capture is named from what you captured. Search by its text in History.");
     let menu_title = t("Settings");
     let menu_body = t("Change any of this later.");
-    let [tray_icon, hotkeys_icon, settings_icon] =
+    let [tray_icon, hotkeys_icon, naming_icon, settings_icon] =
         feature_icons(crate::settings::windowing::prefers_dark_glass_theme());
     let checklist = feature_card_list(
         scale,
         &[
             (tray_icon, tray_title.as_str(), tray_body.as_str()),
             (hotkeys_icon, hotkeys_title.as_str(), hotkeys_body.as_str()),
+            (naming_icon, naming_title.as_str(), naming_body.as_str()),
             (settings_icon, menu_title.as_str(), menu_body.as_str()),
         ],
     );
@@ -41,17 +45,19 @@ pub fn build(body: &GtkBox, actions: &GtkBox, nav: &Nav) {
     actions.append(&finish_btn);
 }
 
-fn feature_icons(dark: bool) -> [&'static str; 3] {
+fn feature_icons(dark: bool) -> [&'static str; 4] {
     if dark {
         [
             custom::PANELS_TOP_LEFT,
             custom::KEYBOARD,
+            custom::SEARCH,
             custom::SETTINGS_2,
         ]
     } else {
         [
             custom::PANELS_TOP_LEFT_LIGHT,
             custom::KEYBOARD_LIGHT,
+            custom::SEARCH_LIGHT,
             custom::SETTINGS_2_LIGHT,
         ]
     }

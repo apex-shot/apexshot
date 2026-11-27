@@ -5734,3 +5734,9 @@ msgstr "{} · скачивается один раз, затем работае�
 
 msgid "{} of {} AI names left. After that, names stay rule-based until you upgrade."
 msgstr "Осталось {} из {} имён с ИИ. Затем имена будут по правилам до перехода на Studio."
+
+msgid "Screenshots name themselves"
+msgstr "Снимки называют себя сами"
+
+msgid "Each capture is named from what you captured. Search by its text in History."
+msgstr "Каждый снимок называется по тому, что вы захватили. Ищите его по тексту в Истории."
