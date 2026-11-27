@@ -101,8 +101,16 @@ fn build_card(app: &Application, kind: CardKind) {
     let title_label = centered_label(&title, "apexshot-studio-headline");
     title_label.add_css_class("apexshot-studio-headline-compact");
     title_label.add_css_class("ai-names-headline");
-    title_label.set_max_width_chars(34);
-    body.append(&title_label);
+    title_label.set_max_width_chars(32);
+    let title_line = GtkBox::new(Orientation::Horizontal, px(8.0));
+    title_line.set_halign(Align::Center);
+    title_line.set_valign(Align::Center);
+    title_line.append(&title_label);
+    let beta = Label::new(Some(&t("Beta")));
+    beta.add_css_class("ai-names-tag");
+    beta.set_valign(Align::Center);
+    title_line.append(&beta);
+    body.append(&title_line);
 
     let lede_label = centered_label(&lede, "apexshot-studio-lede");
     lede_label.set_max_width_chars(40);

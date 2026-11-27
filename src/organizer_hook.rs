@@ -361,6 +361,10 @@ fn capture_window_context() -> (Option<String>, Option<String>) {
     if crate::backend::is_x11_session() {
         return x11_active_window_identity().unwrap_or((None, None));
     }
+    // KDE on Wayland: read the focused window through a one-shot KWin script.
+    if crate::backend::kde_screenshot::is_kde_wayland_session() {
+        return kde_active_window_identity().unwrap_or((None, None));
+    }
     // GNOME on Wayland: a client cannot see other windows, but the ApexShot
     // Shell extension can say which one the user was in.
     gnome_extension_window_identity().unwrap_or((None, None))
@@ -419,6 +423,209 @@ fn pick_user_window(json: &str) -> Option<(Option<String>, Option<String>)> {
         })?;
     let text = |key: &str| chosen[key].as_str().map(str::to_string);
     Some((text("app"), text("title")))
+}
+
+/// How long the KDE Wayland window lookup may take before the capture
+/// carries on without a title.
+const KDE_WINDOW_TIMEOUT: Duration = Duration::from_millis(500);
+
+const KWIN_SERVICE: &str = "org.kde.KWin";
+const KWIN_SCRIPTING_PATH: &str = "/Scripting";
+const KWIN_SCRIPTING_INTERFACE: &str = "org.kde.kwin.Scripting";
+const KWIN_SCRIPT_INTERFACE: &str = "org.kde.kwin.Script";
+const KDE_REPORT_PATH: &str = "/org/apexshot/WindowIdentity";
+const KDE_REPORT_INTERFACE: &str = "org.apexshot.WindowIdentity";
+
+/// The focused window's app and title on KDE Plasma with Wayland.
+///
+/// A client cannot ask KWin for the focused window directly, and the
+/// interactive window query would need a click. Instead a short-lived KWin
+/// script reads `workspace.activeWindow` and calls a temporary bus object
+/// back. The lookup runs on its own thread so a slow compositor can never
+/// hold a capture for longer than [`KDE_WINDOW_TIMEOUT`].
+fn kde_active_window_identity() -> Option<(Option<String>, Option<String>)> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::Builder::new()
+        .name("apexshot-kde-window".to_string())
+        .spawn(move || {
+            let _ = tx.send(kde_active_window_report());
+        })
+        .ok()?;
+    let report = rx.recv_timeout(KDE_WINDOW_TIMEOUT).ok().flatten()?;
+    let (app, title) = parse_kde_window_report(&report)?;
+    Some(clean_window_identity(app, title))
+}
+
+/// Load the reporting script into KWin and wait for its callback.
+fn kde_active_window_report() -> Option<String> {
+    let deadline = Instant::now() + KDE_WINDOW_TIMEOUT;
+    let connection = zbus::blocking::connection::Builder::session()
+        .ok()?
+        .method_timeout(KDE_WINDOW_TIMEOUT)
+        .build()
+        .ok()?;
+    let bus_name = connection.unique_name()?.to_string();
+    let (tx, rx) = mpsc::channel();
+    connection
+        .object_server()
+        .at(KDE_REPORT_PATH, KdeWindowIdentityReport { tx })
+        .ok()?;
+
+    let script_file = write_kde_window_script(&bus_name)?;
+    let script_path = script_file.0.to_string_lossy().into_owned();
+    let script_name = script_file
+        .0
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("apexshot-window")
+        .to_string();
+    let loaded = connection
+        .call_method(
+            Some(KWIN_SERVICE),
+            KWIN_SCRIPTING_PATH,
+            Some(KWIN_SCRIPTING_INTERFACE),
+            "loadScript",
+            &(script_path.as_str(), script_name.as_str()),
+        )
+        .or_else(|_| {
+            // Plasma 5's loadScript takes the path only.
+            connection.call_method(
+                Some(KWIN_SERVICE),
+                KWIN_SCRIPTING_PATH,
+                Some(KWIN_SCRIPTING_INTERFACE),
+                "loadScript",
+                &(script_path.as_str(),),
+            )
+        });
+    let reply = loaded.ok()?;
+    let script_id: i32 = reply.body().deserialize().ok()?;
+    if script_id < 0 {
+        return None;
+    }
+
+    let object_path = format!("/Scripting/Script{script_id}");
+    let _ = connection.call_method(
+        Some(KWIN_SERVICE),
+        object_path.as_str(),
+        Some(KWIN_SCRIPT_INTERFACE),
+        "run",
+        &(),
+    );
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    let report = if remaining.is_zero() {
+        None
+    } else {
+        rx.recv_timeout(remaining).ok()
+    };
+
+    // Stop and unload by name so nothing stays registered in KWin. A failed
+    // cleanup must not change the answer.
+    let _ = connection.call_method(
+        Some(KWIN_SERVICE),
+        object_path.as_str(),
+        Some(KWIN_SCRIPT_INTERFACE),
+        "stop",
+        &(),
+    );
+    let _ = connection.call_method(
+        Some(KWIN_SERVICE),
+        KWIN_SCRIPTING_PATH,
+        Some(KWIN_SCRIPTING_INTERFACE),
+        "unloadScript",
+        &(script_name.as_str(),),
+    );
+    report
+}
+
+/// The temporary bus object the KWin script calls back.
+struct KdeWindowIdentityReport {
+    tx: mpsc::Sender<String>,
+}
+
+#[zbus::interface(name = "org.apexshot.WindowIdentity")]
+impl KdeWindowIdentityReport {
+    fn report(&self, payload: String) {
+        let _ = self.tx.send(payload);
+    }
+}
+
+/// A script file that removes itself when the lookup ends, including on the
+/// early returns above.
+struct KdeScriptFile(PathBuf);
+
+impl Drop for KdeScriptFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// Write the one-shot script where KWin can read it. The runtime directory is
+/// shared with the host in a sandbox, unlike the private temporary directory.
+fn write_kde_window_script(bus_name: &str) -> Option<KdeScriptFile> {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_nanos();
+    let file_name = format!("apexshot-window-{}-{nanos}.js", std::process::id());
+    let directories = [
+        std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from),
+        Some(std::env::temp_dir()),
+    ];
+    for directory in directories.into_iter().flatten() {
+        let path = directory.join(&file_name);
+        if std::fs::write(&path, kde_window_script(bus_name)).is_ok() {
+            return Some(KdeScriptFile(path));
+        }
+    }
+    None
+}
+
+/// The script: read the focused window and report its caption and app class
+/// back to ApexShot's temporary bus name.
+fn kde_window_script(bus_name: &str) -> String {
+    format!(
+        r#"function run() {{
+    var report = "";
+    try {{
+        var active = workspace.activeWindow;
+        if (active) {{
+            report = JSON.stringify({{ caption: active.caption, resourceClass: active.resourceClass }});
+        }}
+    }} catch (error) {{
+    }}
+    callDBus("{}", "{}", "{}", "Report", report);
+}}
+run();
+"#,
+        bus_name, KDE_REPORT_PATH, KDE_REPORT_INTERFACE
+    )
+}
+
+#[derive(serde::Deserialize)]
+struct KdeWindowReport {
+    #[serde(default)]
+    caption: String,
+    #[serde(default, rename = "resourceClass")]
+    resource_class: String,
+}
+
+/// Read the report a KWin script sent, accepting the doubly encoded string
+/// some KWin versions produce.
+fn parse_kde_window_report(payload: &str) -> Option<(Option<String>, Option<String>)> {
+    let payload = payload.trim();
+    if payload.is_empty() {
+        return None;
+    }
+    let report: KdeWindowReport = serde_json::from_str(payload).ok().or_else(|| {
+        let unescaped: String = serde_json::from_str(payload).ok()?;
+        serde_json::from_str(&unescaped).ok()
+    })?;
+    let app = non_empty(Some(report.resource_class));
+    let title = non_empty(Some(report.caption));
+    if app.is_none() && title.is_none() {
+        return None;
+    }
+    Some((app, title))
 }
 
 /// Trim the two fields, and treat one of our own overlays as no context.
@@ -622,6 +829,44 @@ mod tests {
     fn an_old_extension_without_focus_names_nothing() {
         let json = r#"[{"title":"Firefox","app":"Firefox","minimized":false}]"#;
         assert_eq!(pick_user_window(json), None);
+    }
+
+    #[test]
+    fn a_kde_report_names_the_active_window() {
+        let payload = r#"{"caption":"Pull request 283 - Firefox","resourceClass":"firefox"}"#;
+        assert_eq!(
+            parse_kde_window_report(payload),
+            Some((
+                Some("firefox".to_string()),
+                Some("Pull request 283 - Firefox".to_string())
+            ))
+        );
+    }
+
+    #[test]
+    fn a_kde_report_without_a_window_names_nothing() {
+        assert_eq!(parse_kde_window_report(""), None);
+        assert_eq!(parse_kde_window_report("{}"), None);
+    }
+
+    #[test]
+    fn an_escaped_kde_report_is_unescaped() {
+        let inner = r#"{"caption":"Settings","resourceClass":"apexshot"}"#;
+        let escaped = serde_json::to_string(inner).unwrap();
+        assert_eq!(
+            parse_kde_window_report(&escaped),
+            Some((Some("apexshot".to_string()), Some("Settings".to_string())))
+        );
+    }
+
+    #[test]
+    fn the_kde_script_reports_the_active_window_back() {
+        let script = kde_window_script(":1.42");
+        assert!(script.contains("function run()"));
+        assert!(script.contains("workspace.activeWindow"));
+        assert!(script.contains(":1.42"));
+        assert!(script.contains("resourceClass"));
+        assert!(script.contains(KDE_REPORT_INTERFACE));
     }
 
     #[test]

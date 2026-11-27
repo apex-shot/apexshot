@@ -5806,8 +5806,47 @@ msgstr "Nomeada pelo que você capturou. Procure no Histórico."
 msgid "Open History"
 msgstr "Abrir Histórico"
 
-msgid "$19.50 once · 50% off for Black Friday"
-msgstr "US$ 19,50 em pagamento único · 50% de desconto na Black Friday"
+msgid "Each screenshot is named from its window and on-screen text right after you take it."
+msgstr "Cada captura recebe um nome a partir da janela e do texto na tela logo depois de tirada."
 
-msgid "$19.50 once, 50% off for Black Friday. Studio also includes Motion export, Upscale, and Studio styles."
-msgstr "US$ 19,50 uma vez, 50% de desconto na Black Friday. O Studio também inclui exportação Motion, ampliação e estilos do Studio."
+msgid "Search what was on screen"
+msgstr "Pesquise o que estava na tela"
+
+msgid "Find a screenshot in History by any word it showed."
+msgstr "Encontre uma captura no Histórico por qualquer palavra que ela mostrava."
+
+msgid "Share links in fewer steps"
+msgstr "Compartilhe links em menos passos"
+
+msgid "Connecting Cloud now fills in your sign-in code for you."
+msgstr "Ao conectar o Cloud, seu código de login agora é preenchido para você."
+
+msgid "Recording is ready from the first start"
+msgstr "A gravação fica pronta desde a primeira abertura"
+
+msgid "Recording no longer goes missing after a slow first start."
+msgstr "A gravação não some mais depois de uma primeira abertura lenta."
+
+msgid "Record the display you picked"
+msgstr "Grave a tela que você escolheu"
+
+msgid "Multi-monitor recording on Hyprland, Sway, and Niri records your chosen display."
+msgstr "A gravação com várias telas no Hyprland, Sway e Niri grava a tela que você escolheu."
+
+msgid "AI names (Beta)"
+msgstr "Nomes por IA (Beta)"
+
+msgid "A small model on your computer writes clearer names. Nothing is uploaded."
+msgstr "Um modelo pequeno no seu computador escreve nomes mais claros. Nada é enviado."
+
+msgid "Studio is 50% off"
+msgstr "Studio com 50% de desconto"
+
+msgid "Use code BLACKFRIDAY50 for $19.50 instead of $39, until November 30."
+msgstr "Use o código BLACKFRIDAY50 para pagar US$ 19,50 em vez de US$ 39, até 30 de novembro."
+
+msgid "$19.50 once with code {code} · 50% off for Black Friday"
+msgstr "US$ 19,50 em pagamento único com o código {code} · 50% de desconto na Black Friday"
+
+msgid "$19.50 once with code {code}, 50% off for Black Friday. Studio also includes Motion export, Upscale, and Studio styles."
+msgstr "US$ 19,50 uma vez com o código {code}, 50% de desconto na Black Friday. O Studio também inclui exportação Motion, ampliação e estilos do Studio."

@@ -166,12 +166,23 @@ fn table_row() -> GtkBox {
 }
 
 fn row_text(title: &str, hint: Option<&str>) -> GtkBox {
+    row_text_with_badge(title, hint, false)
+}
+
+/// Like [`row_text`], with a small Beta tag after the title.
+fn row_text_with_badge(title: &str, hint: Option<&str>, beta: bool) -> GtkBox {
     let text = GtkBox::new(Orientation::Vertical, 3);
     text.set_hexpand(true);
     text.set_valign(Align::Center);
+    let title_line = GtkBox::new(Orientation::Horizontal, 8);
+    title_line.set_valign(Align::Center);
     let name = Label::new(Some(title));
     name.set_xalign(0.0);
-    text.append(&name);
+    title_line.append(&name);
+    if beta {
+        title_line.append(&beta_pill());
+    }
+    text.append(&title_line);
     if let Some(hint) = hint {
         let hint = Label::new(Some(hint));
         hint.add_css_class("settings-sub-option-hint");
@@ -180,6 +191,16 @@ fn row_text(title: &str, hint: Option<&str>) -> GtkBox {
         text.append(&hint);
     }
     text
+}
+
+/// The Beta tag for features that are not finished yet, in the same pill
+/// shape and amber tint the licence states use.
+fn beta_pill() -> Label {
+    let pill = Label::new(Some(&t("Beta")));
+    pill.add_css_class("studio-pill");
+    pill.add_css_class("studio-pill-warning");
+    pill.set_valign(Align::Center);
+    pill
 }
 
 /// "ApexShot Studio" with its state pill, one short sentence, and the one
@@ -288,7 +309,11 @@ fn ai_names_rows(frame: &GtkBox, root: &GtkBox, status: StudioStatus) {
     } else {
         t("A small model on this PC reads the window title and on-screen text and writes a clearer name. Nothing is uploaded.")
     };
-    row.append(&row_text(&t("Name screenshots with AI"), Some(&hint)));
+    row.append(&row_text_with_badge(
+        &t("Name screenshots with AI"),
+        Some(&hint),
+        true,
+    ));
     let switch = Switch::new();
     switch.set_active(config.organizer_ai_enabled && !locked && supported);
     switch.set_sensitive(is_installed(tier) && !locked && supported);
@@ -496,36 +521,41 @@ fn included_rows(frame: &GtkBox, status: StudioStatus) {
         active,
         &t("AI names"),
         &t("Clearer screenshot names from a small model on this PC."),
+        true,
     );
     feature_row(
         frame,
         active,
         &t("Motion export"),
         &t("Animated titles, timing, and Motion video export in the editors."),
+        false,
     );
     feature_row(
         frame,
         active,
         &t("Upscale"),
         &t("Sharpen small captures with offline neural upscaling."),
+        false,
     );
     feature_row(
         frame,
         active,
         &t("Studio styles"),
         &t("Frame styles, scene shadows, and presentation transforms."),
+        false,
     );
     feature_row(
         frame,
         active,
         &t("Advanced zoom camera"),
         &t("Instant zooms and fine camera control in the video editor."),
+        false,
     );
 }
 
-fn feature_row(frame: &GtkBox, active: bool, title: &str, hint: &str) {
+fn feature_row(frame: &GtkBox, active: bool, title: &str, hint: &str, beta: bool) {
     let row = table_row();
-    row.append(&row_text(title, Some(hint)));
+    row.append(&row_text_with_badge(title, Some(hint), beta));
     let pill_text = if active { t("Active") } else { t("Studio") };
     let pill = Label::new(Some(&pill_text));
     pill.add_css_class("studio-pill");

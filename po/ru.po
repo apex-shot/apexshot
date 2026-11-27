@@ -5795,8 +5795,47 @@ msgstr "Имя дано по тому, что на снимке. Найдите 
 msgid "Open History"
 msgstr "Открыть историю"
 
-msgid "$19.50 once · 50% off for Black Friday"
-msgstr "19,50 $ единоразово · скидка 50% в Чёрную пятницу"
+msgid "Each screenshot is named from its window and on-screen text right after you take it."
+msgstr "Каждый скриншот получает имя по окну и тексту на экране сразу после съёмки."
 
-msgid "$19.50 once, 50% off for Black Friday. Studio also includes Motion export, Upscale, and Studio styles."
-msgstr "19,50 $ один раз, скидка 50% в Чёрную пятницу. В Studio также есть экспорт Motion, увеличение и стили Studio."
+msgid "Search what was on screen"
+msgstr "Поиск по тому, что было на экране"
+
+msgid "Find a screenshot in History by any word it showed."
+msgstr "Находите скриншот в Истории по любому слову, которое на нём было."
+
+msgid "Share links in fewer steps"
+msgstr "Ссылки за меньшее число шагов"
+
+msgid "Connecting Cloud now fills in your sign-in code for you."
+msgstr "При подключении Cloud код входа теперь подставляется автоматически."
+
+msgid "Recording is ready from the first start"
+msgstr "Запись готова с первого запуска"
+
+msgid "Recording no longer goes missing after a slow first start."
+msgstr "Запись больше не пропадает после медленного первого запуска."
+
+msgid "Record the display you picked"
+msgstr "Запись выбранного дисплея"
+
+msgid "Multi-monitor recording on Hyprland, Sway, and Niri records your chosen display."
+msgstr "Запись с несколькими дисплеями в Hyprland, Sway и Niri записывает выбранный дисплей."
+
+msgid "AI names (Beta)"
+msgstr "Имена от ИИ (бета)"
+
+msgid "A small model on your computer writes clearer names. Nothing is uploaded."
+msgstr "Небольшая модель на вашем компьютере пишет более понятные имена. Ничего не загружается."
+
+msgid "Studio is 50% off"
+msgstr "Studio со скидкой 50%"
+
+msgid "Use code BLACKFRIDAY50 for $19.50 instead of $39, until November 30."
+msgstr "С кодом BLACKFRIDAY50 — 19,50 $ вместо 39 $, до 30 ноября."
+
+msgid "$19.50 once with code {code} · 50% off for Black Friday"
+msgstr "19,50 $ единоразово с кодом {code} · скидка 50% в Чёрную пятницу"
+
+msgid "$19.50 once with code {code}, 50% off for Black Friday. Studio also includes Motion export, Upscale, and Studio styles."
+msgstr "19,50 $ один раз с кодом {code}, скидка 50% в Чёрную пятницу. В Studio также есть экспорт Motion, увеличение и стили Studio."

@@ -5,6 +5,10 @@
 
 use chrono::{Local, NaiveDate};
 
+/// The checkout code for the Black Friday price. New and existing users both
+/// see it wherever the price is shown.
+pub const BLACK_FRIDAY_CODE: &str = "BLACKFRIDAY50";
+
 /// The Black Friday offer ends when December 1 begins on the user's clock.
 fn offer_ends() -> NaiveDate {
     NaiveDate::from_ymd_opt(2026, 12, 1).expect("valid date")
@@ -22,7 +26,10 @@ pub fn black_friday_active() -> bool {
 /// The short price line, e.g. on the Studio page and purchase cards.
 pub fn price_label() -> String {
     if black_friday_active() {
-        crate::i18n::t("$19.50 once · 50% off for Black Friday")
+        crate::i18n::tfmt(
+            "$19.50 once with code {code} · 50% off for Black Friday",
+            &[("code", BLACK_FRIDAY_CODE)],
+        )
     } else {
         crate::i18n::t("$39 once")
     }
@@ -31,8 +38,9 @@ pub fn price_label() -> String {
 /// The price sentence that leads the AI names trial-ended card.
 pub fn ai_names_price_note() -> String {
     if black_friday_active() {
-        crate::i18n::t(
-            "$19.50 once, 50% off for Black Friday. Studio also includes Motion export, Upscale, and Studio styles.",
+        crate::i18n::tfmt(
+            "$19.50 once with code {code}, 50% off for Black Friday. Studio also includes Motion export, Upscale, and Studio styles.",
+            &[("code", BLACK_FRIDAY_CODE)],
         )
     } else {
         crate::i18n::t("$39 once. Studio also includes Motion export, Upscale, and Studio styles.")
