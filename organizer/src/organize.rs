@@ -122,10 +122,7 @@ pub fn organize_capture(
         (
             suggestion.app.clone(),
             suggestion.site.clone(),
-            request
-                .window_title
-                .as_deref()
-                .map(crate::secrets::scrub),
+            request.window_title.as_deref().map(crate::secrets::scrub),
             crate::secrets::scrub(&request.page.full_text()),
         )
     };
@@ -318,7 +315,10 @@ mod tests {
         let path = dir.join("shot.png");
         fs::write(&path, b"png").unwrap();
         let index_path = dir.join("index").join("index.json");
-        let mut req = request(path.clone(), Some("Bank — Mozilla Firefox Private Browsing"));
+        let mut req = request(
+            path.clone(),
+            Some("Bank — Mozilla Firefox Private Browsing"),
+        );
         req.page = page(&["account 12345"]);
         let settings = OrganizeSettings {
             auto_name: true,
