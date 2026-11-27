@@ -34,6 +34,8 @@ pub struct NameSuggestion {
     /// Bare host, e.g. "github.com", when the capture shows a web page.
     pub site: Option<String>,
     pub source: NameSource,
+    /// When not `Normal`, the stem is generic and callers must index only the date.
+    pub sensitivity: crate::Sensitivity,
 }
 
 /// Longest stem `suggest_name` returns, in characters.
@@ -74,6 +76,10 @@ pub fn suggest_name(page: &OcrPage, ctx: &CaptureContext, style: NameStyle) -> N
     let (title_subject, title_app) = title_parts.unwrap_or_default();
     let app = title_app.or_else(|| ctx.app.as_deref().map(display_app_from_process));
     let site = detect_site(page, ctx);
+    let sensitivity = crate::sensitive::classify(page, ctx, site.as_deref());
+    if sensitivity.withholds_text() {
+        return withheld(ctx, sensitivity);
+    }
     let day = ctx.captured_at.format("%Y-%m-%d").to_string();
 
     let subject = crate::secrets::scrub(&title_subject).trim().to_string();
@@ -97,6 +103,22 @@ pub fn suggest_name(page: &OcrPage, ctx: &CaptureContext, style: NameStyle) -> N
         app,
         site,
         source: NameSource::Fallback,
+        sensitivity: crate::Sensitivity::Normal,
+    }
+}
+
+/// A generic dated name for a capture whose text must not be used.
+fn withheld(ctx: &CaptureContext, sensitivity: crate::Sensitivity) -> NameSuggestion {
+    let fallback = format!(
+        "Screenshot {}",
+        ctx.captured_at.format("%Y-%m-%d at %H.%M.%S")
+    );
+    NameSuggestion {
+        stem: sanitize_stem(&fallback, MAX_STEM_CHARS),
+        app: None,
+        site: None,
+        source: NameSource::Fallback,
+        sensitivity,
     }
 }
 
@@ -122,6 +144,7 @@ fn suggestion(
         app,
         site,
         source,
+        sensitivity: crate::Sensitivity::Normal,
     }
 }
 
@@ -629,6 +652,26 @@ mod tests {
         assert!(suggestion.stem.starts_with("Screenshot 2026-11-27 at "));
         assert_eq!(suggestion.source, NameSource::Fallback);
         assert_eq!(suggestion.app, None);
+    }
+
+    #[test]
+    fn suggest_name_withholds_private_window_text() {
+        let mut ctx = context();
+        ctx.window_title = Some("Bank statement — Mozilla Firefox Private Browsing".to_string());
+        let suggestion = suggest_name(&OcrPage::default(), &ctx, NameStyle::Clean);
+        assert!(suggestion.stem.starts_with("Screenshot 2026-11-27 at "));
+        assert_eq!(suggestion.app, None);
+        assert_eq!(suggestion.site, None);
+        assert_eq!(suggestion.sensitivity, crate::Sensitivity::PrivateWindow);
+    }
+
+    #[test]
+    fn suggest_name_withholds_explicit_title() {
+        let mut ctx = context();
+        ctx.window_title = Some("Party pics - nude - Chrome".to_string());
+        let suggestion = suggest_name(&OcrPage::default(), &ctx, NameStyle::Clean);
+        assert!(suggestion.stem.starts_with("Screenshot 2026-11-27 at "));
+        assert_eq!(suggestion.sensitivity, crate::Sensitivity::Explicit);
     }
 
     #[test]

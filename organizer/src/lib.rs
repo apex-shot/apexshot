@@ -13,6 +13,8 @@
 pub mod index;
 pub mod naming;
 pub mod secrets;
+pub mod sensitive;
 mod types;
 
 pub use types::{CaptureContext, OcrPage, TextLine};
+pub use sensitive::Sensitivity;
