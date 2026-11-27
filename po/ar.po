@@ -5725,3 +5725,21 @@ msgstr "الأسماء المجانية أنسب لهذا الكمبيوتر."
 
 msgid "AI names need at least 8 GB of memory, 4 processor cores, and AVX2."
 msgstr "تحتاج أسماء الذكاء الاصطناعي إلى ذاكرة 8 غيغابايت على الأقل و4 أنوية معالج ودعم AVX2."
+
+msgid "Keep layout"
+msgstr "الاحتفاظ بالتخطيط"
+
+msgid "Copied text keeps tables, code indentation, and paragraphs."
+msgstr "يحتفظ النص المنسوخ بالجداول ومسافات إزاحة التعليمات البرمجية والفقرات."
+
+msgid "Fix reading mistakes in copied text"
+msgstr "إصلاح أخطاء القراءة في النص المنسوخ"
+
+msgid "When you capture text, the model fixes misread letters and digits. It never rewrites what the text says."
+msgstr "عند التقاط نص، يصحح النموذج الحروف والأرقام المقروءة خطأً. لا يعيد كتابة ما يقوله النص أبدًا."
+
+msgid "Clean text copies"
+msgstr "نسخ نصية نظيفة"
+
+msgid "Copied text with reading mistakes fixed by a small model on this PC."
+msgstr "نص منسوخ صُححت أخطاء قراءته بواسطة نموذج صغير على هذا الكمبيوتر."

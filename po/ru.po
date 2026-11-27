@@ -5785,3 +5785,21 @@ msgstr "Для этого ПК лучше подходят бесплатные 
 
 msgid "AI names need at least 8 GB of memory, 4 processor cores, and AVX2."
 msgstr "Для имён от ИИ нужны не менее 8 ГБ памяти, 4 ядра процессора и AVX2."
+
+msgid "Keep layout"
+msgstr "Сохранять разметку"
+
+msgid "Copied text keeps tables, code indentation, and paragraphs."
+msgstr "Скопированный текст сохраняет таблицы, отступы в коде и абзацы."
+
+msgid "Fix reading mistakes in copied text"
+msgstr "Исправлять ошибки распознавания в скопированном тексте"
+
+msgid "When you capture text, the model fixes misread letters and digits. It never rewrites what the text says."
+msgstr "При захвате текста модель исправляет неверно распознанные буквы и цифры. Она никогда не переписывает содержание текста."
+
+msgid "Clean text copies"
+msgstr "Чистые копии текста"
+
+msgid "Copied text with reading mistakes fixed by a small model on this PC."
+msgstr "Скопированный текст, в котором небольшая модель на этом ПК исправила ошибки распознавания."

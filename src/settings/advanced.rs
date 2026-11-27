@@ -9,6 +9,7 @@ pub struct AdvancedSettingsWidgets {
     pub section: GtkBox,
     pub retina_suffix_check: CheckButton,
     pub ocr_lang_input: SettingsSelect,
+    pub ocr_keep_layout_check: CheckButton,
     pub ocr_line_breaks_check: CheckButton,
     pub organizer_auto_name_check: CheckButton,
     pub organizer_name_style_input: SettingsSelect,
@@ -123,6 +124,28 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
     ocr_lang_hbox.append(ocr_lang_input.widget());
     ocr_frame.append(&build_row!(&ocr_lang_hbox, false));
 
+    // Keep layout
+    let ocr_keep_layout_check = CheckButton::new();
+    ocr_keep_layout_check.set_active(config.ocr_keep_layout);
+    let ocr_layout_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    ocr_layout_hbox.set_hexpand(true);
+    let ocr_layout_vbox = GtkBox::new(Orientation::Vertical, 4);
+    ocr_layout_vbox.set_hexpand(true);
+    let lbl_layout = Label::new(Some(&t("Keep layout")));
+    lbl_layout.set_xalign(0.0);
+    let layout_hint = Label::new(Some(&t(
+        "Copied text keeps tables, code indentation, and paragraphs.",
+    )));
+    layout_hint.add_css_class("settings-sub-option");
+    layout_hint.set_xalign(0.0);
+    layout_hint.set_wrap(true);
+    layout_hint.set_max_width_chars(48);
+    ocr_layout_vbox.append(&lbl_layout);
+    ocr_layout_vbox.append(&layout_hint);
+    ocr_layout_hbox.append(&ocr_layout_vbox);
+    ocr_layout_hbox.append(&ocr_keep_layout_check);
+    ocr_frame.append(&build_row!(&ocr_layout_hbox, false));
+
     // Keep line breaks
     let ocr_line_breaks_check = CheckButton::new();
     ocr_line_breaks_check.set_active(config.adv_ocr_keep_line_breaks);
@@ -228,6 +251,7 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
         section,
         retina_suffix_check,
         ocr_lang_input,
+        ocr_keep_layout_check,
         ocr_line_breaks_check,
         organizer_auto_name_check,
         organizer_name_style_input,
