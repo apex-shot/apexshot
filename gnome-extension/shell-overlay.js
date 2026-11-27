@@ -7,7 +7,7 @@ import Meta from 'gi://Meta';
 import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {captureMenuPosition} from './capture-menu-placement.js';
+import {captureMenuPosition, displayPickerPosition} from './capture-menu-placement.js';
 import {classifyCursorTracker} from './cursor-classifier.js';
 import {
     daemonCanChangeResource,
@@ -394,8 +394,10 @@ export class ShellOverlayService {
         const focus = () => {
             const actor = this._findActor(titles, appId, pid);
             const window = actor ? actor.meta_window : null;
-            const captureMenu = window !== null && window.get_title() === 'ApexShot Capture';
-            const frame = captureMenu ? window.get_frame_rect() : null;
+            const title = window !== null ? window.get_title() : null;
+            const captureMenu = title === 'ApexShot Capture';
+            const displayPicker = title === 'ApexShot Display Picker';
+            const frame = captureMenu || displayPicker ? window.get_frame_rect() : null;
             if (!window || (frame && (frame.width <= 0 || frame.height <= 0))) {
                 attempts++;
                 if (attempts < 20)
@@ -408,7 +410,9 @@ export class ShellOverlayService {
             if (frame) {
                 const monitor = window.get_monitor();
                 const workArea = window.get_work_area_for_monitor(monitor);
-                const pos = captureMenuPosition(workArea, frame);
+                const pos = displayPicker
+                    ? displayPickerPosition(workArea, frame)
+                    : captureMenuPosition(workArea, frame);
                 if (pos)
                     window.move_frame(true, pos.x, pos.y);
             }
