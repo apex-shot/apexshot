@@ -4390,7 +4390,7 @@ private:
         });
         guard->start();
 
-        process->start(executable, {});
+        process->start(executable, QStringList());
         process->write(QJsonDocument(request).toJson(QJsonDocument::Compact));
         process->closeWriteChannel();
     }
