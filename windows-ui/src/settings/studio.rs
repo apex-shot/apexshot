@@ -312,7 +312,10 @@ fn ai_names_rows(frame: &GtkBox, root: &GtkBox, status: StudioStatus) {
     } else {
         t("When you capture text, the model fixes misread letters and digits. It never rewrites what the text says.")
     };
-    row.append(&row_text(&t("Fix reading mistakes in copied text"), Some(&hint)));
+    row.append(&row_text(
+        &t("Fix reading mistakes in copied text"),
+        Some(&hint),
+    ));
     let switch = Switch::new();
     switch.set_active(config.ocr_ai_cleanup && !locked && supported);
     switch.set_sensitive(is_installed(tier) && !locked && supported);
