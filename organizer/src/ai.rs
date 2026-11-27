@@ -13,14 +13,16 @@ pub trait AiNamer {
     fn complete(&self, system: &str, user: &str) -> Option<String>;
 }
 
-pub const SYSTEM_PROMPT: &str = "You write file names for screenshots. From the window title and the text on screen, find the main thing the screenshot is about and name it in 4 to 8 words.
+pub const SYSTEM_PROMPT: &str = "You write file names for screenshots. From the window title and the text on screen, work out what the whole screenshot is about and name it in 4 to 8 words.
 Rules:
 - Start with the subject: who wrote it, or what document, product, error, or topic it is. Then what it is about.
+- When the text is a conversation, article, or document, name its overall topic, not its first line or one sentence.
 - Use only names and facts that appear in the given text. Never invent names.
-- Ignore ads, menus, sidebars, and trending lists.
+- Ignore ads, menus, sidebars, buttons, and trending lists.
 - Never answer with only the app or website name.
 - No file extension, no quotes, no final punctuation.
 - Never include passwords, keys, email addresses, phone numbers, or account numbers.
+- If the text is too garbled or too short to tell what the screenshot shows, reply with: none
 The shape of a good answer: \"<who or what> <about what>\", like \"<sender> invoice reminder due <date>\" or \"<author> post about <topic>\".
 Reply with the name only.";
 
@@ -46,7 +48,8 @@ pub fn build_user_prompt(
             lines.push(format!("Window title: {title}"));
         }
     }
-    lines.push(format!("Current name: {}", suggestion.stem));
+    // The rule-based name is left out on purpose: a small model copies it
+    // instead of naming what the whole capture is about.
     lines.push("Text on screen, top to bottom:".to_string());
     lines.push(page_text(page));
     lines.join("\n")
@@ -87,6 +90,10 @@ pub fn clean_reply(raw: &str) -> Option<String> {
     text = strip_label(text);
     text = strip_wrapping(text);
     text = strip_extension(text);
+    // The model says "none" when the text is too garbled to name.
+    if text.eq_ignore_ascii_case("none") {
+        return None;
+    }
     if !find_secrets(text).is_empty() || contains_explicit(text) {
         return None;
     }
@@ -274,7 +281,7 @@ mod tests {
         assert!(prompt.contains("App: Chrome"));
         assert!(prompt.contains("Site: x.com"));
         assert!(prompt.contains("Window title: Home / X"));
-        assert!(prompt.contains("Current name: Home X"));
+        assert!(!prompt.contains("Current name"));
         let first = prompt.find("First line").unwrap();
         let second = prompt.find("Second line").unwrap();
         assert!(first < second);
@@ -378,6 +385,13 @@ mod thin_tests {
         let mut suggestion = titled("A very long and quite descriptive heading here", None);
         suggestion.source = NameSource::Heading;
         assert!(is_thin(&suggestion));
+    }
+
+    #[test]
+    fn a_none_reply_keeps_the_rule_based_name() {
+        assert_eq!(clean_reply("none"), None);
+        assert_eq!(clean_reply("None"), None);
+        assert!(clean_reply("None of the invoices are overdue").is_some());
     }
 
     #[test]

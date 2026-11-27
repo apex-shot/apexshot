@@ -142,7 +142,7 @@ fn build_card(app: &Application, kind: CardKind) {
     match kind {
         CardKind::TrialEnded => {
             let hint = centered_label(
-                &t("$39 once. Studio also includes Motion export, Upscale, and Studio styles."),
+                &crate::studio_offer::ai_names_price_note(),
                 "apexshot-studio-note",
             );
             hint.set_max_width_chars(46);
@@ -307,6 +307,9 @@ pub(crate) fn example_pairs(limit: usize) -> Vec<(String, String)> {
             let ai = apexshot_organizer::ai::clean_reply(&stem).unwrap_or_else(|| {
                 apexshot_organizer::ai::strip_density_marker(stem.trim()).to_string()
             });
+            // Names from before the readability check could be OCR noise;
+            // only a name that reads as words is worth showing off.
+            let ai = apexshot_organizer::quality::readable_name(&ai)?;
             if ai.trim().eq_ignore_ascii_case(free.trim()) {
                 return None;
             }

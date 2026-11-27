@@ -11,7 +11,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use apexshot_organizer::organize::{
-    organize_capture, parse_name_style, OrganizeRequest, OrganizeSettings,
+    organize_capture, organize_capture_with_ai, parse_name_style, OrganizeRequest, OrganizeSettings,
 };
 use apexshot_organizer::{OcrPage, TextLine};
 use image::RgbaImage;
@@ -25,12 +25,34 @@ use crate::ocr::DetectedTextRegion;
 /// How long a capture waits for its name before its saved path goes out.
 const ORGANIZER_WAIT: Duration = Duration::from_millis(3000);
 
+/// The result of the rule-based pass, kept so a background AI refine can
+/// reuse the OCR page and window context it already collected.
+pub struct Organized {
+    /// Where the capture lives after the rule-based name.
+    pub path: PathBuf,
+    /// The request the first pass built; None when the path went out before
+    /// the worker finished collecting, or when nothing was organized.
+    pub request: Option<OrganizeRequest>,
+    /// True when the rule-based pass renamed the file.
+    pub renamed: bool,
+    /// False when the capture was skipped (an excluded app).
+    pub indexed: bool,
+}
+
+/// The result of a background AI refine.
+pub struct AiRefineOutcome {
+    /// Where the capture lives afterwards; the rule-based path on failure.
+    pub path: PathBuf,
+    /// True when the model chose the current name.
+    pub ai_named: bool,
+}
+
 /// Name, rename, and index a saved capture, and return where it lives now.
 ///
 /// The original path comes back on every failure, including a missing index
 /// location, an unreadable image, or a rename that lost the file.
 pub fn organize_saved_capture(path: PathBuf, config: &AppConfig) -> PathBuf {
-    organize_saved_capture_gated(path, config, &|| true)
+    organize_saved_capture_gated(path, config, &|| true).path
 }
 
 /// Like [`organize_saved_capture`], but asks `may_rename` at the moment the
@@ -43,12 +65,18 @@ pub fn organize_saved_capture_gated(
     path: PathBuf,
     config: &AppConfig,
     may_rename: &dyn Fn() -> bool,
-) -> PathBuf {
+) -> Organized {
+    let unchanged = |path: PathBuf| Organized {
+        path,
+        request: None,
+        renamed: false,
+        indexed: false,
+    };
     let Some(index_path) = crate::config::organizer_index_path() else {
-        return path;
+        return unchanged(path);
     };
     if !path.is_file() {
-        return path;
+        return unchanged(path);
     }
 
     let original = path.clone();
@@ -83,7 +111,7 @@ pub fn organize_saved_capture_gated(
         });
     if let Err(error) = spawned {
         eprintln!("[organizer] worker did not start: {error}");
-        return original;
+        return unchanged(original);
     }
 
     let request = match request_rx.recv_timeout(ORGANIZER_WAIT) {
@@ -98,7 +126,7 @@ pub fn organize_saved_capture_gated(
                 original.display(),
                 ORGANIZER_WAIT.as_millis()
             );
-            return original;
+            return unchanged(original);
         }
     };
     let _ = decision_tx.send(());
@@ -114,7 +142,7 @@ pub fn organize_saved_capture_gated(
             original.display(),
             outcome.path.display()
         );
-        return original;
+        return unchanged(original);
     }
 
     if outcome.renamed && outcome.path.file_name() != original.file_name() {
@@ -134,7 +162,133 @@ pub fn organize_saved_capture_gated(
             elapsed
         );
     }
-    outcome.path
+    Organized {
+        path: outcome.path,
+        request: Some(request),
+        renamed: outcome.renamed,
+        indexed: outcome.indexed,
+    }
+}
+
+/// Refine a rule-based name with the local model, in the background.
+///
+/// `request` carries the OCR page and window context the first pass collected;
+/// `path` is where that pass left the file. The two deadlines mirror the
+/// shipped runtime: the server gets 8 s to be ready and the whole refine is
+/// bounded at 12 s, so a slow machine keeps the rule-based name.
+///
+/// `may_rename` is the caller's gate: the Quick Access card may have used the
+/// path while the rule-based name was settling, and a file the card already
+/// shows must not move again. It is asked once on entry and once more after
+/// the server is up, right before the model may rename anything. When it says
+/// no, the capture is left exactly as the first pass indexed it.
+pub fn refine_name_with_ai(
+    path: PathBuf,
+    mut request: OrganizeRequest,
+    config: &AppConfig,
+    may_rename: &dyn Fn() -> bool,
+) -> AiRefineOutcome {
+    let keep = |path: PathBuf| AiRefineOutcome {
+        path,
+        ai_named: false,
+    };
+    let Some(index_path) = crate::config::organizer_index_path() else {
+        return keep(path);
+    };
+    if !may_rename() || !config.organizer_auto_name {
+        // The path already went out, so there is nothing left to rename; the
+        // first pass has already indexed it under that path.
+        return keep(path);
+    }
+
+    request.path = path.clone();
+    request.allow_ai = true;
+
+    let started = Instant::now();
+    // This runs in the background after the capture is handed out, so it can
+    // wait for a model that is still loading instead of giving up.
+    let naming_deadline = started + Duration::from_millis(20_000);
+    let overall_deadline = started + Duration::from_millis(25_000);
+    let tier = crate::ai_names::tier_from_setting(&config.organizer_ai_model);
+    let Some(base_url) = crate::ai_names::ensure_server(tier, naming_deadline) else {
+        return keep(path);
+    };
+    // Starting the server is the slow part; the card may have been used while
+    // it warmed up, so ask again right before the rename is possible.
+    if !may_rename() {
+        return keep(path);
+    }
+    let settings = OrganizeSettings {
+        auto_name: config.organizer_auto_name,
+        style: parse_name_style(&config.organizer_name_style),
+        excluded_apps: config.organizer_excluded_apps.clone(),
+    };
+    let namer = crate::ai_names::Namer {
+        base_url,
+        deadline: overall_deadline,
+    };
+    let outcome = organize_capture_with_ai(
+        &request,
+        &settings,
+        &index_path,
+        chrono::Local::now(),
+        Some(&namer as &dyn apexshot_organizer::ai::AiNamer),
+    );
+    if outcome.ai_named && !crate::studio_entitlement::studio_unlocked() {
+        crate::ai_names::consume_trial();
+    }
+    show_ai_names_card(outcome.ai_named, outcome.renamed, config, &index_path);
+    if outcome.path.exists() {
+        AiRefineOutcome {
+            path: outcome.path,
+            ai_named: outcome.ai_named,
+        }
+    } else {
+        keep(path)
+    }
+}
+
+/// Show the one AI names card this capture earned, without delaying the path.
+pub(crate) fn show_ai_names_card(
+    ai_named: bool,
+    renamed: bool,
+    config: &AppConfig,
+    index_path: &Path,
+) {
+    use crate::ai_names::{claim_card, recommend, trial_remaining, CardKind};
+
+    let kind = if ai_named
+        && !crate::studio_entitlement::studio_unlocked()
+        && trial_remaining() == 0
+        && claim_card(CardKind::TrialEnded)
+    {
+        Some(CardKind::TrialEnded)
+    } else if !config.organizer_ai_enabled
+        && recommend().tier.is_some()
+        && renamed
+        && index_has_auto_named(index_path, 20)
+        && claim_card(CardKind::TryAiNames)
+    {
+        Some(CardKind::TryAiNames)
+    } else {
+        None
+    };
+    if let Some(kind) = kind {
+        crate::ai_names::spawn_card(kind);
+    }
+}
+
+/// True when the index holds at least `at_least` auto-named captures.
+fn index_has_auto_named(path: &Path, at_least: usize) -> bool {
+    let Ok(index) = apexshot_organizer::index::Index::load(path) else {
+        return false;
+    };
+    index
+        .entries()
+        .iter()
+        .filter(|entry| entry.auto_named)
+        .count()
+        >= at_least
 }
 
 /// Keep the configured naming style, but never rename once the caller that
@@ -207,7 +361,64 @@ fn capture_window_context() -> (Option<String>, Option<String>) {
     if crate::backend::is_x11_session() {
         return x11_active_window_identity().unwrap_or((None, None));
     }
-    (None, None)
+    // GNOME on Wayland: a client cannot see other windows, but the ApexShot
+    // Shell extension can say which one the user was in.
+    gnome_extension_window_identity().unwrap_or((None, None))
+}
+
+/// The window the user was in, from the GNOME Shell extension's window list.
+/// None when the extension is missing or too old to report focus.
+fn gnome_extension_window_identity() -> Option<(Option<String>, Option<String>)> {
+    let json = crate::utils::run_off_tokio(|| {
+        let conn = zbus::blocking::connection::Builder::session()
+            .ok()?
+            .method_timeout(Duration::from_millis(500))
+            .build()
+            .ok()?;
+        for name in [
+            "org.apexshot.WindowList",
+            "org.apexshot.ApexShot.WindowList",
+        ] {
+            let Ok(proxy) = zbus::blocking::Proxy::new(
+                &conn,
+                name,
+                "/org/apexshot/WindowList",
+                "org.apexshot.WindowList",
+            ) else {
+                continue;
+            };
+            if let Ok(json) = proxy.call::<_, _, String>("GetWindows", &()) {
+                return Some(json);
+            }
+        }
+        None
+    })?;
+    let (app, title) = pick_user_window(&json)?;
+    // The extension already leaves out the capture overlay and Quick Access
+    // cards, so an ApexShot window here (Settings, History) is what the user
+    // captured and its title is kept.
+    Some((non_empty(app), non_empty(title)))
+}
+
+/// From the extension's window list, the app and title of the window the user
+/// was in: the focused one, or else the one used most recently.
+fn pick_user_window(json: &str) -> Option<(Option<String>, Option<String>)> {
+    let windows: Vec<serde_json::Value> = serde_json::from_str(json).ok()?;
+    let candidates: Vec<&serde_json::Value> = windows
+        .iter()
+        .filter(|window| !window["minimized"].as_bool().unwrap_or(false))
+        .collect();
+    let chosen = candidates
+        .iter()
+        .find(|window| window["focused"].as_bool().unwrap_or(false))
+        .or_else(|| {
+            candidates
+                .iter()
+                .filter(|window| window["userTime"].as_u64().unwrap_or(0) > 0)
+                .max_by_key(|window| window["userTime"].as_u64().unwrap_or(0))
+        })?;
+    let text = |key: &str| chosen[key].as_str().map(str::to_string);
+    Some((text("app"), text("title")))
 }
 
 /// Trim the two fields, and treat one of our own overlays as no context.
@@ -308,6 +519,9 @@ fn read_ocr_page(path: &Path, language: &str) -> OcrPage {
     }
 }
 
+/// Lowest Tesseract confidence (0-100) a line needs to be used.
+const MIN_LINE_CONFIDENCE: i32 = 60;
+
 /// Convert OCR regions into the organizer's reading-ordered page.
 fn ocr_page_from_regions(
     image_width: u32,
@@ -318,7 +532,9 @@ fn ocr_page_from_regions(
         .into_iter()
         .filter_map(|region| {
             let text = region.text.trim();
-            if text.is_empty() {
+            // Lines Tesseract itself doubts are noise from small or dark UI;
+            // they would only reach a name or the index as gibberish.
+            if text.is_empty() || region.confidence < MIN_LINE_CONFIDENCE {
                 return None;
             }
             Some(TextLine::new(
@@ -376,6 +592,39 @@ mod tests {
     }
 
     #[test]
+    fn doubtful_lines_are_dropped() {
+        let mut noise = region("TOM Bil QCc", 1, 1);
+        noise.confidence = 31;
+        let page = ocr_page_from_regions(320, 200, vec![noise, region("Settings", 1, 20)]);
+
+        let texts: Vec<&str> = page.lines.iter().map(|line| line.text.as_str()).collect();
+        assert_eq!(texts, ["Settings"]);
+    }
+
+    #[test]
+    fn the_extension_names_the_window_the_user_was_in() {
+        let json = r#"[
+            {"title":"Settings","app":"ApexShot","focused":false,"userTime":700,"minimized":false},
+            {"title":"Pull request 283 - Firefox","app":"Firefox","focused":false,"userTime":800,"minimized":false},
+            {"title":"Notes","app":"Text Editor","focused":false,"userTime":100,"minimized":false},
+            {"title":"Old","app":"Files","focused":false,"userTime":950,"minimized":true}
+        ]"#;
+        assert_eq!(
+            pick_user_window(json),
+            Some((
+                Some("Firefox".to_string()),
+                Some("Pull request 283 - Firefox".to_string())
+            ))
+        );
+    }
+
+    #[test]
+    fn an_old_extension_without_focus_names_nothing() {
+        let json = r#"[{"title":"Firefox","app":"Firefox","minimized":false}]"#;
+        assert_eq!(pick_user_window(json), None);
+    }
+
+    #[test]
     fn empty_regions_are_dropped() {
         let page = ocr_page_from_regions(
             320,
@@ -403,5 +652,23 @@ mod tests {
         assert_eq!(gated.excluded_apps, settings.excluded_apps);
 
         assert!(effective_settings(settings, true).auto_name);
+    }
+
+    #[test]
+    fn a_used_card_keeps_the_rule_based_name() {
+        let path = std::env::temp_dir().join("apexshot-ai-refine-unused.png");
+        let request = OrganizeRequest {
+            path: path.clone(),
+            page: OcrPage::default(),
+            app: None,
+            window_title: None,
+            allow_ai: false,
+        };
+        let config = AppConfig::default();
+
+        let outcome = refine_name_with_ai(path.clone(), request, &config, &|| false);
+
+        assert_eq!(outcome.path, path);
+        assert!(!outcome.ai_named);
     }
 }

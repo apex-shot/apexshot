@@ -5734,3 +5734,9 @@ msgstr "سُمّيت حسب ما التقطته. ابحث عنها في السج
 
 msgid "Open History"
 msgstr "فتح السجل"
+
+msgid "$19.50 once · 50% off for Black Friday"
+msgstr "19.50 دولارًا لمرة واحدة · خصم 50% بمناسبة الجمعة السوداء"
+
+msgid "$19.50 once, 50% off for Black Friday. Studio also includes Motion export, Upscale, and Studio styles."
+msgstr "19.50 دولارًا مرة واحدة، بخصم 50% بمناسبة الجمعة السوداء. يتضمن Studio أيضًا تصدير Motion والتكبير وأنماط Studio."

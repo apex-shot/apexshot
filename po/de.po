@@ -5814,3 +5814,9 @@ msgstr "Benannt nach dem, was du aufgenommen hast. Suche danach im Verlauf."
 
 msgid "Open History"
 msgstr "Verlauf öffnen"
+
+msgid "$19.50 once · 50% off for Black Friday"
+msgstr "Einmalig 19,50 $ · 50 % Rabatt zum Black Friday"
+
+msgid "$19.50 once, 50% off for Black Friday. Studio also includes Motion export, Upscale, and Studio styles."
+msgstr "Einmalig 19,50 $, 50 % Rabatt zum Black Friday. Studio enthält außerdem Motion-Export, Hochskalieren und Studio-Stile."

@@ -225,7 +225,7 @@ fn status_row(status: StudioStatus, flash: Option<String>) -> Overlay {
         action.add_css_class("settings-primary-btn");
         action.set_tooltip_text(Some(&format!(
             "{} · {} · {}",
-            t("$39 once"),
+            crate::studio_offer::price_label(),
             t("12 months of updates"),
             t("14-day refund")
         )));

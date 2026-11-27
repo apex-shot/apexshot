@@ -161,8 +161,8 @@ pub fn build_history_window(app: &Application) {
     toolbar.add_css_class("settings-window-controls");
     toolbar.set_size_request(-1, (TITLE_BAR_HEIGHT * ui_scale).round() as i32);
 
-    // Expanding drag spacers on both sides center the search entry in the
-    // header bar, Files-style, and stay draggable.
+    // Expanding spacers on both sides center the search entry in the header
+    // bar, Files-style.
     let left_spacer = GtkBox::new(Orientation::Horizontal, 0);
     left_spacer.set_hexpand(true);
     left_spacer.set_halign(Align::Fill);
@@ -232,8 +232,9 @@ pub fn build_history_window(app: &Application) {
     window_overlay.add_overlay(&toast_label);
 
     // --- WINDOW GESTURES ---
-    install_window_drag(&left_spacer, &window);
-    install_window_drag(&right_spacer, &window);
+    // The whole header bar drags the window, like the editors' top bars; the
+    // search entry and the buttons keep their own presses.
+    install_window_drag(&toolbar, &window);
     install_edge_resize(&root_box, &window);
 
     // --- LAYOUT SPLIT ---

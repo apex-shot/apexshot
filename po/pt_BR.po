@@ -5805,3 +5805,9 @@ msgstr "Nomeada pelo que você capturou. Procure no Histórico."
 
 msgid "Open History"
 msgstr "Abrir Histórico"
+
+msgid "$19.50 once · 50% off for Black Friday"
+msgstr "US$ 19,50 em pagamento único · 50% de desconto na Black Friday"
+
+msgid "$19.50 once, 50% off for Black Friday. Studio also includes Motion export, Upscale, and Studio styles."
+msgstr "US$ 19,50 uma vez, 50% de desconto na Black Friday. O Studio também inclui exportação Motion, ampliação e estilos do Studio."

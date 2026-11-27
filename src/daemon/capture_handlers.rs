@@ -146,28 +146,58 @@ fn apply_saved_capture_after_capture_actions(
         }
     }
 
+    // Start loading the naming model while the text is read, so the AI name
+    // does not wait for a cold start.
+    if config.organizer_auto_name && crate::ai_names::ai_allowed(&config) {
+        let tier = crate::ai_names::tier_from_setting(&config.organizer_ai_model);
+        std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+            let _ = crate::ai_names::ensure_server(tier, deadline);
+        });
+    }
+
     std::thread::spawn(move || {
+        use std::io::Write;
+
         let gate = keep_original_name;
-        let final_path =
+        let organized =
             crate::organizer_hook::organize_saved_capture_gated(saved_path, &config, &|| {
                 !gate.load(Ordering::Relaxed)
             });
+        let crate::organizer_hook::Organized {
+            path: final_path,
+            request,
+            renamed,
+            indexed,
+        } = organized;
 
         if let Ok(mut guard) = state.lock() {
             guard.last_capture_path = Some(final_path.clone());
         }
 
-        // Tell the card where the capture lives now. A write error only means
-        // the card is already gone.
-        if let Some(mut stdin) = card_stdin {
-            use std::io::Write;
-            let _ = writeln!(stdin, "path\t{}", final_path.display());
+        // The model may refine the rule-based name after the card, the
+        // clipboard, and any upload have the path. Only a capture nothing
+        // else claims can be renamed a second time: the editor and an
+        // auto-upload both hold the file by now.
+        let will_refine = indexed
+            && request.is_some()
+            && config.organizer_auto_name
+            && crate::ai_names::ai_allowed(&config)
+            && !config.after_capture_open_annotate
+            && !crate::cloud::upload::should_auto_upload_after_capture(&config);
+
+        // Tell the card where the capture lives now. An interim line keeps it
+        // reporting a used path, because a second rename may still follow.
+        let mut card_stdin = card_stdin;
+        if let Some(stdin) = card_stdin.as_mut() {
+            let line = if will_refine { "path-interim" } else { "path" };
+            let _ = writeln!(stdin, "{line}\t{}", final_path.display());
             let _ = stdin.flush();
-            drop(stdin);
         }
 
-        // These run against the final path, after naming, so the card, the
-        // clipboard, and the upload all agree on where the capture is.
+        // These run against the rule-based path, after naming, so the card,
+        // the clipboard, and the upload all agree on where the capture is,
+        // and none of them waits for the model.
         if config.after_capture_copy_file_to_clipboard {
             if crate::cloud::upload::should_defer_text_clipboard_to_share_url(&config) {
                 if let Err(e) = crate::utils::clipboard::copy_image_to_clipboard(&final_path) {
@@ -181,7 +211,33 @@ fn apply_saved_capture_after_capture_actions(
         crate::cloud::upload::spawn_auto_upload_after_capture(final_path.clone());
 
         if config.after_capture_open_annotate {
-            spawn_editor_subprocess(final_path);
+            spawn_editor_subprocess(final_path.clone());
+        }
+
+        if will_refine {
+            // The card may have used the path while the server was starting,
+            // so the gate is asked again inside the refine, right before the
+            // rename.
+            let outcome = crate::organizer_hook::refine_name_with_ai(
+                final_path,
+                request.expect("will_refine means the request was kept"),
+                &config,
+                &|| !gate.load(Ordering::Relaxed),
+            );
+            if let Ok(mut guard) = state.lock() {
+                guard.last_capture_path = Some(outcome.path.clone());
+            }
+            // A final path line stops the card's usage reports.
+            if let Some(stdin) = card_stdin.as_mut() {
+                let _ = writeln!(stdin, "path\t{}", outcome.path.display());
+                let _ = stdin.flush();
+            }
+            drop(card_stdin);
+        } else {
+            if let Some(index_path) = crate::config::organizer_index_path() {
+                crate::organizer_hook::show_ai_names_card(false, renamed, &config, &index_path);
+            }
+            drop(card_stdin);
         }
     });
 }

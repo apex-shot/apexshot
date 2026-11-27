@@ -316,29 +316,12 @@ fn edge_for_resize(x: f64, y: f64, width: f64, height: f64) -> Option<gdk::Surfa
     }
 }
 
+/// Move the window from a press on `toolbar`'s empty space, exactly as the
+/// image and video editors do: presses on controls are left to the control,
+/// and the press is claimed before the move so no other handler on the window
+/// takes it first.
 pub fn install_window_drag(toolbar: &impl IsA<gtk4::Widget>, window: &gtk4::ApplicationWindow) {
-    let drag_window_gesture = GestureClick::new();
-    drag_window_gesture.set_button(1);
-    let window_drag = window.downgrade();
-    drag_window_gesture.connect_pressed(move |gesture, _, x, y| {
-        let Some(window) = window_drag.upgrade() else {
-            return;
-        };
-        let Some(event) = gesture.current_event() else {
-            return;
-        };
-        let Some(device) = event.device() else {
-            return;
-        };
-        let Some(surface) = window.surface() else {
-            return;
-        };
-        let Ok(toplevel) = surface.downcast::<gdk::Toplevel>() else {
-            return;
-        };
-        toplevel.begin_move(&device, gesture.current_button() as i32, x, y, event.time());
-    });
-    toolbar.add_controller(drag_window_gesture);
+    crate::capture::editor::ui_support::install_window_drag(toolbar, window);
 }
 
 pub fn install_edge_resize(root: &impl IsA<gtk4::Widget>, window: &gtk4::ApplicationWindow) {

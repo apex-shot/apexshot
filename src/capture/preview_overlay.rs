@@ -114,17 +114,22 @@ fn preview_renames_enabled() -> bool {
 
 /// Parse one line the daemon writes to the preview's stdin.
 ///
-/// The only message is `path<TAB><new path>`. Anything else is ignored, and an
-/// empty path is not a location.
-fn parse_preview_message(line: &str) -> Option<PathBuf> {
+/// A message is `path<TAB><new path>` for a final name, or
+/// `path-interim<TAB><new path>` when the rule-based name is in place but a
+/// background refine may still rename the file. The flag says which. Anything
+/// else is ignored, and an empty path is not a location.
+fn parse_preview_message(line: &str) -> Option<(PathBuf, bool)> {
     let line = line.trim_end_matches(|c| c == '\n' || c == '\r');
-    let Some(path) = line.strip_prefix("path\t") else {
-        return None;
-    };
-    if path.is_empty() {
-        return None;
+    for (prefix, is_final) in [("path-interim\t", false), ("path\t", true)] {
+        let Some(path) = line.strip_prefix(prefix) else {
+            continue;
+        };
+        if path.is_empty() {
+            return None;
+        }
+        return Some((PathBuf::from(path), is_final));
     }
-    Some(PathBuf::from(path))
+    None
 }
 
 const PREVIEW_WIDTH: i32 = 190;
@@ -1612,9 +1617,11 @@ fn add_name_hint(card: &Overlay) {
     });
 }
 
-/// Follow the daemon's `path` lines on stdin and move the card's actions to
-/// the final path. The card was built before the rename, so this is also the
-/// first moment the name hint can claim its slot.
+/// Follow the daemon's path lines on stdin and move the card's actions to the
+/// current file. An interim line means the rule-based name is in place but a
+/// background refine may still rename it; only a final line means no further
+/// rename can follow. The card was built before the rename, so this is also
+/// the first moment the name hint can claim its slot.
 fn start_path_updates(
     current_path: Rc<RefCell<PathBuf>>,
     final_path_received: Rc<Cell<bool>>,
@@ -1622,15 +1629,15 @@ fn start_path_updates(
     preview_hint_shown: Rc<Cell<bool>>,
     editor_hint_shown: bool,
 ) {
-    let (path_tx, path_rx) = std::sync::mpsc::channel::<PathBuf>();
+    let (path_tx, path_rx) = std::sync::mpsc::channel::<(PathBuf, bool)>();
     std::thread::spawn(move || {
         use std::io::BufRead;
         for line in std::io::stdin().lock().lines() {
             let Ok(line) = line else {
                 break;
             };
-            if let Some(path) = parse_preview_message(&line) {
-                if path_tx.send(path).is_err() {
+            if let Some(message) = parse_preview_message(&line) {
+                if path_tx.send(message).is_err() {
                     break;
                 }
             }
@@ -1639,19 +1646,21 @@ fn start_path_updates(
 
     glib::timeout_add_local(Duration::from_millis(50), move || loop {
         match path_rx.try_recv() {
-            Ok(path) => {
+            Ok((path, is_final)) => {
                 *current_path.borrow_mut() = path;
-                if final_path_received.get() {
-                    continue;
-                }
-                final_path_received.set(true);
-
+                // The rule-based name is the first moment the name hint can
+                // claim its slot, even when the model may refine it later.
                 if !editor_hint_shown
                     && !preview_hint_shown.get()
                     && crate::studio_nudges::take_name_hint()
                 {
                     add_name_hint(&card);
                     preview_hint_shown.set(true);
+                }
+                // Only the final line means no further rename can follow, so
+                // only it stops the card reporting a used path.
+                if is_final {
+                    final_path_received.set(true);
                 }
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => return ControlFlow::Continue,
@@ -2225,11 +2234,23 @@ mod tests {
     fn preview_message_reads_the_final_path() {
         assert_eq!(
             parse_preview_message("path\t/tmp/Capture.png\n"),
-            Some(PathBuf::from("/tmp/Capture.png"))
+            Some((PathBuf::from("/tmp/Capture.png"), true))
         );
         assert_eq!(
             parse_preview_message("path\t/tmp/Capture.png\r\n"),
-            Some(PathBuf::from("/tmp/Capture.png"))
+            Some((PathBuf::from("/tmp/Capture.png"), true))
+        );
+    }
+
+    #[test]
+    fn preview_message_reads_an_interim_path_as_renameable() {
+        assert_eq!(
+            parse_preview_message("path-interim\t/tmp/Capture.png\n"),
+            Some((PathBuf::from("/tmp/Capture.png"), false))
+        );
+        assert_eq!(
+            parse_preview_message("path-interim\t/tmp/Capture.png\r\n"),
+            Some((PathBuf::from("/tmp/Capture.png"), false))
         );
     }
 
@@ -2237,7 +2258,7 @@ mod tests {
     fn preview_message_keeps_the_rest_of_the_path_intact() {
         assert_eq!(
             parse_preview_message("path\t/tmp/with\ttab.png\n"),
-            Some(PathBuf::from("/tmp/with\ttab.png"))
+            Some((PathBuf::from("/tmp/with\ttab.png"), true))
         );
     }
 
@@ -2245,6 +2266,7 @@ mod tests {
     fn preview_message_ignores_other_lines_and_empty_paths() {
         assert_eq!(parse_preview_message("path\t"), None);
         assert_eq!(parse_preview_message("path\t\n"), None);
+        assert_eq!(parse_preview_message("path-interim\t"), None);
         assert_eq!(parse_preview_message("apexshot-preview:used\n"), None);
         assert_eq!(parse_preview_message("path /tmp/a.png\n"), None);
         assert_eq!(parse_preview_message(""), None);

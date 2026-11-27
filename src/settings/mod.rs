@@ -111,8 +111,16 @@ fn show_settings_toast(
     }
 }
 
+/// The page a freshly opened Settings window starts on.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum InitialPage {
+    Default,
+    Cloud,
+    Studio,
+}
+
 pub fn show_settings_window() -> anyhow::Result<()> {
-    show_settings_window_with(false)
+    show_settings_window_with(InitialPage::Default)
 }
 
 /// Open Settings on the Cloud page and start the connect flow.
@@ -120,10 +128,15 @@ pub fn show_settings_window() -> anyhow::Result<()> {
 /// A second process hands the request to the running window through the
 /// `cloud-connect` action instead of opening its own.
 pub fn show_settings_window_for_cloud_connect() -> anyhow::Result<()> {
-    show_settings_window_with(true)
+    show_settings_window_with(InitialPage::Cloud)
 }
 
-fn show_settings_window_with(cloud_connect: bool) -> anyhow::Result<()> {
+/// Open Settings straight on the Studio page.
+pub fn show_settings_window_for_studio() -> anyhow::Result<()> {
+    show_settings_window_with(InitialPage::Studio)
+}
+
+fn show_settings_window_with(initial_page: InitialPage) -> anyhow::Result<()> {
     // Force-set GIO_LAUNCHED_DESKTOP_FILE to the main app's desktop entry
     // so GNOME Shell shows the correct icon and name.
     if let Some(desktop_path) = crate::app_identity::desktop_file_for_portal() {
@@ -139,17 +152,17 @@ fn show_settings_window_with(cloud_connect: bool) -> anyhow::Result<()> {
         .build();
 
     install_cloud_connect_action(&app);
-    let pending_cloud_connect = Rc::new(Cell::new(cloud_connect));
+    let pending_page = Rc::new(Cell::new(initial_page));
 
     app.connect_activate(move |application| {
         crate::capture::editor::ui_support::apply_theme_to_gtk();
-        let wants_connect = pending_cloud_connect.replace(false);
+        let wants_page = pending_page.replace(InitialPage::Default);
         // Check if a window already exists (single-instance behavior)
         // If yes, just present it instead of creating a new one
         let windows = application.windows();
         if let Some(existing_window) = windows.first() {
             existing_window.present();
-            if wants_connect {
+            if wants_page == InitialPage::Cloud {
                 start_cloud_connect();
             }
             return;
@@ -161,15 +174,19 @@ fn show_settings_window_with(cloud_connect: bool) -> anyhow::Result<()> {
             let _ = crate::daemon::start_daemon_subprocess();
         }
 
-        let page = wants_connect.then_some("6");
+        let page = match wants_page {
+            InitialPage::Cloud => Some("6"),
+            InitialPage::Studio => Some("9"),
+            InitialPage::Default => None,
+        };
         build_settings_window_at(application, page, None);
-        if wants_connect {
+        if wants_page == InitialPage::Cloud {
             // Let the new window map first so the sign-in card has a parent.
             gtk4::glib::idle_add_local_once(start_cloud_connect);
         }
     });
 
-    if cloud_connect && hand_cloud_connect_to_primary(&app) {
+    if initial_page == InitialPage::Cloud && hand_cloud_connect_to_primary(&app) {
         return Ok(());
     }
 
@@ -388,7 +405,9 @@ fn build_settings_window_at(
     // beside it runs the full window height.
 
     // --- WINDOW GESTURES ---
-    install_window_drag(&drag_handle, &window);
+    // The whole header bar drags the window, as History's does; its buttons
+    // keep their own presses.
+    install_window_drag(&toolbar, &window);
     install_edge_resize(&root_box, &window);
 
     // --- LAYOUT SPLIT ---

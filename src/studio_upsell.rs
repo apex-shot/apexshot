@@ -814,7 +814,12 @@ fn offer_meta(capabilities: StudioCapabilities, dark: bool) -> GtkBox {
             true,
         ));
     }
-    items.push((t("$39 once"), custom::CHECK_SYMBOLIC, None, false));
+    items.push((
+        crate::studio_offer::price_label(),
+        custom::CHECK_SYMBOLIC,
+        None,
+        false,
+    ));
     items.push((
         t("12 months of updates"),
         custom::CHECK_SYMBOLIC,

@@ -5701,3 +5701,9 @@ msgstr "已根据截取的内容命名。可在历史记录中搜索。"
 
 msgid "Open History"
 msgstr "打开历史记录"
+
+msgid "$19.50 once · 50% off for Black Friday"
+msgstr "一次性 $19.50 · 黑色星期五 5 折"
+
+msgid "$19.50 once, 50% off for Black Friday. Studio also includes Motion export, Upscale, and Studio styles."
+msgstr "一次性 19.50 美元，黑色星期五 5 折。Studio 还包含 Motion 导出、放大和 Studio 样式。"

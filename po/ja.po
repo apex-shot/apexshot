@@ -5709,3 +5709,9 @@ msgstr "撮影した内容から名前を付けました。履歴で検索でき
 
 msgid "Open History"
 msgstr "履歴を開く"
+
+msgid "$19.50 once · 50% off for Black Friday"
+msgstr "買い切り $19.50 · ブラックフライデー50%オフ"
+
+msgid "$19.50 once, 50% off for Black Friday. Studio also includes Motion export, Upscale, and Studio styles."
+msgstr "一回払い19.50ドル、ブラックフライデー50%オフ。Studioには、Motion書き出し、アップスケール、Studioスタイルも含まれます。"
