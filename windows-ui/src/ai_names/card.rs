@@ -13,7 +13,7 @@ use gtk4::{
 use super::trial::{CardKind, TRIAL_NAMES};
 use crate::i18n::t;
 use crate::studio_upsell::{
-    centered_label, close_button, install_css, link_button, px, primary_button, theme_is_dark,
+    centered_label, close_button, install_css, link_button, primary_button, px, theme_is_dark,
     LIGHT_CLASS,
 };
 
