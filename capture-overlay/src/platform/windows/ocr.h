@@ -14,15 +14,25 @@ namespace Platform {
 bool recognizeText(const QImage& image, const QString& language, bool keepLineBreaks,
                    QString& outText, QString& outError);
 
+/// One recognised word and its bounding box in image pixels.
+struct OcrTextWord {
+    QString text;
+    QRect rect;
+};
+
 /// One recognised line and its bounding box in image pixels.
 struct OcrTextLine {
     QString text;
     QRect rect;
+    QVector<OcrTextWord> words;
 };
 
 /// Recognises text line by line with bounding boxes. Returns false and sets
 /// outError when the engine is unavailable.
 bool recognizeLines(const QImage& image, const QString& language,
                     QVector<OcrTextLine>& outLines, QString& outError);
+
+/// Joins the lines' text the way recognizeText does.
+QString formatOcrText(const QVector<OcrTextLine>& lines, bool keepLineBreaks);
 
 } // namespace Platform

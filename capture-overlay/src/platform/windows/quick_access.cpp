@@ -394,12 +394,23 @@ QString organizeCapture(const QImage& image, const QRect& region, const QString&
 
     QJsonArray jsonLines;
     for (const Platform::OcrTextLine& line : lines) {
+        QJsonArray jsonWords;
+        for (const Platform::OcrTextWord& word : line.words) {
+            QJsonObject wordEntry;
+            wordEntry.insert(QStringLiteral("text"), word.text);
+            wordEntry.insert(QStringLiteral("x"), word.rect.x());
+            wordEntry.insert(QStringLiteral("y"), word.rect.y());
+            wordEntry.insert(QStringLiteral("width"), word.rect.width());
+            wordEntry.insert(QStringLiteral("height"), word.rect.height());
+            jsonWords.append(wordEntry);
+        }
         QJsonObject entry;
         entry.insert(QStringLiteral("text"), line.text);
         entry.insert(QStringLiteral("x"), line.rect.x());
         entry.insert(QStringLiteral("y"), line.rect.y());
         entry.insert(QStringLiteral("width"), line.rect.width());
         entry.insert(QStringLiteral("height"), line.rect.height());
+        entry.insert(QStringLiteral("words"), jsonWords);
         jsonLines.append(entry);
     }
 
@@ -1834,6 +1845,9 @@ public:
         const int pillsTop = m_cardRect.top() + (m_cardRect.height() - button) / 2;
         copy->setGeometry(pillsLeft, pillsTop, copyWidth, button);
         save->setGeometry(pillsLeft + copyWidth + gap, pillsTop, saveWidth, button);
+        m_hintPillsTop = pillsTop;
+        m_hintButton = button;
+        m_hintBottom = bottom;
         const bool hasContent = m_video ? !m_path.isEmpty() : !m_image.isNull();
         copy->setEnabled(hasContent);
         save->setEnabled(hasContent);
@@ -1848,35 +1862,8 @@ public:
             && !settings.studio.unlocked) {
             m_editorHintShown = true;
             auto* hint = new CardButton(CardButton::Kind::Hint, 0, QString(), m_scale, this);
-            const QString hintText =
-                QStringLiteral("Edit: add a background, frame, or 3D tilt.");
-            const int hintPadding = qRound(4 * m_scale);
-            const int hintRoom = std::max(1, m_frameRect.width() - qRound(8 * m_scale));
-            // Keep the sentence whole by giving up a little size before the
-            // text has to elide on a small card.
-            int hintPixels = std::max(1, qRound(9 * m_scale));
-            const int hintPixelsFloor = std::max(1, qRound(7 * m_scale));
-            QFont hintFont = uiFont(hintPixels);
-            QFontMetrics hintMetrics(hintFont);
-            while (hintPixels > hintPixelsFloor
-                   && hintMetrics.horizontalAdvance(hintText) + 2 * hintPadding > hintRoom) {
-                --hintPixels;
-                hintFont = uiFont(hintPixels);
-                hintMetrics = QFontMetrics(hintFont);
-            }
-            hint->setFont(hintFont);
-            hint->setText(hintMetrics.elidedText(hintText, Qt::ElideRight,
-                                                 std::max(1, hintRoom - 2 * hintPadding)));
+            placeHint(hint, QStringLiteral("Edit: add a background, frame, or 3D tilt."));
             hint->setToolTip(QStringLiteral("Open in the editor"));
-            const int hintWidth =
-                std::min(hintRoom, hintMetrics.horizontalAdvance(hint->text()) + 2 * hintPadding);
-            const int hintHeight = qRound(20 * m_scale);
-            // Centred in the strip between the pill row and the bottom corner
-            // row, so it never covers Upload or the cancel button.
-            const int hintTop = pillsTop + button
-                + std::max(0, (bottom - (pillsTop + button) - hintHeight) / 2);
-            hint->setGeometry(m_frameRect.left() + (m_frameRect.width() - hintWidth) / 2,
-                              hintTop, hintWidth, hintHeight);
             hint->setEnabled(m_sample || !m_path.isEmpty());
             connect(hint, &QAbstractButton::clicked, this, [this] { openEditor(); });
             m_controls.append(hint);
@@ -1888,35 +1875,9 @@ public:
             g_nameHintPending = false;
             m_editorHintShown = true;
             auto* hint = new CardButton(CardButton::Kind::Hint, 0, QString(), m_scale, this);
-            const QString hintText =
-                QStringLiteral("Named from what you captured. Search it in History.");
-            const int hintPadding = qRound(4 * m_scale);
-            const int hintRoom = std::max(1, m_frameRect.width() - qRound(8 * m_scale));
-            // Keep the sentence whole by giving up a little size before the
-            // text has to elide on a small card.
-            int hintPixels = std::max(1, qRound(9 * m_scale));
-            const int hintPixelsFloor = std::max(1, qRound(7 * m_scale));
-            QFont hintFont = uiFont(hintPixels);
-            QFontMetrics hintMetrics(hintFont);
-            while (hintPixels > hintPixelsFloor
-                   && hintMetrics.horizontalAdvance(hintText) + 2 * hintPadding > hintRoom) {
-                --hintPixels;
-                hintFont = uiFont(hintPixels);
-                hintMetrics = QFontMetrics(hintFont);
-            }
-            hint->setFont(hintFont);
-            hint->setText(hintMetrics.elidedText(hintText, Qt::ElideRight,
-                                                 std::max(1, hintRoom - 2 * hintPadding)));
+            placeHint(hint,
+                      QStringLiteral("Named from what you captured. Search it in History."));
             hint->setToolTip(QStringLiteral("Open History"));
-            const int hintWidth =
-                std::min(hintRoom, hintMetrics.horizontalAdvance(hint->text()) + 2 * hintPadding);
-            const int hintHeight = qRound(20 * m_scale);
-            // Centred in the strip between the pill row and the bottom corner
-            // row, so it never covers Upload or the cancel button.
-            const int hintTop = pillsTop + button
-                + std::max(0, (bottom - (pillsTop + button) - hintHeight) / 2);
-            hint->setGeometry(m_frameRect.left() + (m_frameRect.width() - hintWidth) / 2,
-                              hintTop, hintWidth, hintHeight);
             hint->setEnabled(m_sample || !m_path.isEmpty());
             connect(hint, &QAbstractButton::clicked, this, [] { openHistoryWindow(); });
             m_controls.append(hint);
@@ -2048,6 +2009,25 @@ public:
     const QString& path() const { return m_path; }
     /// Point the card at a renamed file, so every action on the card uses it.
     void setPath(const QString& path) { m_path = path; }
+
+    /// The copied text was tidied: offer the original back on the clipboard.
+    void showTextCleanedHint(const QString& rawText, bool aiUsed)
+    {
+        if (m_editorHintShown)
+            return;
+        m_editorHintShown = true;
+        auto* hint = new CardButton(CardButton::Kind::Hint, 0, QString(), m_scale, this);
+        placeHint(hint, aiUsed ? QStringLiteral("Text cleaned up with AI · Undo")
+                                : QStringLiteral("Layout kept · Undo"));
+        hint->setToolTip(QStringLiteral("Put the original text back on the clipboard"));
+        connect(hint, &QAbstractButton::clicked, this, [hint, rawText] {
+            QGuiApplication::clipboard()->setText(rawText);
+            hint->setText(QStringLiteral("Original text copied"));
+            hint->setDisabled(true);
+        });
+        hint->show();
+        m_controls.append(hint);
+    }
 
 protected:
     void paintEvent(QPaintEvent*) override
@@ -2418,6 +2398,37 @@ private:
         close();
     }
 
+    /// Lay a quiet hint in the strip between the pill row and the bottom
+    /// corner row, shrinking the font before the text has to elide.
+    void placeHint(CardButton* hint, const QString& hintText)
+    {
+        const int hintPadding = qRound(4 * m_scale);
+        const int hintRoom = std::max(1, m_frameRect.width() - qRound(8 * m_scale));
+        // Keep the sentence whole by giving up a little size before the
+        // text has to elide on a small card.
+        int hintPixels = std::max(1, qRound(9 * m_scale));
+        const int hintPixelsFloor = std::max(1, qRound(7 * m_scale));
+        QFont hintFont = uiFont(hintPixels);
+        QFontMetrics hintMetrics(hintFont);
+        while (hintPixels > hintPixelsFloor
+               && hintMetrics.horizontalAdvance(hintText) + 2 * hintPadding > hintRoom) {
+            --hintPixels;
+            hintFont = uiFont(hintPixels);
+            hintMetrics = QFontMetrics(hintFont);
+        }
+        hint->setFont(hintFont);
+        hint->setText(hintMetrics.elidedText(hintText, Qt::ElideRight,
+                                             std::max(1, hintRoom - 2 * hintPadding)));
+        const int hintWidth =
+            std::min(hintRoom, hintMetrics.horizontalAdvance(hint->text()) + 2 * hintPadding);
+        const int hintHeight = qRound(20 * m_scale);
+        // Centred so it never covers Upload or the cancel button.
+        const int hintTop = m_hintPillsTop + m_hintButton
+            + std::max(0, (m_hintBottom - (m_hintPillsTop + m_hintButton) - hintHeight) / 2);
+        hint->setGeometry(m_frameRect.left() + (m_frameRect.width() - hintWidth) / 2,
+                          hintTop, hintWidth, hintHeight);
+    }
+
     QImage m_image;
     QString m_path;
     bool m_video = false;
@@ -2450,6 +2461,9 @@ private:
     QList<CardButton*> m_controls;
     CardButton* m_cancelUpload = nullptr;
     bool m_editorHintShown = false;
+    int m_hintPillsTop = 0;
+    int m_hintButton = 0;
+    int m_hintBottom = 0;
     UploadState m_uploadState = UploadState::Idle;
     double m_uploadProgress = 0.0;
     QPointer<QProcess> m_uploadProcess;
@@ -4513,6 +4527,7 @@ private:
         bool ocrFailed = false;
         bool isQr = false;
         QString ocrError;
+        QVector<Platform::OcrTextLine> lines;
         if (options.ocr) {
             // QR first: ApexShot's OCR toggle also reads codes.
             QByteArray payload;
@@ -4523,18 +4538,19 @@ private:
                 debugLog(QStringLiteral("qr detected: %1 bytes").arg(payload.size()));
             } else {
                 debugLog(QStringLiteral("qr: %1").arg(qrError));
-                if (!Platform::recognizeText(image, settings.ocr.language,
-                                             settings.ocr.keepLineBreaks, text, ocrError)) {
+                if (!Platform::recognizeLines(image, settings.ocr.language, lines, ocrError)) {
                     ocrFailed = true;
                     debugLog(QStringLiteral("ocr failed: %1").arg(ocrError));
                     notify(ocrError, QStringLiteral("OCR unavailable"));
                 }
+                text = Platform::formatOcrText(lines, settings.ocr.keepLineBreaks);
                 text = text.trimmed();
                 debugLog(QStringLiteral("ocr chars=%1").arg(text.size()));
             }
         }
 
         QString hint = QStringLiteral("Ready");
+        bool copiedText = false;
         if (options.ocr) {
             if (isQr) {
                 m_telemetry->recordOcr();
@@ -4544,6 +4560,7 @@ private:
                 m_telemetry->recordOcr();
                 QGuiApplication::clipboard()->setText(text);
                 hint = QStringLiteral("Text copied to clipboard");
+                copiedText = true;
             } else {
                 Platform::copyCaptureToClipboard(
                     image, path, settings.screenshots.clipboardMode);
@@ -4574,6 +4591,8 @@ private:
             if (!path.isEmpty())
                 notify(hint);
             refineNameInBackground(request, path, image, settings);
+            if (copiedText)
+                cleanCopiedTextInBackground(lines, image, text);
             return;
         }
 
@@ -4583,6 +4602,110 @@ private:
             !options.ocr && settings.screenshots.afterCopyToClipboard;
         showResultCard(image, path, false, autoCopied);
         refineNameInBackground(request, path, image, settings);
+        if (copiedText)
+            cleanCopiedTextInBackground(lines, image, text);
+    }
+
+    /// Ask the helper to tidy the copied OCR text and swap it back onto the
+    /// clipboard while it is still there.
+    void cleanCopiedTextInBackground(const QVector<Platform::OcrTextLine>& lines,
+                                     const QImage& image, const QString& rawText)
+    {
+        if (lines.isEmpty())
+            return;
+        const QString executable = organizerExecutable();
+        if (executable.isEmpty())
+            return;
+
+        QJsonArray jsonLines;
+        for (const Platform::OcrTextLine& line : lines) {
+            QJsonArray jsonWords;
+            for (const Platform::OcrTextWord& word : line.words) {
+                QJsonObject wordEntry;
+                wordEntry.insert(QStringLiteral("text"), word.text);
+                wordEntry.insert(QStringLiteral("x"), word.rect.x());
+                wordEntry.insert(QStringLiteral("y"), word.rect.y());
+                wordEntry.insert(QStringLiteral("width"), word.rect.width());
+                wordEntry.insert(QStringLiteral("height"), word.rect.height());
+                jsonWords.append(wordEntry);
+            }
+            QJsonObject entry;
+            entry.insert(QStringLiteral("text"), line.text);
+            entry.insert(QStringLiteral("x"), line.rect.x());
+            entry.insert(QStringLiteral("y"), line.rect.y());
+            entry.insert(QStringLiteral("width"), line.rect.width());
+            entry.insert(QStringLiteral("height"), line.rect.height());
+            entry.insert(QStringLiteral("words"), jsonWords);
+            jsonLines.append(entry);
+        }
+
+        QJsonObject page;
+        page.insert(QStringLiteral("image_width"), image.width());
+        page.insert(QStringLiteral("image_height"), image.height());
+        page.insert(QStringLiteral("lines"), jsonLines);
+
+        QJsonObject object;
+        object.insert(QStringLiteral("task"), QStringLiteral("clean_text"));
+        object.insert(QStringLiteral("allow_ai"), true);
+        object.insert(QStringLiteral("page"), page);
+
+        auto* process = new QProcess(this);
+        connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+                [this, process, rawText](int exitCode, QProcess::ExitStatus status) {
+                    const QByteArray output = process->readAllStandardOutput();
+                    process->deleteLater();
+                    if (status != QProcess::NormalExit || exitCode != 0)
+                        return;
+                    const QJsonObject obj = QJsonDocument::fromJson(output).object();
+                    const QString cleaned = obj.value(QStringLiteral("text")).toString();
+                    const QString html = obj.value(QStringLiteral("html")).toString();
+                    const bool aiUsed = obj.value(QStringLiteral("ai_used")).toBool();
+                    const QString kind = obj.value(QStringLiteral("kind")).toString();
+                    if (cleaned.isEmpty() || cleaned == rawText) {
+                        debugLog(QStringLiteral("text cleanup: unchanged"));
+                        return;
+                    }
+                    if (QGuiApplication::clipboard()->text() != rawText) {
+                        debugLog(QStringLiteral("text cleanup: clipboard changed"));
+                        return;
+                    }
+                    auto* mime = new QMimeData;
+                    mime->setText(cleaned);
+                    if (!html.isEmpty())
+                        mime->setHtml(html);
+                    QGuiApplication::clipboard()->setMimeData(mime);
+                    debugLog(QStringLiteral("text cleanup: %1 chars, kind %2, ai %3")
+                                 .arg(cleaned.size())
+                                 .arg(kind)
+                                 .arg(aiUsed));
+
+                    for (int i = int(m_cards.size()) - 1; i >= 0; --i) {
+                        if (!m_cards.at(i) || !m_cards.at(i)->isVisible())
+                            continue;
+                        m_cards.at(i)->showTextCleanedHint(rawText, aiUsed);
+                        return;
+                    }
+                    notify(aiUsed ? QStringLiteral("Text cleaned up with AI")
+                                   : QStringLiteral("Text layout kept"));
+                });
+        connect(process, &QProcess::errorOccurred, this,
+                [process](QProcess::ProcessError error) {
+                    debugLog(QStringLiteral("text cleanup: %1").arg(int(error)));
+                    process->deleteLater();
+                });
+        // A helper that hangs must not keep the process around.
+        auto* guard = new QTimer(process);
+        guard->setSingleShot(true);
+        guard->setInterval(15000);
+        connect(guard, &QTimer::timeout, process, [process] {
+            if (process->state() != QProcess::NotRunning)
+                process->kill();
+        });
+        guard->start();
+
+        process->start(executable, QStringList());
+        process->write(QJsonDocument(object).toJson(QJsonDocument::Compact));
+        process->closeWriteChannel();
     }
 
     bool m_menuOpen = false;
