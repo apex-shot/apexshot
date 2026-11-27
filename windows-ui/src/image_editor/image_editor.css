@@ -1166,7 +1166,7 @@ button.image-editor-primary-button:active {
     background: rgba(255, 255, 255, 0.06);
 }
 
-togglebutton.image-editor-bg-tab {
+button.image-editor-bg-tab {
     min-height: 26px;
     padding: 0 6px;
     border: none;
@@ -1179,19 +1179,19 @@ togglebutton.image-editor-bg-tab {
     font-weight: 500;
 }
 
-togglebutton.image-editor-bg-tab label {
+button.image-editor-bg-tab label {
     color: inherit;
     font-size: 11px;
     font-weight: 500;
 }
 
-togglebutton.image-editor-bg-tab:hover {
+button.image-editor-bg-tab:hover {
     background: transparent;
     color: rgba(255, 255, 255, 0.92);
 }
 
-togglebutton.image-editor-bg-tab:checked,
-togglebutton.image-editor-bg-tab:checked:hover {
+button.image-editor-bg-tab:checked,
+button.image-editor-bg-tab:checked:hover {
     background: rgba(255, 255, 255, 0.10);
     color: rgba(255, 255, 255, 0.96);
 }
@@ -1200,16 +1200,16 @@ togglebutton.image-editor-bg-tab:checked:hover {
     background: rgba(17, 24, 39, 0.06);
 }
 
-.editor-theme-light togglebutton.image-editor-bg-tab {
+.editor-theme-light button.image-editor-bg-tab {
     color: rgba(29, 33, 41, 0.52);
 }
 
-.editor-theme-light togglebutton.image-editor-bg-tab:hover {
+.editor-theme-light button.image-editor-bg-tab:hover {
     color: rgba(29, 33, 41, 0.88);
 }
 
-.editor-theme-light togglebutton.image-editor-bg-tab:checked,
-.editor-theme-light togglebutton.image-editor-bg-tab:checked:hover {
+.editor-theme-light button.image-editor-bg-tab:checked,
+.editor-theme-light button.image-editor-bg-tab:checked:hover {
     background: rgba(17, 24, 39, 0.08);
     color: rgba(29, 33, 41, 0.92);
 }

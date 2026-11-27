@@ -62,8 +62,8 @@ const IMAGE_EDITOR_TYPE_CSS: &str = r#"
         .image-editor-bg-custom-row label {
             font-size: 14px;
         }
-        togglebutton.image-editor-bg-tab,
-        togglebutton.image-editor-bg-tab label,
+        button.image-editor-bg-tab,
+        button.image-editor-bg-tab label,
         button.image-editor-preset-pill label {
             font-size: 13px;
         }

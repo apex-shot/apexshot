@@ -255,6 +255,44 @@ mod tests {
         }
     }
 
+    /// The Background tabs once fell back to GTK's default button padding
+    /// because their selector named a `togglebutton` node, which GTK never
+    /// creates. The wider strip became the panel's widest row, and the
+    /// homogeneous wallpaper grid spread its tiles across the slack.
+    #[test]
+    fn the_background_tabs_never_widen_the_wallpaper_panel() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            super::super::ui_support::install_css();
+            let window = gtk4::ApplicationWindow::new(&crate::test_support::test_app());
+            let host = super::super::annotate::EditorHost::new(
+                Rc::new(|| {}),
+                Rc::new(|_| {}),
+                Rc::new(|| (0.0, 0.0)),
+            );
+            *host.editor.borrow_mut() = Some(EditorState::new(RgbaImage::new(1903, 1006)));
+            let scale = crate::platform::ui_scale();
+            let inspector = build(scale, &host, &window);
+            inspector.sync_background();
+            let root: &gtk4::Widget = inspector.root.upcast_ref();
+            let mut tabs = Vec::new();
+            collect_class(root, "image-editor-bg-tabs", &mut tabs);
+            let mut grids = Vec::new();
+            collect_class(root, "image-editor-wallpaper-grid", &mut grids);
+            let strip = tabs
+                .iter()
+                .find(|tab| !tab.has_css_class("image-editor-upscale-segmented"))
+                .unwrap();
+            let strip_width = strip.measure(Orientation::Horizontal, -1).0;
+            let grid_width = grids[0].measure(Orientation::Horizontal, -1).0;
+            assert!(
+                strip_width <= grid_width,
+                "tab strip {strip_width}px is wider than the wallpaper grid {grid_width}px"
+            );
+        }) else {
+            return;
+        };
+    }
+
     #[test]
     fn motion_and_static_share_the_appearance_panel_without_static_transform() {
         let Some(()) = crate::test_support::with_gtk(|| {
