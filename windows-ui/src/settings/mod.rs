@@ -806,6 +806,8 @@ fn build_settings_window(app: &Application, initial_cloud: bool) {
         adv_clipboard_mode: screenshots.clipboard_mode_input.clone(),
         adv_ocr_language: advanced.ocr_lang_input.clone(),
         adv_ocr_keep_line_breaks: advanced.ocr_line_breaks_check.clone(),
+        organizer_auto_name: advanced.organizer_auto_name_check.clone(),
+        organizer_name_style: advanced.organizer_name_style_input.clone(),
         telemetry_enabled: advanced.telemetry_enabled_check.clone(),
         cloud_apexshot: cloud.apexshot_check.clone(),
         cloud_xbackbone: cloud.xbackbone_check.clone(),
@@ -1113,6 +1115,8 @@ fn install_save_dirty_tracking(inputs: &Rc<SaveInputs>, mark_dirty: Rc<dyn Fn()>
     wire_combo(&inputs.adv_clipboard_mode);
     wire_combo(&inputs.adv_ocr_language);
     wire_check(&inputs.adv_ocr_keep_line_breaks);
+    wire_check(&inputs.organizer_auto_name);
+    wire_combo(&inputs.organizer_name_style);
     wire_check(&inputs.telemetry_enabled);
     wire_check(&inputs.cloud_apexshot);
     wire_check(&inputs.cloud_xbackbone);

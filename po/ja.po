@@ -5526,3 +5526,21 @@ msgid ""
 msgstr ""
 "無料リンクは 7 日間有効です。\n"
 "{url}"
+
+msgid "Screenshot names"
+msgstr "スクリーンショット名"
+
+msgid "Name screenshots automatically"
+msgstr "スクリーンショットに自動で名前を付ける"
+
+msgid "Names come from the window title and on-screen text, on this computer. Private windows and explicit content get a dated name."
+msgstr "名前はこのパソコン上で、ウィンドウのタイトルと画面上のテキストから付けられます。プライベートウィンドウと明示的なコンテンツには日付入りの名前が付きます。"
+
+msgid "Name style"
+msgstr "名前の形式"
+
+msgid "Date and title"
+msgstr "日付とタイトル"
+
+msgid "App and title"
+msgstr "アプリとタイトル"

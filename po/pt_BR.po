@@ -5622,3 +5622,21 @@ msgid ""
 msgstr ""
 "Links gratuitos ficam disponíveis por 7 dias.\n"
 "{url}"
+
+msgid "Screenshot names"
+msgstr "Nomes das capturas"
+
+msgid "Name screenshots automatically"
+msgstr "Nomear capturas automaticamente"
+
+msgid "Names come from the window title and on-screen text, on this computer. Private windows and explicit content get a dated name."
+msgstr "Os nomes vêm do título da janela e do texto na tela, neste computador. Janelas privadas e conteúdo explícito recebem um nome com data."
+
+msgid "Name style"
+msgstr "Estilo do nome"
+
+msgid "Date and title"
+msgstr "Data e título"
+
+msgid "App and title"
+msgstr "Aplicativo e título"
