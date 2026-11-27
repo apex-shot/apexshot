@@ -421,7 +421,9 @@ QString organizeCapture(const QImage& image, const QRect& region, const QString&
     process.write(QJsonDocument(object).toJson(QJsonDocument::Compact));
     process.closeWriteChannel();
 
-    const int remaining = qMax(100, 1500 - int(timer.elapsed()));
+    // Rule-based names come back in well under a second; the extra room is for
+    // AI names, whose helper gives up on the model by 2.6 s on its own.
+    const int remaining = qMax(100, 3000 - int(timer.elapsed()));
     if (!process.waitForFinished(remaining)) {
         process.kill();
         process.waitForFinished(500);
