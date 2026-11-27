@@ -22,6 +22,9 @@ pub struct OrganizeRequest {
     pub app: Option<String>,
     #[serde(default)]
     pub window_title: Option<String>,
+    /// True for the background request that may ask the model.
+    #[serde(default)]
+    pub allow_ai: bool,
 }
 
 /// The user's organizer settings.
@@ -112,27 +115,65 @@ pub fn organize_capture_with_ai(
         };
     }
 
+    let loaded = match Index::load(index_path) {
+        Ok(index) => Some(index),
+        Err(error) if error.kind() == io::ErrorKind::InvalidData => {
+            let mut aside = index_path.as_os_str().to_os_string();
+            aside.push(".bad");
+            let _ = fs::rename(index_path, PathBuf::from(aside));
+            Index::load(index_path).ok()
+        }
+        Err(_) => None,
+    };
+    // A second request for the same capture reuses what the first one recorded.
+    let previous = loaded
+        .as_ref()
+        .and_then(|index| index.entries().iter().find(|entry| entry.path == request.path))
+        .cloned();
+
     let ctx = CaptureContext {
         app: request.app.clone(),
         window_title: request.window_title.clone(),
         captured_at,
     };
     let suggestion = suggest_name(&request.page, &ctx, settings.style);
+    let current_stem = request
+        .path
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let plain_stem = current_stem
+        .strip_suffix(density_suffix(&current_stem))
+        .unwrap_or(&current_stem);
     let ai_stem = match (settings.auto_name, ai) {
         (true, Some(namer)) => crate::ai::ai_name(
             namer,
             &suggestion,
             request.window_title.as_deref(),
             &request.page,
-        ),
+        )
+        // A reply that only repeats a name we already have is not an AI name.
+        .filter(|stem| {
+            !stem.eq_ignore_ascii_case(&suggestion.stem)
+                && !stem.eq_ignore_ascii_case(plain_stem)
+        }),
         _ => None,
     };
     let chosen_stem = ai_stem.clone().unwrap_or_else(|| suggestion.stem.clone());
-    let original_name = request
-        .path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default();
+    let original_name = previous
+        .as_ref()
+        .map(|entry| entry.original_name.clone())
+        .unwrap_or_else(|| {
+            request
+                .path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        });
+    let captured_at = previous
+        .as_ref()
+        .map(|entry| entry.captured_at)
+        .unwrap_or(captured_at);
 
     let mut path = request.path.clone();
     let mut renamed = false;
@@ -186,17 +227,8 @@ pub fn organize_capture_with_ai(
     };
 
     let mut indexed = false;
-    let loaded = match Index::load(index_path) {
-        Ok(index) => Some(index),
-        Err(error) if error.kind() == io::ErrorKind::InvalidData => {
-            let mut aside = index_path.as_os_str().to_os_string();
-            aside.push(".bad");
-            let _ = fs::rename(index_path, PathBuf::from(aside));
-            Index::load(index_path).ok()
-        }
-        Err(_) => None,
-    };
     if let Some(mut index) = loaded {
+        index.rename(&request.path, &path);
         index.upsert(entry);
         indexed = index.save().is_ok();
     }
@@ -252,6 +284,7 @@ mod tests {
             page: OcrPage::default(),
             app: None,
             window_title: window_title.map(str::to_string),
+            allow_ai: false,
         }
     }
 
@@ -500,6 +533,106 @@ mod tests {
 
         assert!(outcome.indexed);
         assert!(index_path.with_file_name("index.json.bad").exists());
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn second_request_keeps_the_original_name() {
+        let dir = temp_dir("second-request");
+        let path = dir.join("Screenshot 2026-11-27 at 14.03.09.png");
+        fs::write(&path, b"png").unwrap();
+        let index_path = dir.join("index").join("index.json");
+        let settings = OrganizeSettings {
+            auto_name: true,
+            ..OrganizeSettings::default()
+        };
+
+        let first = organize_capture(
+            &request(path, Some("Quarterly report - Word")),
+            &settings,
+            &index_path,
+            captured_at(),
+        );
+        let mut second_request = request(first.path.clone(), Some("Quarterly report - Word"));
+        second_request.allow_ai = true;
+        let namer = FixedNamer(Some("Quarterly sales review deck".into()));
+
+        let second = organize_capture_with_ai(
+            &second_request,
+            &settings,
+            &index_path,
+            captured_at(),
+            Some(&namer),
+        );
+
+        assert!(second.ai_named);
+        assert_eq!(
+            second.path.file_name().unwrap().to_string_lossy(),
+            "Quarterly sales review deck.png"
+        );
+
+        let index = Index::load(&index_path).unwrap();
+        assert_eq!(index.entries().len(), 1);
+        let entry = &index.entries()[0];
+        assert_eq!(
+            entry.original_name, "Screenshot 2026-11-27 at 14.03.09.png"
+        );
+        assert_eq!(entry.heuristic_name.as_deref(), Some("Quarterly report"));
+        assert!(entry.ai_named);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn echoed_name_is_not_an_ai_name() {
+        let dir = temp_dir("ai-echo");
+        let path = dir.join("Screenshot 2026-11-27 at 14.03.09.png");
+        fs::write(&path, b"png").unwrap();
+        let settings = OrganizeSettings {
+            auto_name: true,
+            ..OrganizeSettings::default()
+        };
+        let namer = FixedNamer(Some("Quarterly report".into()));
+
+        let outcome = organize_capture_with_ai(
+            &request(path, Some("Quarterly report - Word")),
+            &settings,
+            &dir.join("index.json"),
+            captured_at(),
+            Some(&namer),
+        );
+
+        assert!(!outcome.ai_named);
+        assert_eq!(
+            outcome.path.file_name().unwrap().to_string_lossy(),
+            "Quarterly report.png"
+        );
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn echoed_name_with_density_is_not_an_ai_name() {
+        let dir = temp_dir("ai-echo-density");
+        let path = dir.join("Quarterly report@2x.png");
+        fs::write(&path, b"png").unwrap();
+        let settings = OrganizeSettings {
+            auto_name: true,
+            ..OrganizeSettings::default()
+        };
+        let namer = FixedNamer(Some("quarterly REPORT".into()));
+
+        let outcome = organize_capture_with_ai(
+            &request(path.clone(), Some("Quarterly report - Word")),
+            &settings,
+            &dir.join("index.json"),
+            captured_at(),
+            Some(&namer),
+        );
+
+        assert!(!outcome.ai_named);
+        assert_eq!(outcome.path, path);
 
         fs::remove_dir_all(&dir).unwrap();
     }
