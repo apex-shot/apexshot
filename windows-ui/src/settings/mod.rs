@@ -870,6 +870,7 @@ fn build_settings_window(app: &Application, initial_page: InitialPage) {
     );
 
     crate::update::open_windows::register_settings();
+    crate::platform::center_on_pointer_screen(&window);
     window.present();
     crate::update_ui::present_if_needed(&window_overlay);
 }

@@ -347,6 +347,7 @@ fn build_window_at(app: &Application, outcome: Rc<RefCell<Outcome>>, cloud_conne
         cloud_connect,
     );
     ONBOARDING_WIDGETS.with(|slot| *slot.borrow_mut() = Some(widgets));
+    crate::platform::center_on_pointer_screen(&window);
     window.present();
 }
 

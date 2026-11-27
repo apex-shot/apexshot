@@ -460,6 +460,8 @@ pub fn build_history_window(app: &Application) {
         });
     }
 
+    #[cfg(target_os = "windows")]
+    crate::platform::center_on_pointer_screen(&window);
     window.present();
     crate::update_ui::present_if_needed(&window_overlay);
 }

@@ -25,7 +25,13 @@ pub fn ui_scale() -> f64 {
 pub fn center_on_pointer_screen(window: &impl gtk4::prelude::IsA<gtk4::Window>) {
     use gtk4::prelude::*;
 
-    window.as_ref().connect_map(|window| {
+    // Only the first showing: a window the person has moved, then hidden and
+    // shown again, stays where they put it.
+    let placed = std::cell::Cell::new(false);
+    window.as_ref().connect_map(move |window| {
+        if placed.replace(true) {
+            return;
+        }
         let title = window
             .title()
             .map(|title| title.to_string())

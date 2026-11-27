@@ -376,6 +376,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
         }
     });
 
+    crate::platform::center_on_pointer_screen(&window);
     window.present();
     crate::update_ui::present_if_needed(&shell);
 }

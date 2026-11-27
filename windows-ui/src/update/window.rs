@@ -708,6 +708,7 @@ pub(super) fn build_window(app: &Application, release: Release) {
     overlay.add_overlay(&window_controls(&window, scale));
     root.append(&overlay);
     window.set_child(Some(&root));
+    crate::platform::center_on_pointer_screen(&window);
     window.present();
 }
 
