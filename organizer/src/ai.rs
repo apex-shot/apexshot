@@ -90,11 +90,24 @@ pub fn clean_reply(raw: &str) -> Option<String> {
     if !find_secrets(text).is_empty() || contains_explicit(text) {
         return None;
     }
-    let words = text.split_whitespace().count();
-    if !(2..=12).contains(&words) {
+    // OCR reads badges and icons as stray letters ("nader dabit O post"); a
+    // lone letter is noise unless it is a real one-letter word.
+    let words: Vec<&str> = text
+        .split_whitespace()
+        .filter(|word| {
+            let mut chars = word.chars();
+            match (chars.next(), chars.next()) {
+                (Some(only), None) => {
+                    only.is_ascii_digit() || matches!(only, 'a' | 'A' | 'I' | '&' | '+')
+                }
+                _ => true,
+            }
+        })
+        .collect();
+    if !(2..=12).contains(&words.len()) {
         return None;
     }
-    let stem = sanitize_stem(text, MAX_STEM_CHARS);
+    let stem = sanitize_stem(&words.join(" "), MAX_STEM_CHARS);
     if stem == "Screenshot" {
         None
     } else {
@@ -155,12 +168,35 @@ pub fn ai_name(
     window_title: Option<&str>,
     page: &OcrPage,
 ) -> Option<String> {
-    if suggestion.sensitivity.withholds_text() {
+    if suggestion.sensitivity.withholds_text() || !is_thin(suggestion) {
         return None;
     }
     let user = build_user_prompt(suggestion, window_title, page);
     let reply = namer.complete(SYSTEM_PROMPT, &user)?;
     clean_reply(&reply)
+}
+
+/// Words a window title needs before the model has nothing to add to it.
+pub const DESCRIPTIVE_TITLE_WORDS: usize = 5;
+
+/// True when the rule-based name says too little and the model may help: a
+/// short or generic window title, an on-screen heading, or a fallback. A
+/// title like `JaPrado. on X: "I really hope the parents got closure"`
+/// already names the content, and the model only repeats it.
+pub fn is_thin(suggestion: &NameSuggestion) -> bool {
+    if suggestion.source != crate::naming::NameSource::WindowTitle {
+        return true;
+    }
+    let app = suggestion.app.as_deref().unwrap_or("").to_lowercase();
+    let words = suggestion
+        .stem
+        .split_whitespace()
+        .filter(|word| {
+            let letters = word.chars().filter(|c| c.is_alphanumeric()).count();
+            letters >= 2 && word.to_lowercase() != app
+        })
+        .count();
+    words < DESCRIPTIVE_TITLE_WORDS
 }
 
 #[cfg(test)]
@@ -289,5 +325,51 @@ mod tests {
         let namer = Fixed(None);
         let name = ai_name(&namer, &suggestion(), Some("Home / X"), &OcrPage::default());
         assert_eq!(name, None);
+    }
+}
+
+#[cfg(test)]
+mod thin_tests {
+    use super::*;
+    use crate::naming::NameSource;
+    use crate::sensitive::Sensitivity;
+
+    fn titled(stem: &str, app: Option<&str>) -> NameSuggestion {
+        NameSuggestion {
+            stem: stem.to_string(),
+            app: app.map(str::to_string),
+            site: None,
+            source: NameSource::WindowTitle,
+            sensitivity: Sensitivity::Normal,
+        }
+    }
+
+    #[test]
+    fn short_titles_are_thin_and_descriptive_ones_are_not() {
+        assert!(is_thin(&titled("Home X", Some("Chrome"))));
+        assert!(is_thin(&titled("ApexShot Settings", None)));
+        assert!(!is_thin(&titled(
+            "JaPrado. on X I really hope the parents got closure",
+            Some("Chrome")
+        )));
+    }
+
+    #[test]
+    fn headings_and_fallbacks_are_always_thin() {
+        let mut suggestion = titled("A very long and quite descriptive heading here", None);
+        suggestion.source = NameSource::Heading;
+        assert!(is_thin(&suggestion));
+    }
+
+    #[test]
+    fn stray_ocr_letters_are_dropped() {
+        assert_eq!(
+            clean_reply("nader dabit O post about software").as_deref(),
+            Some("nader dabit post about software")
+        );
+        assert_eq!(
+            clean_reply("I love a 4 K screen").as_deref(),
+            Some("I love a 4 screen")
+        );
     }
 }

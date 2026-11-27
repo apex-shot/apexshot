@@ -128,7 +128,12 @@ pub fn organize_capture_with_ai(
     // A second request for the same capture reuses what the first one recorded.
     let previous = loaded
         .as_ref()
-        .and_then(|index| index.entries().iter().find(|entry| entry.path == request.path))
+        .and_then(|index| {
+            index
+                .entries()
+                .iter()
+                .find(|entry| entry.path == request.path)
+        })
         .cloned();
 
     let ctx = CaptureContext {
@@ -575,9 +580,7 @@ mod tests {
         let index = Index::load(&index_path).unwrap();
         assert_eq!(index.entries().len(), 1);
         let entry = &index.entries()[0];
-        assert_eq!(
-            entry.original_name, "Screenshot 2026-11-27 at 14.03.09.png"
-        );
+        assert_eq!(entry.original_name, "Screenshot 2026-11-27 at 14.03.09.png");
         assert_eq!(entry.heuristic_name.as_deref(), Some("Quarterly report"));
         assert!(entry.ai_named);
 
