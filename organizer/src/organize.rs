@@ -113,6 +113,26 @@ fn unique_density_path(dir: &Path, stem: &str, marker: &str, ext: &str) -> PathB
     }
 }
 
+/// Two names that differ only in case, spacing, or punctuation are the same
+/// name: "Billing · Exafunction, Inc." and "Billing Exafunction Inc".
+fn same_name(a: &str, b: &str) -> bool {
+    let letters = |text: &str| -> String {
+        text.chars()
+            .filter(|c| c.is_alphanumeric())
+            .flat_map(char::to_lowercase)
+            .collect()
+    };
+    letters(a) == letters(b)
+}
+
+/// A stem without the " 2" a copy of an existing name was given.
+fn without_copy_number(stem: &str) -> &str {
+    match stem.rsplit_once(' ') {
+        Some((head, tail)) if !tail.is_empty() && tail.chars().all(|c| c.is_ascii_digit()) => head,
+        _ => stem,
+    }
+}
+
 fn normalize_app(app: &str) -> String {
     let app = app.trim().to_lowercase();
     app.strip_suffix(".exe").unwrap_or(&app).to_string()
@@ -187,8 +207,7 @@ pub fn organize_capture_with_ai(
         )
         // A reply that only repeats a name we already have is not an AI name.
         .filter(|stem| {
-            !stem.eq_ignore_ascii_case(&suggestion.stem)
-                && !stem.eq_ignore_ascii_case(plain_stem)
+            !same_name(stem, &suggestion.stem) && !same_name(stem, without_copy_number(plain_stem))
         }),
         _ => None,
     };
@@ -221,7 +240,9 @@ pub fn organize_capture_with_ai(
             // Keep a pixel-density suffix such as "@2x" the shell added.
             let density = density_suffix(&stem);
             let new_stem = format!("{}{density}", chosen_stem);
-            if new_stem != stem {
+            // Only the copy number or punctuation would change: keep the file as is.
+            let same = same_name(&chosen_stem, without_copy_number(plain_stem));
+            if new_stem != stem && !same {
                 let target = unique_density_path(dir, &chosen_stem, density, &ext);
                 if fs::rename(&request.path, &target).is_ok() {
                     path = target;
@@ -408,6 +429,35 @@ mod tests {
             outcome.path.file_name().unwrap().to_string_lossy(),
             "Quarterly sales review deck 2@2x.png"
         );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_reply_that_only_changes_punctuation_is_not_an_ai_name() {
+        let dir = temp_dir("ai-punctuation");
+        let path = dir.join("Cancel subscription Exafunction, Inc. Billing 2@2x.png");
+        fs::write(&path, b"png").unwrap();
+        let settings = OrganizeSettings {
+            auto_name: true,
+            ..OrganizeSettings::default()
+        };
+        let namer = FixedNamer(Some("Cancel subscription Exafunction Inc Billing".into()));
+        let mut req = request(
+            path.clone(),
+            Some("Cancel subscription · Exafunction, Inc. · Billing - Google Chrome"),
+        );
+        req.allow_ai = true;
+
+        let outcome = organize_capture_with_ai(
+            &req,
+            &settings,
+            &dir.join("index.json"),
+            captured_at(),
+            Some(&namer),
+        );
+
+        assert!(!outcome.ai_named);
+        assert!(path.exists());
         fs::remove_dir_all(&dir).unwrap();
     }
 
