@@ -100,6 +100,8 @@ pub struct SaveInputs {
     pub adv_clipboard_mode: SettingsSelect,
     pub adv_ocr_language: SettingsSelect,
     pub adv_ocr_keep_line_breaks: CheckButton,
+    pub organizer_auto_name: CheckButton,
+    pub organizer_name_style: SettingsSelect,
     pub telemetry_enabled: CheckButton,
     pub cloud_apexshot: CheckButton,
     pub cloud_xbackbone: CheckButton,
@@ -410,6 +412,8 @@ pub fn save_settings(inputs: &SaveInputs, state: &mut SaveState) -> anyhow::Resu
 
     config.adv_ocr_language = combo_value(&inputs.adv_ocr_language, "eng");
     config.adv_ocr_keep_line_breaks = inputs.adv_ocr_keep_line_breaks.is_active();
+    config.organizer_auto_name = inputs.organizer_auto_name.is_active();
+    config.organizer_name_style = combo_value(&inputs.organizer_name_style, "clean");
     config.telemetry_enabled = inputs.telemetry_enabled.is_active();
 
     config.cloud_destination = if inputs.cloud_xbackbone.is_active() {

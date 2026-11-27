@@ -5551,3 +5551,21 @@ msgid ""
 msgstr ""
 "تبقى الروابط المجانية متاحة لمدة 7 أيام.\n"
 "{url}"
+
+msgid "Screenshot names"
+msgstr "أسماء لقطات الشاشة"
+
+msgid "Name screenshots automatically"
+msgstr "تسمية لقطات الشاشة تلقائيًا"
+
+msgid "Names come from the window title and on-screen text, on this computer. Private windows and explicit content get a dated name."
+msgstr "تأتي الأسماء من عنوان النافذة والنص الظاهر على الشاشة، على هذا الجهاز. تحصل النوافذ الخاصة والمحتوى الصريح على اسم بتاريخ."
+
+msgid "Name style"
+msgstr "نمط الاسم"
+
+msgid "Date and title"
+msgstr "التاريخ والعنوان"
+
+msgid "App and title"
+msgstr "التطبيق والعنوان"

@@ -5518,3 +5518,21 @@ msgid ""
 msgstr ""
 "免费链接有效期 7 天。\n"
 "{url}"
+
+msgid "Screenshot names"
+msgstr "截图名称"
+
+msgid "Name screenshots automatically"
+msgstr "自动命名截图"
+
+msgid "Names come from the window title and on-screen text, on this computer. Private windows and explicit content get a dated name."
+msgstr "名称来自窗口标题和屏幕上的文字，仅在这台电脑上处理。隐私窗口和敏感内容会得到带日期的名称。"
+
+msgid "Name style"
+msgstr "命名样式"
+
+msgid "Date and title"
+msgstr "日期和标题"
+
+msgid "App and title"
+msgstr "应用和标题"

@@ -190,6 +190,12 @@ pub struct AppConfig {
     pub adv_clipboard_mode: String,
     pub adv_ocr_language: String,
     pub adv_ocr_keep_line_breaks: bool,
+    /// Rename each new screenshot from its window title and on-screen text.
+    pub organizer_auto_name: bool,
+    /// "clean", "dated", or "by_app".
+    pub organizer_name_style: String,
+    /// Apps whose captures are never named or indexed, e.g. "signal.exe".
+    pub organizer_excluded_apps: Vec<String>,
     /// Anonymous usage heartbeat (daemon). Opt out in Settings or via
     /// `APEXSHOT_TELEMETRY=0`. Default on to match install-script telemetry.
     pub telemetry_enabled: bool,
@@ -330,6 +336,9 @@ impl Default for AppConfig {
             adv_clipboard_mode: "File & Image (default)".to_string(),
             adv_ocr_language: "eng".to_string(),
             adv_ocr_keep_line_breaks: true,
+            organizer_auto_name: true,
+            organizer_name_style: "clean".to_string(),
+            organizer_excluded_apps: Vec::new(),
             // Flatpak: off until the user explicitly opts in (plan §10.3 / §9.4).
             telemetry_enabled: !cfg!(feature = "flatpak"),
             windows_telemetry_enabled: false,
@@ -543,6 +552,16 @@ pub fn config_path() -> Option<PathBuf> {
     path.push("apexshot");
     path.push("config.yml");
     Some(path)
+}
+
+/// Where the screenshot organizer keeps its search index.
+pub fn organizer_index_path() -> Option<PathBuf> {
+    Some(
+        dirs::data_local_dir()?
+            .join("apexshot")
+            .join("organizer")
+            .join("index.json"),
+    )
 }
 
 pub fn load_config() -> AppConfig {
