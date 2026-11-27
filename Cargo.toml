@@ -82,6 +82,7 @@ libc = "0.2.182"
 wayland-protocols-plasma = { version = "0.3.12", features = ["client"] }
 ksni = "0.2"
 gettext-rs = { version = "0.7", features = ["gettext-system"] }
+apexshot-organizer = { path = "organizer" }
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"  # better test output

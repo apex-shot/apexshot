@@ -7,7 +7,7 @@
 //! vocabulary (the `recent-captures-*` CSS classes).
 
 use std::cell::{Cell, RefCell};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::mpsc;
 use std::time::{Duration, SystemTime};
@@ -61,6 +61,8 @@ struct PageState {
     /// The window's shared header-bar search entry; re-read after every
     /// populate so freshly loaded cards honor an in-progress query.
     search: Entry,
+    /// The organizer's search index, read on each reload (Screenshots only).
+    index: RefCell<Option<apexshot_organizer::index::Index>>,
     cards: RefCell<Vec<Rc<Card>>>,
     /// Current scan/thumbnail batch. Bumped on refresh so stale deliveries drop.
     generation: Cell<u64>,
@@ -158,6 +160,7 @@ pub fn build_local_page(
         scroller: scroller.clone(),
         subtitle,
         search: search.clone(),
+        index: RefCell::new(None),
         cards: RefCell::new(Vec::new()),
         generation: Cell::new(0),
         next_card_id: Cell::new(0),
@@ -286,6 +289,12 @@ pub(super) fn build_loading_skeleton() -> FlowBox {
 /// Clear the grid, bump the generation, rescan on a worker thread, and stream
 /// the results (and their thumbnails) back onto the main loop.
 fn reload(state: &Rc<PageState>) {
+    // A small JSON file, read on the main thread before the scan below starts.
+    if state.kind == MediaKind::Image {
+        *state.index.borrow_mut() = crate::config::organizer_index_path()
+            .and_then(|path| apexshot_organizer::index::Index::load(&path).ok());
+    }
+
     // A new batch: any in-flight thumbnails for the old one become irrelevant.
     let previous = state.generation.get();
     if previous != 0 {
@@ -655,13 +664,33 @@ fn set_card_image(card: &Card, path: &PathBuf) {
     card.placeholder.set_visible(false);
 }
 
-/// Show only cards whose filename contains `needle` (case-insensitive).
+/// Show only cards whose filename contains `needle` (case-insensitive), or
+/// whose indexed on-screen text matches it (Screenshots only).
 fn apply_filter(state: &Rc<PageState>, needle: &str) {
     let needle = needle.trim().to_ascii_lowercase();
+    let index = state.index.borrow();
+    let matches: Option<std::collections::HashSet<PathBuf>> =
+        if !needle.is_empty() && state.kind == MediaKind::Image {
+            index.as_ref().map(|index| {
+                let today = chrono::Local::now().date_naive();
+                let query = apexshot_organizer::index::parse_query(&needle, today);
+                index
+                    .search(&query)
+                    .iter()
+                    .map(|hit| index.entries()[hit.entry].path.clone())
+                    .collect()
+            })
+        } else {
+            None
+        };
     let cards = state.cards.borrow();
     let mut any_visible = false;
     for card in cards.iter() {
-        let visible = needle.is_empty() || card.search_key.contains(&needle);
+        let visible = needle.is_empty()
+            || card.search_key.contains(&needle)
+            || matches
+                .as_ref()
+                .is_some_and(|set| set.iter().any(|path| same_file(path, &card.entry.path)));
         card.root.set_visible(visible);
         any_visible |= visible;
     }
@@ -673,6 +702,17 @@ fn apply_filter(state: &Rc<PageState>, needle: &str) {
     } else {
         state.empty_state.set_visible(false);
         state.grid.set_visible(any_visible || !needle.is_empty());
+    }
+}
+
+/// Compare two paths to the same capture; Windows ignores separator style and
+/// letter case.
+fn same_file(a: &Path, b: &Path) -> bool {
+    if cfg!(windows) {
+        let normalize = |path: &Path| path.to_string_lossy().replace('\\', "/").to_lowercase();
+        normalize(a) == normalize(b)
+    } else {
+        a == b
     }
 }
 

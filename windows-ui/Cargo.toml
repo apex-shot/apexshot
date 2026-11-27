@@ -30,6 +30,10 @@ path = "src/bin/apexshot-image-editor.rs"
 name = "apexshot-update"
 path = "src/bin/apexshot-update.rs"
 
+[[bin]]
+name = "apexshot-organize"
+path = "src/bin/apexshot-organize.rs"
+
 [dependencies]
 gtk4 = { version = "0.10", features = ["v4_10"] }
 relm4-icons = "0.10.1"
@@ -51,6 +55,7 @@ rayon = "1.10"
 thiserror = "2.0"
 tract-onnx = { version = "0.23.9", default-features = false }
 unicode-segmentation = "1.13"
+apexshot-organizer = { path = "../organizer" }
 
 [target.'cfg(windows)'.dependencies]
 pango = { version = "0.21", features = ["v1_56"] }
