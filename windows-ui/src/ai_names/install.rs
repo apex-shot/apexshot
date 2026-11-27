@@ -9,9 +9,7 @@ use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
-use super::catalog::{
-    model_path, model_spec, runtime_dir, runtime_exe, runtime_spec, ModelTier,
-};
+use super::catalog::{model_path, model_spec, runtime_dir, runtime_exe, runtime_spec, ModelTier};
 use super::server;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

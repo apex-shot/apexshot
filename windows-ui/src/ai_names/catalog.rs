@@ -103,6 +103,6 @@ pub fn runtime_exe() -> Option<PathBuf> {
 }
 
 pub fn is_installed(tier: ModelTier) -> bool {
-    model_path(tier).map_or(false, |path| path.is_file())
-        && runtime_exe().map_or(false, |path| path.is_file())
+    model_path(tier).is_some_and(|path| path.is_file())
+        && runtime_exe().is_some_and(|path| path.is_file())
 }
