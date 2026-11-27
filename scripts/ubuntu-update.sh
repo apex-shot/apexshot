@@ -606,7 +606,8 @@ fixup_user_autostart() {
         rewritten=$((rewritten + 1))
     }
 
-    if [[ -f "$desktop_path" ]]; then
+    # An override with Hidden=true is the user's opt-out from login startup.
+    if [[ -f "$desktop_path" ]] && ! grep -qi '^Hidden=true' "$desktop_path"; then
         rewrite_autostart_file "$desktop_path"
     fi
     if [[ -f "$daemon_desktop_path" ]]; then
