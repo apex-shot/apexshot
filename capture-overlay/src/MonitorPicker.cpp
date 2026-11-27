@@ -7,7 +7,6 @@
 
 #include <QApplication>
 #include <QCloseEvent>
-#include <QCoreApplication>
 #include <QCursor>
 #include <QEvent>
 #include <QEventLoop>
@@ -15,16 +14,13 @@
 #include <QFont>
 #include <QFontMetrics>
 #include <QGuiApplication>
-#include <QHBoxLayout>
 #include <QKeyEvent>
-#include <QLabel>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QScreen>
 #include <QThread>
 #include <QTimer>
-#include <QVBoxLayout>
 #include <QWidget>
 #include <QWindow>
 
@@ -35,77 +31,85 @@
 
 namespace {
 
-constexpr QColor kBgRoot(5, 5, 7);
-constexpr QColor kBgElevated(25, 25, 28);
-constexpr QColor kBorder(255, 255, 255, 30);
-constexpr QColor kBorderHover(255, 102, 0, 200);
-constexpr QColor kAccent(255, 102, 0);
-constexpr QColor kTextPrimary(255, 255, 255, 240);
-constexpr QColor kTextMuted(255, 255, 255, 150);
-constexpr int kPreviewW = 260;
-constexpr int kPreviewH = 156;
-constexpr int kCardPad = 14;
-constexpr int kRadius = 14;
-constexpr int kPanelRadius = 18;
-
-QPixmap displayGlyph()
+// The picker sits on the same sheet as the onboarding and update windows: a
+// borderless #191919 surface, a centred headline over quiet copy, and
+// #222222 cards. Keep these values identical to the GTK picker.
+QColor warmAlpha(qreal alpha)
 {
-    QPixmap pm(kPreviewW, kPreviewH);
-    pm.fill(Qt::transparent);
-    QPainter p(&pm);
-    p.setRenderHint(QPainter::Antialiasing);
+    QColor color(243, 240, 236);
+    color.setAlphaF(alpha);
+    return color;
+}
 
-    QPainterPath bg;
-    bg.addRoundedRect(QRectF(0, 0, kPreviewW, kPreviewH), 10, 10);
-    p.fillPath(bg, kBgRoot);
+const QColor kPanelFill(0x19, 0x19, 0x19);
+const QColor kCardFill(0x22, 0x22, 0x22);
+const QColor kCardHoverFill(0x2b, 0x2b, 0x2b);
+const QColor kCardPressedFill(0x30, 0x30, 0x30);
+const QColor kWash = warmAlpha(0.06);
+const QColor kWashActive = warmAlpha(0.10);
+const QColor kText(0xf3, 0xf0, 0xec);
+const QColor kTextMuted(0xa3, 0xa0, 0x9c);
+const QColor kCloseIdle(0xb9, 0xb4, 0xad);
+const QColor kAccent(0xff, 0x67, 0x0d);
 
-    const QRectF screen(26, 20, kPreviewW - 52, kPreviewH - 54);
-    QPainterPath body;
-    body.addRoundedRect(screen, 8, 8);
-    p.fillPath(body, kBgElevated);
-    p.setPen(QPen(QColor(255, 255, 255, 30), 1.2));
-    p.drawPath(body);
+constexpr int kPanelRadius = 12;
+constexpr int kInset = 36;
+constexpr int kCloseSize = 28;
+constexpr int kCloseMargin = 12;
+constexpr int kHeadlineHeight = 34;
+constexpr int kCopyGap = 6;
+constexpr int kCopyHeight = 20;
+constexpr int kCardsGap = 24;
+constexpr int kCardGap = 12;
+constexpr int kCardWidth = 220;
+constexpr int kCardHeight = 182;
+constexpr int kCardRadius = 9;
+constexpr int kCardPad = 14;
+constexpr int kPreviewWidth = 192;
+constexpr int kPreviewHeight = 108;
+constexpr int kMinPanelWidth = 380;
 
-    const QRectF inner = screen.adjusted(8, 8, -8, -8);
-    QLinearGradient g(inner.topLeft(), inner.bottomRight());
-    g.setColorAt(0, QColor(38, 38, 42));
-    g.setColorAt(1, QColor(24, 24, 27));
-    p.fillRect(inner, g);
+constexpr int kCardsTop = kInset + kHeadlineHeight + kCopyGap + kCopyHeight + kCardsGap;
+constexpr int kPanelHeight = kCardsTop + kCardHeight + kInset;
 
-    p.fillRect(QRectF(inner.x() + 10, inner.y() + 14, inner.width() * 0.45, 8),
-               QColor(255, 102, 0, 90));
-    p.fillRect(QRectF(inner.x() + 10, inner.y() + 30, inner.width() * 0.7, 6),
-               QColor(255, 255, 255, 28));
-    p.fillRect(QRectF(inner.x() + 10, inner.y() + 44, inner.width() * 0.55, 6),
-               QColor(255, 255, 255, 18));
+int rowWidthFor(int count)
+{
+    return count * kCardWidth + (count - 1) * kCardGap;
+}
 
-    const qreal standTop = screen.bottom() + 4;
-    p.setPen(Qt::NoPen);
-    p.setBrush(QColor(38, 38, 42));
-    p.drawRoundedRect(QRectF(kPreviewW / 2.0 - 14, standTop, 28, 8), 2, 2);
-    p.drawRoundedRect(QRectF(kPreviewW / 2.0 - 36, standTop + 8, 72, 5), 2, 2);
-    return pm;
+int panelWidthFor(int count)
+{
+    return std::max(kMinPanelWidth, kInset * 2 + rowWidthFor(count));
 }
 
 class MonitorCard : public QWidget
 {
 public:
-    MonitorCard(int index, QScreen* screen, bool isPrimary, QWidget* parent)
+    // `index` is the screen's position in QGuiApplication::screens();
+    // `displayNumber` is its left-to-right position, which is what the card
+    // shows and what the number keys select.
+    MonitorCard(int index, int displayNumber, QScreen* screen, bool isPrimary, QWidget* parent)
         : QWidget(parent)
         , m_index(index)
+        , m_displayNumber(displayNumber)
         , m_hovered(false)
         , m_pressed(false)
         , m_isPrimary(isPrimary)
-        , m_glyph(displayGlyph())
         , m_name(screen->name())
-        , m_sizeText(QStringLiteral("%1 × %2")
-                       .arg(screen->geometry().width())
-                       .arg(screen->geometry().height()))
+        , m_aspect(16.0 / 9.0)
     {
+        const QSize geom = screen->geometry().size();
+        m_sizeText = QStringLiteral("%1 × %2")
+                       .arg(geom.width())
+                       .arg(geom.height());
+        if (geom.height() > 0) {
+            m_aspect = qreal(geom.width()) / qreal(geom.height());
+        }
+
         setCursor(Qt::PointingHandCursor);
         setFocusPolicy(Qt::StrongFocus);
         setAttribute(Qt::WA_Hover, true);
-        setFixedSize(kPreviewW + kCardPad * 2, kPreviewH + kCardPad * 2 + 56);
+        setFixedSize(kCardWidth, kCardHeight);
     }
 
     int index() const { return m_index; }
@@ -116,82 +120,72 @@ protected:
     {
         QPainter p(this);
         p.setRenderHint(QPainter::Antialiasing);
-        p.setRenderHint(QPainter::SmoothPixmapTransform);
 
-        const QRectF outer = QRectF(rect()).adjusted(1.5, 1.5, -1.5, -1.5);
+        const bool focused = hasFocus();
+        const bool hovered = m_hovered;
 
-        {
-            QPainterPath shadow;
-            shadow.addRoundedRect(outer.translated(0, 3), kRadius, kRadius);
-            p.fillPath(shadow, QColor(0, 0, 0, m_hovered ? 80 : 40));
-        }
+        const bool active = hovered || focused || m_pressed;
 
         QPainterPath body;
-        body.addRoundedRect(outer, kRadius, kRadius);
-        p.fillPath(body, m_hovered ? QColor(255, 102, 0, 210) : kBgElevated);
+        body.addRoundedRect(QRectF(rect()), kCardRadius, kCardRadius);
+        p.fillPath(body, m_pressed ? kCardPressedFill
+                                   : (hovered || focused ? kCardHoverFill : kCardFill));
 
-        const QColor border = (m_hovered || hasFocus()) ? kBorderHover : kBorder;
-        p.setPen(QPen(border, m_hovered || hasFocus() ? 1.6 : 1.0));
-        p.setBrush(Qt::NoBrush);
-        p.drawPath(body);
-
-        const qreal inset = m_pressed ? 2.0 : 0.0;
-        const QRectF content = outer.adjusted(kCardPad + inset, kCardPad + inset,
-                                              -(kCardPad + inset), -(kCardPad + inset));
-
-        const QRectF glyphRect(content.x(), content.y(), content.width(), kPreviewH);
-        p.drawPixmap(glyphRect.toRect(), m_glyph);
+        // The display as a plain rectangle at its real aspect ratio, centred
+        // in the preview box, with the display number inside it.
+        const QRectF box(kCardPad, kCardPad, kPreviewWidth, kPreviewHeight);
+        qreal monW = box.width();
+        qreal monH = monW / m_aspect;
+        if (monH > box.height()) {
+            monH = box.height();
+            monW = monH * m_aspect;
+        }
+        const QPointF centre = box.center();
+        const QRectF monitor(centre.x() - monW / 2.0, centre.y() - monH / 2.0,
+                             monW, monH);
+        QPainterPath screenPath;
+        screenPath.addRoundedRect(monitor, 6, 6);
+        p.fillPath(screenPath, active ? kWashActive : kWash);
 
         {
-            const QString num = QString::number(m_index + 1);
-            QFont bf = font();
-            bf.setPixelSize(11);
-            bf.setWeight(QFont::DemiBold);
-            p.setFont(bf);
-            const QFontMetrics fm(bf);
-            const int bw = std::max(22, fm.horizontalAdvance(num) + 12);
-            const QRectF badge(glyphRect.x() + 8, glyphRect.y() + 8, bw, 20);
-            QPainterPath bp;
-            bp.addRoundedRect(badge, 6, 6);
-            p.fillPath(bp, m_hovered ? kAccent : QColor(0, 0, 0, 180));
-            p.setPen(Qt::white);
-            p.drawText(badge, Qt::AlignCenter, num);
+            QFont numberFont = font();
+            numberFont.setPixelSize(20);
+            numberFont.setWeight(QFont::DemiBold);
+            p.setFont(numberFont);
+            p.setPen(active ? kAccent : kText);
+            p.drawText(monitor, Qt::AlignCenter, QString::number(m_displayNumber));
         }
 
-        if (m_isPrimary) {
-            QFont pf = font();
-            pf.setPixelSize(10);
-            pf.setWeight(QFont::Medium);
-            p.setFont(pf);
-            const QString chip = QStringLiteral("Primary");
-            const QFontMetrics fm(pf);
-            const int cw = fm.horizontalAdvance(chip) + 12;
-            const QRectF chipR(glyphRect.right() - cw - 8, glyphRect.y() + 8, cw, 18);
-            QPainterPath cp;
-            cp.addRoundedRect(chipR, 5, 5);
-            p.fillPath(cp, QColor(255, 255, 255, 22));
-            p.setPen(QColor(255, 255, 255, 200));
-            p.drawText(chipR, Qt::AlignCenter, chip);
+        const qreal textX = kCardPad;
+        const qreal textW = kCardWidth - kCardPad * 2;
+        const qreal nameY = kCardPad + kPreviewHeight + 10;
+
+        {
+            QFont nameFont = font();
+            nameFont.setPixelSize(14);
+            nameFont.setWeight(QFont::Medium);
+            p.setFont(nameFont);
+            p.setPen(kText);
+            p.drawText(QRectF(textX, nameY, textW, 18),
+                       Qt::AlignLeft | Qt::AlignVCenter,
+                       QStringLiteral("Display %1").arg(m_displayNumber));
         }
 
-        const qreal metaY = glyphRect.bottom() + 12;
-        QFont titleF = font();
-        titleF.setPixelSize(14);
-        titleF.setWeight(QFont::DemiBold);
-        p.setFont(titleF);
-        p.setPen(kTextPrimary);
-        p.drawText(QRectF(content.x(), metaY, content.width(), 18),
-                   Qt::AlignLeft | Qt::AlignVCenter,
-                   QStringLiteral("Display %1").arg(m_index + 1));
-
-        QFont subF = font();
-        subF.setPixelSize(13);
-        p.setFont(subF);
-        p.setPen(kTextMuted);
-        const QString sub = QStringLiteral("%1  ·  %2").arg(m_sizeText, m_name);
-        p.drawText(QRectF(content.x(), metaY + 18, content.width(), 16),
-                   Qt::AlignLeft | Qt::AlignVCenter,
-                   QFontMetrics(subF).elidedText(sub, Qt::ElideMiddle, int(content.width())));
+        {
+            QFont metaFont = font();
+            metaFont.setPixelSize(13);
+            metaFont.setWeight(QFont::Normal);
+            p.setFont(metaFont);
+            p.setPen(kTextMuted);
+            QString meta = QStringLiteral("%1 · %2").arg(m_name, m_sizeText);
+            if (m_isPrimary) {
+                meta += QStringLiteral(" · Primary");
+            }
+            const QString shown =
+              QFontMetrics(metaFont).elidedText(meta, Qt::ElideRight, int(textW));
+            p.drawText(QRectF(textX, nameY + 18 + 2, textW, 16),
+                       Qt::AlignLeft | Qt::AlignVCenter, shown);
+        }
     }
 
     void mousePressEvent(QMouseEvent* e) override
@@ -241,25 +235,83 @@ protected:
     void focusInEvent(QFocusEvent* e) override
     {
         QWidget::focusInEvent(e);
-        m_hovered = true;
         update();
     }
 
     void focusOutEvent(QFocusEvent* e) override
     {
         QWidget::focusOutEvent(e);
-        m_hovered = false;
         update();
     }
 
 private:
     int m_index;
+    int m_displayNumber;
     bool m_hovered;
     bool m_pressed;
     bool m_isPrimary;
-    QPixmap m_glyph;
     QString m_name;
     QString m_sizeText;
+    qreal m_aspect;
+};
+
+class CloseButton : public QWidget
+{
+public:
+    explicit CloseButton(QWidget* parent)
+        : QWidget(parent)
+        , m_hovered(false)
+    {
+        setFixedSize(kCloseSize, kCloseSize);
+        setCursor(Qt::PointingHandCursor);
+        setAttribute(Qt::WA_Hover, true);
+        setToolTip(QStringLiteral("Cancel"));
+    }
+
+    std::function<void()> onCancel;
+
+protected:
+    void paintEvent(QPaintEvent*) override
+    {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing);
+
+        if (m_hovered) {
+            QPainterPath bg;
+            bg.addEllipse(QRectF(rect()));
+            p.fillPath(bg, kWash);
+        }
+
+        p.setPen(QPen(m_hovered ? kText : kCloseIdle, 1.5, Qt::SolidLine, Qt::RoundCap));
+        const QPointF c = QRectF(rect()).center();
+        constexpr qreal kHalf = 4.5;
+        p.drawLine(QPointF(c.x() - kHalf, c.y() - kHalf),
+                   QPointF(c.x() + kHalf, c.y() + kHalf));
+        p.drawLine(QPointF(c.x() - kHalf, c.y() + kHalf),
+                   QPointF(c.x() + kHalf, c.y() - kHalf));
+    }
+
+    void enterEvent(QEvent*) override
+    {
+        m_hovered = true;
+        update();
+    }
+
+    void leaveEvent(QEvent*) override
+    {
+        m_hovered = false;
+        update();
+    }
+
+    void mousePressEvent(QMouseEvent* e) override
+    {
+        if (e->button() == Qt::LeftButton && onCancel) {
+            onCancel();
+        }
+    }
+
+private:
+    bool m_hovered;
 };
 
 /// Compact floating panel — does NOT cover the full screen (live desktop stays).
@@ -276,6 +328,7 @@ public:
         , m_loop(loop)
         , m_result(result)
         , m_dismissing(false)
+        , m_panelSize(kMinPanelWidth, kPanelHeight)
     {
         setAttribute(Qt::WA_TranslucentBackground);
         setAttribute(Qt::WA_OpaquePaintEvent, false);
@@ -284,6 +337,10 @@ public:
         setMouseTracking(true);
         setWindowTitle(QStringLiteral("ApexShot Display Picker"));
     }
+
+    void setPanelSize(const QSize& size) { m_panelSize = size; }
+    /// Screen indexes in left-to-right order, for the number keys.
+    void setOrder(const QList<int>& order) { m_order = order; }
 
     /// Unmap immediately and drain the event loop so the compositor drops the
     /// surface before freeze / capture-overlay runs (avoids ghost picker).
@@ -309,17 +366,31 @@ protected:
         QPainter p(this);
         p.setRenderHint(QPainter::Antialiasing);
 
-        const QRectF r = QRectF(rect()).adjusted(1, 1, -1, -1);
-        QPainterPath panel;
-        panel.addRoundedRect(r, kPanelRadius, kPanelRadius);
-        p.fillPath(panel, kBgRoot);
-        p.setPen(QPen(QColor(255, 255, 255, 24), 1.0));
-        p.setBrush(Qt::NoBrush);
-        p.drawPath(panel);
+        const QRectF panel(0, 0, m_panelSize.width(), m_panelSize.height());
 
-        p.setPen(QPen(QColor(255, 255, 255, 16), 1.0));
-        p.drawLine(int(r.left() + 22), int(r.top() + 1),
-                   int(r.right() - 22), int(r.top() + 1));
+        // Opaque and borderless; only the area outside the corners is clear.
+        QPainterPath fillPath;
+        fillPath.addRoundedRect(panel, kPanelRadius, kPanelRadius);
+        p.fillPath(fillPath, kPanelFill);
+
+        const qreal textW = panel.width() - kInset * 2;
+
+        QFont headline = font();
+        headline.setPixelSize(28);
+        headline.setWeight(QFont::DemiBold);
+        headline.setLetterSpacing(QFont::AbsoluteSpacing, -0.6);
+        p.setFont(headline);
+        p.setPen(kText);
+        p.drawText(QRectF(kInset, kInset, textW, kHeadlineHeight), Qt::AlignCenter,
+                   QStringLiteral("Choose a display"));
+
+        QFont copy = font();
+        copy.setPixelSize(15);
+        copy.setWeight(QFont::Normal);
+        p.setFont(copy);
+        p.setPen(kTextMuted);
+        p.drawText(QRectF(kInset, kInset + kHeadlineHeight + kCopyGap, textW, kCopyHeight),
+                   Qt::AlignCenter, QStringLiteral("Pick the screen to capture."));
     }
 
     void keyPressEvent(QKeyEvent* event) override
@@ -329,7 +400,10 @@ protected:
             return;
         }
         if (event->key() >= Qt::Key_1 && event->key() <= Qt::Key_9) {
-            dismissAndQuit(event->key() - Qt::Key_1);
+            const int position = event->key() - Qt::Key_1;
+            if (position < m_order.size()) {
+                dismissAndQuit(m_order.at(position));
+            }
             return;
         }
         QWidget::keyPressEvent(event);
@@ -347,36 +421,8 @@ private:
     QEventLoop* m_loop;
     int* m_result;
     bool m_dismissing;
-};
-
-class CancelLabel : public QLabel
-{
-public:
-    CancelLabel(PickerPanel* panel, QWidget* parent)
-        : QLabel(QStringLiteral("Cancel"), parent)
-        , m_panel(panel)
-    {
-        setAlignment(Qt::AlignCenter);
-        setCursor(Qt::PointingHandCursor);
-        setStyleSheet(QStringLiteral(
-          "QLabel { color: rgba(255,255,255,0.82); "
-          "background: rgba(255,255,255,16); "
-          "border: none; border-radius: 8px; "
-          "padding: 8px 18px; font-size: 12px; font-weight: 600; }"
-          "QLabel:hover { color: rgba(255,255,255,0.96); "
-          "background: rgba(255,255,255,28); }"));
-    }
-
-protected:
-    void mousePressEvent(QMouseEvent*) override
-    {
-        if (m_panel) {
-            m_panel->dismissAndQuit(-1);
-        }
-    }
-
-private:
-    PickerPanel* m_panel;
+    QSize m_panelSize;
+    QList<int> m_order;
 };
 
 } // namespace
@@ -404,45 +450,17 @@ int selectMonitorIndex(const QList<QScreen*>& screens)
     // destruction alone is not enough for Wayland unmap timing.
     auto panel = std::make_unique<PickerPanel>(&loop, &result);
 
-    auto* root = new QVBoxLayout(panel.get());
-    root->setContentsMargins(36, 28, 36, 20);
-    root->setSpacing(0);
+    const int panelWidth = panelWidthFor(screens.size());
+    panel->setPanelSize(QSize(panelWidth, kPanelHeight));
+    panel->setFixedSize(panelWidth, kPanelHeight);
 
-    auto* title = new QLabel(QStringLiteral("Select a display"), panel.get());
-    title->setAlignment(Qt::AlignCenter);
-    {
-        QFont f = title->font();
-        f.setPixelSize(18);
-        f.setWeight(QFont::DemiBold);
-        title->setFont(f);
-    }
-    title->setStyleSheet(QStringLiteral(
-      "QLabel { color: rgba(255,255,255,0.95); background: transparent; }"));
-    root->addWidget(title);
+    PickerPanel* panelPtr = panel.get();
 
-    root->addSpacing(4);
-
-    auto* hint = new QLabel(
-      QStringLiteral("Click a display  ·  Esc to cancel  ·  1–%1")
-        .arg(std::min(9, screens.size())),
-      panel.get());
-    hint->setAlignment(Qt::AlignCenter);
-    {
-        QFont f = hint->font();
-        f.setPixelSize(13);
-        hint->setFont(f);
-    }
-    hint->setStyleSheet(QStringLiteral(
-      "QLabel { color: rgba(255,255,255,0.5); background: transparent; }"));
-    root->addWidget(hint);
-
-    root->addSpacing(22);
-
-    auto* row = new QWidget(panel.get());
-    auto* rowLayout = new QHBoxLayout(row);
-    rowLayout->setSpacing(16);
-    rowLayout->setContentsMargins(0, 0, 0, 0);
-    rowLayout->setAlignment(Qt::AlignCenter);
+    auto* closeButton = new CloseButton(panel.get());
+    closeButton->onCancel = [panelPtr]() {
+        panelPtr->dismissAndQuit(-1);
+    };
+    closeButton->move(panelWidth - kCloseMargin - kCloseSize, kCloseMargin);
 
     QList<int> sorted;
     for (int i = 0; i < screens.size(); ++i) {
@@ -452,29 +470,27 @@ int selectMonitorIndex(const QList<QScreen*>& screens)
         return screens[a]->geometry().x() < screens[b]->geometry().x();
     });
 
+    panel->setOrder(sorted);
     QScreen* primary = QGuiApplication::primaryScreen();
     MonitorCard* firstCard = nullptr;
-    PickerPanel* panelPtr = panel.get();
 
+    // One row of cards, centred in the panel however wide the panel is.
+    int x = (panelWidth - rowWidthFor(screens.size())) / 2;
+    const int y = kCardsTop;
+    int displayNumber = 0;
     for (int i : sorted) {
         QScreen* screen = screens[i];
-        auto* card = new MonitorCard(i, screen, screen == primary, row);
+        auto* card =
+          new MonitorCard(i, ++displayNumber, screen, screen == primary, panel.get());
         card->onSelected = [panelPtr](int index) {
             panelPtr->dismissAndQuit(index);
         };
-        rowLayout->addWidget(card, 0, Qt::AlignTop);
+        card->setGeometry(x, y, kCardWidth, kCardHeight);
         if (!firstCard) {
             firstCard = card;
         }
+        x += kCardWidth + kCardGap;
     }
-    root->addWidget(row, 0, Qt::AlignCenter);
-
-    root->addSpacing(12);
-    root->addWidget(new CancelLabel(panelPtr, panel.get()), 0, Qt::AlignCenter);
-
-    panel->adjustSize();
-    const QSize sz = panel->sizeHint().expandedTo(panel->minimumSizeHint());
-    panel->resize(sz);
 
     // Center on host screen — floating only, desktop remains visible around it.
     const QRect avail = host->availableGeometry();
