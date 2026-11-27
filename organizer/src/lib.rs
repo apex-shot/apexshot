@@ -19,4 +19,4 @@ pub mod sensitive;
 mod types;
 
 pub use sensitive::Sensitivity;
-pub use types::{CaptureContext, OcrPage, TextLine};
+pub use types::{CaptureContext, OcrPage, TextLine, TextWord};

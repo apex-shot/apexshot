@@ -3,6 +3,28 @@
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 
+/// One recognised word with its bounding box in image pixels.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TextWord {
+    pub text: String,
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+impl TextWord {
+    pub fn new(text: impl Into<String>, x: i32, y: i32, width: i32, height: i32) -> Self {
+        Self {
+            text: text.into(),
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+}
+
 /// One line of recognised text with its bounding box in image pixels.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TextLine {
@@ -11,6 +33,10 @@ pub struct TextLine {
     pub y: i32,
     pub width: i32,
     pub height: i32,
+    /// The line's words in reading order, when the OCR engine reports them.
+    /// Layout rebuilding (tables, code indentation) needs them; naming does not.
+    #[serde(default)]
+    pub words: Vec<TextWord>,
 }
 
 impl TextLine {
@@ -21,7 +47,14 @@ impl TextLine {
             y,
             width,
             height,
+            words: Vec::new(),
         }
+    }
+
+    /// The same line with its words attached.
+    pub fn with_words(mut self, words: Vec<TextWord>) -> Self {
+        self.words = words;
+        self
     }
 }
 
