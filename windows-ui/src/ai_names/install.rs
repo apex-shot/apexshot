@@ -122,7 +122,8 @@ fn download(
     let total = response
         .header("Content-Length")
         .and_then(|value| value.parse::<u64>().ok())
-        .map(|length| base_done + length)
+        // The bar covers every file still to come, not just this one.
+        .map(|length| grand_total.max(base_done + length))
         .unwrap_or(grand_total);
 
     let mut reader = response.into_reader();
