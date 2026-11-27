@@ -128,7 +128,13 @@ fn line_words(line: &TextLine) -> Vec<TextWord> {
         .iter()
         .enumerate()
         .map(|(index, token)| {
-            TextWord::new(*token, line.x + index as i32 * step, line.y, step, line.height)
+            TextWord::new(
+                *token,
+                line.x + index as i32 * step,
+                line.y,
+                step,
+                line.height,
+            )
         })
         .collect()
 }
@@ -153,7 +159,7 @@ fn line_height(lines: &[TextLine]) -> f32 {
     }
     heights.sort_unstable();
     let middle = heights.len() / 2;
-    let median = if heights.len() % 2 == 0 {
+    let median = if heights.len().is_multiple_of(2) {
         (heights[middle - 1] + heights[middle]) as f32 / 2.0
     } else {
         heights[middle] as f32
@@ -292,11 +298,9 @@ fn table_columns(cells: &[Vec<Cell>], char_width: f32) -> Option<Vec<Column>> {
         for cell in row_cells {
             total += 1;
             let edge = cell.left as f32;
-            let in_kept = clusters
-                .iter()
-                .any(|cluster| {
-                    cluster.rows.len() >= 2 && edge >= cluster.min && edge <= cluster.max
-                });
+            let in_kept = clusters.iter().any(|cluster| {
+                cluster.rows.len() >= 2 && edge >= cluster.min && edge <= cluster.max
+            });
             if in_kept {
                 aligned += 1;
             }
@@ -508,9 +512,8 @@ fn list_text(rows: &[Row], char_width: f32) -> String {
     for row in rows {
         let text = row.text().trim().to_string();
         let starts = starts_list_item(&text);
-        let continuation = !starts
-            && !items.is_empty()
-            && row.left as f32 > item_left + 1.5 * char_width;
+        let continuation =
+            !starts && !items.is_empty() && row.left as f32 > item_left + 1.5 * char_width;
         if continuation {
             if let Some(item) = items.last_mut() {
                 item.push(' ');
@@ -578,7 +581,11 @@ mod tests {
             .collect::<Vec<_>>()
             .join(" ");
         let left = words.iter().map(|word| word.x).min().unwrap_or(0);
-        let right = words.iter().map(|word| word.x + word.width).max().unwrap_or(0);
+        let right = words
+            .iter()
+            .map(|word| word.x + word.width)
+            .max()
+            .unwrap_or(0);
         TextLine::new(text, left, y, right - left, 20).with_words(words)
     }
 
@@ -630,7 +637,10 @@ mod tests {
         let page = page(vec![
             line(&[("def", 0), ("total(items):", 40)], 0),
             line(&[("sum", 40), ("=", 70), ("0", 90)], 20),
-            line(&[("for", 40), ("item", 70), ("in", 100), ("items:", 130)], 40),
+            line(
+                &[("for", 40), ("item", 70), ("in", 100), ("items:", 130)],
+                40,
+            ),
             line(&[("sum", 80), ("+=", 110), ("item", 130)], 60),
         ]);
         let layout = rebuild(&page);

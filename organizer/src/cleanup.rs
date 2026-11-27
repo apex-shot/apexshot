@@ -23,10 +23,7 @@ pub fn accept_correction(original: &str, corrected: &str) -> Option<String> {
     if corrected.is_empty() {
         return None;
     }
-    let longest = original
-        .chars()
-        .count()
-        .max(corrected.chars().count());
+    let longest = original.chars().count().max(corrected.chars().count());
     if edit_distance(original, corrected) as f32 > 0.08 * longest as f32 {
         return None;
     }
@@ -91,21 +88,19 @@ fn edit_distance(a: &str, b: &str) -> usize {
     previous[b.len()]
 }
 
-/// Every maximal run of ASCII digits, in order.
+/// The digits of every number-like token, in order. A token counts when at
+/// least half of its letters and digits are digits ("1,240.00", "INV-2026"),
+/// so a misread letter inside a word ("0rder") may still be fixed while a
+/// changed number never passes.
 fn digit_runs(text: &str) -> Vec<String> {
-    let mut runs = Vec::new();
-    let mut run = String::new();
-    for c in text.chars() {
-        if c.is_ascii_digit() {
-            run.push(c);
-        } else if !run.is_empty() {
-            runs.push(std::mem::take(&mut run));
-        }
-    }
-    if !run.is_empty() {
-        runs.push(run);
-    }
-    runs
+    text.split_whitespace()
+        .filter(|token| {
+            let digits = token.chars().filter(char::is_ascii_digit).count();
+            let alnum = token.chars().filter(|c| c.is_alphanumeric()).count();
+            digits > 0 && digits * 2 >= alnum
+        })
+        .map(|token| token.chars().filter(char::is_ascii_digit).collect())
+        .collect()
 }
 
 /// Whitespace-separated tokens that carry a link or an address.
