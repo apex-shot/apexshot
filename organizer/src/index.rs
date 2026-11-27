@@ -402,11 +402,11 @@ fn osa_distance(left: &str, right: &str) -> usize {
     let rows = left.len();
     let columns = right.len();
     let mut table = vec![vec![0usize; columns + 1]; rows + 1];
-    for row in 0..=rows {
-        table[row][0] = row;
+    for (row, cells) in table.iter_mut().enumerate() {
+        cells[0] = row;
     }
-    for column in 0..=columns {
-        table[0][column] = column;
+    for (column, cell) in table[0].iter_mut().enumerate() {
+        *cell = column;
     }
     for row in 1..=rows {
         for column in 1..=columns {

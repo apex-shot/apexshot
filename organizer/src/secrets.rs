@@ -197,7 +197,7 @@ fn luhn(digits: &[u8]) -> bool {
         sum += value;
         double = !double;
     }
-    sum % 10 == 0
+    sum.is_multiple_of(10)
 }
 
 fn find_jwts(bytes: &[u8], out: &mut Vec<SecretSpan>) {

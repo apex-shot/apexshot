@@ -276,9 +276,7 @@ fn host_from_token(token: &str) -> Option<String> {
         .strip_prefix("https://")
         .or_else(|| token.strip_prefix("http://"))
         .unwrap_or(token);
-    let end = token
-        .find(|c| matches!(c, '/' | '?' | '#' | ':'))
-        .unwrap_or(token.len());
+    let end = token.find(['/', '?', '#', ':']).unwrap_or(token.len());
     let host = &token[..end];
     let host = host.strip_prefix("www.").unwrap_or(host).to_lowercase();
     if is_host(&host) {
@@ -344,7 +342,7 @@ fn best_heading(page: &OcrPage) -> Option<String> {
         let pos = 1.0 - (line.y as f32 / image_height);
         let words = word_count.min(6) as f32 / 6.0;
         let score = rel * 2.0 + pos + words;
-        if best.as_ref().map_or(true, |(top, _)| score > *top) {
+        if best.as_ref().is_none_or(|(top, _)| score > *top) {
             best = Some((score, text));
         }
     }
@@ -446,7 +444,7 @@ fn truncate_at_word(text: &str, max_chars: usize) -> String {
         .enumerate()
         .filter(|(index, c)| **c == ' ' && *index >= half)
         .map(|(index, _)| index)
-        .last();
+        .next_back();
     let end = cut.unwrap_or(head.len());
     let prefix: String = head[..end].iter().collect();
     trim_trailing_dots(prefix.trim_end())
