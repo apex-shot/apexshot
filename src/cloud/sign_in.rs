@@ -525,6 +525,11 @@ fn build_card(parent: Option<&Window>, app: Option<&Application>, options: SignI
         CONNECT_CARD.with(|card| *card.borrow_mut() = Some(window.downgrade()));
     }
 
+    // A card with no parent window stands alone, so it opens mid-screen.
+    #[cfg(target_os = "windows")]
+    if parent.is_none() {
+        crate::platform::center_on_pointer_screen(&window);
+    }
     window.present();
     if start_at_device {
         ui.start();

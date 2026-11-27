@@ -220,6 +220,7 @@ fn build_card(app: &Application, kind: CardKind) {
         }
     });
     window.add_controller(keys);
+    crate::platform::center_on_pointer_screen(&window);
     window.present();
 }
 
