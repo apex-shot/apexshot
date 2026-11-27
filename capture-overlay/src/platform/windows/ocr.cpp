@@ -160,13 +160,15 @@ static bool recognizeLinesOnWorker(const QImage& image, const QString& language,
             if (text.trimmed().isEmpty())
                 continue;
             QRect rect;
+            QVector<OcrTextWord> words;
             for (const auto& word : line.Words()) {
                 const auto bounds = word.BoundingRect();
                 const QRect wordRect(qRound(bounds.X), qRound(bounds.Y),
                                      qRound(bounds.Width), qRound(bounds.Height));
                 rect = rect.united(wordRect);
+                words.append(OcrTextWord{QString::fromWCharArray(word.Text().c_str()), wordRect});
             }
-            outLines.append(OcrTextLine{text, rect});
+            outLines.append(OcrTextLine{text, rect, words});
         }
         return true;
     } catch (const winrt::hresult_error& error) {
@@ -206,6 +208,14 @@ bool recognizeLines(const QImage& image, const QString& language,
         outError = QStringLiteral("Could not start OCR");
         return false;
     }
+}
+
+QString formatOcrText(const QVector<OcrTextLine>& lines, bool keepLineBreaks)
+{
+    QStringList text;
+    for (const OcrTextLine& line : lines)
+        text.append(line.text);
+    return formatOcrLines(text, keepLineBreaks);
 }
 
 } // namespace Platform
