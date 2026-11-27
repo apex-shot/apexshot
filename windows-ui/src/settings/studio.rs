@@ -24,8 +24,15 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-/// The example name rows need two tones the shared Settings sheet lacks.
+/// The example name rows need two tones the shared Settings sheet lacks, and
+/// the download bar takes the same orange as the Download button it replaces.
 const AI_NAMES_CSS: &str = r#"
+progressbar.studio-download-progress > trough > progress {
+    background-image: none;
+    background-color: #ff670d;
+    border-color: #ff670d;
+}
+
 .settings-table-row label.studio-example-free {
     font-size: 12px;
     color: rgba(255, 255, 255, 0.62);
@@ -609,6 +616,7 @@ fn start_install(
     progress.set_hexpand(true);
     progress.set_valign(Align::Center);
     progress.set_fraction(0.0);
+    progress.add_css_class("studio-download-progress");
     row.append(&progress);
     let cancel_button = Button::with_label(&t("Cancel"));
     cancel_button.set_valign(Align::Center);
