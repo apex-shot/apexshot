@@ -5743,3 +5743,6 @@ msgstr "نسخ نصية نظيفة"
 
 msgid "Copied text with reading mistakes fixed by a small model on this PC."
 msgstr "نص منسوخ صُححت أخطاء قراءته بواسطة نموذج صغير على هذا الكمبيوتر."
+
+msgid "Search them by their text in History."
+msgstr "ابحث فيها بنصها في السجل."

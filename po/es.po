@@ -5821,3 +5821,6 @@ msgstr "Copias de texto limpias"
 
 msgid "Copied text with reading mistakes fixed by a small model on this PC."
 msgstr "Texto copiado con los errores de lectura corregidos por un modelo pequeño en este PC."
+
+msgid "Search them by their text in History."
+msgstr "Búscalas por su texto en el historial."

@@ -5718,3 +5718,6 @@ msgstr "きれいなテキストコピー"
 
 msgid "Copied text with reading mistakes fixed by a small model on this PC."
 msgstr "このPCの小さなモデルが読み取り間違いを修正したコピーテキスト。"
+
+msgid "Search them by their text in History."
+msgstr "履歴でテキストから検索できます。"
