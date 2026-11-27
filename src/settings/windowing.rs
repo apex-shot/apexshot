@@ -87,6 +87,70 @@ fn autostart_dir() -> anyhow::Result<std::path::PathBuf> {
     Ok(config_home.join("autostart"))
 }
 
+/// The file name every Linux package installs under `/etc/xdg/autostart`. A
+/// user file with the same name overrides it, which is how login startup is
+/// turned off for a packaged install.
+const SYSTEM_AUTOSTART_FILE: &str = "apexshot.desktop";
+
+/// A user override that turns the packaged autostart entry off.
+const AUTOSTART_OPT_OUT: &str =
+    "[Desktop Entry]\nType=Application\nName=ApexShot Daemon\nHidden=true\n";
+
+fn system_autostart_dirs() -> Vec<std::path::PathBuf> {
+    let dirs = std::env::var("XDG_CONFIG_DIRS")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "/etc/xdg".to_string());
+    dirs.split(':')
+        .filter(|dir| !dir.is_empty())
+        .map(|dir| std::path::PathBuf::from(dir).join("autostart"))
+        .collect()
+}
+
+fn system_autostart_entry(system_dirs: &[std::path::PathBuf]) -> Option<std::path::PathBuf> {
+    system_dirs
+        .iter()
+        .map(|dir| dir.join(SYSTEM_AUTOSTART_FILE))
+        .find(|path| path.is_file())
+}
+
+/// Whether a desktop entry's text turns the entry off.
+fn desktop_entry_disabled(content: &str) -> bool {
+    content.lines().map(str::trim).any(|line| {
+        line.eq_ignore_ascii_case("Hidden=true")
+            || line.eq_ignore_ascii_case("X-GNOME-Autostart-enabled=false")
+    })
+}
+
+/// Whether ApexShot starts at login, given the user and system autostart
+/// directories: a user `apexshot.desktop` decides on its own, a user
+/// `apexshot-daemon.desktop` turns it on, and otherwise a packaged system
+/// entry does.
+fn autostart_enabled_in(user_dir: &std::path::Path, system_dirs: &[std::path::PathBuf]) -> bool {
+    let user_entry = user_dir.join(SYSTEM_AUTOSTART_FILE);
+    if user_entry.is_file() {
+        return std::fs::read_to_string(&user_entry)
+            .map(|content| !desktop_entry_disabled(&content))
+            .unwrap_or(true);
+    }
+    if user_dir.join("apexshot-daemon.desktop").is_file() {
+        return true;
+    }
+    system_autostart_entry(system_dirs).is_some()
+}
+
+/// The login-startup state the Settings toggle shows. A portal-only build
+/// cannot read the portal's state back, so it keeps the saved setting.
+pub fn effective_start_at_login(configured: bool) -> bool {
+    if crate::app_identity::portal_only() {
+        return configured;
+    }
+    match autostart_dir() {
+        Ok(user_dir) => autostart_enabled_in(&user_dir, &system_autostart_dirs()),
+        Err(_) => configured,
+    }
+}
+
 /// Flatpak autostart via XDG Background portal (no ~/.config/autostart write).
 fn request_background_autostart(enable: bool) -> anyhow::Result<std::path::PathBuf> {
     let reason = if enable {
@@ -139,6 +203,20 @@ pub fn install_autostart_entry_smart() -> anyhow::Result<std::path::PathBuf> {
     if crate::app_identity::portal_only() {
         return request_background_autostart(true);
     }
+    // A packaged install already starts from its system entry. Clear any user
+    // override (including an opt-out) so that entry runs, instead of writing a
+    // second entry that would start a second daemon.
+    if let Some(system_entry) = system_autostart_entry(&system_autostart_dirs()) {
+        let user_dir = autostart_dir()?;
+        for name in ["apexshot-daemon.desktop", SYSTEM_AUTOSTART_FILE] {
+            match std::fs::remove_file(user_dir.join(name)) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+        return Ok(system_entry);
+    }
     let autostart_dir = autostart_dir()?;
     std::fs::create_dir_all(&autostart_dir)?;
 
@@ -179,14 +257,23 @@ pub fn uninstall_autostart_entry() -> anyhow::Result<()> {
         return Ok(());
     }
     let autostart_dir = autostart_dir()?;
-    // Remove both possible autostart files
-    for name in ["apexshot-daemon.desktop", "apexshot.desktop"] {
-        let desktop_path = autostart_dir.join(name);
-        match std::fs::remove_file(&desktop_path) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e.into()),
-        }
+    match std::fs::remove_file(autostart_dir.join("apexshot-daemon.desktop")) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.into()),
+    }
+    let user_entry = autostart_dir.join(SYSTEM_AUTOSTART_FILE);
+    if system_autostart_entry(&system_autostart_dirs()).is_some() {
+        // The packaged entry cannot be removed by the user; an override with
+        // the same name and Hidden=true turns it off.
+        std::fs::create_dir_all(&autostart_dir)?;
+        std::fs::write(&user_entry, AUTOSTART_OPT_OUT)?;
+        return Ok(());
+    }
+    match std::fs::remove_file(&user_entry) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.into()),
     }
     Ok(())
 }
@@ -317,4 +404,51 @@ pub fn install_edge_resize(root: &impl IsA<gtk4::Widget>, window: &gtk4::Applica
     root.add_controller(resize_motion);
     root.add_controller(resize_motion_leave);
     root.add_controller(resize_click);
+}
+
+#[cfg(test)]
+mod autostart_state_tests {
+    use super::*;
+
+    fn scratch(case: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("apexshot-autostart-{case}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("user")).unwrap();
+        std::fs::create_dir_all(dir.join("system")).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_packaged_entry_starts_at_login_until_the_user_opts_out() {
+        let dir = scratch("packaged");
+        let user = dir.join("user");
+        let system = vec![dir.join("system")];
+        assert!(!autostart_enabled_in(&user, &system));
+        std::fs::write(
+            dir.join("system").join(SYSTEM_AUTOSTART_FILE),
+            "[Desktop Entry]\n",
+        )
+        .unwrap();
+        assert!(autostart_enabled_in(&user, &system));
+        std::fs::write(user.join(SYSTEM_AUTOSTART_FILE), AUTOSTART_OPT_OUT).unwrap();
+        assert!(!autostart_enabled_in(&user, &system));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_user_entry_decides_without_a_packaged_one() {
+        let dir = scratch("user-only");
+        let user = dir.join("user");
+        let system = vec![dir.join("system")];
+        std::fs::write(user.join("apexshot-daemon.desktop"), "[Desktop Entry]\n").unwrap();
+        assert!(autostart_enabled_in(&user, &system));
+        std::fs::write(
+            user.join(SYSTEM_AUTOSTART_FILE),
+            "[Desktop Entry]\nX-GNOME-Autostart-enabled=false\n",
+        )
+        .unwrap();
+        assert!(!autostart_enabled_in(&user, &system));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

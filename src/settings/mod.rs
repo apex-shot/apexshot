@@ -269,7 +269,10 @@ fn build_settings_window_at(
 
     install_settings_css();
 
-    let config = load_config().sanitized();
+    let mut config = load_config().sanitized();
+    // Show the real login-startup state: a packaged install starts from its
+    // system entry whatever the saved setting says.
+    config.start_at_login = windowing::effective_start_at_login(config.start_at_login);
     i18n::apply_gtk_direction(&config.ui_language);
     let prefers_dark = prefers_dark_glass_theme();
     let reduced_transparency = prefers_reduced_transparency();

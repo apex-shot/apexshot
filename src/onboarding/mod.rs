@@ -769,6 +769,19 @@ fn finish(widgets: &OnboardingWidgets) {
         widgets.status.set_visible(true);
         return;
     }
+    // Login startup is on by default. Packaged installs already ship a system
+    // entry; a portal-only build has to ask for it once here.
+    if crate::app_identity::portal_only() {
+        std::thread::spawn(|| {
+            if crate::settings::windowing::install_autostart_entry_smart().is_ok() {
+                let mut config = crate::config::load_config();
+                config.start_at_login = true;
+                if let Err(error) = crate::config::save_config(&config) {
+                    eprintln!("[onboarding] Failed to save login startup: {error}");
+                }
+            }
+        });
+    }
     // Tray + hotkeys live in the daemon; Settings alone is not enough.
     std::thread::spawn(|| {
         let _ = crate::daemon::ensure_daemon_running();

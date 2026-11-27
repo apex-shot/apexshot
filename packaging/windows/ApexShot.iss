@@ -88,6 +88,9 @@ Root: HKCU; Subkey: "Software\Classes\apexshot"; ValueType: string; ValueName: "
 Root: HKCU; Subkey: "Software\Classes\apexshot"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
 Root: HKCU; Subkey: "Software\Classes\apexshot\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\bin\apexshot-capture.exe"",0"
 Root: HKCU; Subkey: "Software\Classes\apexshot\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\bin\apexshot-settings.exe"" ""%1"""
+; Start at login is on for a fresh install, matching the Linux packages. An
+; upgrade leaves the user's choice alone.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "ApexShot"; ValueData: """{app}\bin\apexshot-capture.exe"" --background"; Flags: uninsdeletevalue; Check: not IsUpgrade
 
 [Run]
 ; Run the bundled ffmpeg once, hidden, and wait for it before anything starts.
@@ -130,4 +133,12 @@ end;
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := Upgrading and ((PageID = wpLicense) or (PageID = wpSelectTasks));
+end;
+
+// Settings can add the login entry on any version, so remove it on uninstall
+// whatever wrote it; otherwise Windows keeps launching a missing program.
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then
+    RegDeleteValue(HKEY_CURRENT_USER, 'Software\Microsoft\Windows\CurrentVersion\Run', 'ApexShot');
 end;
