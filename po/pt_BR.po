@@ -5803,17 +5803,5 @@ msgstr "Manter o layout"
 msgid "Copied text keeps tables, code indentation, and paragraphs."
 msgstr "O texto copiado mantém tabelas, a indentação do código e os parágrafos."
 
-msgid "Fix reading mistakes in copied text"
-msgstr "Corrigir erros de leitura no texto copiado"
-
-msgid "When you capture text, the model fixes misread letters and digits. It never rewrites what the text says."
-msgstr "Ao capturar texto, o modelo corrige letras e números lidos errado. Ele nunca reescreve o que o texto diz."
-
-msgid "Clean text copies"
-msgstr "Cópias de texto limpas"
-
-msgid "Copied text with reading mistakes fixed by a small model on this PC."
-msgstr "Texto copiado com erros de leitura corrigidos por um modelo pequeno neste PC."
-
 msgid "Search them by their text in History."
 msgstr "Encontre-as pelo texto no Histórico."

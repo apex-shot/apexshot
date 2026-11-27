@@ -2011,14 +2011,13 @@ public:
     void setPath(const QString& path) { m_path = path; }
 
     /// The copied text was tidied: offer the original back on the clipboard.
-    void showTextCleanedHint(const QString& rawText, bool aiUsed)
+    void showTextCleanedHint(const QString& rawText)
     {
         if (m_editorHintShown)
             return;
         m_editorHintShown = true;
         auto* hint = new CardButton(CardButton::Kind::Hint, 0, QString(), m_scale, this);
-        placeHint(hint, aiUsed ? QStringLiteral("Text cleaned up with AI · Undo")
-                                : QStringLiteral("Layout kept · Undo"));
+        placeHint(hint, QStringLiteral("Layout kept · Undo"));
         hint->setToolTip(QStringLiteral("Put the original text back on the clipboard"));
         connect(hint, &QAbstractButton::clicked, this, [hint, rawText] {
             QGuiApplication::clipboard()->setText(rawText);
@@ -4646,7 +4645,6 @@ private:
 
         QJsonObject object;
         object.insert(QStringLiteral("task"), QStringLiteral("clean_text"));
-        object.insert(QStringLiteral("allow_ai"), true);
         object.insert(QStringLiteral("page"), page);
 
         auto* process = new QProcess(this);
@@ -4659,7 +4657,6 @@ private:
                     const QJsonObject obj = QJsonDocument::fromJson(output).object();
                     const QString cleaned = obj.value(QStringLiteral("text")).toString();
                     const QString html = obj.value(QStringLiteral("html")).toString();
-                    const bool aiUsed = obj.value(QStringLiteral("ai_used")).toBool();
                     const QString kind = obj.value(QStringLiteral("kind")).toString();
                     if (cleaned.isEmpty() || cleaned == rawText) {
                         debugLog(QStringLiteral("text cleanup: unchanged"));
@@ -4674,19 +4671,17 @@ private:
                     if (!html.isEmpty())
                         mime->setHtml(html);
                     QGuiApplication::clipboard()->setMimeData(mime);
-                    debugLog(QStringLiteral("text cleanup: %1 chars, kind %2, ai %3")
+                    debugLog(QStringLiteral("text cleanup: %1 chars, kind %2")
                                  .arg(cleaned.size())
-                                 .arg(kind)
-                                 .arg(aiUsed));
+                                 .arg(kind));
 
                     for (int i = int(m_cards.size()) - 1; i >= 0; --i) {
                         if (!m_cards.at(i) || !m_cards.at(i)->isVisible())
                             continue;
-                        m_cards.at(i)->showTextCleanedHint(rawText, aiUsed);
+                        m_cards.at(i)->showTextCleanedHint(rawText);
                         return;
                     }
-                    notify(aiUsed ? QStringLiteral("Text cleaned up with AI")
-                                   : QStringLiteral("Text layout kept"));
+                    notify(QStringLiteral("Text layout kept"));
                 });
         connect(process, &QProcess::errorOccurred, this,
                 [process](QProcess::ProcessError error) {

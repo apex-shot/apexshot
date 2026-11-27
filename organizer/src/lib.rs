@@ -11,7 +11,6 @@
 //! window. Nothing here touches the network.
 
 pub mod ai;
-pub mod cleanup;
 pub mod index;
 pub mod naming;
 pub mod organize;

@@ -4,13 +4,12 @@
 //! JSON `OrganizeRequest` on stdin, names, renames, and indexes the capture,
 //! and prints the capture's final path on stdout. Any failure prints the
 //! original path, so the shell always gets a usable path. A `clean_text`
-//! request instead rebuilds and cleans copied OCR text and prints JSON.
+//! request instead rebuilds the layout of copied OCR text and prints JSON.
 
 use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use apexshot_organizer::cleanup::{accept_correction, ai_eligible, CLEANUP_PROMPT};
 use apexshot_organizer::organize::{
     organize_capture_with_ai, parse_name_style, OrganizeOutcome, OrganizeRequest, OrganizeSettings,
 };
@@ -74,9 +73,8 @@ fn main() {
     println!("{}", display_path(&outcome.path));
 }
 
-/// Rebuild copied OCR text, optionally fixing reading mistakes with the model.
+/// Rebuild copied OCR text: tables, code indentation, paragraphs, and lists.
 fn clean_text(value: serde_json::Value) {
-    let started = std::time::Instant::now();
     let Some(page) = value
         .get("page")
         .cloned()
@@ -85,10 +83,6 @@ fn clean_text(value: serde_json::Value) {
         println!("{{}}");
         return;
     };
-    let allow_ai = value
-        .get("allow_ai")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
     let config = apexshot_settings::config::load_config();
     let mut layout = rebuild(&page);
     if !config.ocr_keep_layout {
@@ -103,37 +97,6 @@ fn clean_text(value: serde_json::Value) {
             html: None,
         };
     }
-    let mut ai_used = false;
-    if allow_ai
-        && config.ocr_ai_cleanup
-        && apexshot_settings::ai_names::ai_allowed(&config)
-        && ai_eligible(&layout)
-    {
-        let deadline = started + std::time::Duration::from_secs(12);
-        let tier = apexshot_settings::ai_names::tier_from_setting(&config.organizer_ai_model);
-        if let Some(base) = apexshot_settings::ai_names::ensure_server(tier, deadline) {
-            let words = layout.text.split_whitespace().count() as u32;
-            let max_tokens = (words * 2 + 32).min(512);
-            let reply = apexshot_settings::ai_names::complete_long(
-                &base,
-                CLEANUP_PROMPT,
-                &layout.text,
-                max_tokens,
-                deadline,
-            );
-            if let Some(reply) = reply {
-                if let Some(text) = accept_correction(&layout.text, &reply) {
-                    if text != layout.text {
-                        layout.text = text;
-                        ai_used = true;
-                        if !apexshot_settings::studio_entitlement::studio_unlocked() {
-                            apexshot_settings::ai_names::consume_trial();
-                        }
-                    }
-                }
-            }
-        }
-    }
     let kind = match layout.kind {
         TextKind::Prose => "prose",
         TextKind::List => "list",
@@ -146,7 +109,6 @@ fn clean_text(value: serde_json::Value) {
             "text": layout.text,
             "html": layout.html,
             "kind": kind,
-            "ai_used": ai_used,
         })
     );
 }

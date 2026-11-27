@@ -5707,17 +5707,5 @@ msgstr "レイアウトを保持"
 msgid "Copied text keeps tables, code indentation, and paragraphs."
 msgstr "コピーしたテキストは表、コードのインデント、段落を保持します。"
 
-msgid "Fix reading mistakes in copied text"
-msgstr "コピーしたテキストの読み取り間違いを修正"
-
-msgid "When you capture text, the model fixes misread letters and digits. It never rewrites what the text says."
-msgstr "テキストを取り込むと、モデルが読み違えた文字や数字を修正します。テキストの内容を書き換えることはありません。"
-
-msgid "Clean text copies"
-msgstr "きれいなテキストコピー"
-
-msgid "Copied text with reading mistakes fixed by a small model on this PC."
-msgstr "このPCの小さなモデルが読み取り間違いを修正したコピーテキスト。"
-
 msgid "Search them by their text in History."
 msgstr "履歴でテキストから検索できます。"

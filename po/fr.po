@@ -5823,17 +5823,5 @@ msgstr "Conserver la mise en page"
 msgid "Copied text keeps tables, code indentation, and paragraphs."
 msgstr "Le texte copié conserve les tableaux, l’indentation du code et les paragraphes."
 
-msgid "Fix reading mistakes in copied text"
-msgstr "Corriger les erreurs de lecture du texte copié"
-
-msgid "When you capture text, the model fixes misread letters and digits. It never rewrites what the text says."
-msgstr "Lorsque vous capturez du texte, le modèle corrige les lettres et les chiffres mal lus. Il ne réécrit jamais le contenu."
-
-msgid "Clean text copies"
-msgstr "Copies de texte propres"
-
-msgid "Copied text with reading mistakes fixed by a small model on this PC."
-msgstr "Texte copié dont les erreurs de lecture sont corrigées par un petit modèle sur ce PC."
-
 msgid "Search them by their text in History."
 msgstr "Retrouvez-les par leur texte dans l’historique."

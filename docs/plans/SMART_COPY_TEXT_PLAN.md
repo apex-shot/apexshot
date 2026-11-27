@@ -1,8 +1,7 @@
 # Smarter Copy text
 
 Capturing with OCR copies the recognised text. This makes the copy keep its
-layout and, with Studio, fixes the reader's mistakes, without ever making the
-copy wait or changing what the text says.
+layout, without ever making the copy wait or changing what the text says.
 
 ## Flow
 
@@ -18,18 +17,18 @@ From word boxes: tables (aligned columns) become tab-separated text plus an
 HTML table; code keeps its indentation; paragraphs rejoin lines and
 hyphenated words; lists keep one item per line. Instant and lossless.
 
-## Layer 2: AI corrections (Studio)
+## Not shipped: AI corrections
 
-The same local model fixes OCR character mistakes in prose and lists of up to
-150 words. Never for tables or code. Every reply passes a fidelity check (edit
-distance within 8% of the original, identical digits, links, and email
-addresses) or is discarded. Uses the AI names gate: supported PC, model
-installed, Studio or trial uses left.
+A Studio layer asked the local 2B model to fix OCR reading mistakes, behind a
+fidelity check. On the test set (article, steps, Python, YAML, spreadsheet,
+dashboard, post, settings) it took 2.6-9 s and returned the text unchanged
+every time: Windows OCR is already accurate, and its remaining mistakes ("Al"
+for "AI", "QI" for "Q1") are ones a small, cautious model cannot tell from
+real text. Layout carries the value, so the feature is layout only and free.
 
 ## Settings
 
 - Advanced, OCR: "Keep layout (tables, code, paragraphs)", on by default.
-- Studio: "Fix reading mistakes with AI", and an entry in What's included.
 
 ## Checking it
 

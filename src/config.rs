@@ -202,8 +202,6 @@ pub struct AppConfig {
     pub organizer_ai_model: String,
     /// Copied OCR text keeps its tables, code indentation, and paragraphs.
     pub ocr_keep_layout: bool,
-    /// Let the local model fix OCR reading mistakes in copied text (Studio).
-    pub ocr_ai_cleanup: bool,
     /// Anonymous usage heartbeat (daemon). Opt out in Settings or via
     /// `APEXSHOT_TELEMETRY=0`. Default on to match install-script telemetry.
     pub telemetry_enabled: bool,
@@ -350,7 +348,6 @@ impl Default for AppConfig {
             organizer_ai_enabled: false,
             organizer_ai_model: "standard".to_string(),
             ocr_keep_layout: true,
-            ocr_ai_cleanup: true,
             // Flatpak: off until the user explicitly opts in (plan §10.3 / §9.4).
             telemetry_enabled: !cfg!(feature = "flatpak"),
             windows_telemetry_enabled: false,
