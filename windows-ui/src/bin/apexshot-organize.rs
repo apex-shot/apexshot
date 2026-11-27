@@ -23,15 +23,19 @@ fn main() {
     };
 
     let config = apexshot_settings::config::load_config();
+    if request.allow_ai && !apexshot_settings::ai_names::ai_allowed(&config) {
+        println!("{}", display_path(&request.path));
+        return;
+    }
     let settings = OrganizeSettings {
         auto_name: config.organizer_auto_name,
         style: parse_name_style(&config.organizer_name_style),
         excluded_apps: config.organizer_excluded_apps.clone(),
     };
 
-    let namer = if apexshot_settings::ai_names::ai_allowed(&config) {
+    let namer = if request.allow_ai {
         let tier = apexshot_settings::ai_names::tier_from_setting(&config.organizer_ai_model);
-        let deadline = started + std::time::Duration::from_millis(2600);
+        let deadline = started + std::time::Duration::from_millis(8000);
         apexshot_settings::ai_names::ensure_server(tier, deadline)
             .map(|base_url| apexshot_settings::ai_names::Namer { base_url, deadline })
     } else {
