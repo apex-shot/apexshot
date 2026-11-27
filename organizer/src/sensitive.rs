@@ -240,7 +240,10 @@ mod tests {
     fn classify_explicit_site() {
         let page = page("hello");
         let ctx = titled("Inbox - Outlook");
-        assert_eq!(classify(&page, &ctx, Some("onlyfans.com")), Sensitivity::Explicit);
+        assert_eq!(
+            classify(&page, &ctx, Some("onlyfans.com")),
+            Sensitivity::Explicit
+        );
     }
 
     #[test]
