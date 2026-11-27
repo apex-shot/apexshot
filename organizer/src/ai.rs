@@ -120,13 +120,15 @@ pub fn clean_reply(raw: &str) -> Option<String> {
 }
 
 /// `word` without a trailing "@2x"-style marker.
-pub fn strip_density_marker(word: &str) -> &str {
-    if let Some(at) = word.rfind('@') {
+pub fn strip_density_marker(mut word: &str) -> &str {
+    // Repeat: a name saved twice can carry "@2x@2x".
+    while let Some(at) = word.rfind('@') {
         let marker = &word[at + 1..];
-        if let Some(digits) = marker.strip_suffix(['x', 'X']) {
-            if !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()) {
-                return &word[..at];
+        match marker.strip_suffix(['x', 'X']) {
+            Some(digits) if !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()) => {
+                word = &word[..at];
             }
+            _ => break,
         }
     }
     word
@@ -385,6 +387,7 @@ mod thin_tests {
             Some("ApexShot Settings screenshot")
         );
         assert_eq!(strip_density_marker("shot@3X"), "shot");
+        assert_eq!(strip_density_marker("shot@2x@2x"), "shot");
         assert_eq!(strip_density_marker("me@example"), "me@example");
     }
 

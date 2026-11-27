@@ -82,11 +82,12 @@ fn build_card(app: &Application, kind: CardKind) {
 
     let title_label = centered_label(&title, "apexshot-studio-headline");
     title_label.add_css_class("apexshot-studio-headline-compact");
-    title_label.set_max_width_chars(26);
+    title_label.add_css_class("ai-names-headline");
+    title_label.set_max_width_chars(34);
     body.append(&title_label);
 
     let lede_label = centered_label(&lede, "apexshot-studio-lede");
-    lede_label.set_max_width_chars(48);
+    lede_label.set_max_width_chars(40);
     lede_label.set_margin_top(px(6.0));
     body.append(&lede_label);
 
@@ -301,7 +302,11 @@ pub(crate) fn example_pairs(limit: usize) -> Vec<(String, String)> {
         .filter_map(|entry| {
             let free = entry.heuristic_name.clone()?;
             let stem = entry.path.file_stem()?.to_string_lossy().to_string();
-            let ai = apexshot_organizer::ai::strip_density_marker(stem.trim()).to_string();
+            // Show older names with today's cleanup (stray OCR letters,
+            // density markers), falling back to the stem as saved.
+            let ai = apexshot_organizer::ai::clean_reply(&stem).unwrap_or_else(|| {
+                apexshot_organizer::ai::strip_density_marker(stem.trim()).to_string()
+            });
             if ai.trim().eq_ignore_ascii_case(free.trim()) {
                 return None;
             }
@@ -343,6 +348,9 @@ fn t_args(msgid: &str, values: &[&str]) -> String {
 }
 
 const EXAMPLE_CSS: &str = r#"
+    .apexshot-studio-card label.ai-names-headline {
+        font-size: 24px;
+    }
     .apexshot-studio-card box.ai-names-examples {
         border-radius: 12px;
         background-color: rgba(255, 255, 255, 0.05);
