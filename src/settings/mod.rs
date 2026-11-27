@@ -5,9 +5,21 @@ use gtk4::{
     FileChooserNative, Image, Label, Orientation, Overlay as GtkOverlay, ResponseType,
     ScrolledWindow,
 };
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
+
+thread_local! {
+    /// The open Settings window's Cloud page, so a `cloud/connect` link can
+    /// present it and start the same flow as its own Connect button.
+    static CLOUD_CONNECT_TARGET: RefCell<Option<CloudConnectTarget>> = const { RefCell::new(None) };
+}
+
+#[derive(Clone)]
+struct CloudConnectTarget {
+    stack: gtk4::glib::WeakRef<gtk4::Stack>,
+    connect_btn: gtk4::glib::WeakRef<Button>,
+}
 
 mod about;
 mod account;
@@ -100,6 +112,18 @@ fn show_settings_toast(
 }
 
 pub fn show_settings_window() -> anyhow::Result<()> {
+    show_settings_window_with(false)
+}
+
+/// Open Settings on the Cloud page and start the connect flow.
+///
+/// A second process hands the request to the running window through the
+/// `cloud-connect` action instead of opening its own.
+pub fn show_settings_window_for_cloud_connect() -> anyhow::Result<()> {
+    show_settings_window_with(true)
+}
+
+fn show_settings_window_with(cloud_connect: bool) -> anyhow::Result<()> {
     // Force-set GIO_LAUNCHED_DESKTOP_FILE to the main app's desktop entry
     // so GNOME Shell shows the correct icon and name.
     if let Some(desktop_path) = crate::app_identity::desktop_file_for_portal() {
@@ -114,13 +138,20 @@ pub fn show_settings_window() -> anyhow::Result<()> {
         .application_id(crate::app_identity::app_id())
         .build();
 
-    app.connect_activate(|application| {
+    install_cloud_connect_action(&app);
+    let pending_cloud_connect = Rc::new(Cell::new(cloud_connect));
+
+    app.connect_activate(move |application| {
         crate::capture::editor::ui_support::apply_theme_to_gtk();
+        let wants_connect = pending_cloud_connect.replace(false);
         // Check if a window already exists (single-instance behavior)
         // If yes, just present it instead of creating a new one
         let windows = application.windows();
         if let Some(existing_window) = windows.first() {
             existing_window.present();
+            if wants_connect {
+                start_cloud_connect();
+            }
             return;
         }
 
@@ -130,12 +161,86 @@ pub fn show_settings_window() -> anyhow::Result<()> {
             let _ = crate::daemon::start_daemon_subprocess();
         }
 
-        build_settings_window_at(application, None, None);
+        let page = wants_connect.then_some("6");
+        build_settings_window_at(application, page, None);
+        if wants_connect {
+            // Let the new window map first so the sign-in card has a parent.
+            gtk4::glib::idle_add_local_once(start_cloud_connect);
+        }
     });
+
+    if cloud_connect && hand_cloud_connect_to_primary(&app) {
+        return Ok(());
+    }
 
     crate::graceful_close::close_windows_on_sigterm(&app, || true);
     let _ = app.run_with_args::<String>(&[]);
     Ok(())
+}
+
+fn install_cloud_connect_action(app: &Application) {
+    let action = gtk4::gio::SimpleAction::new("cloud-connect", None);
+    let app_weak = app.downgrade();
+    action.connect_activate(move |_, _| {
+        if let Some(app) = app_weak.upgrade() {
+            open_settings_for_cloud_connect(&app);
+        }
+    });
+    app.add_action(&action);
+}
+
+fn open_settings_for_cloud_connect(app: &Application) {
+    if let Some(window) = app.windows().first() {
+        window.present();
+    } else {
+        build_settings_window_at(app, Some("6"), None);
+    }
+    gtk4::glib::idle_add_local_once(start_cloud_connect);
+}
+
+fn remember_cloud_connect_target(stack: &gtk4::Stack, connect_btn: &Button) {
+    CLOUD_CONNECT_TARGET.with(|slot| {
+        *slot.borrow_mut() = Some(CloudConnectTarget {
+            stack: stack.downgrade(),
+            connect_btn: connect_btn.downgrade(),
+        });
+    });
+}
+
+/// Present the Cloud page and start its Connect button, unless the account is
+/// already linked. An open sign-in card presents itself instead of asking for
+/// another device code.
+fn start_cloud_connect() {
+    let target = CLOUD_CONNECT_TARGET.with(|slot| slot.borrow().clone());
+    let Some(target) = target else {
+        return;
+    };
+    let Some(stack) = target.stack.upgrade() else {
+        return;
+    };
+    stack.set_visible_child_name("6");
+    if crate::config::is_cloud_logged_in(&load_config()) {
+        return;
+    }
+    if let Some(connect_btn) = target.connect_btn.upgrade() {
+        connect_btn.emit_clicked();
+    }
+}
+
+/// Hand the action to an instance that already owns the application id.
+/// Returns true when this process can exit.
+fn hand_cloud_connect_to_primary(app: &Application) -> bool {
+    if app.register(None::<&gtk4::gio::Cancellable>).is_err() {
+        return false;
+    }
+    if !app.is_remote() {
+        return false;
+    }
+    app.activate_action("cloud-connect", None);
+    if let Some(connection) = app.dbus_connection() {
+        let _ = connection.flush_sync(None::<&gtk4::gio::Cancellable>);
+    }
+    true
 }
 
 fn rebuild_settings_window(window: &ApplicationWindow, stack: &gtk4::Stack) {
@@ -433,6 +538,7 @@ fn build_settings_window_at(
     let recordings = recording::build_recording_section(&config);
     let screenshots = build_screenshots_section(&config);
     let cloud = cloud::build_cloud_section(&config);
+    remember_cloud_connect_target(&stack, &cloud.connect_btn);
     let advanced = advanced::build_advanced_section(&config);
     let about = about::build_about_section();
     let annotate = build_annotate_section(&config);

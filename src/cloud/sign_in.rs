@@ -41,6 +41,12 @@ enum PrimaryAction {
     Retry,
 }
 
+std::thread_local! {
+    /// The open device-code card, so a second Connect request presents it
+    /// instead of asking the server for another code.
+    static CONNECT_CARD: RefCell<Option<glib::WeakRef<Window>>> = const { RefCell::new(None) };
+}
+
 /// The card's introduction step: the same one-time-code flow, framed by the
 /// caller that asked for it.
 #[derive(Clone)]
@@ -101,6 +107,13 @@ pub fn prompt_for_upload(parent: Option<&Window>, retry: impl Fn() + 'static) {
 
 /// Show the card at the device-code step, for Settings and History.
 pub fn show_connect(parent: Option<&Window>, on_connected: impl Fn() + 'static) {
+    if let Some(window) =
+        CONNECT_CARD.with(|card| card.borrow().as_ref().and_then(|weak| weak.upgrade()))
+    {
+        window.present();
+        return;
+    }
+
     build_card(
         parent,
         None,
@@ -464,6 +477,10 @@ fn build_card(parent: Option<&Window>, app: Option<&Application>, options: SignI
         }
     });
     window.add_controller(keys);
+
+    if start_at_device {
+        CONNECT_CARD.with(|card| *card.borrow_mut() = Some(window.downgrade()));
+    }
 
     window.present();
     if start_at_device {

@@ -159,6 +159,13 @@ struct OnboardingWidgets {
     generation: Rc<Cell<u64>>,
     animations: Rc<RefCell<Vec<gtk4::TickCallbackId>>>,
     outcome: Rc<RefCell<Outcome>>,
+    current_step: Rc<Cell<Option<OnboardingStep>>>,
+}
+
+thread_local! {
+    /// The open onboarding window, so a `cloud/connect` link can switch it to
+    /// the Cloud step instead of opening a second window.
+    static ONBOARDING_WIDGETS: RefCell<Option<OnboardingWidgets>> = const { RefCell::new(None) };
 }
 
 impl OnboardingWidgets {
@@ -201,27 +208,97 @@ pub fn mark_complete() -> std::io::Result<()> {
 
 /// Open the onboarding window and wait for it to close.
 pub fn run() -> anyhow::Result<Outcome> {
+    run_with(false)
+}
+
+/// Open onboarding at the Cloud step, with its device-code view already open
+/// when no account is linked. The website's Cloud connect link lands here.
+pub fn run_for_cloud_connect() -> anyhow::Result<Outcome> {
+    run_with(true)
+}
+
+fn run_with(cloud_connect: bool) -> anyhow::Result<Outcome> {
     let app = Application::builder()
         .application_id(format!("{}.setup", crate::app_identity::app_id()))
         .build();
     let outcome = Rc::new(RefCell::new(Outcome::default()));
     let outcome_for_app = Rc::clone(&outcome);
 
+    install_cloud_connect_action(&app, &outcome);
+    let pending_cloud_connect = Rc::new(Cell::new(cloud_connect));
+
     app.connect_activate(move |application| {
         crate::platform::sharpen_text();
+        let wants_connect = pending_cloud_connect.replace(false);
         if let Some(existing) = application.windows().first() {
             existing.present();
+            if wants_connect {
+                switch_to_cloud_connect();
+            }
             return;
         }
-        build_window(application, Rc::clone(&outcome_for_app));
+        build_window_at(application, Rc::clone(&outcome_for_app), wants_connect);
     });
+
+    if cloud_connect && hand_cloud_connect_to_primary(&app) {
+        return Ok(*outcome.borrow());
+    }
 
     let _ = app.run_with_args::<String>(&[]);
     let result = *outcome.borrow();
     Ok(result)
 }
 
-fn build_window(app: &Application, outcome: Rc<RefCell<Outcome>>) {
+fn install_cloud_connect_action(app: &Application, outcome: &Rc<RefCell<Outcome>>) {
+    let action = gtk4::gio::SimpleAction::new("cloud-connect", None);
+    let app_weak = app.downgrade();
+    let outcome = Rc::clone(outcome);
+    action.connect_activate(move |_, _| {
+        if let Some(app) = app_weak.upgrade() {
+            open_onboarding_for_cloud_connect(&app, Rc::clone(&outcome));
+        }
+    });
+    app.add_action(&action);
+}
+
+fn open_onboarding_for_cloud_connect(app: &Application, outcome: Rc<RefCell<Outcome>>) {
+    if app.windows().first().is_some() {
+        switch_to_cloud_connect();
+    } else {
+        build_window_at(app, outcome, true);
+    }
+}
+
+fn switch_to_cloud_connect() {
+    let widgets = ONBOARDING_WIDGETS.with(|slot| slot.borrow().clone());
+    let Some(widgets) = widgets else {
+        return;
+    };
+    widgets.window.present();
+    // A live device-code view is already what the link asks for.
+    if widgets.current_step.get() == Some(OnboardingStep::Cloud) && cloud::connect_in_progress() {
+        return;
+    }
+    show_step_inner(&widgets, OnboardingStep::Cloud, true);
+}
+
+/// Hand the action to an instance that already owns the application id.
+/// Returns true when this process can exit.
+fn hand_cloud_connect_to_primary(app: &Application) -> bool {
+    if app.register(None::<&gtk4::gio::Cancellable>).is_err() {
+        return false;
+    }
+    if !app.is_remote() {
+        return false;
+    }
+    app.activate_action("cloud-connect", None);
+    if let Some(connection) = app.dbus_connection() {
+        let _ = connection.flush_sync(None::<&gtk4::gio::Cancellable>);
+    }
+    true
+}
+
+fn build_window_at(app: &Application, outcome: Rc<RefCell<Outcome>>, cloud_connect: bool) {
     crate::icons::install();
     crate::settings::ui_support::install_settings_css();
     crate::settings::install_window_css();
@@ -246,17 +323,37 @@ fn build_window(app: &Application, outcome: Rc<RefCell<Outcome>>) {
         glib::Propagation::Proceed
     });
 
-    install(&window, scale, animations, outcome);
+    window.connect_close_request(|_| {
+        ONBOARDING_WIDGETS.with(|slot| *slot.borrow_mut() = None);
+        glib::Propagation::Proceed
+    });
+
+    let initial_step = if cloud_connect {
+        OnboardingStep::Cloud
+    } else {
+        OnboardingStep::Welcome
+    };
+    let widgets = install_at(
+        &window,
+        scale,
+        animations,
+        outcome,
+        initial_step,
+        cloud_connect,
+    );
+    ONBOARDING_WIDGETS.with(|slot| *slot.borrow_mut() = Some(widgets));
     window.present();
 }
 
-/// Build the whole onboarding surface into `window` and show the first step.
-fn install(
+/// Build the whole onboarding surface into `window` and show `initial_step`.
+fn install_at(
     window: &ApplicationWindow,
     scale: f64,
     animations: Rc<RefCell<Vec<gtk4::TickCallbackId>>>,
     outcome: Rc<RefCell<Outcome>>,
-) {
+    initial_step: OnboardingStep,
+    start_cloud_connect: bool,
+) -> OnboardingWidgets {
     cancel_animations(&animations);
     let dark = crate::settings::windowing::prefers_dark_glass_theme();
     let root = GtkBox::new(Orientation::Vertical, 0);
@@ -330,8 +427,10 @@ fn install(
         generation: Rc::new(Cell::new(0)),
         animations,
         outcome,
+        current_step: Rc::new(Cell::new(None)),
     };
-    show_step(&widgets, OnboardingStep::Welcome);
+    show_step_inner(&widgets, initial_step, start_cloud_connect);
+    widgets
 }
 
 fn crossfade_stack() -> Stack {
@@ -371,6 +470,11 @@ fn window_controls(window: &ApplicationWindow, scale: f64) -> GtkBox {
 }
 
 fn show_step(widgets: &OnboardingWidgets, step: OnboardingStep) {
+    show_step_inner(widgets, step, false);
+}
+
+fn show_step_inner(widgets: &OnboardingWidgets, step: OnboardingStep, start_cloud_connect: bool) {
+    widgets.current_step.set(Some(step));
     widgets.cancel_animations();
     let id = widgets.generation.get() + 1;
     widgets.generation.set(id);
@@ -442,7 +546,13 @@ fn show_step(widgets: &OnboardingWidgets, step: OnboardingStep) {
             welcome::build(&body, &actions, &nav, &mut animations);
         }
         OnboardingStep::HowToUse => howto::build(&body, &actions, &nav),
-        OnboardingStep::Cloud => cloud::build(&body, &actions, &nav),
+        OnboardingStep::Cloud => {
+            if start_cloud_connect {
+                cloud::build_connecting(&body, &actions, &nav);
+            } else {
+                cloud::build(&body, &actions, &nav);
+            }
+        }
         OnboardingStep::Complete => complete::build(&body, &actions, &nav),
     }
     layout_footer_actions(&actions);

@@ -13,6 +13,7 @@
 
 pub mod annotations;
 pub mod app_identity;
+pub mod app_links;
 pub mod backend;
 pub mod capture;
 pub mod capture_overlay;

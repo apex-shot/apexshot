@@ -18,6 +18,7 @@ mod cli;
 
 use apexshot::{
     app_identity,
+    app_links::{classify_link, is_app_link, AppLink},
     capture::{open_image_editor, open_image_editor_empty, show_capture_preview_overlay},
     capture_overlay::run_capture_overlay,
     daemon::trigger_daemon_action,
@@ -25,12 +26,14 @@ use apexshot::{
         install_hotkeys_for_current_desktop, reset_hotkey_config,
         setup_hotkeys_for_current_desktop, uninstall_hotkeys_for_current_desktop,
     },
-    onboarding::{is_onboarding_complete, show_onboarding_window},
+    onboarding::{
+        is_onboarding_complete, show_onboarding_for_cloud_connect, show_onboarding_window,
+    },
     recording::{
         editor::{open_empty_recording_editor, open_recording_editor},
         run_overlay_recording_request, run_recording_countdown_bar,
     },
-    settings::show_settings_window,
+    settings::{show_settings_window, show_settings_window_for_cloud_connect},
 };
 use std::path::PathBuf;
 
@@ -58,29 +61,46 @@ fn main() {
 
     apexshot::i18n::init_from_config();
 
-    // The desktop file hands the app an `apexshot://` URL when the Studio page
-    // sends a licence back after a purchase or recovery. Handle it before any
-    // subcommand dispatch, so the link can never be mistaken for one.
+    // The desktop file hands the app an `apexshot://` URL when the website
+    // sends a Studio licence or asks the app to connect Cloud. Handle it
+    // before any subcommand dispatch, so the link can never be mistaken for
+    // one. A link this build does not know is a normal launch, not a command.
     if let Some(url) = args
         .get(1)
-        .filter(|argument| argument.starts_with("apexshot://"))
+        .filter(|argument| is_app_link(argument.as_str()))
     {
-        activate_studio_from_url(url);
+        match classify_link(url) {
+            AppLink::CloudConnect => {
+                // Count it before a handoff to the running instance can end
+                // this process.
+                apexshot::usage_telemetry::record_connect_link_opened();
+                let daemon = start_daemon();
+                let result = if is_onboarding_complete() {
+                    show_settings_window_for_cloud_connect()
+                } else {
+                    show_onboarding_for_cloud_connect()
+                };
+                // A handoff to a running window returns at once; finish
+                // starting the daemon before this process exits.
+                let _ = daemon.join();
+                if let Err(error) = result {
+                    eprintln!("Failed to open ApexShot for the Cloud link: {error}");
+                    std::process::exit(1);
+                }
+                return;
+            }
+            AppLink::Studio => activate_studio_from_url(url),
+            AppLink::Unknown => {
+                launch_ui();
+                return;
+            }
+        }
     }
 
     apexshot::recording::dnd::recover_stale_gnome_dnd();
 
     if args.len() < 2 {
-        // No arguments - open settings or onboarding, and ensure the tray/hotkey
-        // daemon is up so first-run is not a dead UI with no capture path.
-        std::thread::spawn(|| {
-            let _ = apexshot::daemon::ensure_daemon_running();
-        });
-        if !is_onboarding_complete() {
-            let _ = show_onboarding_window();
-            return;
-        }
-        let _ = show_settings_window();
+        launch_ui();
         return;
     }
 
@@ -281,6 +301,25 @@ fn main() {
     tokio::runtime::Runtime::new()
         .expect("Failed to create tokio runtime")
         .block_on(async_main(args));
+}
+
+/// Bring up the tray/hotkey daemon before any window that depends on it.
+fn start_daemon() -> std::thread::JoinHandle<()> {
+    std::thread::spawn(|| {
+        let _ = apexshot::daemon::ensure_daemon_running();
+    })
+}
+
+/// The normal no-argument launch: onboarding until setup is finished, then
+/// Settings, with the daemon up so first-run is not a dead UI with no capture
+/// path.
+fn launch_ui() {
+    start_daemon();
+    if !is_onboarding_complete() {
+        let _ = show_onboarding_window();
+        return;
+    }
+    let _ = show_settings_window();
 }
 
 /// Activates the Studio licence carried by an `apexshot://studio/activate`

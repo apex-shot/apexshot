@@ -63,6 +63,7 @@ const QStringList editorCounters{
     QStringLiteral("cloud_nudge_shown"),
     QStringLiteral("cloud_nudge_clicked"),
     QStringLiteral("cloud_nudge_dismissed"),
+    QStringLiteral("connect_link_opened"),
 };
 } // namespace
 
@@ -106,7 +107,7 @@ int main(int argc, char** argv)
     mergeState(editorCounts);
     telemetry.poll();
     CHECK(sent == 1);
-    CHECK(payload.size() == 23);
+    CHECK(payload.size() == 24);
     CHECK(payload.value(QStringLiteral("event")).toString() == QStringLiteral("heartbeat"));
     CHECK(payload.value(QStringLiteral("distro")).toString() == QStringLiteral("windows"));
     CHECK(!payload.value(QStringLiteral("install_id")).toString().isEmpty());

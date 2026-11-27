@@ -72,6 +72,7 @@ const QStringList& counterKeys()
         QStringLiteral("cloud_nudge_shown"),
         QStringLiteral("cloud_nudge_clicked"),
         QStringLiteral("cloud_nudge_dismissed"),
+        QStringLiteral("connect_link_opened"),
     };
     return keys;
 }

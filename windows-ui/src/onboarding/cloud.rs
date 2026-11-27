@@ -33,10 +33,16 @@ struct View {
     session: Rc<Cell<u64>>,
 }
 
+std::thread_local! {
+    /// The Cloud step's body while the device-code sub-view owns it.
+    static CONNECT_BODY: RefCell<Option<glib::WeakRef<GtkBox>>> = const { RefCell::new(None) };
+}
+
 impl View {
     fn begin(&self) -> u64 {
         super::clear(&self.body);
         super::clear(&self.actions);
+        CONNECT_BODY.with(|body| *body.borrow_mut() = None);
         let session = self.session.get() + 1;
         self.session.set(session);
         session
@@ -48,18 +54,45 @@ impl View {
 }
 
 pub fn build(body: &GtkBox, actions: &GtkBox, nav: &Nav) {
-    let view = View {
-        body: body.clone(),
-        actions: actions.clone(),
-        nav: nav.clone(),
-        session: Rc::new(Cell::new(0)),
-    };
+    let view = step_view(body, actions, nav);
     let config = load_config().sanitized();
     if is_cloud_logged_in(&config) {
         connected(&view, &config);
     } else {
         intro(&view);
     }
+}
+
+/// Build the step straight into the device-code sub-view when the account is
+/// not linked. The website's Cloud connect link lands here.
+pub(super) fn build_connecting(body: &GtkBox, actions: &GtkBox, nav: &Nav) {
+    let view = step_view(body, actions, nav);
+    let config = load_config().sanitized();
+    if is_cloud_logged_in(&config) {
+        connected(&view, &config);
+    } else {
+        connect(&view);
+    }
+}
+
+fn step_view(body: &GtkBox, actions: &GtkBox, nav: &Nav) -> View {
+    View {
+        body: body.clone(),
+        actions: actions.clone(),
+        nav: nav.clone(),
+        session: Rc::new(Cell::new(0)),
+    }
+}
+
+/// True while the device-code sub-view is on screen, so a repeated connect
+/// request can reuse it instead of requesting a second code.
+pub(super) fn connect_in_progress() -> bool {
+    CONNECT_BODY.with(|body| {
+        body.borrow()
+            .as_ref()
+            .and_then(|weak| weak.upgrade())
+            .is_some_and(|body| body.is_mapped())
+    })
 }
 
 fn intro(view: &View) {
@@ -169,6 +202,7 @@ fn sign_out(view: &View) {
 fn connect_ui(view: &View) -> ConnectUi {
     let scale = view.nav.scale;
     let session = view.begin();
+    CONNECT_BODY.with(|body| *body.borrow_mut() = Some(view.body.downgrade()));
     view.body.append(&heading(
         scale,
         &t("Connect your account"),

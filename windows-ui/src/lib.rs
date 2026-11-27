@@ -9,6 +9,9 @@
 
 pub mod app_identity;
 
+#[path = "../../src/app_links.rs"]
+pub mod app_links;
+
 /// Re-editable annotation sidecars: the files and format the Linux editor
 /// writes, so an exported image reopens with its annotations as objects on
 /// either platform.
@@ -59,7 +62,7 @@ pub mod test_support;
 pub mod typography;
 pub mod update;
 pub mod update_ui;
-mod usage_telemetry;
+pub mod usage_telemetry;
 pub mod utils;
 pub mod video_editor;
 pub mod whats_new;

@@ -27,30 +27,64 @@ fn main() {
         }
     }
 
-    // The Studio page hands a purchased or recovered licence back through an
-    // `apexshot://` link. Activate it and leave without opening Settings.
+    // The website opens `apexshot://` links: the Studio page hands a purchased
+    // or recovered licence back, and the Cloud page asks the app to connect.
+    // A link this build does not know is a normal launch, never a command.
     if let Some(url) = std::env::args()
         .nth(1)
-        .filter(|url| url.starts_with("apexshot://"))
+        .filter(|url| app::app_links::is_app_link(url.as_str()))
     {
-        match app::studio_entitlement::activate_from_url(&url) {
-            Ok(()) => {
-                app::utils::notify::desktop_notification_and_wait(
-                    &app::i18n::t("Studio is active on this device"),
-                    "",
-                    false,
-                );
-                std::process::exit(0);
+        match app::app_links::classify_link(&url) {
+            app::app_links::AppLink::CloudConnect => {
+                // Count it before a handoff to the running instance can end
+                // this process.
+                app::usage_telemetry::record_connect_link_opened();
+                if needs_onboarding() {
+                    match app::onboarding::run_for_cloud_connect() {
+                        Ok(outcome) => {
+                            if !outcome.finished {
+                                return;
+                            }
+                        }
+                        Err(error) => {
+                            eprintln!("Failed to open onboarding: {error}");
+                            std::process::exit(1);
+                        }
+                    }
+                    finish_onboarding();
+                    return;
+                }
+                if let Err(error) = app::settings::launch_shell(false) {
+                    eprintln!("Failed to start the ApexShot shell: {error}");
+                }
+                if let Err(error) = app::settings::show_settings_window_for_cloud_connect() {
+                    eprintln!("Failed to open settings window: {error}");
+                    std::process::exit(1);
+                }
+                return;
             }
-            Err(error) => {
-                eprintln!("{error}");
-                app::utils::notify::desktop_notification_and_wait(
-                    &app::i18n::t("Studio activation failed"),
-                    &error.to_string(),
-                    true,
-                );
-                std::process::exit(1);
+            app::app_links::AppLink::Studio => {
+                match app::studio_entitlement::activate_from_url(&url) {
+                    Ok(()) => {
+                        app::utils::notify::desktop_notification_and_wait(
+                            &app::i18n::t("Studio is active on this device"),
+                            "",
+                            false,
+                        );
+                        std::process::exit(0);
+                    }
+                    Err(error) => {
+                        eprintln!("{error}");
+                        app::utils::notify::desktop_notification_and_wait(
+                            &app::i18n::t("Studio activation failed"),
+                            &error.to_string(),
+                            true,
+                        );
+                        std::process::exit(1);
+                    }
+                }
             }
+            app::app_links::AppLink::Unknown => {}
         }
     }
 
@@ -88,27 +122,7 @@ fn main() {
             }
         }
 
-        // The shell starts after setup on this platform, so the first shell
-        // run would otherwise treat a fresh install as an upgrade and show the
-        // release highlights. Recording the version keeps a new install quiet;
-        // an upgrade never runs this path.
-        app::whats_new::write_last_seen(env!("CARGO_PKG_VERSION"));
-
-        // Publish the finished setup to the C++ shell before it starts, so
-        // auto-upload and the rest of the mirror are current from the first
-        // capture.
-        if let Err(error) = app::settings::sync_shell_settings() {
-            eprintln!("Failed to write the shell settings: {error}");
-        }
-
-        // Setup is done. The tray shell is the running app: it owns the tray
-        // icon and the capture hotkeys, and it opens the quick access menu, so
-        // the new install lands where the shortcuts work instead of in a
-        // settings window the user did not ask for.
-        if let Err(error) = app::settings::launch_shell(true) {
-            eprintln!("Failed to start the ApexShot shell: {error}");
-            std::process::exit(1);
-        }
+        finish_onboarding();
         return;
     }
 
@@ -121,6 +135,32 @@ fn main() {
 
     if let Err(error) = app::settings::show_settings_window() {
         eprintln!("Failed to open settings window: {error}");
+        std::process::exit(1);
+    }
+}
+
+/// The steps that follow a finished setup, whether it came from the normal
+/// first run or from the website's Cloud connect link.
+fn finish_onboarding() {
+    // The shell starts after setup on this platform, so the first shell
+    // run would otherwise treat a fresh install as an upgrade and show the
+    // release highlights. Recording the version keeps a new install quiet;
+    // an upgrade never runs this path.
+    app::whats_new::write_last_seen(env!("CARGO_PKG_VERSION"));
+
+    // Publish the finished setup to the C++ shell before it starts, so
+    // auto-upload and the rest of the mirror are current from the first
+    // capture.
+    if let Err(error) = app::settings::sync_shell_settings() {
+        eprintln!("Failed to write the shell settings: {error}");
+    }
+
+    // Setup is done. The tray shell is the running app: it owns the tray
+    // icon and the capture hotkeys, and it opens the quick access menu, so
+    // the new install lands where the shortcuts work instead of in a
+    // settings window the user did not ask for.
+    if let Err(error) = app::settings::launch_shell(true) {
+        eprintln!("Failed to start the ApexShot shell: {error}");
         std::process::exit(1);
     }
 }
