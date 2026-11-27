@@ -5695,3 +5695,9 @@ msgstr "AI 命名需要至少 8 GB 内存、4 个处理器核心并支持 AVX2�
 
 msgid "Search them by their text in History."
 msgstr "可在历史记录中按文字搜索。"
+
+msgid "Named from what you captured. Search it in History."
+msgstr "已根据截取的内容命名。可在历史记录中搜索。"
+
+msgid "Open History"
+msgstr "打开历史记录"

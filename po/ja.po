@@ -5703,3 +5703,9 @@ msgstr "AIによる名前付けには、8 GB以上のメモリ、4コア以上�
 
 msgid "Search them by their text in History."
 msgstr "履歴でテキストから検索できます。"
+
+msgid "Named from what you captured. Search it in History."
+msgstr "撮影した内容から名前を付けました。履歴で検索できます。"
+
+msgid "Open History"
+msgstr "履歴を開く"

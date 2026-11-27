@@ -5788,3 +5788,9 @@ msgstr "Для имён от ИИ нужны не менее 8 ГБ памяти
 
 msgid "Search them by their text in History."
 msgstr "Ищите их по тексту в истории."
+
+msgid "Named from what you captured. Search it in History."
+msgstr "Имя дано по тому, что на снимке. Найдите её в истории."
+
+msgid "Open History"
+msgstr "Открыть историю"

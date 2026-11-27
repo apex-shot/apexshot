@@ -32,6 +32,7 @@ pub mod hotkeys;
 pub mod i18n;
 pub mod ocr;
 pub mod onboarding;
+pub mod organizer_hook;
 pub mod overlay;
 pub mod pipewire_engine;
 pub mod preview_launch;

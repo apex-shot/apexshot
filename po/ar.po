@@ -5728,3 +5728,9 @@ msgstr "تحتاج أسماء الذكاء الاصطناعي إلى ذاكرة 
 
 msgid "Search them by their text in History."
 msgstr "ابحث فيها بنصها في السجل."
+
+msgid "Named from what you captured. Search it in History."
+msgstr "سُمّيت حسب ما التقطته. ابحث عنها في السجل."
+
+msgid "Open History"
+msgstr "فتح السجل"

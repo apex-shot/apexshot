@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::{
@@ -43,6 +44,14 @@ pub(super) fn apply_screenshot_after_capture_actions(
     unsaved_capture: bool,
 ) {
     let config = load_config().sanitized();
+    // A capture the user never saved lives in app-owned storage, so it is
+    // never renamed or indexed. Its path never changes, so it keeps the
+    // one-shot flow at the end of this function.
+    if !unsaved_capture {
+        apply_saved_capture_after_capture_actions(saved_path, state, target_display, config);
+        return;
+    }
+
     state.lock().unwrap().last_capture_path = Some(saved_path.clone());
 
     let open_annotate = config.after_capture_open_annotate;
@@ -56,13 +65,8 @@ pub(super) fn apply_screenshot_after_capture_actions(
     let configured_mode = crate::utils::clipboard::ScreenshotClipboardMode::from_config_value(
         &config.adv_clipboard_mode,
     );
-    let mode = if unsaved_capture {
-        configured_mode.for_unsaved_capture()
-    } else {
-        configured_mode
-    };
-    let unsaved_bitmap_only =
-        unsaved_capture && mode == crate::utils::clipboard::ScreenshotClipboardMode::ImageOnly;
+    let mode = configured_mode.for_unsaved_capture();
+    let unsaved_bitmap_only = mode == crate::utils::clipboard::ScreenshotClipboardMode::ImageOnly;
     let clip_path = saved_path.clone();
     let clip_config = config.clone();
     std::thread::spawn(move || {
@@ -96,6 +100,108 @@ pub(super) fn apply_screenshot_after_capture_actions(
         let child = show_preview_subprocess(saved_path, target_display);
         replace_preview_child(&state, child);
     }
+}
+
+/// Run the after-capture actions for a normally saved capture: the Quick Access
+/// card appears at once with the saved path, while naming, the clipboard, an
+/// auto-upload, and the editor happen on a background thread once the name is
+/// settled.
+fn apply_saved_capture_after_capture_actions(
+    saved_path: std::path::PathBuf,
+    state: Arc<Mutex<DaemonState>>,
+    target_display: Option<CaptureDisplay>,
+    config: crate::config::AppConfig,
+) {
+    state.lock().unwrap().last_capture_path = Some(saved_path.clone());
+
+    // The card reports this when one of its actions ran before the final path
+    // arrived: it keeps showing the saved path, so naming must keep that name.
+    let keep_original_name = Arc::new(AtomicBool::new(false));
+    let mut card_stdin = None;
+
+    if config.after_capture_show_quick_access {
+        match crate::preview_launch::spawn_preview_subprocess_with_renames_on_display(
+            &saved_path,
+            target_display,
+        ) {
+            Ok(mut child) => {
+                card_stdin = child.stdin.take();
+                if let Some(stdout) = child.stdout.take() {
+                    watch_preview_card_usage(stdout, keep_original_name.clone());
+                }
+                replace_preview_child(&state, Some(child));
+            }
+            Err(error) => {
+                // The in-process fallback builds every action on this path and
+                // cannot follow a rename, so keep the name as it is.
+                keep_original_name.store(true, Ordering::Relaxed);
+                eprintln!(
+                    "[daemon] Failed to spawn preview subprocess: {error}, falling back to in-app preview"
+                );
+                crate::preview_launch::show_preview_direct_on_display(
+                    saved_path.clone(),
+                    target_display,
+                );
+            }
+        }
+    }
+
+    std::thread::spawn(move || {
+        let gate = keep_original_name;
+        let final_path =
+            crate::organizer_hook::organize_saved_capture_gated(saved_path, &config, &|| {
+                !gate.load(Ordering::Relaxed)
+            });
+
+        if let Ok(mut guard) = state.lock() {
+            guard.last_capture_path = Some(final_path.clone());
+        }
+
+        // Tell the card where the capture lives now. A write error only means
+        // the card is already gone.
+        if let Some(mut stdin) = card_stdin {
+            use std::io::Write;
+            let _ = writeln!(stdin, "path\t{}", final_path.display());
+            let _ = stdin.flush();
+            drop(stdin);
+        }
+
+        // These run against the final path, after naming, so the card, the
+        // clipboard, and the upload all agree on where the capture is.
+        if config.after_capture_copy_file_to_clipboard {
+            if crate::cloud::upload::should_defer_text_clipboard_to_share_url(&config) {
+                if let Err(e) = crate::utils::clipboard::copy_image_to_clipboard(&final_path) {
+                    eprintln!("[daemon] Failed to copy screenshot image to clipboard: {e}");
+                }
+            } else {
+                copy_screenshot_to_clipboard(&final_path, &config);
+            }
+        }
+
+        crate::cloud::upload::spawn_auto_upload_after_capture(final_path.clone());
+
+        if config.after_capture_open_annotate {
+            spawn_editor_subprocess(final_path);
+        }
+    });
+}
+
+/// Read the card's stdout until it exits. Only its "used" line matters; every
+/// other line is ignored.
+fn watch_preview_card_usage(stdout: std::process::ChildStdout, used: Arc<AtomicBool>) {
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        for line in std::io::BufReader::new(stdout).lines() {
+            let Ok(line) = line else {
+                break;
+            };
+            if line.trim_end_matches(|c| c == '\n' || c == '\r')
+                == crate::preview_launch::PREVIEW_USED_SIGNAL
+            {
+                used.store(true, Ordering::Relaxed);
+            }
+        }
+    });
 }
 
 pub fn copy_screenshot_to_clipboard(path: &std::path::Path, config: &crate::config::AppConfig) {

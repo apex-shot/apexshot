@@ -5808,3 +5808,9 @@ msgstr "KI-Namen brauchen mindestens 8 GB Arbeitsspeicher, 4 Prozessorkerne und 
 
 msgid "Search them by their text in History."
 msgstr "Durchsuche sie im Verlauf nach ihrem Text."
+
+msgid "Named from what you captured. Search it in History."
+msgstr "Benannt nach dem, was du aufgenommen hast. Suche danach im Verlauf."
+
+msgid "Open History"
+msgstr "Verlauf öffnen"

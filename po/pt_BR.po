@@ -5799,3 +5799,9 @@ msgstr "Os nomes com IA precisam de pelo menos 8 GB de memória, 4 núcleos de p
 
 msgid "Search them by their text in History."
 msgstr "Encontre-as pelo texto no Histórico."
+
+msgid "Named from what you captured. Search it in History."
+msgstr "Nomeada pelo que você capturou. Procure no Histórico."
+
+msgid "Open History"
+msgstr "Abrir Histórico"

@@ -947,11 +947,11 @@ fn parse_tesseract_tsv_regions(tsv: &str, inv_scale: f32) -> Vec<DetectedTextReg
     regions
 }
 
-/// Extract text with bounding boxes from an image
+/// Extract text with bounding boxes from an image, in English.
 pub fn extract_text_regions(image: &RgbaImage) -> Result<Vec<DetectedTextRegion>, OcrError> {
     #[cfg(feature = "tesseract-ocr")]
     {
-        extract_text_regions_tesseract(image)
+        extract_text_regions_tesseract(image, "eng", &fast_region_preprocess_config())
     }
     #[cfg(not(feature = "tesseract-ocr"))]
     {
@@ -961,22 +961,48 @@ pub fn extract_text_regions(image: &RgbaImage) -> Result<Vec<DetectedTextRegion>
     }
 }
 
+/// Text lines with bounding boxes for naming a saved capture, in `language`.
+///
+/// Screen text is already sharp, so this enlarges less than the editor's
+/// highlighter does: it reads the same lines in about two thirds of the time,
+/// which keeps naming inside the save budget. Empty or whitespace-only
+/// languages fall back to English. Without the Tesseract engine the list is
+/// empty, so callers still get a usable answer on the sandboxed build.
+pub fn extract_text_lines_for_naming(
+    image: &RgbaImage,
+    language: &str,
+) -> Result<Vec<DetectedTextRegion>, OcrError> {
+    #[cfg(feature = "tesseract-ocr")]
+    {
+        extract_text_regions_tesseract(image, language, &naming_preprocess_config())
+    }
+    #[cfg(not(feature = "tesseract-ocr"))]
+    {
+        let _ = (image, language);
+        Ok(Vec::new())
+    }
+}
+
 /// Extract line-level text regions from Tesseract TSV output.
 /// TSV carries recognized text, bounding boxes, and confidence in one pass,
 /// avoiding placeholder text and fragile line-box/text-index matching.
 #[cfg(feature = "tesseract-ocr")]
-fn extract_text_regions_tesseract(image: &RgbaImage) -> Result<Vec<DetectedTextRegion>, OcrError> {
+fn extract_text_regions_tesseract(
+    image: &RgbaImage,
+    language: &str,
+    preprocess_config: &PreprocessConfig,
+) -> Result<Vec<DetectedTextRegion>, OcrError> {
     use std::ffi::CString;
 
-    // Use faster preprocessing for highlighter text detection
-    let preprocess_config = fast_region_preprocess_config();
-    let luma_data = preprocess_image(image, &preprocess_config);
+    let luma_data = preprocess_image(image, preprocess_config);
     let scale = preprocess_config.scale_factor;
     let width = (image.width() as f32 * scale) as i32;
     let height = (image.height() as f32 * scale) as i32;
 
+    let trimmed = language.trim();
+    let language = if trimmed.is_empty() { "eng" } else { trimmed };
     let mut api = tesseract::plumbing::TessBaseApi::create();
-    let lang = CString::new("eng").map_err(|e| OcrError::InitializationError(e.to_string()))?;
+    let lang = CString::new(language).map_err(|e| OcrError::InitializationError(e.to_string()))?;
     api.init_2(None, Some(&lang))
         .map_err(|e| OcrError::InitializationError(format!("Init failed: {}", e)))?;
 
@@ -1018,6 +1044,16 @@ fn fast_region_preprocess_config() -> PreprocessConfig {
         scale_factor: 2.5, // Higher upscale for small text detection (view counts, channel names)
         contrast: 1.15,    // Mild contrast enhancement to separate text from background
         threshold: true,   // Otsu's for better small text detection
+    }
+}
+
+/// Preprocessing for naming a saved capture: a smaller upscale than the
+/// highlighter's, measured to read the same screen text faster.
+#[cfg(feature = "tesseract-ocr")]
+fn naming_preprocess_config() -> PreprocessConfig {
+    PreprocessConfig {
+        scale_factor: 1.5,
+        ..fast_region_preprocess_config()
     }
 }
 
