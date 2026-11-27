@@ -41,6 +41,8 @@ pub struct OrganizeOutcome {
     pub renamed: bool,
     /// False when the capture was skipped (excluded app).
     pub indexed: bool,
+    /// True when the model chose the current name.
+    pub ai_named: bool,
 }
 
 /// Read a stored name style; anything unrecognized is `Clean`.
@@ -90,11 +92,23 @@ pub fn organize_capture(
     index_path: &Path,
     captured_at: DateTime<Local>,
 ) -> OrganizeOutcome {
+    organize_capture_with_ai(request, settings, index_path, captured_at, None)
+}
+
+/// Name, rename, and index one capture, optionally letting a model pick the name.
+pub fn organize_capture_with_ai(
+    request: &OrganizeRequest,
+    settings: &OrganizeSettings,
+    index_path: &Path,
+    captured_at: DateTime<Local>,
+    ai: Option<&dyn crate::ai::AiNamer>,
+) -> OrganizeOutcome {
     if is_excluded_app(request.app.as_deref(), &settings.excluded_apps) {
         return OrganizeOutcome {
             path: request.path.clone(),
             renamed: false,
             indexed: false,
+            ai_named: false,
         };
     }
 
@@ -104,6 +118,16 @@ pub fn organize_capture(
         captured_at,
     };
     let suggestion = suggest_name(&request.page, &ctx, settings.style);
+    let ai_stem = match (settings.auto_name, ai) {
+        (true, Some(namer)) => crate::ai::ai_name(
+            namer,
+            &suggestion,
+            request.window_title.as_deref(),
+            &request.page,
+        ),
+        _ => None,
+    };
+    let chosen_stem = ai_stem.clone().unwrap_or_else(|| suggestion.stem.clone());
     let original_name = request
         .path
         .file_name()
@@ -122,7 +146,7 @@ pub fn organize_capture(
                 .unwrap_or_default();
             // Keep a pixel-density suffix such as "@2x" the shell added.
             let density = density_suffix(&stem);
-            let new_stem = format!("{}{density}", suggestion.stem);
+            let new_stem = format!("{}{density}", chosen_stem);
             if new_stem != stem {
                 let target = unique_path(dir, &new_stem, &ext);
                 if fs::rename(&request.path, &target).is_ok() {
@@ -143,6 +167,7 @@ pub fn organize_capture(
             crate::secrets::scrub(&request.page.full_text()),
         )
     };
+    let ai_named = ai_stem.is_some() && renamed;
     let entry = IndexEntry {
         path: path.clone(),
         original_name,
@@ -152,6 +177,12 @@ pub fn organize_capture(
         captured_at,
         text,
         auto_named: renamed,
+        heuristic_name: if ai_named {
+            Some(suggestion.stem.clone())
+        } else {
+            None
+        },
+        ai_named,
     };
 
     let mut indexed = false;
@@ -174,6 +205,7 @@ pub fn organize_capture(
         path,
         renamed,
         indexed,
+        ai_named,
     }
 }
 
@@ -220,6 +252,14 @@ mod tests {
             page: OcrPage::default(),
             app: None,
             window_title: window_title.map(str::to_string),
+        }
+    }
+
+    struct FixedNamer(Option<String>);
+
+    impl crate::ai::AiNamer for FixedNamer {
+        fn complete(&self, _system: &str, _user: &str) -> Option<String> {
+            self.0.clone()
         }
     }
 
@@ -297,6 +337,69 @@ mod tests {
             outcome.path.file_name().unwrap().to_string_lossy(),
             "Quarterly report@2x.png"
         );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn model_name_replaces_the_heuristic() {
+        let dir = temp_dir("ai-rename");
+        let path = dir.join("Screenshot 2026-11-27 at 14.03.09.png");
+        fs::write(&path, b"png").unwrap();
+        let index_path = dir.join("index").join("index.json");
+        let req = request(path, Some("Quarterly report - Word"));
+        let settings = OrganizeSettings {
+            auto_name: true,
+            ..OrganizeSettings::default()
+        };
+        let namer = FixedNamer(Some("Quarterly sales review deck".into()));
+
+        let outcome =
+            organize_capture_with_ai(&req, &settings, &index_path, captured_at(), Some(&namer));
+
+        assert!(outcome.renamed);
+        assert!(outcome.ai_named);
+        assert_eq!(
+            outcome.path.file_name().unwrap().to_string_lossy(),
+            "Quarterly sales review deck.png"
+        );
+
+        let index = Index::load(&index_path).unwrap();
+        assert_eq!(
+            index.entries()[0].heuristic_name.as_deref(),
+            Some("Quarterly report")
+        );
+        assert!(index.entries()[0].ai_named);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn falls_back_when_the_model_fails() {
+        let dir = temp_dir("ai-fallback");
+        let path = dir.join("Screenshot 2026-11-27 at 14.03.09.png");
+        fs::write(&path, b"png").unwrap();
+        let index_path = dir.join("index").join("index.json");
+        let req = request(path, Some("Quarterly report - Word"));
+        let settings = OrganizeSettings {
+            auto_name: true,
+            ..OrganizeSettings::default()
+        };
+        let namer = FixedNamer(None);
+
+        let outcome =
+            organize_capture_with_ai(&req, &settings, &index_path, captured_at(), Some(&namer));
+
+        assert!(outcome.renamed);
+        assert!(!outcome.ai_named);
+        assert_eq!(
+            outcome.path.file_name().unwrap().to_string_lossy(),
+            "Quarterly report.png"
+        );
+
+        let index = Index::load(&index_path).unwrap();
+        assert_eq!(index.entries()[0].heuristic_name, None);
+        assert!(!index.entries()[0].ai_named);
+
         fs::remove_dir_all(&dir).unwrap();
     }
 

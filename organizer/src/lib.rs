@@ -10,6 +10,7 @@
 //! window tracking, the Windows shell from the system OCR and the foreground
 //! window. Nothing here touches the network.
 
+pub mod ai;
 pub mod index;
 pub mod naming;
 pub mod organize;
