@@ -119,6 +119,17 @@ pub fn stop_server() {
 }
 
 pub fn complete(base_url: &str, system: &str, user: &str, deadline: Instant) -> Option<String> {
+    complete_long(base_url, system, user, 32, deadline)
+}
+
+/// Like `complete`, for longer replies: up to `max_tokens` tokens.
+pub fn complete_long(
+    base_url: &str,
+    system: &str,
+    user: &str,
+    max_tokens: u32,
+    deadline: Instant,
+) -> Option<String> {
     let left = deadline.saturating_duration_since(Instant::now());
     if left.is_zero() {
         return None;
@@ -128,7 +139,7 @@ pub fn complete(base_url: &str, system: &str, user: &str, deadline: Instant) -> 
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        "max_tokens": 32,
+        "max_tokens": max_tokens,
         "temperature": 0.0,
         "chat_template_kwargs": {"enable_thinking": false},
     });
