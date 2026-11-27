@@ -5796,3 +5796,6 @@ msgstr "Para este PC, os nomes gratuitos são a melhor opção."
 
 msgid "AI names need at least 8 GB of memory, 4 processor cores, and AVX2."
 msgstr "Os nomes com IA precisam de pelo menos 8 GB de memória, 4 núcleos de processador e AVX2."
+
+msgid "Search them by their text in History."
+msgstr "Encontre-as pelo texto no Histórico."

@@ -18,8 +18,8 @@ pub fn build(body: &GtkBox, actions: &GtkBox, nav: &Nav) {
     let tray_title = t("Tray icon");
     let tray_body = t("Right-click for your capture menu.");
     let naming_title = t("Screenshots name themselves");
-    let naming_body =
-        t("Each capture is named from what you captured. Search by its text in History.");
+    // One line, like the other items: the page must fit without scrolling.
+    let naming_body = t("Search them by their text in History.");
     let menu_title = t("Settings");
     let menu_body = t("Change any of this later.");
     // The shortcuts page just before this one already covers hotkeys.

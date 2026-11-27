@@ -5725,3 +5725,6 @@ msgstr "الأسماء المجانية أنسب لهذا الكمبيوتر."
 
 msgid "AI names need at least 8 GB of memory, 4 processor cores, and AVX2."
 msgstr "تحتاج أسماء الذكاء الاصطناعي إلى ذاكرة 8 غيغابايت على الأقل و4 أنوية معالج ودعم AVX2."
+
+msgid "Search them by their text in History."
+msgstr "ابحث فيها بنصها في السجل."

@@ -5785,3 +5785,6 @@ msgstr "Для этого ПК лучше подходят бесплатные 
 
 msgid "AI names need at least 8 GB of memory, 4 processor cores, and AVX2."
 msgstr "Для имён от ИИ нужны не менее 8 ГБ памяти, 4 ядра процессора и AVX2."
+
+msgid "Search them by their text in History."
+msgstr "Ищите их по тексту в истории."

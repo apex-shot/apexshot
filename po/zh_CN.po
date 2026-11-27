@@ -5692,3 +5692,6 @@ msgstr "这台电脑更适合使用免费命名。"
 
 msgid "AI names need at least 8 GB of memory, 4 processor cores, and AVX2."
 msgstr "AI 命名需要至少 8 GB 内存、4 个处理器核心并支持 AVX2。"
+
+msgid "Search them by their text in History."
+msgstr "可在历史记录中按文字搜索。"
