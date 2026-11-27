@@ -5719,3 +5719,9 @@ msgstr "39 دولارًا مرة واحدة. يتضمن Studio أيضًا تصد
 
 msgid "Your free AI names are used. Upgrade to Studio to keep them."
 msgstr "استُخدمت أسماء الذكاء الاصطناعي المجانية. قم بالترقية إلى Studio للاحتفاظ بها."
+
+msgid "This PC is better off with the free names."
+msgstr "الأسماء المجانية أنسب لهذا الكمبيوتر."
+
+msgid "AI names need at least 8 GB of memory, 4 processor cores, and AVX2."
+msgstr "تحتاج أسماء الذكاء الاصطناعي إلى ذاكرة 8 غيغابايت على الأقل و4 أنوية معالج ودعم AVX2."

@@ -89,6 +89,7 @@ fn show_ai_names_card(
     {
         Some(CardKind::TrialEnded)
     } else if !config.organizer_ai_enabled
+        && apexshot_settings::ai_names::recommend().tier.is_some()
         && outcome.renamed
         && index_has_auto_named(index_path, 20)
         && claim_card(CardKind::TryAiNames)

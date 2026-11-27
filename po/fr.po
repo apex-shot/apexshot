@@ -5810,3 +5810,9 @@ msgstr "39 $ une seule fois. Studio comprend aussi l’export Motion, l’agrand
 
 msgid "Your free AI names are used. Upgrade to Studio to keep them."
 msgstr "Vos noms IA gratuits sont épuisés. Passez à Studio pour les garder."
+
+msgid "This PC is better off with the free names."
+msgstr "Pour ce PC, les noms gratuits sont le meilleur choix."
+
+msgid "AI names need at least 8 GB of memory, 4 processor cores, and AVX2."
+msgstr "Les noms IA nécessitent au moins 8 Go de mémoire, 4 cœurs de processeur et AVX2."

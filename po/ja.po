@@ -5694,3 +5694,9 @@ msgstr "一回払い39ドル。Studioには、Motion書き出し、アップス�
 
 msgid "Your free AI names are used. Upgrade to Studio to keep them."
 msgstr "無料のAI命名を使い切りました。引き続き使うにはStudioにアップグレードしてください。"
+
+msgid "This PC is better off with the free names."
+msgstr "このPCには無料の名前付けが適しています。"
+
+msgid "AI names need at least 8 GB of memory, 4 processor cores, and AVX2."
+msgstr "AIによる名前付けには、8 GB以上のメモリ、4コア以上のプロセッサ、AVX2が必要です。"

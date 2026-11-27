@@ -80,6 +80,7 @@ pub fn claim_card(kind: CardKind) -> bool {
 /// trial left.
 pub fn ai_allowed(config: &AppConfig) -> bool {
     config.organizer_ai_enabled
+        && super::hardware::recommend().tier.is_some()
         && is_installed(tier_from_setting(&config.organizer_ai_model))
         && (crate::studio_entitlement::studio_unlocked() || trial_remaining() > 0)
 }

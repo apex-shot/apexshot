@@ -277,16 +277,21 @@ fn ai_names_rows(frame: &GtkBox, root: &GtkBox, status: StudioStatus) {
     // trial, the switch shows off and locked; the saved choice stays, so an
     // upgrade picks AI names back up without another click.
     let locked = !matches!(status, StudioStatus::Active { .. }) && trial_remaining() == 0;
+    // A PC that cannot run the model well gets no AI names at all: a weaker
+    // model named screenshots worse than the free names do.
+    let supported = recommend().tier.is_some();
     let row = table_row();
-    let hint = if locked {
+    let hint = if !supported {
+        t("This PC is better off with the free names.")
+    } else if locked {
         t("Your free AI names are used. Upgrade to Studio to keep them.")
     } else {
         t("A small model on this PC reads the window title and on-screen text and writes a clearer name. Nothing is uploaded.")
     };
     row.append(&row_text(&t("Name screenshots with AI"), Some(&hint)));
     let switch = Switch::new();
-    switch.set_active(config.organizer_ai_enabled && !locked);
-    switch.set_sensitive(is_installed(tier) && !locked);
+    switch.set_active(config.organizer_ai_enabled && !locked && supported);
+    switch.set_sensitive(is_installed(tier) && !locked && supported);
     switch.set_valign(Align::Center);
     switch.connect_active_notify(|switch| {
         let mut config = load_config();
@@ -333,10 +338,13 @@ fn ai_names_rows(frame: &GtkBox, root: &GtkBox, status: StudioStatus) {
             "Recommended for this PC: {} ({})",
             &[spec.detail, size.as_str()],
         ),
-        None => t("This PC is below the recommended specs, so names may be slow."),
+        None => t("AI names need at least 8 GB of memory, 4 processor cores, and AVX2."),
     };
     row.append(&row_text(&t("Model"), Some(&hint)));
     frame.append(&row);
+    if !supported && !is_installed(tier) {
+        return;
+    }
 
     // The chosen model: ready to use, or a one-time download.
     let row = table_row();

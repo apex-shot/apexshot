@@ -5779,3 +5779,9 @@ msgstr "39 $ один раз. В Studio также есть экспорт Motio
 
 msgid "Your free AI names are used. Upgrade to Studio to keep them."
 msgstr "Бесплатные имена от ИИ закончились. Перейдите на Studio, чтобы сохранить их."
+
+msgid "This PC is better off with the free names."
+msgstr "Для этого ПК лучше подходят бесплатные имена."
+
+msgid "AI names need at least 8 GB of memory, 4 processor cores, and AVX2."
+msgstr "Для имён от ИИ нужны не менее 8 ГБ памяти, 4 ядра процессора и AVX2."

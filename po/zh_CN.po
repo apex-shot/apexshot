@@ -5686,3 +5686,9 @@ msgstr "一次性 39 美元。Studio 还包含 Motion 导出、放大和 Studio 
 
 msgid "Your free AI names are used. Upgrade to Studio to keep them."
 msgstr "免费 AI 命名已用完。升级到 Studio 即可继续使用。"
+
+msgid "This PC is better off with the free names."
+msgstr "这台电脑更适合使用免费命名。"
+
+msgid "AI names need at least 8 GB of memory, 4 processor cores, and AVX2."
+msgstr "AI 命名需要至少 8 GB 内存、4 个处理器核心并支持 AVX2。"
