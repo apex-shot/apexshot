@@ -5674,3 +5674,9 @@ msgstr "{} · يُنزَّل مرة واحدة ثم يعمل دون اتصال"
 
 msgid "{} of {} AI names left. After that, names stay rule-based until you upgrade."
 msgstr "تبقى {} من {} أسماء بالذكاء الاصطناعي. بعد ذلك تبقى الأسماء قائمة على القواعد حتى الترقية."
+
+msgid "Screenshots name themselves"
+msgstr "لقطات الشاشة تسمّي نفسها"
+
+msgid "Each capture is named from what you captured. Search by its text in History."
+msgstr "تُسمّى كل لقطة بحسب ما التقطته. ابحث عن نصّها في السجل."

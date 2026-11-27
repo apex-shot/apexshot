@@ -133,7 +133,12 @@ fn main() {
         eprintln!("Failed to start the ApexShot shell: {error}");
     }
 
-    if let Err(error) = app::settings::show_settings_window() {
+    let settings = if std::env::args().any(|argument| argument == "--studio") {
+        app::settings::show_settings_window_for_studio()
+    } else {
+        app::settings::show_settings_window()
+    };
+    if let Err(error) = settings {
         eprintln!("Failed to open settings window: {error}");
         std::process::exit(1);
     }

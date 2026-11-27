@@ -5641,3 +5641,9 @@ msgstr "{} · 下载一次后即可离线使用"
 
 msgid "{} of {} AI names left. After that, names stay rule-based until you upgrade."
 msgstr "还剩 {} / {} 次 AI 命名。之后名称将保持基于规则生成，直到你升级。"
+
+msgid "Screenshots name themselves"
+msgstr "截图会自己命名"
+
+msgid "Each capture is named from what you captured. Search by its text in History."
+msgstr "每张截图都会根据拍摄内容命名。可在历史记录中按文字搜索。"
