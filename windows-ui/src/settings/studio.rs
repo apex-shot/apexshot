@@ -323,7 +323,10 @@ fn ai_names_rows(frame: &GtkBox, root: &GtkBox, status: StudioStatus) {
             let recommended_spec = model_spec(recommended);
             let label = t(recommended_spec.label);
             let size = size_text(recommended_spec.bytes);
-            t_args("Recommended for this PC: {} ({})", &[label.as_str(), size.as_str()])
+            t_args(
+                "Recommended for this PC: {} ({})",
+                &[label.as_str(), size.as_str()],
+            )
         }
         None => t("This PC is below the recommended specs, so names may be slow."),
     };
@@ -364,7 +367,10 @@ fn ai_names_rows(frame: &GtkBox, root: &GtkBox, status: StudioStatus) {
     let row = table_row();
     if is_installed(tier) {
         let name = format!("{} · {}", t(spec.label), spec.detail);
-        let text = row_text(&t("Ready"), Some(&t_args("{} model on this PC", &[name.as_str()])));
+        let text = row_text(
+            &t("Ready"),
+            Some(&t_args("{} model on this PC", &[name.as_str()])),
+        );
         let result = Label::new(None);
         result.add_css_class("settings-sub-option-hint");
         result.set_xalign(0.0);
@@ -540,7 +546,11 @@ fn feature_row(frame: &GtkBox, active: bool, title: &str, hint: &str) {
     let pill_text = if active { t("Active") } else { t("Studio") };
     let pill = Label::new(Some(&pill_text));
     pill.add_css_class("studio-pill");
-    pill.add_css_class(if active { "studio-pill-active" } else { "studio-pill-neutral" });
+    pill.add_css_class(if active {
+        "studio-pill-active"
+    } else {
+        "studio-pill-neutral"
+    });
     pill.set_valign(Align::Center);
     row.append(&pill);
     frame.append(&row);
@@ -582,7 +592,7 @@ fn example_pairs() -> Vec<(String, String)> {
             Some((entry.captured_at, free, ai))
         })
         .collect();
-    entries.sort_by(|left, right| right.0.cmp(&left.0));
+    entries.sort_by_key(|entry| std::cmp::Reverse(entry.0));
     entries
         .into_iter()
         .take(3)
@@ -593,9 +603,12 @@ fn example_pairs() -> Vec<(String, String)> {
 /// The pairs shown until the index has captures the user renamed.
 fn sample_pairs() -> Vec<(String, String)> {
     [
-        ("Home X", "WhalePanda post on earning ohms"),
+        ("Home X", "Sam Lee post announcing a new keyboard"),
         ("Inbox Outlook", "Invoice reminder from Northwind Traders"),
-        ("main.rs apexshot", "Rust organizer module with naming tests"),
+        (
+            "main.rs apexshot",
+            "Rust organizer module with naming tests",
+        ),
     ]
     .iter()
     .map(|(free, ai)| (free.to_string(), ai.to_string()))
@@ -666,13 +679,13 @@ fn start_install(
                             done as f64 / total as f64
                         };
                         progress.set_fraction(fraction);
-                        progress.set_text(&format!("{} / {}", mb_text(done), mb_text(total)));
+                        progress.set_text(Some(&format!("{} / {}", mb_text(done), mb_text(total))));
                     }
                     InstallProgress::Verifying => {
-                        progress.set_text(&t("Checking the download…"));
+                        progress.set_text(Some(&t("Checking the download…")));
                     }
                     InstallProgress::Extracting => {
-                        progress.set_text(&t("Unpacking…"));
+                        progress.set_text(Some(&t("Unpacking…")));
                     }
                     InstallProgress::Done => progress.set_fraction(1.0),
                 },

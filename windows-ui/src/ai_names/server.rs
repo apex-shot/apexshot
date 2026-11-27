@@ -162,9 +162,9 @@ pub fn benchmark(tier: ModelTier) -> Option<Duration> {
 }
 
 const BENCHMARK_PROMPT: &str = "App: Chrome\nSite: x.com\nWindow title: Home / X\n\
-Current name: Home X\nText on screen, top to bottom:\nWhalePanda @walepandaa\n\
-starting keeper's resistance today with 0 ohms\nfirst goal is 1,000 ohms\n\
-Resistance\nSeason ends in 51 days";
+Current name: Home X\nText on screen, top to bottom:\nSam Lee @samlee\n\
+Our new split keyboard ships next month\nPreorders open Friday for early testers\n\
+Show more\nWhat's happening";
 
 fn healthy(base: &str, deadline: Instant) -> bool {
     let left = deadline.saturating_duration_since(Instant::now());
