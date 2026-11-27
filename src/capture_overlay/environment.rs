@@ -131,6 +131,13 @@ fn force_wayland_gdk_for_layer_shell() {
         // before entering the GTK layer-shell selector.
         unsafe { std::env::set_var("GDK_BACKEND", "wayland") };
     }
+    // These surfaces open before any GTK application exists, so the toplevel
+    // takes its app id from the program name. Without this the dock and the
+    // window switcher show a generic "GTK Application" entry.
+    if gtk4::glib::prgname().is_none_or(|name| name != crate::app_identity::app_id()) {
+        gtk4::glib::set_prgname(Some(crate::app_identity::app_id()));
+        gtk4::glib::set_application_name(crate::app_identity::app_name());
+    }
 }
 
 fn is_gnome_session() -> bool {

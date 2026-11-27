@@ -185,6 +185,7 @@ fn recording_request_for_target(
         controls: config.rec_controls,
         mic: menu.microphone,
         speaker: menu.speaker,
+        output: String::new(),
         mic_device: menu.mic_device.clone(),
         speaker_app: menu.speaker_app.clone(),
         speaker_app_pid: menu.speaker_app_pid,
@@ -210,7 +211,9 @@ fn recording_request_for_display(
     choice: &crate::overlay::MonitorChoice,
     menu: crate::overlay::CaptureMenuResult,
 ) -> RecordingRequest {
-    recording_request_for_target(menu, Some(selected_display(choice)), true, false)
+    let mut request = recording_request_for_target(menu, Some(selected_display(choice)), true, false);
+    request.output = choice.connector.clone();
+    request
 }
 
 /// GTK quick-capture fallback for wlroots desktops.

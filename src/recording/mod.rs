@@ -49,6 +49,9 @@ pub enum RecordError {
     #[error("GStreamer error: {0}")]
     GStreamerError(String),
 
+    #[error("Screen recorder failed: {0}")]
+    RecorderFailed(String),
+
     #[error("Wayland portal error: {0}")]
     PortalError(String),
 
@@ -184,6 +187,9 @@ pub struct RecordingConfig {
     pub output_path: PathBuf,
     /// Portal or backend source selected for this recording.
     pub target: RecordingTarget,
+    /// Compositor output name a full-screen recording should capture. None
+    /// lets the backend choose.
+    pub output: Option<String>,
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub x: Option<i32>,
@@ -241,11 +247,14 @@ pub fn recording_output_dir(app_config: &AppConfig) -> PathBuf {
 }
 
 /// Expand `rec_filename_pattern` (`{Date}`, `{Time}`) and join under the export dir.
-pub fn recording_output_path(
+pub fn recording_output_path<Tz: chrono::TimeZone>(
     app_config: &AppConfig,
     extension: &str,
-    now: chrono::DateTime<chrono::Utc>,
-) -> PathBuf {
+    now: chrono::DateTime<Tz>,
+) -> PathBuf
+where
+    Tz::Offset: std::fmt::Display,
+{
     let date_str = now.format("%Y-%m-%d").to_string();
     let time_str = now.format("%H-%M-%S").to_string();
     let pattern = app_config.rec_filename_pattern.trim();
@@ -282,6 +291,7 @@ impl Default for RecordingConfig {
         Self {
             output_path: path,
             target: RecordingTarget::Screen,
+            output: None,
             width: None,
             height: None,
             x: None,
@@ -314,14 +324,17 @@ impl RecordingConfig {
     /// fps / resolution / cursor / HiDPI / mono). Used by daemon screen/area
     /// hotkeys so they match the overlay recording path.
     pub fn from_app_config(app_config: &AppConfig, extension: &str) -> Self {
-        Self::from_app_config_at(app_config, extension, chrono::Utc::now())
+        Self::from_app_config_at(app_config, extension, chrono::Local::now())
     }
 
-    pub fn from_app_config_at(
+    pub fn from_app_config_at<Tz: chrono::TimeZone>(
         app_config: &AppConfig,
         extension: &str,
-        now: chrono::DateTime<chrono::Utc>,
-    ) -> Self {
+        now: chrono::DateTime<Tz>,
+    ) -> Self
+    where
+        Tz::Offset: std::fmt::Display,
+    {
         let output_path = recording_output_path(app_config, extension, now);
         ensure_recording_parent_dir(&output_path);
 
@@ -337,6 +350,7 @@ impl RecordingConfig {
         Self {
             output_path,
             target: RecordingTarget::Screen,
+            output: None,
             width: None,
             height: None,
             x: None,

@@ -758,11 +758,14 @@ fn should_use_shell_mask_for_request(
         && request.height > 0
 }
 
-pub fn prepare_overlay_recording_request(
+pub fn prepare_overlay_recording_request<Tz: chrono::TimeZone>(
     mut app_config: AppConfig,
     request: &RecordingRequest,
-    now: chrono::DateTime<chrono::Utc>,
-) -> PreparedOverlayRecordingRequest {
+    now: chrono::DateTime<Tz>,
+) -> PreparedOverlayRecordingRequest
+where
+    Tz::Offset: std::fmt::Display,
+{
     let shell_overlay_available =
         crate::gnome_shell::current_session_supports_gnome_shell_overlay();
     let use_shell_mask = should_use_shell_mask_for_request(request, shell_overlay_available);
@@ -841,6 +844,9 @@ pub fn prepare_overlay_recording_request(
             )
         };
 
+    let output = (request.fullscreen && !request.window && !request.output.trim().is_empty())
+        .then(|| request.output.trim().to_string());
+
     let recording_config = super::RecordingConfig {
         output_path: output_path.clone(),
         target: if request.window {
@@ -850,6 +856,7 @@ pub fn prepare_overlay_recording_request(
         } else {
             super::RecordingTarget::Area
         },
+        output,
         width: capture_width,
         height: capture_height,
         x: capture_x,
@@ -1666,7 +1673,7 @@ pub fn persist_overlay_recording_request_state(request: &RecordingRequest) -> an
     let prepared = prepare_overlay_recording_request(
         crate::config::load_config(),
         request,
-        chrono::Utc::now(),
+        chrono::Local::now(),
     );
     save_config(&prepared.updated_app_config)?;
     Ok(())
@@ -1681,7 +1688,7 @@ pub fn run_overlay_recording_request_with_gtk(
     let prepared = prepare_overlay_recording_request(
         crate::config::load_config(),
         &request,
-        chrono::Utc::now(),
+        chrono::Local::now(),
     );
 
     if let Some(parent) = prepared.output_path.parent() {
@@ -2223,6 +2230,7 @@ mod tests {
             controls: true,
             mic: true,
             speaker: false,
+            output: String::new(),
             mic_device: String::new(),
             speaker_app: String::new(),
             speaker_app_pid: 0,
@@ -2652,6 +2660,26 @@ mod tests {
         assert_eq!(prepared.updated_app_config.rec_video_quality, 2);
         assert_eq!(prepared.updated_app_config.rec_video_max_res, 0);
         assert_eq!(prepared.updated_app_config.rec_video_fps, 3);
+    }
+
+    #[test]
+    fn prepare_overlay_recording_request_carries_the_fullscreen_output_only() {
+        let at = chrono::Utc.with_ymd_and_hms(2026, 4, 2, 10, 0, 0).unwrap();
+        let fullscreen = RecordingRequest {
+            fullscreen: true,
+            output: "DP-2".into(),
+            ..RecordingRequest::default()
+        };
+        let prepared = prepare_overlay_recording_request(AppConfig::default(), &fullscreen, at);
+        assert_eq!(prepared.recording_config.output.as_deref(), Some("DP-2"));
+
+        let window = RecordingRequest {
+            window: true,
+            output: "DP-2".into(),
+            ..RecordingRequest::default()
+        };
+        let prepared = prepare_overlay_recording_request(AppConfig::default(), &window, at);
+        assert_eq!(prepared.recording_config.output, None);
     }
 
     #[test]

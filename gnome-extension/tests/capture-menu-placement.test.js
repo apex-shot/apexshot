@@ -3,6 +3,7 @@
 import {
     CAPTURE_MENU_TOP_MARGIN,
     captureMenuPosition,
+    displayPickerPosition,
 } from '../capture-menu-placement.js';
 
 function assertEqual(actual, expected, message) {
@@ -58,4 +59,12 @@ runTest('returns null when an input rect is missing', () => {
         null, 'missing work area should be deferred');
     assertEqual(captureMenuPosition({x: 0, y: 32, width: 1920, height: 1080}, null),
         null, 'missing frame should be deferred');
+});
+
+runTest('centres the display picker on both axes of a second monitor', () => {
+    const pos = displayPickerPosition(
+        {x: 1920, y: 32, width: 1920, height: 1048},
+        {x: 0, y: 0, width: 756, height: 338});
+    assertEqual(pos.x, 1920 + 582, 'x should be centred in the work area');
+    assertEqual(pos.y, 32 + 355, 'y should be centred in the work area');
 });

@@ -1,8 +1,13 @@
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::process::Stdio;
-use tokio::sync::mpsc;
+use std::sync::Arc;
+use tokio::io::AsyncBufReadExt;
+use tokio::sync::{mpsc, Mutex};
 
 use super::*;
+
+const WF_RECORDER_STDERR_TAIL: usize = 8;
 
 pub(crate) fn is_wlroots_session() -> bool {
     let desktop = std::env::var("XDG_CURRENT_DESKTOP")
@@ -107,7 +112,122 @@ pub(super) fn ffmpeg_vaapi_args(width: u32, height: u32, qp: u32) -> Vec<String>
     ]
 }
 
-fn video_capture_args(config: &super::RecordingConfig) -> Vec<String> {
+/// Parse `wf-recorder -L` output. Each output is one line like
+/// `1. Name: HEADLESS-2 Description: Some Monitor`.
+fn parse_wf_recorder_outputs(stdout: &str) -> Vec<String> {
+    stdout
+        .lines()
+        .filter_map(|line| {
+            let rest = line.split_once("Name: ")?.1.trim_start();
+            let name = rest
+                .split_once(" Description:")
+                .map(|(name, _)| name)
+                .unwrap_or(rest)
+                .trim();
+            let name = name.split_whitespace().next()?;
+            (name != "Description:").then(|| name.to_string())
+        })
+        .collect()
+}
+
+fn listed_wf_recorder_outputs() -> Vec<String> {
+    let Ok(output) = std::process::Command::new("wf-recorder")
+        .arg("-L")
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+    else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    parse_wf_recorder_outputs(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn focused_name_in_array(json: &str) -> Option<String> {
+    let monitors: serde_json::Value = serde_json::from_str(json).ok()?;
+    monitors
+        .as_array()?
+        .iter()
+        .find(|monitor| monitor.get("focused").and_then(|focused| focused.as_bool()) == Some(true))
+        .and_then(|monitor| monitor.get("name"))
+        .and_then(|name| name.as_str())
+        .map(str::to_string)
+}
+
+fn parse_hyprland_focused_output(json: &str) -> Option<String> {
+    focused_name_in_array(json)
+}
+
+fn parse_sway_focused_output(json: &str) -> Option<String> {
+    focused_name_in_array(json)
+}
+
+fn parse_niri_focused_output(json: &str) -> Option<String> {
+    let output: serde_json::Value = serde_json::from_str(json).ok()?;
+    output
+        .get("name")
+        .and_then(|name| name.as_str())
+        .map(str::to_string)
+}
+
+fn run_json_command(program: &str, args: &[&str]) -> Option<String> {
+    let output = std::process::Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn focused_compositor_output() -> Option<String> {
+    if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some() {
+        return run_json_command("hyprctl", &["monitors", "-j"])
+            .and_then(|json| parse_hyprland_focused_output(&json));
+    }
+    if std::env::var_os("SWAYSOCK").is_some() {
+        return run_json_command("swaymsg", &["-t", "get_outputs", "-r"])
+            .and_then(|json| parse_sway_focused_output(&json));
+    }
+    if std::env::var_os("NIRI_SOCKET").is_some() {
+        return run_json_command("niri", &["msg", "-j", "focused-output"])
+            .and_then(|json| parse_niri_focused_output(&json));
+    }
+    None
+}
+
+/// Pick a wf-recorder output from the listed outputs, a requested name, and
+/// the compositor's focused output. An empty list means listing failed.
+fn choose_output(
+    listed: &[String],
+    requested: Option<&str>,
+    focused: Option<&str>,
+) -> Option<String> {
+    if let Some(requested) = requested.map(str::trim).filter(|name| !name.is_empty()) {
+        if listed.is_empty() || listed.iter().any(|name| name == requested) {
+            return Some(requested.to_string());
+        }
+    }
+    if let Some(focused) = focused.map(str::trim).filter(|name| !name.is_empty()) {
+        if listed.is_empty() || listed.iter().any(|name| name == focused) {
+            return Some(focused.to_string());
+        }
+    }
+    listed.first().cloned()
+}
+
+fn resolve_wf_recorder_output(requested: Option<&str>) -> Option<String> {
+    let listed = listed_wf_recorder_outputs();
+    let focused = focused_compositor_output();
+    choose_output(&listed, requested, focused.as_deref())
+}
+
+fn video_capture_args(config: &super::RecordingConfig, output: Option<&str>) -> Vec<String> {
     let mut args = Vec::new();
 
     if let (Some(x), Some(y), Some(width), Some(height)) =
@@ -115,6 +235,11 @@ fn video_capture_args(config: &super::RecordingConfig) -> Vec<String> {
     {
         args.push("-g".into());
         args.push(format!("{},{} {}x{}", x, y, width, height));
+    } else if config.target != super::RecordingTarget::Window {
+        if let Some(output) = output {
+            args.push("-o".into());
+            args.push(output.to_string());
+        }
     }
 
     args.push("-r".into());
@@ -143,7 +268,19 @@ pub(super) async fn record_with_wf_recorder(
     }
 
     let final_path = config.output_path.clone();
-    let mut args = video_capture_args(&config);
+    let has_geometry = config.x.is_some()
+        && config.y.is_some()
+        && config.width.is_some()
+        && config.height.is_some();
+    let output = if has_geometry || config.target == super::RecordingTarget::Window {
+        None
+    } else {
+        resolve_wf_recorder_output(config.output.as_deref())
+    };
+    if let Some(output) = output.as_deref() {
+        eprintln!("[recording] wf-recorder output: {output}");
+    }
+    let mut args = video_capture_args(&config, output.as_deref());
 
     // wf-recorder opens one Pulse source. Resolve it against the live server
     // first so an unplugged choice falls back to the default instead of
@@ -203,9 +340,30 @@ pub(super) async fn record_with_wf_recorder(
         .args(&args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::inherit())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(RecordError::IoError)?;
+
+    // Echo wf-recorder's stderr and keep the tail so a failed start can
+    // report the real reason instead of only the exit status.
+    let stderr_tail = Arc::new(Mutex::new(VecDeque::new()));
+    let mut stderr_reader = child.stderr.take().map(|stderr| {
+        let stderr_tail = Arc::clone(&stderr_tail);
+        tokio::spawn(async move {
+            let mut lines = tokio::io::BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                eprintln!("[wf-recorder] {line}");
+                let mut tail = stderr_tail.lock().await;
+                if tail.len() >= WF_RECORDER_STDERR_TAIL {
+                    tail.pop_front();
+                }
+                tail.push_back(line);
+            }
+        })
+    });
 
     super::notify_daemon_event("recording_session_started");
     let mut command_rx = command_rx;
@@ -217,7 +375,25 @@ pub(super) async fn record_with_wf_recorder(
             status = child.wait() => {
                 let status = status.map_err(RecordError::IoError)?;
                 if !status.success() && stop_action == super::RecordingTerminalAction::Save {
-                    return Err(RecordError::GStreamerError(format!("wf-recorder exited with {status}")));
+                    if let Some(reader) = stderr_reader.take() {
+                        let _ = tokio::time::timeout(
+                            std::time::Duration::from_millis(500),
+                            reader,
+                        )
+                        .await;
+                    }
+                    let tail = stderr_tail.lock().await;
+                    let detail = tail
+                        .iter()
+                        .rev()
+                        .find(|line| !line.trim().is_empty())
+                        .cloned();
+                    drop(tail);
+                    let message = match detail {
+                        Some(line) => format!("wf-recorder exited with {status}: {line}"),
+                        None => format!("wf-recorder exited with {status}"),
+                    };
+                    return Err(RecordError::RecorderFailed(message));
                 }
                 break;
             }
@@ -307,7 +483,7 @@ mod tests {
             ..crate::recording::RecordingConfig::default()
         };
 
-        let args = video_capture_args(&config);
+        let args = video_capture_args(&config, None);
 
         assert!(args
             .windows(2)
@@ -316,5 +492,100 @@ mod tests {
         assert!(args.windows(2).any(|pair| {
             pair[0] == "-F" && pair[1].contains("min(iw,1280)") && pair[1].contains("min(ih,720)")
         }));
+    }
+
+    #[test]
+    fn parses_wf_recorder_output_listing() {
+        let stdout = concat!(
+            "1. Name: WAYLAND-1 Description: \n",
+            "2. Name: HEADLESS-2 Description: Some Monitor\n",
+            "3. Name: DP-1 Description: Dell Inc. U2720Q\n",
+        );
+        assert_eq!(
+            parse_wf_recorder_outputs(stdout),
+            vec!["WAYLAND-1", "HEADLESS-2", "DP-1"]
+        );
+    }
+
+    #[test]
+    fn parses_hyprland_focused_monitor() {
+        let json = r#"[{"name":"DP-1","focused":false},{"name":"DP-2","focused":true}]"#;
+        assert_eq!(parse_hyprland_focused_output(json).as_deref(), Some("DP-2"));
+    }
+
+    #[test]
+    fn parses_sway_focused_output() {
+        let json = r#"[{"name":"HDMI-A-1","focused":true},{"name":"DP-1","focused":false}]"#;
+        assert_eq!(parse_sway_focused_output(json).as_deref(), Some("HDMI-A-1"));
+    }
+
+    #[test]
+    fn parses_niri_focused_output() {
+        let json = r#"{"name":"eDP-1","make":"BOE"}"#;
+        assert_eq!(parse_niri_focused_output(json).as_deref(), Some("eDP-1"));
+    }
+
+    #[test]
+    fn chooses_the_requested_listed_output() {
+        let listed = vec!["DP-1".to_string(), "DP-2".to_string()];
+        assert_eq!(
+            choose_output(&listed, Some("DP-2"), Some("DP-1")).as_deref(),
+            Some("DP-2")
+        );
+    }
+
+    #[test]
+    fn unlisted_request_falls_back_to_the_focused_output() {
+        let listed = vec!["DP-1".to_string(), "DP-2".to_string()];
+        assert_eq!(
+            choose_output(&listed, Some("HDMI-1"), Some("DP-1")).as_deref(),
+            Some("DP-1")
+        );
+    }
+
+    #[test]
+    fn no_request_or_focus_uses_the_first_listed_output() {
+        let listed = vec!["DP-1".to_string(), "DP-2".to_string()];
+        assert_eq!(choose_output(&listed, None, None).as_deref(), Some("DP-1"));
+    }
+
+    #[test]
+    fn failed_listing_keeps_the_requested_or_focused_output() {
+        let empty: Vec<String> = Vec::new();
+        assert_eq!(
+            choose_output(&empty, Some("DP-2"), None).as_deref(),
+            Some("DP-2")
+        );
+        assert_eq!(
+            choose_output(&empty, None, Some("DP-1")).as_deref(),
+            Some("DP-1")
+        );
+        assert_eq!(choose_output(&empty, None, None), None);
+    }
+
+    #[test]
+    fn video_capture_args_use_the_resolved_output_without_geometry() {
+        let config = crate::recording::RecordingConfig::default();
+        let args = video_capture_args(&config, Some("DP-1"));
+
+        assert!(args.windows(2).any(|pair| pair == ["-o", "DP-1"]));
+        assert!(!args.iter().any(|arg| arg == "-g"));
+    }
+
+    #[test]
+    fn video_capture_args_prefer_geometry_over_the_output() {
+        let config = crate::recording::RecordingConfig {
+            x: Some(10),
+            y: Some(20),
+            width: Some(2560),
+            height: Some(1440),
+            ..crate::recording::RecordingConfig::default()
+        };
+        let args = video_capture_args(&config, Some("DP-1"));
+
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["-g", "10,20 2560x1440"]));
+        assert!(!args.iter().any(|arg| arg == "-o"));
     }
 }

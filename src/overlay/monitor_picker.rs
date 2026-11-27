@@ -2,8 +2,8 @@
 //!
 //! Mirrors the C++ `MonitorPicker` flow:
 //! - 1 monitor → that monitor immediately (no UI)
-//! - multi → floating "Select a display" panel
-//! - Esc / Cancel → cancelled
+//! - multi → floating "Choose a display" panel
+//! - Esc / close button → cancelled
 //! - number keys 1–9 select by sorted left-to-right order
 //!
 //! The picker is metadata-only: freeze/capture happens after dismiss so the
@@ -106,7 +106,8 @@ fn is_primary_guess(monitors: &[gdk::Monitor], index: usize) -> bool {
 /// - 1 monitor → that monitor (no UI)
 /// - multi → interactive floating picker
 ///
-/// Cancelled when the user presses Esc / clicks Cancel / closes the panel.
+/// Cancelled when the user presses Esc / clicks the close button / closes the
+/// panel.
 pub fn select_target_monitor() -> Result<(gdk::Monitor, MonitorChoice), SelectionError> {
     let display = gdk::Display::default()
         .ok_or_else(|| SelectionError::InitError("No display found for monitor picker".into()))?;
@@ -135,26 +136,76 @@ struct PickerCard {
     choice: MonitorChoice,
 }
 
-const PICKER_MARGIN_X: f64 = 36.0;
-const PICKER_CARD_W: f64 = 288.0;
-const PICKER_CARD_H: f64 = 240.0;
-const PICKER_CARD_GAP: f64 = 16.0;
-const PICKER_PREVIEW_W: f64 = 260.0;
-const PICKER_PREVIEW_H: f64 = 156.0;
+// The picker sits on the same sheet as the onboarding and update windows
+// (`07-pages-about-onboarding.css`, `update_window/update.css`): a borderless
+// #191919 surface, a centred headline over quiet copy, and #222222 cards.
+const PICKER_PANEL_RADIUS: f64 = 12.0;
+const PICKER_INSET: f64 = 36.0;
+const PICKER_CLOSE_SIZE: f64 = 28.0;
+const PICKER_CLOSE_MARGIN: f64 = 12.0;
+const PICKER_HEADLINE_H: f64 = 34.0;
+const PICKER_COPY_GAP: f64 = 6.0;
+const PICKER_COPY_H: f64 = 20.0;
+const PICKER_CARDS_GAP: f64 = 24.0;
+const PICKER_CARD_W: f64 = 220.0;
+const PICKER_CARD_H: f64 = 182.0;
+const PICKER_CARD_GAP: f64 = 12.0;
+const PICKER_CARD_RADIUS: f64 = 9.0;
 const PICKER_CARD_PAD: f64 = 14.0;
+const PICKER_PREVIEW_W: f64 = 192.0;
+const PICKER_PREVIEW_H: f64 = 108.0;
+const PICKER_PREVIEW_RADIUS: f64 = 6.0;
+const PICKER_PREVIEW_GAP: f64 = 10.0;
+const PICKER_NAME_H: f64 = 18.0;
+const PICKER_META_GAP: f64 = 2.0;
+const PICKER_META_H: f64 = 16.0;
+const PICKER_MIN_W: f64 = 380.0;
 
-fn picker_panel_size(card_count: usize) -> (i32, i32) {
-    let width = (PICKER_MARGIN_X * 2.0
-        + card_count as f64 * PICKER_CARD_W
-        + card_count.saturating_sub(1) as f64 * PICKER_CARD_GAP) as i32;
-    // 28 top + title 22 + 4 + hint 15 + 22 + cards 240 + 12 + cancel 34 + 20.
-    (width.max(360), 397)
+type Rgba = (f64, f64, f64, f64);
+
+const fn rgb(r: u8, g: u8, b: u8) -> Rgba {
+    (r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0, 1.0)
 }
 
-fn picker_card_rect(index: usize) -> PickerRect {
+/// `.onboarding-root` background.
+const PICKER_PANEL_BG: Rgba = rgb(0x19, 0x19, 0x19);
+/// `.update-card` background, and the update window's secondary button.
+const PICKER_CARD_BG: Rgba = rgb(0x22, 0x22, 0x22);
+const PICKER_CARD_HOVER: Rgba = rgb(0x2b, 0x2b, 0x2b);
+const PICKER_CARD_PRESSED: Rgba = rgb(0x30, 0x30, 0x30);
+/// `.onboarding-text-button` hover and active washes.
+const PICKER_WASH: Rgba = (243.0 / 255.0, 240.0 / 255.0, 236.0 / 255.0, 0.06);
+const PICKER_WASH_ACTIVE: Rgba = (243.0 / 255.0, 240.0 / 255.0, 236.0 / 255.0, 0.10);
+/// Headline and value text.
+const PICKER_TEXT: Rgba = rgb(0xf3, 0xf0, 0xec);
+/// `.onboarding-copy` and `.update-row-key`.
+const PICKER_TEXT_MUTED: Rgba = rgb(0xa3, 0xa0, 0x9c);
+/// `.onboarding-text-button` idle colour.
+const PICKER_CLOSE_IDLE: Rgba = rgb(0xb9, 0xb4, 0xad);
+/// The primary button orange.
+const PICKER_ACCENT: Rgba = rgb(0xff, 0x67, 0x0d);
+
+fn picker_row_width(card_count: usize) -> f64 {
+    card_count as f64 * PICKER_CARD_W + card_count.saturating_sub(1) as f64 * PICKER_CARD_GAP
+}
+
+fn picker_cards_top() -> f64 {
+    PICKER_INSET + PICKER_HEADLINE_H + PICKER_COPY_GAP + PICKER_COPY_H + PICKER_CARDS_GAP
+}
+
+fn picker_panel_size(card_count: usize) -> (i32, i32) {
+    let width = (PICKER_INSET * 2.0 + picker_row_width(card_count)).max(PICKER_MIN_W);
+    let height = picker_cards_top() + PICKER_CARD_H + PICKER_INSET;
+    (width as i32, height as i32)
+}
+
+/// Cards sit in one row centred in the panel, however wide the panel is.
+fn picker_card_rect(index: usize, card_count: usize) -> PickerRect {
+    let (panel_width, _) = picker_panel_size(card_count);
+    let left = (f64::from(panel_width) - picker_row_width(card_count)) / 2.0;
     PickerRect {
-        x: PICKER_MARGIN_X + index as f64 * (PICKER_CARD_W + PICKER_CARD_GAP),
-        y: 91.0,
+        x: left + index as f64 * (PICKER_CARD_W + PICKER_CARD_GAP),
+        y: picker_cards_top(),
         width: PICKER_CARD_W,
         height: PICKER_CARD_H,
     }
@@ -202,301 +253,226 @@ fn picker_round_rect(context: &cairo::Context, rect: PickerRect, radius: f64) {
     context.close_path();
 }
 
-fn picker_text(
+#[derive(Clone, Copy)]
+enum PickerAlign {
+    Left,
+    Center,
+}
+
+/// Pango with hinting switched off, matching the rest of the overlay so
+/// measured and painted text stays identical.
+fn set_font_options(context: &pango::Context) {
+    if let Ok(mut options) = cairo::FontOptions::new() {
+        options.set_hint_style(cairo::HintStyle::None);
+        options.set_hint_metrics(cairo::HintMetrics::Off);
+        pangocairo::functions::context_set_font_options(context, Some(&options));
+    }
+}
+
+fn picker_layout(
+    context: &pango::Context,
+    text: &str,
+    size: f64,
+    weight: pango::Weight,
+) -> pango::Layout {
+    let layout = pango::Layout::new(context);
+    let mut description = pango::FontDescription::new();
+    description.set_family(crate::typography::UI_FONT_FAMILY);
+    description.set_absolute_size(size * f64::from(pango::SCALE));
+    description.set_weight(weight);
+    layout.set_font_description(Some(&description));
+    layout.set_text(text);
+    layout
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_picker_text(
     context: &cairo::Context,
+    pango_context: &pango::Context,
     rect: PickerRect,
     text: &str,
     size: f64,
-    weight: cairo::FontWeight,
-    color: (f64, f64, f64, f64),
-    centered: bool,
+    weight: pango::Weight,
+    color: Rgba,
+    align: PickerAlign,
+    tracking: f64,
 ) {
-    context.select_font_face(
-        crate::typography::UI_FONT_FAMILY,
-        cairo::FontSlant::Normal,
-        weight,
-    );
-    context.set_font_size(size);
+    let layout = picker_layout(pango_context, text, size, weight);
+    if tracking != 0.0 {
+        let attrs = pango::AttrList::new();
+        attrs.insert(pango::AttrInt::new_letter_spacing(
+            (tracking * f64::from(pango::SCALE)).round() as i32,
+        ));
+        layout.set_attributes(Some(&attrs));
+    }
+    let (_, logical) = layout.extents();
+    let text_width = f64::from(logical.width()) / f64::from(pango::SCALE);
+    let text_height = f64::from(logical.height()) / f64::from(pango::SCALE);
+    // Pango clips and ellipsizes at the slot width instead of measuring
+    // candidate strings by hand.
+    layout.set_width((rect.width * f64::from(pango::SCALE)).round() as i32);
+    layout.set_ellipsize(pango::EllipsizeMode::End);
+    layout.set_single_paragraph_mode(true);
+    let x = match align {
+        PickerAlign::Left => rect.x,
+        PickerAlign::Center => rect.x + ((rect.width - text_width) / 2.0).max(0.0),
+    };
+    let y = rect.y + (rect.height - text_height) / 2.0;
     context.set_source_rgba(color.0, color.1, color.2, color.3);
-    if let Ok(extents) = context.text_extents(text) {
-        let x = if centered {
-            rect.x + (rect.width - extents.width()) / 2.0 - extents.x_bearing()
-        } else {
-            rect.x - extents.x_bearing()
-        };
-        let y = rect.y + (rect.height - extents.height()) / 2.0 - extents.y_bearing();
-        context.move_to(x, y);
-        let _ = context.show_text(text);
-    }
+    context.move_to(x, y);
+    pangocairo::functions::show_layout(context, &layout);
 }
 
-fn picker_elide(context: &cairo::Context, text: &str, max_width: f64) -> String {
-    if context
-        .text_extents(text)
-        .is_ok_and(|m| m.width() <= max_width)
-    {
-        return text.to_owned();
-    }
-    let mut out = text.to_owned();
-    while !out.is_empty() {
-        out.pop();
-        let candidate = format!("{out}…");
-        if context
-            .text_extents(&candidate)
-            .is_ok_and(|m| m.width() <= max_width)
-        {
-            return candidate;
-        }
-    }
-    "…".to_owned()
-}
-
-fn draw_display_glyph(context: &cairo::Context, rect: PickerRect) {
-    picker_round_rect(context, rect, 10.0);
-    context.set_source_rgb(5.0 / 255.0, 5.0 / 255.0, 7.0 / 255.0);
+fn fill_round_rect(context: &cairo::Context, rect: PickerRect, radius: f64, color: Rgba) {
+    picker_round_rect(context, rect, radius);
+    context.set_source_rgba(color.0, color.1, color.2, color.3);
     let _ = context.fill();
+}
 
+/// The display as a plain rectangle at its real aspect ratio, centred in the
+/// card's preview box, with the display number inside it.
+fn draw_picker_preview(
+    context: &cairo::Context,
+    pango_context: &pango::Context,
+    preview: PickerRect,
+    card: &PickerCard,
+    active: bool,
+) {
+    let width = f64::from(card.choice.width.max(1));
+    let height = f64::from(card.choice.height.max(1));
+    let scale = (preview.width / width).min(preview.height / height);
     let screen = PickerRect {
-        x: rect.x + 26.0,
-        y: rect.y + 20.0,
-        width: PICKER_PREVIEW_W - 52.0,
-        height: PICKER_PREVIEW_H - 54.0,
+        x: preview.x + (preview.width - width * scale) / 2.0,
+        y: preview.y + (preview.height - height * scale) / 2.0,
+        width: width * scale,
+        height: height * scale,
     };
-    picker_round_rect(context, screen, 8.0);
-    context.set_source_rgb(25.0 / 255.0, 25.0 / 255.0, 28.0 / 255.0);
-    let _ = context.fill_preserve();
-    context.set_source_rgba(1.0, 1.0, 1.0, 30.0 / 255.0);
-    context.set_line_width(1.2);
-    let _ = context.stroke();
-
-    let inner = PickerRect {
-        x: screen.x + 8.0,
-        y: screen.y + 8.0,
-        width: screen.width - 16.0,
-        height: screen.height - 16.0,
-    };
-    let gradient = cairo::LinearGradient::new(
-        inner.x,
-        inner.y,
-        inner.x + inner.width,
-        inner.y + inner.height,
-    );
-    gradient.add_color_stop_rgb(0.0, 38.0 / 255.0, 38.0 / 255.0, 42.0 / 255.0);
-    gradient.add_color_stop_rgb(1.0, 24.0 / 255.0, 24.0 / 255.0, 27.0 / 255.0);
-    let _ = context.set_source(&gradient);
-    context.rectangle(inner.x, inner.y, inner.width, inner.height);
-    let _ = context.fill();
-    context.set_source_rgba(1.0, 102.0 / 255.0, 0.0, 90.0 / 255.0);
-    context.rectangle(inner.x + 10.0, inner.y + 14.0, inner.width * 0.45, 8.0);
-    let _ = context.fill();
-    context.set_source_rgba(1.0, 1.0, 1.0, 28.0 / 255.0);
-    context.rectangle(inner.x + 10.0, inner.y + 30.0, inner.width * 0.7, 6.0);
-    let _ = context.fill();
-    context.set_source_rgba(1.0, 1.0, 1.0, 18.0 / 255.0);
-    context.rectangle(inner.x + 10.0, inner.y + 44.0, inner.width * 0.55, 6.0);
-    let _ = context.fill();
-
-    let stand_top = screen.y + screen.height + 4.0;
-    context.set_source_rgb(38.0 / 255.0, 38.0 / 255.0, 42.0 / 255.0);
-    picker_round_rect(
+    fill_round_rect(
         context,
-        PickerRect {
-            x: rect.x + PICKER_PREVIEW_W / 2.0 - 14.0,
-            y: stand_top,
-            width: 28.0,
-            height: 8.0,
+        screen,
+        PICKER_PREVIEW_RADIUS,
+        if active {
+            PICKER_WASH_ACTIVE
+        } else {
+            PICKER_WASH
         },
-        2.0,
     );
-    let _ = context.fill();
-    picker_round_rect(
+    draw_picker_text(
         context,
-        PickerRect {
-            x: rect.x + PICKER_PREVIEW_W / 2.0 - 36.0,
-            y: stand_top + 8.0,
-            width: 72.0,
-            height: 5.0,
-        },
-        2.0,
+        pango_context,
+        screen,
+        &card.display_number.to_string(),
+        20.0,
+        pango::Weight::Semibold,
+        if active { PICKER_ACCENT } else { PICKER_TEXT },
+        PickerAlign::Center,
+        0.0,
     );
-    let _ = context.fill();
 }
 
 fn draw_picker_card(
     context: &cairo::Context,
-    index: usize,
+    pango_context: &pango::Context,
+    rect: PickerRect,
     card: &PickerCard,
     hovered: bool,
     pressed: bool,
 ) {
-    let raw = picker_card_rect(index);
-    let outer = PickerRect {
-        x: raw.x + 1.5,
-        y: raw.y + 1.5,
-        width: raw.width - 3.0,
-        height: raw.height - 3.0,
-    };
-    picker_round_rect(
-        context,
-        PickerRect {
-            y: outer.y + 3.0,
-            ..outer
-        },
-        14.0,
-    );
-    context.set_source_rgba(
-        0.0,
-        0.0,
-        0.0,
-        if hovered { 80.0 / 255.0 } else { 40.0 / 255.0 },
-    );
-    let _ = context.fill();
-    picker_round_rect(context, outer, 14.0);
-    if hovered {
-        context.set_source_rgba(1.0, 102.0 / 255.0, 0.0, 210.0 / 255.0);
+    let fill = if pressed {
+        PICKER_CARD_PRESSED
+    } else if hovered {
+        PICKER_CARD_HOVER
     } else {
-        context.set_source_rgb(25.0 / 255.0, 25.0 / 255.0, 28.0 / 255.0);
-    }
-    let _ = context.fill_preserve();
-    context.set_source_rgba(
-        1.0,
-        if hovered { 102.0 / 255.0 } else { 1.0 },
-        if hovered { 0.0 } else { 1.0 },
-        if hovered { 200.0 / 255.0 } else { 30.0 / 255.0 },
-    );
-    context.set_line_width(if hovered { 1.6 } else { 1.0 });
-    let _ = context.stroke();
-
-    let inset = if pressed { 2.0 } else { 0.0 };
-    let content = PickerRect {
-        x: outer.x + PICKER_CARD_PAD + inset,
-        y: outer.y + PICKER_CARD_PAD + inset,
-        width: outer.width - (PICKER_CARD_PAD + inset) * 2.0,
-        height: outer.height - (PICKER_CARD_PAD + inset) * 2.0,
+        PICKER_CARD_BG
     };
-    let glyph = PickerRect {
+    fill_round_rect(context, rect, PICKER_CARD_RADIUS, fill);
+
+    let content = PickerRect {
+        x: rect.x + PICKER_CARD_PAD,
+        y: rect.y + PICKER_CARD_PAD,
+        width: rect.width - PICKER_CARD_PAD * 2.0,
+        height: rect.height - PICKER_CARD_PAD * 2.0,
+    };
+    let preview = PickerRect {
         x: content.x,
         y: content.y,
-        width: content.width,
+        width: PICKER_PREVIEW_W,
         height: PICKER_PREVIEW_H,
     };
-    draw_display_glyph(context, glyph);
+    draw_picker_preview(context, pango_context, preview, card, hovered || pressed);
 
-    context.select_font_face(
-        crate::typography::UI_FONT_FAMILY,
-        cairo::FontSlant::Normal,
-        cairo::FontWeight::Bold,
-    );
-    context.set_font_size(11.0);
-    let number = card.display_number.to_string();
-    let badge_w = context
-        .text_extents(&number)
-        .map(|m| (m.width() + 12.0).max(22.0))
-        .unwrap_or(22.0);
-    let badge = PickerRect {
-        x: glyph.x + 8.0,
-        y: glyph.y + 8.0,
-        width: badge_w,
-        height: 20.0,
+    let name = PickerRect {
+        x: content.x,
+        y: preview.y + preview.height + PICKER_PREVIEW_GAP,
+        width: content.width,
+        height: PICKER_NAME_H,
     };
-    picker_round_rect(context, badge, 6.0);
-    if hovered {
-        context.set_source_rgb(1.0, 102.0 / 255.0, 0.0);
-    } else {
-        context.set_source_rgba(0.0, 0.0, 0.0, 180.0 / 255.0);
-    }
-    let _ = context.fill();
-    picker_text(
+    draw_picker_text(
         context,
-        badge,
-        &number,
-        11.0,
-        cairo::FontWeight::Bold,
-        (1.0, 1.0, 1.0, 1.0),
-        true,
-    );
-
-    if card.choice.is_primary {
-        context.select_font_face(
-            crate::typography::UI_FONT_FAMILY,
-            cairo::FontSlant::Normal,
-            cairo::FontWeight::Normal,
-        );
-        context.set_font_size(10.0);
-        let chip_text = "Primary";
-        let chip_w = context
-            .text_extents(chip_text)
-            .map(|m| m.width() + 12.0)
-            .unwrap_or(48.0);
-        let chip = PickerRect {
-            x: glyph.x + glyph.width - chip_w - 8.0,
-            y: glyph.y + 8.0,
-            width: chip_w,
-            height: 18.0,
-        };
-        picker_round_rect(context, chip, 5.0);
-        context.set_source_rgba(1.0, 1.0, 1.0, 22.0 / 255.0);
-        let _ = context.fill();
-        picker_text(
-            context,
-            chip,
-            chip_text,
-            10.0,
-            cairo::FontWeight::Normal,
-            (1.0, 1.0, 1.0, 200.0 / 255.0),
-            true,
-        );
-    }
-
-    let meta_y = glyph.y + glyph.height + 12.0;
-    picker_text(
-        context,
-        PickerRect {
-            x: content.x,
-            y: meta_y,
-            width: content.width,
-            height: 18.0,
-        },
+        pango_context,
+        name,
         &format!("Display {}", card.display_number),
-        13.0,
-        cairo::FontWeight::Bold,
-        (1.0, 1.0, 1.0, 240.0 / 255.0),
-        false,
+        14.0,
+        pango::Weight::Medium,
+        PICKER_TEXT,
+        PickerAlign::Left,
+        0.0,
     );
-    context.select_font_face(
-        crate::typography::UI_FONT_FAMILY,
-        cairo::FontSlant::Normal,
-        cairo::FontWeight::Normal,
+
+    let mut metadata = format!(
+        "{} · {} × {}",
+        card.choice.connector, card.choice.width, card.choice.height
     );
-    context.set_font_size(11.0);
-    let metadata = format!(
-        "{} × {}  ·  {}",
-        card.choice.width, card.choice.height, card.choice.connector
-    );
-    let metadata = picker_elide(context, &metadata, content.width);
-    picker_text(
+    if card.choice.is_primary {
+        metadata.push_str(" · Primary");
+    }
+    let meta = PickerRect {
+        x: content.x,
+        y: name.y + name.height + PICKER_META_GAP,
+        width: content.width,
+        height: PICKER_META_H,
+    };
+    draw_picker_text(
         context,
-        PickerRect {
-            x: content.x,
-            y: meta_y + 18.0,
-            width: content.width,
-            height: 16.0,
-        },
+        pango_context,
+        meta,
         &metadata,
-        11.0,
-        cairo::FontWeight::Normal,
-        (1.0, 1.0, 1.0, 150.0 / 255.0),
-        false,
+        13.0,
+        pango::Weight::Normal,
+        PICKER_TEXT_MUTED,
+        PickerAlign::Left,
+        0.0,
     );
 }
 
-fn cancel_rect(panel_width: f64) -> PickerRect {
+fn close_button_rect(panel_width: f64) -> PickerRect {
     PickerRect {
-        x: panel_width / 2.0 - 39.0,
-        y: 343.0,
-        width: 78.0,
-        height: 34.0,
+        x: panel_width - PICKER_CLOSE_MARGIN - PICKER_CLOSE_SIZE,
+        y: PICKER_CLOSE_MARGIN,
+        width: PICKER_CLOSE_SIZE,
+        height: PICKER_CLOSE_SIZE,
     }
+}
+
+fn draw_close_button(context: &cairo::Context, rect: PickerRect, hovered: bool) {
+    if hovered {
+        fill_round_rect(context, rect, rect.width / 2.0, PICKER_WASH);
+    }
+    let center = (rect.x + rect.width / 2.0, rect.y + rect.height / 2.0);
+    let half = 4.5;
+    context.set_line_width(1.5);
+    context.set_line_cap(cairo::LineCap::Round);
+    context.move_to(center.0 - half, center.1 - half);
+    context.line_to(center.0 + half, center.1 + half);
+    context.move_to(center.0 + half, center.1 - half);
+    context.line_to(center.0 - half, center.1 + half);
+    let color = if hovered {
+        PICKER_TEXT
+    } else {
+        PICKER_CLOSE_IDLE
+    };
+    context.set_source_rgba(color.0, color.1, color.2, color.3);
+    let _ = context.stroke();
 }
 
 fn draw_picker_panel(
@@ -506,97 +482,65 @@ fn draw_picker_panel(
     cards: &[PickerCard],
     hovered: i32,
     pressed: i32,
-    cancel_hovered: bool,
+    close_hovered: bool,
 ) {
+    context.set_antialias(cairo::Antialias::Best);
     let panel = PickerRect {
-        x: 1.0,
-        y: 1.0,
-        width: width as f64 - 2.0,
-        height: height as f64 - 2.0,
+        x: 0.0,
+        y: 0.0,
+        width: width as f64,
+        height: height as f64,
     };
-    picker_round_rect(context, panel, 18.0);
-    context.set_source_rgb(5.0 / 255.0, 5.0 / 255.0, 7.0 / 255.0);
-    let _ = context.fill_preserve();
-    context.set_source_rgba(1.0, 1.0, 1.0, 24.0 / 255.0);
-    context.set_line_width(1.0);
-    let _ = context.stroke();
-    context.set_source_rgba(1.0, 1.0, 1.0, 16.0 / 255.0);
-    context.move_to(panel.x + 22.0, panel.y + 1.0);
-    context.line_to(panel.x + panel.width - 22.0, panel.y + 1.0);
-    let _ = context.stroke();
+    // Opaque and borderless, like the onboarding sheet; only the area
+    // outside the rounded corners stays transparent.
+    fill_round_rect(context, panel, PICKER_PANEL_RADIUS, PICKER_PANEL_BG);
 
-    picker_text(
+    let pango_context = pangocairo::functions::create_context(context);
+    set_font_options(&pango_context);
+
+    let text_slot = |y: f64, height: f64| PickerRect {
+        x: PICKER_INSET,
+        y,
+        width: panel.width - PICKER_INSET * 2.0,
+        height,
+    };
+    draw_picker_text(
         context,
-        PickerRect {
-            x: 0.0,
-            y: 28.0,
-            width: width as f64,
-            height: 22.0,
-        },
-        "Select a display",
-        18.0,
-        cairo::FontWeight::Bold,
-        (1.0, 1.0, 1.0, 240.0 / 255.0),
-        true,
+        &pango_context,
+        text_slot(PICKER_INSET, PICKER_HEADLINE_H),
+        "Choose a display",
+        28.0,
+        pango::Weight::Semibold,
+        PICKER_TEXT,
+        PickerAlign::Center,
+        -0.6,
     );
-    let hint = format!(
-        "Click a display  ·  Esc to cancel  ·  1–{}",
-        cards.len().min(9)
-    );
-    picker_text(
+    draw_picker_text(
         context,
-        PickerRect {
-            x: 0.0,
-            y: 54.0,
-            width: width as f64,
-            height: 15.0,
-        },
-        &hint,
-        12.0,
-        cairo::FontWeight::Normal,
-        (1.0, 1.0, 1.0, 128.0 / 255.0),
-        true,
+        &pango_context,
+        text_slot(
+            PICKER_INSET + PICKER_HEADLINE_H + PICKER_COPY_GAP,
+            PICKER_COPY_H,
+        ),
+        "Pick the screen to capture.",
+        15.0,
+        pango::Weight::Normal,
+        PICKER_TEXT_MUTED,
+        PickerAlign::Center,
+        0.0,
     );
+    draw_close_button(context, close_button_rect(panel.width), close_hovered);
+
     for (index, card) in cards.iter().enumerate() {
         draw_picker_card(
             context,
-            index,
+            &pango_context,
+            picker_card_rect(index, cards.len()),
             card,
             hovered == index as i32,
             pressed == index as i32,
         );
     }
-    let cancel = cancel_rect(width as f64);
-    picker_round_rect(context, cancel, 8.0);
-    context.set_source_rgba(
-        1.0,
-        1.0,
-        1.0,
-        if cancel_hovered {
-            28.0 / 255.0
-        } else {
-            16.0 / 255.0
-        },
-    );
-    let _ = context.fill();
-    picker_text(
-        context,
-        cancel,
-        "Cancel",
-        12.0,
-        cairo::FontWeight::Bold,
-        (
-            1.0,
-            1.0,
-            1.0,
-            if cancel_hovered {
-                245.0 / 255.0
-            } else {
-                209.0 / 255.0
-            },
-        ),
-        true,
-    );
 }
 
 fn select_monitor_interactive(
@@ -629,10 +573,25 @@ fn select_monitor_interactive(
         .css_classes(["apexshot-monitor-picker-canvas"])
         .build();
     panel.set_default_size(panel_width, panel_height);
+    // A plain toplevel lands wherever the compositor puts new windows. On a
+    // layer-shell compositor, an overlay surface with no anchors is centred
+    // on its output instead, so the picker opens in the middle of the
+    // primary display.
+    if gtk4_layer_shell::is_supported() {
+        use gtk4_layer_shell::{KeyboardMode, Layer, LayerShell};
+        panel.init_layer_shell();
+        panel.set_layer(Layer::Overlay);
+        panel.set_namespace(Some("apexshot-monitor-picker"));
+        panel.set_keyboard_mode(KeyboardMode::Exclusive);
+        let primary = (0..monitors.len())
+            .find(|&index| is_primary_guess(monitors, index))
+            .unwrap_or(0);
+        panel.set_monitor(Some(&monitors[primary]));
+    }
 
     let hovered = Rc::new(Cell::new(0));
     let pressed = Rc::new(Cell::new(-1));
-    let cancel_hovered = Rc::new(Cell::new(false));
+    let close_hovered = Rc::new(Cell::new(false));
     let drawing = DrawingArea::new();
     drawing.set_content_width(panel_width);
     drawing.set_content_height(panel_height);
@@ -642,7 +601,7 @@ fn select_monitor_interactive(
         let cards = cards.clone();
         let hovered = hovered.clone();
         let pressed = pressed.clone();
-        let cancel_hovered = cancel_hovered.clone();
+        let close_hovered = close_hovered.clone();
         drawing.set_draw_func(move |_, context, width, height| {
             draw_picker_panel(
                 context,
@@ -651,7 +610,7 @@ fn select_monitor_interactive(
                 &cards,
                 hovered.get(),
                 pressed.get(),
-                cancel_hovered.get(),
+                close_hovered.get(),
             );
         });
     }
@@ -660,29 +619,29 @@ fn select_monitor_interactive(
         let card_count = cards.len();
         move |x: f64, y: f64| {
             (0..card_count)
-                .find(|&index| picker_card_rect(index).contains(x, y))
+                .find(|&index| picker_card_rect(index, card_count).contains(x, y))
                 .map(|index| index as i32)
         }
     };
     let motion = EventControllerMotion::new();
     {
         let hovered = hovered.clone();
-        let cancel_hovered = cancel_hovered.clone();
+        let close_hovered = close_hovered.clone();
         let drawing = drawing.clone();
         motion.connect_motion(move |_, x, y| {
             let next = card_hit(x, y).unwrap_or(-1);
-            let next_cancel = cancel_rect(panel_width as f64).contains(x, y);
-            if hovered.replace(next) != next || cancel_hovered.replace(next_cancel) != next_cancel {
+            let next_close = close_button_rect(panel_width as f64).contains(x, y);
+            if hovered.replace(next) != next || close_hovered.replace(next_close) != next_close {
                 drawing.queue_draw();
             }
         });
     }
     {
         let hovered = hovered.clone();
-        let cancel_hovered = cancel_hovered.clone();
+        let close_hovered = close_hovered.clone();
         let drawing = drawing.clone();
         motion.connect_leave(move |_| {
-            if hovered.replace(-1) != -1 || cancel_hovered.replace(false) {
+            if hovered.replace(-1) != -1 || close_hovered.replace(false) {
                 drawing.queue_draw();
             }
         });
@@ -713,7 +672,7 @@ fn select_monitor_interactive(
                 main_loop.quit();
                 return;
             }
-            if cancel_rect(panel_width as f64).contains(x, y) {
+            if close_button_rect(panel_width as f64).contains(x, y) {
                 *result.borrow_mut() = Some(-1);
                 panel.close();
                 main_loop.quit();
@@ -873,5 +832,22 @@ mod tests {
         };
         assert_eq!(c.connector, "DP-2");
         assert_eq!(c.width, 2560);
+    }
+
+    #[test]
+    fn picker_geometry_centres_the_cards() {
+        // One card keeps the 380px minimum and sits in the middle of it.
+        assert_eq!(picker_panel_size(1), (380, 338));
+        let only = picker_card_rect(0, 1);
+        assert_eq!(only.x, 80.0);
+        assert_eq!(only.y, 120.0);
+        assert_eq!((only.width, only.height), (220.0, 182.0));
+        assert_eq!(only.y + only.height + PICKER_INSET, 338.0);
+
+        // Three cards: 36 inset either side, 12 between cards.
+        assert_eq!(picker_panel_size(3), (756, 338));
+        assert_eq!(picker_card_rect(0, 3).x, 36.0);
+        assert_eq!(picker_card_rect(1, 3).x, 268.0);
+        assert_eq!(picker_card_rect(2, 3).x + 220.0 + 36.0, 756.0);
     }
 }

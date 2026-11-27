@@ -24,3 +24,15 @@ export function captureMenuPosition(workArea, frameRect, margin = CAPTURE_MENU_T
         x = workArea.x;
     return {x, y: workArea.y + margin};
 }
+
+// The display picker is a dialog: centred in the work area on both axes.
+export function displayPickerPosition(workArea, frameRect) {
+    if (!isRect(workArea) || !isRect(frameRect))
+        return null;
+    if (frameRect.width <= 0 || frameRect.height <= 0)
+        return null;
+
+    const x = workArea.x + Math.max(0, Math.round((workArea.width - frameRect.width) / 2));
+    const y = workArea.y + Math.max(0, Math.round((workArea.height - frameRect.height) / 2));
+    return {x, y};
+}
