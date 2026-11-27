@@ -19,6 +19,25 @@ valid).
   app, site, and filename; `app:`, `site:`, and date filters ("yesterday",
   "last week", `2026-11-27`).
 
+### Sensitive captures (`sensitive` module)
+
+The organizer never describes pixels: names come only from the window title
+and recognised text, and the model (phase 3) never sees the image. A capture
+with no text gets a generic name. Text is the only way explicit or private
+material can reach a filename or the index, so before naming:
+
+- **Private windows**: a title marked as a private, incognito, or InPrivate
+  window gets the generic dated name, and only its date is indexed (no title,
+  site, or text).
+- **Explicit content**: a small built-in list of adult terms and domains; a
+  match in the title, site, or text falls back to the generic name and a
+  date-only index entry. Those words never appear in a filename or in search.
+- **Excluded apps** (settings list) and a pause switch skip naming and
+  indexing entirely.
+- The phase 3 model is only called when none of the above trips.
+- No image classifier: it would be another download, would misfire, and is
+  unnecessary when names never describe the image.
+
 ## Phase 2: wiring (free)
 
 - Capture context at capture time: foreground window title and process on
