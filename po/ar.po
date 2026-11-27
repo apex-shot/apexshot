@@ -5704,3 +5704,15 @@ msgstr "إعداد أسماء الذكاء الاصطناعي"
 
 msgid "{} free names, then part of Studio"
 msgstr "{} أسماء مجانية، ثم تصبح جزءًا من Studio"
+
+msgid "AI named {} of your screenshots"
+msgstr "سمّى الذكاء الاصطناعي {} من لقطات شاشتك"
+
+msgid "That was the free trial. New screenshots go back to window-title names."
+msgstr "كانت هذه الفترة التجريبية المجانية. ستعود اللقطات الجديدة إلى أسماء عناوين النوافذ."
+
+msgid "Keep AI names"
+msgstr "الاحتفاظ بأسماء الذكاء الاصطناعي"
+
+msgid "$39 once. Studio also includes Motion export, Upscale, and Studio styles."
+msgstr "39 دولارًا مرة واحدة. يتضمن Studio أيضًا تصدير Motion والتكبير وأنماط Studio."

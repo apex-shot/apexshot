@@ -5784,3 +5784,15 @@ msgstr "KI-Namen einrichten"
 
 msgid "{} free names, then part of Studio"
 msgstr "{} kostenlose Namen, danach Teil von Studio"
+
+msgid "AI named {} of your screenshots"
+msgstr "KI hat {} deiner Screenshots benannt"
+
+msgid "That was the free trial. New screenshots go back to window-title names."
+msgstr "Das war die kostenlose Testphase. Neue Screenshots werden wieder nach dem Fenstertitel benannt."
+
+msgid "Keep AI names"
+msgstr "KI-Namen behalten"
+
+msgid "$39 once. Studio also includes Motion export, Upscale, and Studio styles."
+msgstr "Einmalig 39 $. Studio enthält außerdem Motion-Export, Hochskalieren und Studio-Stile."

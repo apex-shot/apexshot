@@ -546,30 +546,9 @@ fn example_line(free: &str, ai: &str) -> GtkBox {
     line
 }
 
-/// Up to three recent captures the organizer renamed, newest first.
+/// The same examples the AI names card picks: real changes, biggest first.
 fn example_pairs() -> Vec<(String, String)> {
-    let Some(path) = crate::config::organizer_index_path() else {
-        return Vec::new();
-    };
-    let Ok(index) = apexshot_organizer::index::Index::load(&path) else {
-        return Vec::new();
-    };
-    let mut entries: Vec<_> = index
-        .entries()
-        .iter()
-        .filter(|entry| entry.ai_named)
-        .filter_map(|entry| {
-            let free = entry.heuristic_name.clone()?;
-            let ai = entry.path.file_stem()?.to_string_lossy().to_string();
-            Some((entry.captured_at, free, ai))
-        })
-        .collect();
-    entries.sort_by_key(|entry| std::cmp::Reverse(entry.0));
-    entries
-        .into_iter()
-        .take(3)
-        .map(|(_, free, ai)| (free, ai))
-        .collect()
+    crate::ai_names::card::example_pairs(3)
 }
 
 /// The pairs shown until the index has captures the user renamed.

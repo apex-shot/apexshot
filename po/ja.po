@@ -5679,3 +5679,15 @@ msgstr "AI ネームを設定"
 
 msgid "{} free names, then part of Studio"
 msgstr "無料の名前は {} 回、その後は Studio の一部になります"
+
+msgid "AI named {} of your screenshots"
+msgstr "AIがスクリーンショットを{}件命名しました"
+
+msgid "That was the free trial. New screenshots go back to window-title names."
+msgstr "無料トライアルはここまでです。新しいスクリーンショットはウィンドウタイトルの名前に戻ります。"
+
+msgid "Keep AI names"
+msgstr "AIによる名前を使い続ける"
+
+msgid "$39 once. Studio also includes Motion export, Upscale, and Studio styles."
+msgstr "一回払い39ドル。Studioには、Motion書き出し、アップスケール、Studioスタイルも含まれます。"

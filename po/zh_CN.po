@@ -5671,3 +5671,15 @@ msgstr "设置 AI 命名"
 
 msgid "{} free names, then part of Studio"
 msgstr "{} 次免费命名，之后属于 Studio"
+
+msgid "AI named {} of your screenshots"
+msgstr "AI 已为你的 {} 张截图命名"
+
+msgid "That was the free trial. New screenshots go back to window-title names."
+msgstr "免费试用已结束。新截图将恢复使用窗口标题命名。"
+
+msgid "Keep AI names"
+msgstr "继续使用 AI 命名"
+
+msgid "$39 once. Studio also includes Motion export, Upscale, and Studio styles."
+msgstr "一次性 39 美元。Studio 还包含 Motion 导出、放大和 Studio 样式。"

@@ -17,7 +17,7 @@ use crate::studio_upsell::{
     LIGHT_CLASS,
 };
 
-const CARD_WIDTH: f64 = 480.0;
+const CARD_WIDTH: f64 = 440.0;
 const CTA_WIDTH: f64 = 320.0;
 
 /// Run one AI names card as its own small window; returns the exit code.
@@ -64,10 +64,15 @@ fn build_card(app: &Application, kind: CardKind) {
     body.add_css_class("apexshot-studio-body");
     body.set_margin_top(px(24.0));
 
+    let named = ai_named_count();
     let (title, lede) = match kind {
+        CardKind::TrialEnded if named > 0 => (
+            t_args("AI named {} of your screenshots", &[named.to_string().as_str()]),
+            t("That was the free trial. New screenshots go back to window-title names."),
+        ),
         CardKind::TrialEnded => (
             t("Your free AI names are used up"),
-            t("New screenshots are named from the window title again. Here is what AI names did for yours:"),
+            t("That was the free trial. New screenshots go back to window-title names."),
         ),
         CardKind::TryAiNames => (
             t("Want clearer screenshot names?"),
@@ -87,7 +92,7 @@ fn build_card(app: &Application, kind: CardKind) {
 
     let pairs = match kind {
         CardKind::TrialEnded => {
-            let own = example_pairs();
+            let own = example_pairs(3);
             if own.is_empty() {
                 sample_pairs()
             } else {
@@ -96,17 +101,19 @@ fn build_card(app: &Application, kind: CardKind) {
         }
         CardKind::TryAiNames => sample_pairs(),
     };
-    let examples = GtkBox::new(Orientation::Vertical, px(6.0));
-    examples.set_halign(Align::Center);
-    examples.set_margin_top(px(14.0));
+    let examples = GtkBox::new(Orientation::Vertical, 0);
+    examples.add_css_class("ai-names-examples");
+    examples.set_margin_top(px(16.0));
+    examples.set_margin_start(px(28.0));
+    examples.set_margin_end(px(28.0));
     for (free, ai) in pairs.iter().take(3) {
-        examples.append(&example_line(free, ai));
+        examples.append(&example_tile(free, ai));
     }
     body.append(&examples);
 
     let studio_active = crate::studio_entitlement::studio_unlocked();
     let primary_label = match kind {
-        CardKind::TrialEnded => t("Upgrade to Studio"),
+        CardKind::TrialEnded => t("Keep AI names"),
         CardKind::TryAiNames if studio_active => t("Set up AI names"),
         CardKind::TryAiNames => t("Try AI names"),
     };
@@ -134,7 +141,7 @@ fn build_card(app: &Application, kind: CardKind) {
     match kind {
         CardKind::TrialEnded => {
             let hint = centered_label(
-                &t("$39 once · also includes Motion export, Upscale, and Studio styles"),
+                &t("$39 once. Studio also includes Motion export, Upscale, and Studio styles."),
                 "apexshot-studio-note",
             );
             hint.set_max_width_chars(46);
@@ -236,26 +243,51 @@ fn open_ai_setup_and_close(window: &Window) {
     window.close();
 }
 
-/// One free name, an arrow, and the AI name that replaces it.
-fn example_line(free: &str, ai: &str) -> GtkBox {
-    let line = GtkBox::new(Orientation::Horizontal, px(8.0));
+/// The free name, small and quiet, over the AI name that replaced it.
+fn example_tile(free: &str, ai: &str) -> GtkBox {
+    let tile = GtkBox::new(Orientation::Vertical, px(3.0));
+    tile.add_css_class("ai-names-example");
+
     let before = Label::new(Some(free));
-    before.add_css_class("studio-example-free");
+    before.add_css_class("ai-names-before");
     before.set_xalign(0.0);
-    line.append(&before);
-    let arrow = Label::new(Some("→"));
-    arrow.add_css_class("apexshot-studio-note");
-    line.append(&arrow);
+    before.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    before.set_max_width_chars(40);
+    tile.append(&before);
+
+    let line = GtkBox::new(Orientation::Horizontal, px(8.0));
+    let tag = Label::new(Some("AI"));
+    tag.add_css_class("ai-names-tag");
+    tag.set_valign(Align::Center);
+    line.append(&tag);
     let after = Label::new(Some(ai));
-    after.add_css_class("studio-example-ai");
+    after.add_css_class("ai-names-after");
     after.set_xalign(0.0);
-    after.set_wrap(true);
+    after.set_hexpand(true);
+    after.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    after.set_max_width_chars(36);
     line.append(&after);
-    line
+    tile.append(&line);
+    tile
 }
 
-/// Up to three recent captures the organizer renamed, newest first.
-fn example_pairs() -> Vec<(String, String)> {
+/// How many captures the model has named.
+fn ai_named_count() -> usize {
+    crate::config::organizer_index_path()
+        .and_then(|path| apexshot_organizer::index::Index::load(&path).ok())
+        .map(|index| {
+            index
+                .entries()
+                .iter()
+                .filter(|entry| entry.ai_named)
+                .count()
+        })
+        .unwrap_or(0)
+}
+
+/// The user's own renames that show the model best: names that really
+/// changed, the biggest gain in words first, then the newest.
+pub(crate) fn example_pairs(limit: usize) -> Vec<(String, String)> {
     let Some(path) = crate::config::organizer_index_path() else {
         return Vec::new();
     };
@@ -268,15 +300,21 @@ fn example_pairs() -> Vec<(String, String)> {
         .filter(|entry| entry.ai_named)
         .filter_map(|entry| {
             let free = entry.heuristic_name.clone()?;
-            let ai = entry.path.file_stem()?.to_string_lossy().to_string();
-            Some((entry.captured_at, free, ai))
+            let stem = entry.path.file_stem()?.to_string_lossy().to_string();
+            let ai = apexshot_organizer::ai::strip_density_marker(stem.trim()).to_string();
+            if ai.trim().eq_ignore_ascii_case(free.trim()) {
+                return None;
+            }
+            let gain =
+                ai.split_whitespace().count() as i64 - free.split_whitespace().count() as i64;
+            Some((gain, entry.captured_at, free, ai))
         })
         .collect();
-    entries.sort_by_key(|entry| std::cmp::Reverse(entry.0));
+    entries.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
     entries
         .into_iter()
-        .take(3)
-        .map(|(_, free, ai)| (free, ai))
+        .take(limit)
+        .map(|(_, _, free, ai)| (free, ai))
         .collect()
 }
 
@@ -305,20 +343,50 @@ fn t_args(msgid: &str, values: &[&str]) -> String {
 }
 
 const EXAMPLE_CSS: &str = r#"
-    .apexshot-studio-card label.studio-example-free {
-        font-size: 12px;
-        color: rgba(255, 255, 255, 0.62);
+    .apexshot-studio-card box.ai-names-examples {
+        border-radius: 12px;
+        background-color: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.08);
     }
-    .apexshot-studio-card label.studio-example-ai {
+    .apexshot-studio-card box.ai-names-example {
+        padding: 10px 14px;
+    }
+    .apexshot-studio-card box.ai-names-example + box.ai-names-example {
+        border-top: 1px solid rgba(255, 255, 255, 0.07);
+    }
+    .apexshot-studio-card label.ai-names-before {
         font-size: 12px;
+        color: rgba(255, 255, 255, 0.50);
+    }
+    .apexshot-studio-card label.ai-names-after {
+        font-size: 14px;
+        font-weight: 600;
+        color: rgba(255, 255, 255, 0.94);
+    }
+    .apexshot-studio-card label.ai-names-tag {
+        font-size: 10px;
         font-weight: 700;
-        color: #8fdcab;
+        padding: 1px 6px;
+        border-radius: 999px;
+        color: #ff670d;
+        background-color: rgba(255, 103, 13, 0.14);
     }
-    .apexshot-studio-card.apexshot-studio-light label.studio-example-free {
-        color: rgba(29, 33, 41, 0.60);
+    .apexshot-studio-card.apexshot-studio-light box.ai-names-examples {
+        background-color: rgba(29, 33, 41, 0.04);
+        border-color: rgba(29, 33, 41, 0.10);
     }
-    .apexshot-studio-card.apexshot-studio-light label.studio-example-ai {
-        color: #17643e;
+    .apexshot-studio-card.apexshot-studio-light box.ai-names-example + box.ai-names-example {
+        border-top-color: rgba(29, 33, 41, 0.08);
+    }
+    .apexshot-studio-card.apexshot-studio-light label.ai-names-before {
+        color: rgba(29, 33, 41, 0.55);
+    }
+    .apexshot-studio-card.apexshot-studio-light label.ai-names-after {
+        color: rgba(29, 33, 41, 0.92);
+    }
+    .apexshot-studio-card.apexshot-studio-light label.ai-names-tag {
+        color: #c94f05;
+        background-color: rgba(255, 103, 13, 0.12);
     }
 "#;
 

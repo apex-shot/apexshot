@@ -5782,3 +5782,15 @@ msgstr "Configurar nombres con IA"
 
 msgid "{} free names, then part of Studio"
 msgstr "{} nombres gratis y después pasan a formar parte de Studio"
+
+msgid "AI named {} of your screenshots"
+msgstr "La IA nombró {} de tus capturas"
+
+msgid "That was the free trial. New screenshots go back to window-title names."
+msgstr "Esa fue la prueba gratuita. Las capturas nuevas vuelven a nombrarse por el título de la ventana."
+
+msgid "Keep AI names"
+msgstr "Mantener los nombres con IA"
+
+msgid "$39 once. Studio also includes Motion export, Upscale, and Studio styles."
+msgstr "39 $ una sola vez. Studio también incluye exportación Motion, escalado y estilos de Studio."

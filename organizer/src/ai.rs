@@ -94,6 +94,10 @@ pub fn clean_reply(raw: &str) -> Option<String> {
     // lone letter is noise unless it is a real one-letter word.
     let words: Vec<&str> = text
         .split_whitespace()
+        // A filename on screen can lend the reply a pixel-density marker; the
+        // organizer adds the capture's own marker back itself.
+        .map(strip_density_marker)
+        .filter(|word| !word.is_empty())
         .filter(|word| {
             let mut chars = word.chars();
             match (chars.next(), chars.next()) {
@@ -113,6 +117,19 @@ pub fn clean_reply(raw: &str) -> Option<String> {
     } else {
         Some(stem)
     }
+}
+
+/// `word` without a trailing "@2x"-style marker.
+pub fn strip_density_marker(word: &str) -> &str {
+    if let Some(at) = word.rfind('@') {
+        let marker = &word[at + 1..];
+        if let Some(digits) = marker.strip_suffix(['x', 'X']) {
+            if !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()) {
+                return &word[..at];
+            }
+        }
+    }
+    word
 }
 
 /// Drop a leading "Filename:"-style label, ignoring case.
@@ -359,6 +376,16 @@ mod thin_tests {
         let mut suggestion = titled("A very long and quite descriptive heading here", None);
         suggestion.source = NameSource::Heading;
         assert!(is_thin(&suggestion));
+    }
+
+    #[test]
+    fn density_markers_from_the_screen_are_dropped() {
+        assert_eq!(
+            clean_reply("ApexShot Settings screenshot@2x").as_deref(),
+            Some("ApexShot Settings screenshot")
+        );
+        assert_eq!(strip_density_marker("shot@3X"), "shot");
+        assert_eq!(strip_density_marker("me@example"), "me@example");
     }
 
     #[test]
