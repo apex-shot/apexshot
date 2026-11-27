@@ -363,6 +363,10 @@ QString organizerExecutable()
     return executable;
 }
 
+/// Set when a capture was just renamed for the first time ever; the next
+/// screenshot card shows where the name came from.
+static bool g_nameHintPending = false;
+
 /// Name, rename, and index a saved screenshot. Returns the path the file has
 /// afterwards; on any failure, the path it was saved under.
 QString organizeCapture(const QImage& image, const QRect& region, const QString& path,
@@ -441,9 +445,15 @@ QString organizeCapture(const QImage& image, const QRect& region, const QString&
         return path;
 
     debugLog(QStringLiteral("organizer: %1 -> %2 in %3 ms").arg(path, renamed).arg(timer.elapsed()));
-    return path.contains(QLatin1Char('/')) && !path.contains(QLatin1Char('\\'))
-               ? QDir::fromNativeSeparators(renamed)
-               : renamed;
+    const QString finalPath = path.contains(QLatin1Char('/')) && !path.contains(QLatin1Char('\\'))
+                                  ? QDir::fromNativeSeparators(renamed)
+                                  : renamed;
+    if (QFileInfo(finalPath).fileName() != QFileInfo(path).fileName()
+        && !QSettings().value(QStringLiteral("organizer/name_hint_shown"), false).toBool()) {
+        QSettings().setValue(QStringLiteral("organizer/name_hint_shown"), true);
+        g_nameHintPending = true;
+    }
+    return finalPath;
 }
 
 QString videoOutputPath(const Platform::ShellSettings& settings)
@@ -1854,6 +1864,46 @@ public:
                               hintTop, hintWidth, hintHeight);
             hint->setEnabled(m_sample || !m_path.isEmpty());
             connect(hint, &QAbstractButton::clicked, this, [this] { openEditor(); });
+            m_controls.append(hint);
+        }
+
+        // The first capture the organizer ever renamed says where the name
+        // came from.
+        if (!m_video && !m_sample && !m_editorHintShown && g_nameHintPending) {
+            g_nameHintPending = false;
+            m_editorHintShown = true;
+            auto* hint = new CardButton(CardButton::Kind::Hint, 0, QString(), m_scale, this);
+            const QString hintText =
+                QStringLiteral("Named from what you captured. Search it in History.");
+            const int hintPadding = qRound(4 * m_scale);
+            const int hintRoom = std::max(1, m_frameRect.width() - qRound(8 * m_scale));
+            // Keep the sentence whole by giving up a little size before the
+            // text has to elide on a small card.
+            int hintPixels = std::max(1, qRound(9 * m_scale));
+            const int hintPixelsFloor = std::max(1, qRound(7 * m_scale));
+            QFont hintFont = uiFont(hintPixels);
+            QFontMetrics hintMetrics(hintFont);
+            while (hintPixels > hintPixelsFloor
+                   && hintMetrics.horizontalAdvance(hintText) + 2 * hintPadding > hintRoom) {
+                --hintPixels;
+                hintFont = uiFont(hintPixels);
+                hintMetrics = QFontMetrics(hintFont);
+            }
+            hint->setFont(hintFont);
+            hint->setText(hintMetrics.elidedText(hintText, Qt::ElideRight,
+                                                 std::max(1, hintRoom - 2 * hintPadding)));
+            hint->setToolTip(QStringLiteral("Open History"));
+            const int hintWidth =
+                std::min(hintRoom, hintMetrics.horizontalAdvance(hint->text()) + 2 * hintPadding);
+            const int hintHeight = qRound(20 * m_scale);
+            // Centred in the strip between the pill row and the bottom corner
+            // row, so it never covers Upload or the cancel button.
+            const int hintTop = pillsTop + button
+                + std::max(0, (bottom - (pillsTop + button) - hintHeight) / 2);
+            hint->setGeometry(m_frameRect.left() + (m_frameRect.width() - hintWidth) / 2,
+                              hintTop, hintWidth, hintHeight);
+            hint->setEnabled(m_sample || !m_path.isEmpty());
+            connect(hint, &QAbstractButton::clicked, this, [] { openHistoryWindow(); });
             m_controls.append(hint);
         }
 
