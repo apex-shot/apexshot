@@ -12,6 +12,7 @@
 
 pub mod index;
 pub mod naming;
+pub mod organize;
 pub mod secrets;
 pub mod sensitive;
 mod types;
