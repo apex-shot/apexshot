@@ -70,16 +70,46 @@ pub fn is_excluded_app(app: Option<&str>, excluded: &[String]) -> bool {
 }
 
 /// A trailing "@2x"-style density marker on a filename stem, or "".
-fn density_suffix(stem: &str) -> &str {
-    let Some(at) = stem.rfind('@') else {
-        return "";
+/// A stem split into its name and its "@2x"-style density marker. A copy
+/// number after the marker ("Name@2x 3") belongs to the name side.
+fn split_density(stem: &str) -> (&str, &str) {
+    let core = match stem.rsplit_once(' ') {
+        Some((head, tail)) if !tail.is_empty() && tail.chars().all(|c| c.is_ascii_digit()) => head,
+        _ => stem,
     };
-    let marker = &stem[at + 1..];
-    let digits = marker.strip_suffix('x').unwrap_or("");
+    let Some(at) = core.rfind('@') else {
+        return (stem, "");
+    };
+    let digits = core[at + 1..].strip_suffix('x').unwrap_or("");
     if !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()) {
-        &stem[at..]
+        (&core[..at], &core[at..])
     } else {
-        ""
+        (stem, "")
+    }
+}
+
+/// The density marker a stem carries, or "".
+fn density_suffix(stem: &str) -> &str {
+    split_density(stem).1
+}
+
+/// `dir/stem<marker>.ext`, numbering copies before the marker:
+/// "Name@2x.png", then "Name 2@2x.png".
+fn unique_density_path(dir: &Path, stem: &str, marker: &str, ext: &str) -> PathBuf {
+    if marker.is_empty() {
+        return unique_path(dir, stem, ext);
+    }
+    let first = dir.join(format!("{stem}{marker}.{ext}"));
+    if !first.exists() {
+        return first;
+    }
+    let mut counter = 2u32;
+    loop {
+        let candidate = dir.join(format!("{stem} {counter}{marker}.{ext}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+        counter += 1;
     }
 }
 
@@ -147,9 +177,7 @@ pub fn organize_capture_with_ai(
         .file_stem()
         .map(|stem| stem.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let plain_stem = current_stem
-        .strip_suffix(density_suffix(&current_stem))
-        .unwrap_or(&current_stem);
+    let plain_stem = split_density(&current_stem).0;
     let ai_stem = match (settings.auto_name, ai) {
         (true, Some(namer)) => crate::ai::ai_name(
             namer,
@@ -194,7 +222,7 @@ pub fn organize_capture_with_ai(
             let density = density_suffix(&stem);
             let new_stem = format!("{}{density}", chosen_stem);
             if new_stem != stem {
-                let target = unique_path(dir, &new_stem, &ext);
+                let target = unique_density_path(dir, &chosen_stem, density, &ext);
                 if fs::rename(&request.path, &target).is_ok() {
                     path = target;
                     renamed = true;
@@ -355,10 +383,44 @@ mod tests {
     }
 
     #[test]
+    fn a_numbered_copy_keeps_its_density_marker() {
+        let dir = temp_dir("density-copy");
+        let path = dir.join("Quarterly report@2x 3.png");
+        fs::write(&path, b"png").unwrap();
+        fs::write(dir.join("Quarterly sales review deck@2x.png"), b"png").unwrap();
+        let settings = OrganizeSettings {
+            auto_name: true,
+            ..OrganizeSettings::default()
+        };
+        let namer = FixedNamer(Some("Quarterly sales review deck".into()));
+        let mut req = request(path, Some("Quarterly report - Word"));
+        req.allow_ai = true;
+
+        let outcome = organize_capture_with_ai(
+            &req,
+            &settings,
+            &dir.join("index.json"),
+            captured_at(),
+            Some(&namer),
+        );
+
+        assert_eq!(
+            outcome.path.file_name().unwrap().to_string_lossy(),
+            "Quarterly sales review deck 2@2x.png"
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn keeps_the_density_suffix() {
         assert_eq!(density_suffix("ApexShot-2026-11-27_18-40-50@2x"), "@2x");
         assert_eq!(density_suffix("me@example"), "");
         assert_eq!(density_suffix("plain"), "");
+        assert_eq!(
+            split_density("ApexShot Settings@2x 3"),
+            ("ApexShot Settings", "@2x")
+        );
+        assert_eq!(split_density("Release 3"), ("Release 3", ""));
 
         let dir = temp_dir("density");
         let path = dir.join("ApexShot-2026-11-27_18-40-50@2x.png");
