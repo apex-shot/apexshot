@@ -14,6 +14,115 @@ pub fn ui_scale() -> f64 {
     UI_SCALE_MILLIS.load(Ordering::Relaxed) as f64 / 1000.0
 }
 
+/// Open a stand-alone card in the middle of the screen the pointer is on.
+///
+/// GTK 4 on Windows leaves a new top-level window at the system's cascade
+/// position near the top-left corner. A card that is not attached to another
+/// window should open where the person is working, as it does on Linux. Call
+/// this before `present()`: the move happens as the window is mapped, before
+/// its first frame is drawn.
+#[cfg(target_os = "windows")]
+pub fn center_on_pointer_screen(window: &impl gtk4::prelude::IsA<gtk4::Window>) {
+    use gtk4::prelude::*;
+
+    window.as_ref().connect_map(|window| {
+        let title = window
+            .title()
+            .map(|title| title.to_string())
+            .unwrap_or_default();
+        center_thread_window_by_title(&title);
+    });
+}
+
+#[cfg(target_os = "windows")]
+fn center_thread_window_by_title(title: &str) {
+    use windows_sys::Win32::Foundation::{HWND, LPARAM, POINT, RECT};
+    use windows_sys::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTOPRIMARY,
+    };
+    use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumThreadWindows, GetCursorPos, GetWindowRect, GetWindowTextW, IsWindowVisible,
+        SetWindowPos, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
+    };
+
+    struct Search {
+        title: Vec<u16>,
+        found: Vec<HWND>,
+    }
+
+    unsafe extern "system" fn visit(hwnd: HWND, data: LPARAM) -> i32 {
+        let search = unsafe { &mut *(data as *mut Search) };
+        if unsafe { IsWindowVisible(hwnd) } == 0 {
+            return 1;
+        }
+        let mut buffer = [0u16; 512];
+        let length = unsafe { GetWindowTextW(hwnd, buffer.as_mut_ptr(), buffer.len() as i32) };
+        if length > 0 && buffer[..length as usize] == search.title[..] {
+            search.found.push(hwnd);
+        }
+        1
+    }
+
+    let mut search = Search {
+        title: title.encode_utf16().collect(),
+        found: Vec::new(),
+    };
+    unsafe {
+        EnumThreadWindows(
+            GetCurrentThreadId(),
+            Some(visit),
+            &mut search as *mut Search as LPARAM,
+        );
+
+        let mut pointer = POINT { x: 0, y: 0 };
+        GetCursorPos(&mut pointer);
+        let monitor = MonitorFromPoint(pointer, MONITOR_DEFAULTTOPRIMARY);
+        let mut info: MONITORINFO = std::mem::zeroed();
+        info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+        if GetMonitorInfoW(monitor, &mut info) == 0 {
+            return;
+        }
+        let area = info.rcWork;
+
+        for hwnd in search.found {
+            let mut rect = RECT {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            };
+            if GetWindowRect(hwnd, &mut rect) == 0 {
+                continue;
+            }
+            let (x, y) = centered_origin(
+                (area.left, area.top, area.right, area.bottom),
+                (rect.right - rect.left, rect.bottom - rect.top),
+            );
+            SetWindowPos(
+                hwnd,
+                std::ptr::null_mut(),
+                x,
+                y,
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+        }
+    }
+}
+
+/// The top-left corner that centres a `size` window in `area` (left, top,
+/// right, bottom), kept inside the area when the window is larger than it.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn centered_origin(area: (i32, i32, i32, i32), size: (i32, i32)) -> (i32, i32) {
+    let (left, top, right, bottom) = area;
+    let (width, height) = size;
+    let x = left + ((right - left - width) / 2).max(0);
+    let y = top + ((bottom - top - height) / 2).max(0);
+    (x, y)
+}
+
 #[cfg(target_os = "windows")]
 pub fn prepare_process() {
     use windows_sys::Win32::UI::HiDpi::{
@@ -191,4 +300,27 @@ fn display_name() -> Option<String> {
 #[cfg(not(target_os = "windows"))]
 fn display_name() -> Option<String> {
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::centered_origin;
+
+    #[test]
+    fn a_card_is_centred_in_the_work_area() {
+        assert_eq!(centered_origin((0, 0, 1920, 1146), (504, 439)), (708, 353));
+    }
+
+    #[test]
+    fn a_card_on_a_second_screen_is_centred_on_that_screen() {
+        assert_eq!(
+            centered_origin((1920, 0, 4480, 1400), (500, 400)),
+            (2950, 500)
+        );
+    }
+
+    #[test]
+    fn a_window_larger_than_the_screen_keeps_its_top_left_on_it() {
+        assert_eq!(centered_origin((0, 0, 800, 600), (1000, 700)), (0, 0));
+    }
 }

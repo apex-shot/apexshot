@@ -206,6 +206,7 @@ fn build_window(
     });
     window.add_controller(keys);
 
+    crate::platform::center_on_pointer_screen(&window);
     window.present();
 }
 

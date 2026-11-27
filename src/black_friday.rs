@@ -142,6 +142,8 @@ fn build_card(app: &Application) {
         }
     });
     window.add_controller(keys);
+    #[cfg(target_os = "windows")]
+    crate::platform::center_on_pointer_screen(&window);
     window.present();
 }
 
