@@ -5683,3 +5683,6 @@ msgstr "继续使用 AI 命名"
 
 msgid "$39 once. Studio also includes Motion export, Upscale, and Studio styles."
 msgstr "一次性 39 美元。Studio 还包含 Motion 导出、放大和 Studio 样式。"
+
+msgid "Your free AI names are used. Upgrade to Studio to keep them."
+msgstr "免费 AI 命名已用完。升级到 Studio 即可继续使用。"

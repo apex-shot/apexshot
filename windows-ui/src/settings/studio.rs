@@ -273,17 +273,20 @@ fn ai_names_rows(frame: &GtkBox, root: &GtkBox, status: StudioStatus) {
     let tier = tier_from_setting(&config.organizer_ai_model);
     let spec = model_spec(tier);
 
-    // The switch and where names come from.
+    // The switch and where names come from. Once a free device has used its
+    // trial, the switch shows off and locked; the saved choice stays, so an
+    // upgrade picks AI names back up without another click.
+    let locked = !matches!(status, StudioStatus::Active { .. }) && trial_remaining() == 0;
     let row = table_row();
-    row.append(&row_text(
-        &t("Name screenshots with AI"),
-        Some(&t(
-            "A small model on this PC reads the window title and on-screen text and writes a clearer name. Nothing is uploaded.",
-        )),
-    ));
+    let hint = if locked {
+        t("Your free AI names are used. Upgrade to Studio to keep them.")
+    } else {
+        t("A small model on this PC reads the window title and on-screen text and writes a clearer name. Nothing is uploaded.")
+    };
+    row.append(&row_text(&t("Name screenshots with AI"), Some(&hint)));
     let switch = Switch::new();
-    switch.set_active(config.organizer_ai_enabled);
-    switch.set_sensitive(is_installed(tier));
+    switch.set_active(config.organizer_ai_enabled && !locked);
+    switch.set_sensitive(is_installed(tier) && !locked);
     switch.set_valign(Align::Center);
     switch.connect_active_notify(|switch| {
         let mut config = load_config();

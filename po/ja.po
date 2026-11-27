@@ -5691,3 +5691,6 @@ msgstr "AIによる名前を使い続ける"
 
 msgid "$39 once. Studio also includes Motion export, Upscale, and Studio styles."
 msgstr "一回払い39ドル。Studioには、Motion書き出し、アップスケール、Studioスタイルも含まれます。"
+
+msgid "Your free AI names are used. Upgrade to Studio to keep them."
+msgstr "無料のAI命名を使い切りました。引き続き使うにはStudioにアップグレードしてください。"

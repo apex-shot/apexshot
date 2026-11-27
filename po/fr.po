@@ -5807,3 +5807,6 @@ msgstr "Garder les noms IA"
 
 msgid "$39 once. Studio also includes Motion export, Upscale, and Studio styles."
 msgstr "39 $ une seule fois. Studio comprend aussi l’export Motion, l’agrandissement et les styles Studio."
+
+msgid "Your free AI names are used. Upgrade to Studio to keep them."
+msgstr "Vos noms IA gratuits sont épuisés. Passez à Studio pour les garder."

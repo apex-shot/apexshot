@@ -5716,3 +5716,6 @@ msgstr "الاحتفاظ بأسماء الذكاء الاصطناعي"
 
 msgid "$39 once. Studio also includes Motion export, Upscale, and Studio styles."
 msgstr "39 دولارًا مرة واحدة. يتضمن Studio أيضًا تصدير Motion والتكبير وأنماط Studio."
+
+msgid "Your free AI names are used. Upgrade to Studio to keep them."
+msgstr "استُخدمت أسماء الذكاء الاصطناعي المجانية. قم بالترقية إلى Studio للاحتفاظ بها."

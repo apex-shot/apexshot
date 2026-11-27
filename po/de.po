@@ -5796,3 +5796,6 @@ msgstr "KI-Namen behalten"
 
 msgid "$39 once. Studio also includes Motion export, Upscale, and Studio styles."
 msgstr "Einmalig 39 $. Studio enthält außerdem Motion-Export, Hochskalieren und Studio-Stile."
+
+msgid "Your free AI names are used. Upgrade to Studio to keep them."
+msgstr "Deine kostenlosen KI-Namen sind aufgebraucht. Mit Studio behältst du sie."

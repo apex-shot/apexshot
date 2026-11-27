@@ -5776,3 +5776,6 @@ msgstr "Оставить имена от ИИ"
 
 msgid "$39 once. Studio also includes Motion export, Upscale, and Studio styles."
 msgstr "39 $ один раз. В Studio также есть экспорт Motion, увеличение и стили Studio."
+
+msgid "Your free AI names are used. Upgrade to Studio to keep them."
+msgstr "Бесплатные имена от ИИ закончились. Перейдите на Studio, чтобы сохранить их."
