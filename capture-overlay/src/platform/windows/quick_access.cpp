@@ -6,6 +6,7 @@
 #include "platform/recording_settings.h"
 #include "platform/windows/audio_devices.h"
 #include "platform/windows/ocr.h"
+#include "platform/windows/recording_manifest.h"
 #include "platform/windows/usage_telemetry.h"
 #include "platform/windows/qr.h"
 #include "platform/windows/capture_sound.h"
@@ -44,6 +45,9 @@
 #include <QFontMetrics>
 #include <QGuiApplication>
 #include <QIcon>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QKeyEvent>
 #include <QMenu>
 #include <QLocalServer>
@@ -331,6 +335,113 @@ QString saveCapture(const QImage& image, const QRect& region,
         return QString();
     }
     return path;
+}
+
+/// The topmost app window under the middle of the captured region.
+Platform::WindowIdentity windowUnderCapture(const QRect& region)
+{
+    for (const Platform::WindowInfo& window : Platform::windows()) {
+        if (window.minimized)
+            continue;
+        if (window.geometry.contains(region.center()))
+            return Platform::windowIdentity(window.id);
+    }
+    return Platform::WindowIdentity{};
+}
+
+/// The helper that names and indexes a saved screenshot.
+QString organizerExecutable()
+{
+    QString executable = qEnvironmentVariable("APEXSHOT_ORGANIZER");
+    if (executable.isEmpty()) {
+        const QString sibling =
+            QDir(QCoreApplication::applicationDirPath())
+                .filePath(QStringLiteral("apexshot-organize.exe"));
+        if (QFileInfo::exists(sibling))
+            executable = sibling;
+    }
+    return executable;
+}
+
+/// Name, rename, and index a saved screenshot. Returns the path the file has
+/// afterwards; on any failure, the path it was saved under.
+QString organizeCapture(const QImage& image, const QRect& region, const QString& path,
+                        const Platform::ShellSettings& settings)
+{
+    if (path.isEmpty() || !settings.screenshots.afterSave)
+        return path;
+
+    const QString executable = organizerExecutable();
+    if (executable.isEmpty())
+        return path;
+
+    QElapsedTimer timer;
+    timer.start();
+
+    const Platform::WindowIdentity window = windowUnderCapture(region);
+
+    QVector<Platform::OcrTextLine> lines;
+    QString ocrError;
+    if (!Platform::recognizeLines(image, settings.ocr.language, lines, ocrError))
+        debugLog(QStringLiteral("organizer ocr: %1").arg(ocrError));
+
+    QJsonArray jsonLines;
+    for (const Platform::OcrTextLine& line : lines) {
+        QJsonObject entry;
+        entry.insert(QStringLiteral("text"), line.text);
+        entry.insert(QStringLiteral("x"), line.rect.x());
+        entry.insert(QStringLiteral("y"), line.rect.y());
+        entry.insert(QStringLiteral("width"), line.rect.width());
+        entry.insert(QStringLiteral("height"), line.rect.height());
+        jsonLines.append(entry);
+    }
+
+    QJsonObject page;
+    page.insert(QStringLiteral("image_width"), image.width());
+    page.insert(QStringLiteral("image_height"), image.height());
+    page.insert(QStringLiteral("lines"), jsonLines);
+
+    QJsonObject object;
+    object.insert(QStringLiteral("path"), QDir::toNativeSeparators(path));
+    object.insert(QStringLiteral("app"), window.app.isEmpty()
+                                               ? QJsonValue(QJsonValue::Null)
+                                               : QJsonValue(window.app));
+    object.insert(QStringLiteral("window_title"), window.title.isEmpty()
+                                                      ? QJsonValue(QJsonValue::Null)
+                                                      : QJsonValue(window.title));
+    object.insert(QStringLiteral("page"), page);
+
+    QProcess process;
+    process.start(executable, QStringList());
+    if (!process.waitForStarted(1000)) {
+        debugLog(QStringLiteral("organizer: %1 did not start")
+                     .arg(QDir::toNativeSeparators(executable)));
+        return path;
+    }
+    process.write(QJsonDocument(object).toJson(QJsonDocument::Compact));
+    process.closeWriteChannel();
+
+    const int remaining = qMax(100, 1500 - int(timer.elapsed()));
+    if (!process.waitForFinished(remaining)) {
+        process.kill();
+        process.waitForFinished(500);
+        debugLog(QStringLiteral("organizer timed out"));
+        return path;
+    }
+
+    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+        debugLog(QStringLiteral("organizer exited with %1").arg(process.exitCode()));
+        return path;
+    }
+
+    const QString renamed = QString::fromUtf8(process.readAllStandardOutput()).trimmed();
+    if (renamed.isEmpty() || !QFileInfo::exists(renamed))
+        return path;
+
+    debugLog(QStringLiteral("organizer: %1 -> %2 in %3 ms").arg(path, renamed).arg(timer.elapsed()));
+    return path.contains(QLatin1Char('/')) && !path.contains(QLatin1Char('\\'))
+               ? QDir::fromNativeSeparators(renamed)
+               : renamed;
 }
 
 QString videoOutputPath(const Platform::ShellSettings& settings)
@@ -4170,7 +4281,8 @@ private:
         m_telemetry->recordScreenshot();
         const Platform::ShellSettings settings = Platform::loadShellSettings();
         QString saveError;
-        const QString path = saveCapture(image, region, settings, saveError);
+        const QString saved = saveCapture(image, region, settings, saveError);
+        const QString path = organizeCapture(image, region, saved, settings);
         if (path.isEmpty())
             QMessageBox::warning(nullptr, QStringLiteral("Screenshot"),
                                  QStringLiteral("Could not save the screenshot: %1").arg(saveError));
@@ -4236,7 +4348,8 @@ private:
         const Platform::ShellSettings settings = Platform::loadShellSettings();
         const bool persist = settings.screenshots.afterSave;
         QString saveError;
-        const QString path = saveCapture(image, region, settings, saveError);
+        const QString saved = saveCapture(image, region, settings, saveError);
+        const QString path = organizeCapture(image, region, saved, settings);
         if (path.isEmpty())
             QMessageBox::warning(nullptr, QStringLiteral("Screenshot"),
                                  QStringLiteral("Could not save the screenshot: %1").arg(saveError));
