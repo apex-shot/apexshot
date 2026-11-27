@@ -7,6 +7,7 @@
 //! binary (`#[path]` includes), while the platform modules below provide the
 //! handful of Linux APIs those pages expect.
 
+pub mod ai_names;
 pub mod app_identity;
 
 #[path = "../../src/app_links.rs"]

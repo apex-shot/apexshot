@@ -5611,3 +5611,180 @@ msgid ""
 msgstr ""
 "Бесплатные ссылки доступны 7 дней.\n"
 "{url}"
+
+msgid "Screenshot names"
+msgstr "Названия снимков"
+
+msgid "Name screenshots automatically"
+msgstr "Автоматически называть снимки"
+
+msgid "Names come from the window title and on-screen text, on this computer. Private windows and explicit content get a dated name."
+msgstr "Названия берутся из заголовка окна и текста на экране, на этом компьютере. Приватные окна и откровенное содержимое получают имя с датой."
+
+msgid "Name style"
+msgstr "Стиль названия"
+
+msgid "Date and title"
+msgstr "Дата и заголовок"
+
+msgid "App and title"
+msgstr "Приложение и заголовок"
+
+msgid "AI names"
+msgstr "Имена с ИИ"
+
+msgid "Name screenshots with AI"
+msgstr "Называть снимки с помощью ИИ"
+
+msgid "A small model on this PC reads the window title and on-screen text and writes a clearer name. Nothing is uploaded."
+msgstr "Небольшая модель на этом ПК читает заголовок окна и текст на экране и подбирает понятное имя. Ничего не отправляется в сеть."
+
+msgid "How names change"
+msgstr "Как меняются имена"
+
+msgid "Examples"
+msgstr "Примеры"
+
+msgid "From your own screenshots"
+msgstr "Из ваших снимков"
+
+msgid "Model"
+msgstr "Модель"
+
+msgid "This PC is below the recommended specs, so names may be slow."
+msgstr "Этот ПК слабее рекомендуемых характеристик, поэтому имена могут создаваться медленно."
+
+msgid "Fast"
+msgstr "Быстрая"
+
+msgid "Better"
+msgstr "Точная"
+
+msgid "Ready"
+msgstr "Готово"
+
+msgid "Test speed"
+msgstr "Проверить скорость"
+
+msgid "Testing…"
+msgstr "Проверка…"
+
+msgid "That is slower than ApexShot waits for, so most names will stay rule-based."
+msgstr "Это медленнее, чем ждёт ApexShot, поэтому большинство имён будет создаваться по правилам."
+
+msgid "The model did not answer. Try again, or remove and download it again."
+msgstr "Модель не ответила. Повторите попытку или удалите её и скачайте заново."
+
+msgid "Download"
+msgstr "Скачать"
+
+msgid "Checking the download…"
+msgstr "Проверка загрузки…"
+
+msgid "Unpacking…"
+msgstr "Распаковка…"
+
+msgid "Download cancelled"
+msgstr "Загрузка отменена"
+
+msgid "Free trial"
+msgstr "Пробный период"
+
+msgid "What's included"
+msgstr "Что входит"
+
+msgid "Clearer screenshot names from a small model on this PC."
+msgstr "Более понятные названия снимков от небольшой модели на этом ПК."
+
+msgid "Motion export"
+msgstr "Экспорт Motion"
+
+msgid "Animated titles, timing, and Motion video export in the editors."
+msgstr "Анимированные заголовки, тайминг и экспорт видео Motion в редакторах."
+
+msgid "Upscale"
+msgstr "Масштабирование"
+
+msgid "Sharpen small captures with offline neural upscaling."
+msgstr "Повышайте чёткость небольших снимков офлайн-нейронным масштабированием."
+
+msgid "Studio styles"
+msgstr "Стили Studio"
+
+msgid "Frame styles, scene shadows, and presentation transforms."
+msgstr "Стили рамки, тени сцены и преобразования для презентаций."
+
+msgid "Advanced zoom camera"
+msgstr "Продвинутая камера масштабирования"
+
+msgid "Instant zooms and fine camera control in the video editor."
+msgstr "Мгновенные зум-эффекты и точное управление камерой в видеоредакторе."
+
+msgid "Recommended for this PC: {} ({})"
+msgstr "Рекомендовано для этого ПК: {} ({})"
+
+msgid "{} model on this PC"
+msgstr "Модель {} на этом ПК"
+
+msgid "Named a sample in {} s"
+msgstr "Пример назван за {} с"
+
+msgid "{} · downloads once, then works offline"
+msgstr "{} · скачивается один раз, затем работает офлайн"
+
+msgid "{} of {} AI names left. After that, names stay rule-based until you upgrade."
+msgstr "Осталось {} из {} имён с ИИ. Затем имена будут по правилам до перехода на Studio."
+
+msgid "Screenshots name themselves"
+msgstr "Снимки называют себя сами"
+
+msgid "Each capture is named from what you captured. Search by its text in History."
+msgstr "Каждый снимок называется по тому, что вы захватили. Ищите его по тексту в Истории."
+
+msgid "Your free AI names are used up"
+msgstr "Бесплатные имена с ИИ закончились"
+
+msgid "New screenshots are named from the window title again. Here is what AI names did for yours:"
+msgstr "Новые снимки снова называются по заголовку окна. Вот что имена с ИИ сделали для ваших:"
+
+msgid "$39 once · also includes Motion export, Upscale, and Studio styles"
+msgstr "39 $ один раз · также включает экспорт Motion, Upscale и стили Studio"
+
+msgid "Want clearer screenshot names?"
+msgstr "Хотите более понятные имена снимков?"
+
+msgid "Your screenshots are named from their window titles. AI names also reads what is on screen, using a small model on this PC."
+msgstr "Ваши снимки называются по заголовкам окон. Имена с ИИ также читают, что на экране, с помощью небольшой модели на этом ПК."
+
+msgid "Try AI names"
+msgstr "Попробовать имена с ИИ"
+
+msgid "Set up AI names"
+msgstr "Настроить имена с ИИ"
+
+msgid "{} free names, then part of Studio"
+msgstr "{} бесплатных имён, затем — часть Studio"
+
+msgid "AI named {} of your screenshots"
+msgstr "ИИ назвал {} ваших скриншотов"
+
+msgid "That was the free trial. New screenshots go back to window-title names."
+msgstr "Пробный период закончился. Новые скриншоты снова получают имя по заголовку окна."
+
+msgid "Keep AI names"
+msgstr "Оставить имена от ИИ"
+
+msgid "$39 once. Studio also includes Motion export, Upscale, and Studio styles."
+msgstr "39 $ один раз. В Studio также есть экспорт Motion, увеличение и стили Studio."
+
+msgid "Your free AI names are used. Upgrade to Studio to keep them."
+msgstr "Бесплатные имена от ИИ закончились. Перейдите на Studio, чтобы сохранить их."
+
+msgid "This PC is better off with the free names."
+msgstr "Для этого ПК лучше подходят бесплатные имена."
+
+msgid "AI names need at least 8 GB of memory, 4 processor cores, and AVX2."
+msgstr "Для имён от ИИ нужны не менее 8 ГБ памяти, 4 ядра процессора и AVX2."
+
+msgid "Search them by their text in History."
+msgstr "Ищите их по тексту в истории."

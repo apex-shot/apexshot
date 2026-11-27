@@ -17,17 +17,19 @@ pub fn build(body: &GtkBox, actions: &GtkBox, nav: &Nav) {
 
     let tray_title = t("Tray icon");
     let tray_body = t("Right-click for your capture menu.");
-    let hotkeys_title = t("Hotkeys");
-    let hotkeys_body = t("Your shortcuts work while ApexShot runs.");
+    let naming_title = t("Screenshots name themselves");
+    // One line, like the other items: the page must fit without scrolling.
+    let naming_body = t("Search them by their text in History.");
     let menu_title = t("Settings");
     let menu_body = t("Change any of this later.");
-    let [tray_icon, hotkeys_icon, settings_icon] =
+    // The shortcuts page just before this one already covers hotkeys.
+    let [tray_icon, naming_icon, settings_icon] =
         feature_icons(crate::settings::windowing::prefers_dark_glass_theme());
     let checklist = feature_card_list(
         scale,
         &[
             (tray_icon, tray_title.as_str(), tray_body.as_str()),
-            (hotkeys_icon, hotkeys_title.as_str(), hotkeys_body.as_str()),
+            (naming_icon, naming_title.as_str(), naming_body.as_str()),
             (settings_icon, menu_title.as_str(), menu_body.as_str()),
         ],
     );
@@ -43,15 +45,11 @@ pub fn build(body: &GtkBox, actions: &GtkBox, nav: &Nav) {
 
 fn feature_icons(dark: bool) -> [&'static str; 3] {
     if dark {
-        [
-            custom::PANELS_TOP_LEFT,
-            custom::KEYBOARD,
-            custom::SETTINGS_2,
-        ]
+        [custom::PANELS_TOP_LEFT, custom::SEARCH, custom::SETTINGS_2]
     } else {
         [
             custom::PANELS_TOP_LEFT_LIGHT,
-            custom::KEYBOARD_LIGHT,
+            custom::SEARCH_LIGHT,
             custom::SETTINGS_2_LIGHT,
         ]
     }

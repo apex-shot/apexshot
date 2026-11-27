@@ -1,17 +1,68 @@
 //! The Windows Studio page, in the same group-and-table layout as the other
-//! Settings pages: one row for where this device stands, then the license.
+//! Settings pages: where this device stands, the AI naming controls, what
+//! Studio includes, then the license.
 //!
 //! The page rebuilds itself from the stored entitlement after an activation,
 //! so every row always describes the same state.
 
+use crate::ai_names::{
+    benchmark, install, is_installed, model_spec, recommend, remove, tier_from_setting,
+    trial_remaining, InstallProgress, ModelTier, TRIAL_NAMES,
+};
+use crate::config::{load_config, save_config};
 use crate::i18n::{t, tfmt};
 use crate::studio_entitlement::{
     activate_token, current_status, StudioEntitlementError, StudioStatus,
 };
 use gtk4::prelude::*;
-use gtk4::{glib, Align, Box as GtkBox, Button, Entry, Label, Orientation, Overlay, Revealer};
+use gtk4::{
+    glib, Align, Box as GtkBox, Button, Entry, Label, Orientation, Overlay, ProgressBar, Revealer,
+    Switch,
+};
 use std::cell::Cell;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
+/// The example name rows need two tones the shared Settings sheet lacks, and
+/// the download bar takes the same orange as the Download button it replaces.
+const AI_NAMES_CSS: &str = r#"
+progressbar.studio-download-progress > trough > progress {
+    background-image: none;
+    background-color: #ff670d;
+    border-color: #ff670d;
+}
+
+.settings-table-row label.studio-example-free {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.62);
+}
+
+.settings-table-row label.studio-example-ai {
+    font-size: 12px;
+    font-weight: 700;
+    color: #8fdcab;
+}
+
+.editor-root.editor-theme-light .settings-table-row label.studio-example-free {
+    color: rgba(29, 33, 41, 0.60);
+}
+
+.editor-root.editor-theme-light .settings-table-row label.studio-example-ai {
+    color: #17643e;
+}
+"#;
+
+/// Messages from the install thread back to the row.
+enum InstallMessage {
+    Progress(InstallProgress),
+    Finished(Result<(), String>),
+}
+
+thread_local! {
+    /// Set by a finished install so the rebuilt row runs one speed test.
+    static AUTO_TEST_AFTER_INSTALL: Cell<bool> = const { Cell::new(false) };
+}
 
 pub fn build_studio_section() -> GtkBox {
     install_css();
@@ -41,6 +92,16 @@ fn render(root: &GtkBox, flash: Option<String>) {
     if matches!(status, StudioStatus::ConfigurationUnavailable) {
         return;
     }
+
+    root.append(&group_title(&t("AI names")));
+    let frame = table_frame();
+    ai_names_rows(&frame, root, status);
+    root.append(&frame);
+
+    root.append(&group_title(&t("What's included")));
+    let frame = table_frame();
+    included_rows(&frame, status);
+    root.append(&frame);
 
     root.append(&group_title(&t("License")));
     let frame = table_frame();
@@ -203,6 +264,446 @@ fn with_dither_field(row: GtkBox) -> Overlay {
     overlay.add_overlay(&row);
     overlay.set_measure_overlay(&row, true);
     overlay
+}
+
+/// The AI naming controls: the switch, how names change, the model choice,
+/// its install state, and the free-trial countdown.
+fn ai_names_rows(frame: &GtkBox, root: &GtkBox, status: StudioStatus) {
+    let config = load_config();
+    let tier = tier_from_setting(&config.organizer_ai_model);
+    let spec = model_spec(tier);
+
+    // The switch and where names come from. Once a free device has used its
+    // trial, the switch shows off and locked; the saved choice stays, so an
+    // upgrade picks AI names back up without another click.
+    let locked = !matches!(status, StudioStatus::Active { .. }) && trial_remaining() == 0;
+    // A PC that cannot run the model well gets no AI names at all: a weaker
+    // model named screenshots worse than the free names do.
+    let supported = recommend().tier.is_some();
+    let row = table_row();
+    let hint = if !supported {
+        t("This PC is better off with the free names.")
+    } else if locked {
+        t("Your free AI names are used. Upgrade to Studio to keep them.")
+    } else {
+        t("A small model on this PC reads the window title and on-screen text and writes a clearer name. Nothing is uploaded.")
+    };
+    row.append(&row_text(&t("Name screenshots with AI"), Some(&hint)));
+    let switch = Switch::new();
+    switch.set_active(config.organizer_ai_enabled && !locked && supported);
+    switch.set_sensitive(is_installed(tier) && !locked && supported);
+    switch.set_valign(Align::Center);
+    switch.connect_active_notify(|switch| {
+        let mut config = load_config();
+        config.organizer_ai_enabled = switch.is_active();
+        if let Err(error) = save_config(&config) {
+            eprintln!("[studio] Could not save the AI names setting: {error}");
+        }
+    });
+    row.append(&switch);
+    frame.append(&row);
+
+    // How the free name and the AI name compare.
+    let row = table_row();
+    let examples = GtkBox::new(Orientation::Vertical, 6);
+    examples.set_hexpand(true);
+    examples.set_valign(Align::Center);
+    let title = Label::new(Some(&t("How names change")));
+    title.add_css_class("settings-sub-option-hint");
+    title.set_xalign(0.0);
+    examples.append(&title);
+    let own = example_pairs();
+    let from_own = !own.is_empty();
+    let pairs = if from_own { own } else { sample_pairs() };
+    let origin = if from_own {
+        t("From your own screenshots")
+    } else {
+        t("Examples")
+    };
+    let source = Label::new(Some(&origin));
+    source.add_css_class("settings-sub-option-hint");
+    source.set_xalign(0.0);
+    examples.append(&source);
+    for (free, ai) in pairs {
+        examples.append(&example_line(&free, &ai));
+    }
+    row.append(&examples);
+    frame.append(&row);
+
+    // The model, and whether this PC runs it fast enough.
+    let row = table_row();
+    let size = size_text(spec.bytes);
+    let hint = match recommend().tier {
+        Some(_) => t_args(
+            "Recommended for this PC: {} ({})",
+            &[spec.detail, size.as_str()],
+        ),
+        None => t("AI names need at least 8 GB of memory, 4 processor cores, and AVX2."),
+    };
+    row.append(&row_text(&t("Model"), Some(&hint)));
+    frame.append(&row);
+    if !supported && !is_installed(tier) {
+        return;
+    }
+
+    // The chosen model: ready to use, or a one-time download.
+    let row = table_row();
+    if is_installed(tier) {
+        let name = format!("{} · {}", t(spec.label), spec.detail);
+        let text = row_text(
+            &t("Ready"),
+            Some(&t_args("{} model on this PC", &[name.as_str()])),
+        );
+        let result = Label::new(None);
+        result.add_css_class("settings-sub-option-hint");
+        result.set_xalign(0.0);
+        result.set_wrap(true);
+        result.set_visible(false);
+        text.append(&result);
+        row.append(&text);
+
+        let test = Button::with_label(&t("Test speed"));
+        test.set_valign(Align::Center);
+        test.connect_clicked({
+            let test = test.clone();
+            let result = result.clone();
+            move |_| {
+                test.set_sensitive(false);
+                test.set_label(&t("Testing…"));
+                result.set_visible(false);
+                let (tx, rx) = async_channel::unbounded::<Option<std::time::Duration>>();
+                std::thread::spawn(move || {
+                    let _ = tx.send_blocking(benchmark(tier));
+                });
+                let test = test.downgrade();
+                let result = result.downgrade();
+                glib::spawn_future_local(async move {
+                    let Ok(sample) = rx.recv().await else {
+                        return;
+                    };
+                    let (Some(test), Some(result)) = (test.upgrade(), result.upgrade()) else {
+                        return;
+                    };
+                    test.set_label(&t("Test speed"));
+                    test.set_sensitive(true);
+                    let message = match sample {
+                        Some(elapsed) => {
+                            let seconds = elapsed.as_secs_f64();
+                            let shown = format!("{seconds:.1}");
+                            let mut message = t_args("Named a sample in {} s", &[shown.as_str()]);
+                            if seconds > 2.5 {
+                                message.push(' ');
+                                message.push_str(&t(
+                                    "That is slower than ApexShot waits for, so most names will stay rule-based.",
+                                ));
+                            }
+                            message
+                        }
+                        None => t(
+                            "The model did not answer. Try again, or remove and download it again.",
+                        ),
+                    };
+                    result.set_text(&message);
+                    result.set_visible(true);
+                });
+            }
+        });
+        if AUTO_TEST_AFTER_INSTALL.with(|pending| pending.replace(false)) {
+            let test = test.clone();
+            glib::idle_add_local_once(move || test.emit_clicked());
+        }
+        row.append(&test);
+
+        let remove_button = Button::with_label(&t("Remove"));
+        remove_button.set_valign(Align::Center);
+        remove_button.connect_clicked({
+            let root = root.downgrade();
+            move |_| {
+                let (tx, rx) = async_channel::unbounded::<Result<(), String>>();
+                std::thread::spawn(move || {
+                    let _ = tx.send_blocking(remove(tier));
+                });
+                glib::spawn_future_local({
+                    let root = root.clone();
+                    async move {
+                        if let Ok(Err(error)) = rx.recv().await {
+                            eprintln!("[studio] Could not remove the AI model: {error}");
+                        }
+                        let Some(root) = root.upgrade() else {
+                            return;
+                        };
+                        let mut config = load_config();
+                        config.organizer_ai_enabled = false;
+                        if let Err(error) = save_config(&config) {
+                            eprintln!("[studio] Could not save the AI names setting: {error}");
+                        }
+                        render(&root, None);
+                    }
+                });
+            }
+        });
+        row.append(&remove_button);
+    } else {
+        let size = size_text(spec.bytes);
+        let hint = t_args("{} · downloads once, then works offline", &[size.as_str()]);
+        let text = row_text(&t("Download"), Some(&hint));
+        let feedback = Label::new(None);
+        feedback.add_css_class("settings-sub-option-hint");
+        feedback.set_xalign(0.0);
+        feedback.set_wrap(true);
+        feedback.set_visible(false);
+        text.append(&feedback);
+        row.append(&text);
+        row.append(&download_button(&row, &feedback, root, tier));
+    }
+    frame.append(&row);
+
+    // The free trial count, until Studio is active on this device.
+    if !matches!(status, StudioStatus::Active { .. }) {
+        let row = table_row();
+        let remaining = trial_remaining();
+        let left = remaining.to_string();
+        let total = TRIAL_NAMES.to_string();
+        let hint = t_args(
+            "{} of {} AI names left. After that, names stay rule-based until you upgrade.",
+            &[left.as_str(), total.as_str()],
+        );
+        row.append(&row_text(&t("Free trial"), Some(&hint)));
+        if remaining == 0 {
+            let upgrade = Button::with_label(&t("Upgrade to Studio"));
+            upgrade.add_css_class("settings-primary-btn");
+            upgrade.set_valign(Align::Center);
+            upgrade.connect_clicked(|_| {
+                std::thread::spawn(|| {
+                    if let Err(error) =
+                        crate::utils::open::open_url(&crate::studio_entitlement::studio_page_url())
+                    {
+                        eprintln!("[studio] Could not open the Studio page: {error}");
+                    }
+                });
+            });
+            row.append(&upgrade);
+        }
+        frame.append(&row);
+    }
+}
+
+/// Studio's features, each with a pill for whether it is on this device.
+fn included_rows(frame: &GtkBox, status: StudioStatus) {
+    let active = matches!(status, StudioStatus::Active { .. });
+    feature_row(
+        frame,
+        active,
+        &t("AI names"),
+        &t("Clearer screenshot names from a small model on this PC."),
+    );
+    feature_row(
+        frame,
+        active,
+        &t("Motion export"),
+        &t("Animated titles, timing, and Motion video export in the editors."),
+    );
+    feature_row(
+        frame,
+        active,
+        &t("Upscale"),
+        &t("Sharpen small captures with offline neural upscaling."),
+    );
+    feature_row(
+        frame,
+        active,
+        &t("Studio styles"),
+        &t("Frame styles, scene shadows, and presentation transforms."),
+    );
+    feature_row(
+        frame,
+        active,
+        &t("Advanced zoom camera"),
+        &t("Instant zooms and fine camera control in the video editor."),
+    );
+}
+
+fn feature_row(frame: &GtkBox, active: bool, title: &str, hint: &str) {
+    let row = table_row();
+    row.append(&row_text(title, Some(hint)));
+    let pill_text = if active { t("Active") } else { t("Studio") };
+    let pill = Label::new(Some(&pill_text));
+    pill.add_css_class("studio-pill");
+    pill.add_css_class(if active {
+        "studio-pill-active"
+    } else {
+        "studio-pill-neutral"
+    });
+    pill.set_valign(Align::Center);
+    row.append(&pill);
+    frame.append(&row);
+}
+
+/// One free name, an arrow, and the AI name that replaces it.
+fn example_line(free: &str, ai: &str) -> GtkBox {
+    let line = GtkBox::new(Orientation::Horizontal, 8);
+    let before = Label::new(Some(free));
+    before.add_css_class("studio-example-free");
+    before.set_xalign(0.0);
+    line.append(&before);
+    let arrow = Label::new(Some("→"));
+    arrow.add_css_class("settings-sub-option-hint");
+    line.append(&arrow);
+    let after = Label::new(Some(ai));
+    after.add_css_class("studio-example-ai");
+    after.set_xalign(0.0);
+    after.set_wrap(true);
+    line.append(&after);
+    line
+}
+
+/// The same examples the AI names card picks: real changes, biggest first.
+fn example_pairs() -> Vec<(String, String)> {
+    crate::ai_names::card::example_pairs(3)
+}
+
+/// The pairs shown until the index has captures the user renamed.
+fn sample_pairs() -> Vec<(String, String)> {
+    [
+        ("Home X", "Sam Lee post announcing a new keyboard"),
+        ("Inbox Outlook", "Invoice reminder from Northwind Traders"),
+        (
+            "main.rs apexshot",
+            "Rust organizer module with naming tests",
+        ),
+    ]
+    .iter()
+    .map(|(free, ai)| (free.to_string(), ai.to_string()))
+    .collect()
+}
+
+/// A Download button that swaps itself for the install row's progress state.
+fn download_button(row: &GtkBox, feedback: &Label, root: &GtkBox, tier: ModelTier) -> Button {
+    let button = Button::with_label(&t("Download"));
+    button.add_css_class("settings-primary-btn");
+    button.set_valign(Align::Center);
+    button.connect_clicked({
+        let row = row.clone();
+        let feedback = feedback.clone();
+        let root = root.downgrade();
+        move |button| start_install(&row, &feedback, &root, tier, button)
+    });
+    button
+}
+
+/// Run the blocking install on a thread and drive the row's progress from it.
+fn start_install(
+    row: &GtkBox,
+    feedback: &Label,
+    root: &glib::WeakRef<GtkBox>,
+    tier: ModelTier,
+    button: &Button,
+) {
+    row.remove(button);
+    feedback.set_visible(false);
+    let progress = ProgressBar::new();
+    progress.set_show_text(true);
+    progress.set_hexpand(true);
+    progress.set_valign(Align::Center);
+    progress.set_fraction(0.0);
+    progress.add_css_class("studio-download-progress");
+    row.append(&progress);
+    let cancel_button = Button::with_label(&t("Cancel"));
+    cancel_button.set_valign(Align::Center);
+    row.append(&cancel_button);
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    cancel_button.connect_clicked({
+        let cancel = cancel.clone();
+        move |_| cancel.store(true, Ordering::Relaxed)
+    });
+
+    let (tx, rx) = async_channel::unbounded::<InstallMessage>();
+    std::thread::spawn(move || {
+        let progress_tx = tx.clone();
+        let report = move |event: InstallProgress| {
+            let _ = progress_tx.send_blocking(InstallMessage::Progress(event));
+        };
+        let outcome = install(tier, &report, cancel.as_ref());
+        let _ = tx.send_blocking(InstallMessage::Finished(outcome));
+    });
+
+    let row = row.clone();
+    let feedback = feedback.clone();
+    let root = root.clone();
+    glib::spawn_future_local(async move {
+        while let Ok(message) = rx.recv().await {
+            match message {
+                InstallMessage::Progress(event) => match event {
+                    InstallProgress::Downloading { done, total } => {
+                        let fraction = if total == 0 {
+                            0.0
+                        } else {
+                            done as f64 / total as f64
+                        };
+                        progress.set_fraction(fraction);
+                        progress.set_text(Some(&format!("{} / {}", mb_text(done), mb_text(total))));
+                    }
+                    InstallProgress::Verifying => {
+                        progress.set_text(Some(&t("Checking the download…")));
+                    }
+                    InstallProgress::Extracting => {
+                        progress.set_text(Some(&t("Unpacking…")));
+                    }
+                    InstallProgress::Done => progress.set_fraction(1.0),
+                },
+                InstallMessage::Finished(Ok(())) => {
+                    let mut config = load_config();
+                    config.organizer_ai_enabled = true;
+                    if let Err(error) = save_config(&config) {
+                        eprintln!("[studio] Could not save the AI names setting: {error}");
+                    }
+                    AUTO_TEST_AFTER_INSTALL.with(|pending| pending.set(true));
+                    if let Some(root) = root.upgrade() {
+                        render(&root, None);
+                    }
+                    break;
+                }
+                InstallMessage::Finished(Err(error)) => {
+                    let message = if error == "cancelled" {
+                        t("Download cancelled")
+                    } else {
+                        error
+                    };
+                    feedback.set_text(&message);
+                    feedback.set_visible(true);
+                    row.remove(&progress);
+                    row.remove(&cancel_button);
+                    if let Some(root) = root.upgrade() {
+                        row.append(&download_button(&row, &feedback, &root, tier));
+                    }
+                    break;
+                }
+            }
+        }
+    });
+}
+
+/// `t` with positional `{}` placeholders filled left to right.
+fn t_args(msgid: &str, values: &[&str]) -> String {
+    let mut text = t(msgid);
+    for value in values {
+        text = text.replacen("{}", value, 1);
+    }
+    text
+}
+
+/// A model's download size, rounded to MB, or GB once it is large enough.
+fn size_text(bytes: u64) -> String {
+    if bytes >= 1_000_000_000 {
+        format!("{:.1} GB", bytes as f64 / 1_000_000_000.0)
+    } else {
+        mb_text(bytes)
+    }
+}
+
+fn mb_text(bytes: u64) -> String {
+    format!("{} MB", (bytes as f64 / 1_000_000.0).round() as u64)
 }
 
 /// The key field with its Activate button on one line, and the result of
@@ -392,8 +893,9 @@ fn install_css() {
         return;
     };
     let provider = gtk4::CssProvider::new();
+    let sheet = format!("{}\n{}", include_str!("studio.css"), AI_NAMES_CSS);
     provider.load_from_data(&crate::css_scale::scale_px_lengths(
-        include_str!("studio.css"),
+        &sheet,
         crate::platform::ui_scale(),
     ));
     gtk4::style_context_add_provider_for_display(

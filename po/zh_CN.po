@@ -5518,3 +5518,180 @@ msgid ""
 msgstr ""
 "免费链接有效期 7 天。\n"
 "{url}"
+
+msgid "Screenshot names"
+msgstr "截图名称"
+
+msgid "Name screenshots automatically"
+msgstr "自动命名截图"
+
+msgid "Names come from the window title and on-screen text, on this computer. Private windows and explicit content get a dated name."
+msgstr "名称来自窗口标题和屏幕上的文字，仅在这台电脑上处理。隐私窗口和敏感内容会得到带日期的名称。"
+
+msgid "Name style"
+msgstr "命名样式"
+
+msgid "Date and title"
+msgstr "日期和标题"
+
+msgid "App and title"
+msgstr "应用和标题"
+
+msgid "AI names"
+msgstr "AI 命名"
+
+msgid "Name screenshots with AI"
+msgstr "用 AI 命名截图"
+
+msgid "A small model on this PC reads the window title and on-screen text and writes a clearer name. Nothing is uploaded."
+msgstr "此 PC 上的小型模型会读取窗口标题和屏幕上的文字，生成更清晰的名称。不会上传任何内容。"
+
+msgid "How names change"
+msgstr "名称如何变化"
+
+msgid "Examples"
+msgstr "示例"
+
+msgid "From your own screenshots"
+msgstr "来自你自己的截图"
+
+msgid "Model"
+msgstr "模型"
+
+msgid "This PC is below the recommended specs, so names may be slow."
+msgstr "此 PC 低于推荐配置，因此命名可能会较慢。"
+
+msgid "Fast"
+msgstr "快速"
+
+msgid "Better"
+msgstr "更佳"
+
+msgid "Ready"
+msgstr "已就绪"
+
+msgid "Test speed"
+msgstr "测试速度"
+
+msgid "Testing…"
+msgstr "正在测试…"
+
+msgid "That is slower than ApexShot waits for, so most names will stay rule-based."
+msgstr "这比 ApexShot 的等待时间更慢，因此大多数名称仍将基于规则生成。"
+
+msgid "The model did not answer. Try again, or remove and download it again."
+msgstr "模型没有响应。请重试，或移除后重新下载。"
+
+msgid "Download"
+msgstr "下载"
+
+msgid "Checking the download…"
+msgstr "正在检查下载…"
+
+msgid "Unpacking…"
+msgstr "正在解压…"
+
+msgid "Download cancelled"
+msgstr "已取消下载"
+
+msgid "Free trial"
+msgstr "免费试用"
+
+msgid "What's included"
+msgstr "包含内容"
+
+msgid "Clearer screenshot names from a small model on this PC."
+msgstr "由此 PC 上的小型模型生成更清晰的截图名称。"
+
+msgid "Motion export"
+msgstr "Motion 导出"
+
+msgid "Animated titles, timing, and Motion video export in the editors."
+msgstr "编辑器中的动画标题、时间控制和 Motion 视频导出。"
+
+msgid "Upscale"
+msgstr "放大"
+
+msgid "Sharpen small captures with offline neural upscaling."
+msgstr "通过离线神经网络放大让小尺寸截图更清晰。"
+
+msgid "Studio styles"
+msgstr "Studio 样式"
+
+msgid "Frame styles, scene shadows, and presentation transforms."
+msgstr "边框样式、场景阴影和演示变换。"
+
+msgid "Advanced zoom camera"
+msgstr "高级缩放相机"
+
+msgid "Instant zooms and fine camera control in the video editor."
+msgstr "视频编辑器中的即时缩放和精细相机控制。"
+
+msgid "Recommended for this PC: {} ({})"
+msgstr "推荐用于此 PC：{} ({})"
+
+msgid "{} model on this PC"
+msgstr "此 PC 上的 {} 模型"
+
+msgid "Named a sample in {} s"
+msgstr "命名示例用时 {} 秒"
+
+msgid "{} · downloads once, then works offline"
+msgstr "{} · 下载一次后即可离线使用"
+
+msgid "{} of {} AI names left. After that, names stay rule-based until you upgrade."
+msgstr "还剩 {} / {} 次 AI 命名。之后名称将保持基于规则生成，直到你升级。"
+
+msgid "Screenshots name themselves"
+msgstr "截图会自己命名"
+
+msgid "Each capture is named from what you captured. Search by its text in History."
+msgstr "每张截图都会根据拍摄内容命名。可在历史记录中按文字搜索。"
+
+msgid "Your free AI names are used up"
+msgstr "你的免费 AI 命名次数已用完"
+
+msgid "New screenshots are named from the window title again. Here is what AI names did for yours:"
+msgstr "新截图将重新按窗口标题命名。以下是 AI 命名为你的截图生成的名字："
+
+msgid "$39 once · also includes Motion export, Upscale, and Studio styles"
+msgstr "39 美元一次性付费 · 还包含 Motion 导出、放大和 Studio 样式"
+
+msgid "Want clearer screenshot names?"
+msgstr "想要更清晰的截图名称吗？"
+
+msgid "Your screenshots are named from their window titles. AI names also reads what is on screen, using a small model on this PC."
+msgstr "你的截图按窗口标题命名。AI 命名还会使用本机的小型模型读取屏幕上的内容。"
+
+msgid "Try AI names"
+msgstr "试用 AI 命名"
+
+msgid "Set up AI names"
+msgstr "设置 AI 命名"
+
+msgid "{} free names, then part of Studio"
+msgstr "{} 次免费命名，之后属于 Studio"
+
+msgid "AI named {} of your screenshots"
+msgstr "AI 已为你的 {} 张截图命名"
+
+msgid "That was the free trial. New screenshots go back to window-title names."
+msgstr "免费试用已结束。新截图将恢复使用窗口标题命名。"
+
+msgid "Keep AI names"
+msgstr "继续使用 AI 命名"
+
+msgid "$39 once. Studio also includes Motion export, Upscale, and Studio styles."
+msgstr "一次性 39 美元。Studio 还包含 Motion 导出、放大和 Studio 样式。"
+
+msgid "Your free AI names are used. Upgrade to Studio to keep them."
+msgstr "免费 AI 命名已用完。升级到 Studio 即可继续使用。"
+
+msgid "This PC is better off with the free names."
+msgstr "这台电脑更适合使用免费命名。"
+
+msgid "AI names need at least 8 GB of memory, 4 processor cores, and AVX2."
+msgstr "AI 命名需要至少 8 GB 内存、4 个处理器核心并支持 AVX2。"
+
+msgid "Search them by their text in History."
+msgstr "可在历史记录中按文字搜索。"

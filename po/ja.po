@@ -5526,3 +5526,180 @@ msgid ""
 msgstr ""
 "無料リンクは 7 日間有効です。\n"
 "{url}"
+
+msgid "Screenshot names"
+msgstr "スクリーンショット名"
+
+msgid "Name screenshots automatically"
+msgstr "スクリーンショットに自動で名前を付ける"
+
+msgid "Names come from the window title and on-screen text, on this computer. Private windows and explicit content get a dated name."
+msgstr "名前はこのパソコン上で、ウィンドウのタイトルと画面上のテキストから付けられます。プライベートウィンドウと明示的なコンテンツには日付入りの名前が付きます。"
+
+msgid "Name style"
+msgstr "名前の形式"
+
+msgid "Date and title"
+msgstr "日付とタイトル"
+
+msgid "App and title"
+msgstr "アプリとタイトル"
+
+msgid "AI names"
+msgstr "AI による名前"
+
+msgid "Name screenshots with AI"
+msgstr "AI でスクリーンショットに名前を付ける"
+
+msgid "A small model on this PC reads the window title and on-screen text and writes a clearer name. Nothing is uploaded."
+msgstr "この PC 上の小さなモデルがウィンドウのタイトルと画面上のテキストを読み、わかりやすい名前を付けます。何もアップロードされません。"
+
+msgid "How names change"
+msgstr "名前の変わり方"
+
+msgid "Examples"
+msgstr "例"
+
+msgid "From your own screenshots"
+msgstr "自分のスクリーンショットから"
+
+msgid "Model"
+msgstr "モデル"
+
+msgid "This PC is below the recommended specs, so names may be slow."
+msgstr "この PC は推奨スペックを下回っているため、名前の生成が遅くなる場合があります。"
+
+msgid "Fast"
+msgstr "高速"
+
+msgid "Better"
+msgstr "高品質"
+
+msgid "Ready"
+msgstr "準備完了"
+
+msgid "Test speed"
+msgstr "速度をテスト"
+
+msgid "Testing…"
+msgstr "テスト中…"
+
+msgid "That is slower than ApexShot waits for, so most names will stay rule-based."
+msgstr "ApexShot の待ち時間より遅いため、ほとんどの名前はルールベースのままになります。"
+
+msgid "The model did not answer. Try again, or remove and download it again."
+msgstr "モデルが応答しませんでした。もう一度試すか、削除して再ダウンロードしてください。"
+
+msgid "Download"
+msgstr "ダウンロード"
+
+msgid "Checking the download…"
+msgstr "ダウンロードを確認中…"
+
+msgid "Unpacking…"
+msgstr "展開中…"
+
+msgid "Download cancelled"
+msgstr "ダウンロードをキャンセルしました"
+
+msgid "Free trial"
+msgstr "無料トライアル"
+
+msgid "What's included"
+msgstr "含まれる機能"
+
+msgid "Clearer screenshot names from a small model on this PC."
+msgstr "この PC 上の小さなモデルが、よりわかりやすいスクリーンショット名を付けます。"
+
+msgid "Motion export"
+msgstr "Motion 書き出し"
+
+msgid "Animated titles, timing, and Motion video export in the editors."
+msgstr "アニメーションタイトル、タイミング、Motion 動画の書き出しをエディターで利用できます。"
+
+msgid "Upscale"
+msgstr "アップスケール"
+
+msgid "Sharpen small captures with offline neural upscaling."
+msgstr "オフラインのニューラルアップスケーリングで小さいキャプチャを鮮明にします。"
+
+msgid "Studio styles"
+msgstr "Studio スタイル"
+
+msgid "Frame styles, scene shadows, and presentation transforms."
+msgstr "フレームスタイル、シーンの影、プレゼン用の変形。"
+
+msgid "Advanced zoom camera"
+msgstr "高度なズームカメラ"
+
+msgid "Instant zooms and fine camera control in the video editor."
+msgstr "ビデオエディターでの即時ズームと細かなカメラ操作。"
+
+msgid "Recommended for this PC: {} ({})"
+msgstr "この PC におすすめ: {} ({})"
+
+msgid "{} model on this PC"
+msgstr "この PC の {} モデル"
+
+msgid "Named a sample in {} s"
+msgstr "サンプルの命名に {} 秒"
+
+msgid "{} · downloads once, then works offline"
+msgstr "{} · 一度ダウンロードすると、その後はオフラインで動作します"
+
+msgid "{} of {} AI names left. After that, names stay rule-based until you upgrade."
+msgstr "AI による名前があと {} / {} 回使えます。その後はアップグレードするまで名前はルールベースのままです。"
+
+msgid "Screenshots name themselves"
+msgstr "スクリーンショットに自動で名前が付きます"
+
+msgid "Each capture is named from what you captured. Search by its text in History."
+msgstr "各キャプチャは撮影した内容から名前が付きます。履歴でそのテキストから検索できます。"
+
+msgid "Your free AI names are used up"
+msgstr "無料の AI ネームを使い切りました"
+
+msgid "New screenshots are named from the window title again. Here is what AI names did for yours:"
+msgstr "新しいスクリーンショットは再びウィンドウタイトルから名前が付きます。AI ネームがあなたのスクリーンショットに付けた名前はこちらです:"
+
+msgid "$39 once · also includes Motion export, Upscale, and Studio styles"
+msgstr "39 ドルの買い切り · Motion 書き出し、アップスケール、Studio スタイルも含まれます"
+
+msgid "Want clearer screenshot names?"
+msgstr "スクリーンショットの名前をもっと分かりやすくしますか？"
+
+msgid "Your screenshots are named from their window titles. AI names also reads what is on screen, using a small model on this PC."
+msgstr "スクリーンショットはウィンドウタイトルから名前が付きます。AI ネームは、この PC 上の小さなモデルで画面の内容も読み取ります。"
+
+msgid "Try AI names"
+msgstr "AI ネームを試す"
+
+msgid "Set up AI names"
+msgstr "AI ネームを設定"
+
+msgid "{} free names, then part of Studio"
+msgstr "無料の名前は {} 回、その後は Studio の一部になります"
+
+msgid "AI named {} of your screenshots"
+msgstr "AIがスクリーンショットを{}件命名しました"
+
+msgid "That was the free trial. New screenshots go back to window-title names."
+msgstr "無料トライアルはここまでです。新しいスクリーンショットはウィンドウタイトルの名前に戻ります。"
+
+msgid "Keep AI names"
+msgstr "AIによる名前を使い続ける"
+
+msgid "$39 once. Studio also includes Motion export, Upscale, and Studio styles."
+msgstr "一回払い39ドル。Studioには、Motion書き出し、アップスケール、Studioスタイルも含まれます。"
+
+msgid "Your free AI names are used. Upgrade to Studio to keep them."
+msgstr "無料のAI命名を使い切りました。引き続き使うにはStudioにアップグレードしてください。"
+
+msgid "This PC is better off with the free names."
+msgstr "このPCには無料の名前付けが適しています。"
+
+msgid "AI names need at least 8 GB of memory, 4 processor cores, and AVX2."
+msgstr "AIによる名前付けには、8 GB以上のメモリ、4コア以上のプロセッサ、AVX2が必要です。"
+
+msgid "Search them by their text in History."
+msgstr "履歴でテキストから検索できます。"

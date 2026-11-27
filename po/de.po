@@ -5631,3 +5631,180 @@ msgid ""
 msgstr ""
 "Kostenlose Links bleiben 7 Tage verfügbar.\n"
 "{url}"
+
+msgid "Screenshot names"
+msgstr "Screenshot-Namen"
+
+msgid "Name screenshots automatically"
+msgstr "Screenshots automatisch benennen"
+
+msgid "Names come from the window title and on-screen text, on this computer. Private windows and explicit content get a dated name."
+msgstr "Namen stammen aus dem Fenstertitel und dem Text auf dem Bildschirm, auf diesem Computer. Private Fenster und explizite Inhalte erhalten einen Namen mit Datum."
+
+msgid "Name style"
+msgstr "Namensstil"
+
+msgid "Date and title"
+msgstr "Datum und Titel"
+
+msgid "App and title"
+msgstr "App und Titel"
+
+msgid "AI names"
+msgstr "KI-Namen"
+
+msgid "Name screenshots with AI"
+msgstr "Screenshots mit KI benennen"
+
+msgid "A small model on this PC reads the window title and on-screen text and writes a clearer name. Nothing is uploaded."
+msgstr "Ein kleines Modell auf diesem PC liest Fenstertitel und Text auf dem Bildschirm und schreibt einen klareren Namen. Nichts wird hochgeladen."
+
+msgid "How names change"
+msgstr "So ändern sich Namen"
+
+msgid "Examples"
+msgstr "Beispiele"
+
+msgid "From your own screenshots"
+msgstr "Aus deinen eigenen Screenshots"
+
+msgid "Model"
+msgstr "Modell"
+
+msgid "This PC is below the recommended specs, so names may be slow."
+msgstr "Dieser PC liegt unter den empfohlenen Anforderungen, daher können Namen langsam sein."
+
+msgid "Fast"
+msgstr "Schnell"
+
+msgid "Better"
+msgstr "Besser"
+
+msgid "Ready"
+msgstr "Bereit"
+
+msgid "Test speed"
+msgstr "Tempo testen"
+
+msgid "Testing…"
+msgstr "Wird getestet…"
+
+msgid "That is slower than ApexShot waits for, so most names will stay rule-based."
+msgstr "Das ist langsamer, als ApexShot wartet, daher bleiben die meisten Namen regelbasiert."
+
+msgid "The model did not answer. Try again, or remove and download it again."
+msgstr "Das Modell hat nicht geantwortet. Versuche es erneut oder entferne es und lade es erneut herunter."
+
+msgid "Download"
+msgstr "Herunterladen"
+
+msgid "Checking the download…"
+msgstr "Download wird geprüft…"
+
+msgid "Unpacking…"
+msgstr "Wird entpackt…"
+
+msgid "Download cancelled"
+msgstr "Download abgebrochen"
+
+msgid "Free trial"
+msgstr "Kostenlose Testversion"
+
+msgid "What's included"
+msgstr "Was enthalten ist"
+
+msgid "Clearer screenshot names from a small model on this PC."
+msgstr "Klarere Screenshot-Namen von einem kleinen Modell auf diesem PC."
+
+msgid "Motion export"
+msgstr "Motion-Export"
+
+msgid "Animated titles, timing, and Motion video export in the editors."
+msgstr "Animierte Titel, Timing und Motion-Videoexport in den Editoren."
+
+msgid "Upscale"
+msgstr "Hochskalieren"
+
+msgid "Sharpen small captures with offline neural upscaling."
+msgstr "Kleine Aufnahmen mit offline-neuronaler Hochskalierung schärfen."
+
+msgid "Studio styles"
+msgstr "Studio-Stile"
+
+msgid "Frame styles, scene shadows, and presentation transforms."
+msgstr "Rahmenstile, Szenenschatten und Präsentations-Transformationen."
+
+msgid "Advanced zoom camera"
+msgstr "Erweiterte Zoom-Kamera"
+
+msgid "Instant zooms and fine camera control in the video editor."
+msgstr "Sofort-Zooms und feine Kamerasteuerung im Videoeditor."
+
+msgid "Recommended for this PC: {} ({})"
+msgstr "Für diesen PC empfohlen: {} ({})"
+
+msgid "{} model on this PC"
+msgstr "Modell {} auf diesem PC"
+
+msgid "Named a sample in {} s"
+msgstr "Beispiel in {} s benannt"
+
+msgid "{} · downloads once, then works offline"
+msgstr "{} · wird einmal heruntergeladen und funktioniert dann offline"
+
+msgid "{} of {} AI names left. After that, names stay rule-based until you upgrade."
+msgstr "{} von {} KI-Namen übrig. Danach bleiben Namen regelbasiert, bis du ein Upgrade durchführst."
+
+msgid "Screenshots name themselves"
+msgstr "Screenshots benennen sich selbst"
+
+msgid "Each capture is named from what you captured. Search by its text in History."
+msgstr "Jede Aufnahme wird nach ihrem Inhalt benannt. Suche im Verlauf nach ihrem Text."
+
+msgid "Your free AI names are used up"
+msgstr "Deine kostenlosen KI-Namen sind aufgebraucht"
+
+msgid "New screenshots are named from the window title again. Here is what AI names did for yours:"
+msgstr "Neue Screenshots werden wieder nach dem Fenstertitel benannt. Das haben KI-Namen für deine Screenshots getan:"
+
+msgid "$39 once · also includes Motion export, Upscale, and Studio styles"
+msgstr "39 $ einmalig · inklusive Motion-Export, Upscale und Studio-Stilen"
+
+msgid "Want clearer screenshot names?"
+msgstr "Klarere Screenshot-Namen?"
+
+msgid "Your screenshots are named from their window titles. AI names also reads what is on screen, using a small model on this PC."
+msgstr "Deine Screenshots werden nach ihren Fenstertiteln benannt. KI-Namen lesen zusätzlich, was auf dem Bildschirm zu sehen ist, mit einem kleinen Modell auf diesem PC."
+
+msgid "Try AI names"
+msgstr "KI-Namen testen"
+
+msgid "Set up AI names"
+msgstr "KI-Namen einrichten"
+
+msgid "{} free names, then part of Studio"
+msgstr "{} kostenlose Namen, danach Teil von Studio"
+
+msgid "AI named {} of your screenshots"
+msgstr "KI hat {} deiner Screenshots benannt"
+
+msgid "That was the free trial. New screenshots go back to window-title names."
+msgstr "Das war die kostenlose Testphase. Neue Screenshots werden wieder nach dem Fenstertitel benannt."
+
+msgid "Keep AI names"
+msgstr "KI-Namen behalten"
+
+msgid "$39 once. Studio also includes Motion export, Upscale, and Studio styles."
+msgstr "Einmalig 39 $. Studio enthält außerdem Motion-Export, Hochskalieren und Studio-Stile."
+
+msgid "Your free AI names are used. Upgrade to Studio to keep them."
+msgstr "Deine kostenlosen KI-Namen sind aufgebraucht. Mit Studio behältst du sie."
+
+msgid "This PC is better off with the free names."
+msgstr "Für diesen PC sind die kostenlosen Namen die bessere Wahl."
+
+msgid "AI names need at least 8 GB of memory, 4 processor cores, and AVX2."
+msgstr "KI-Namen brauchen mindestens 8 GB Arbeitsspeicher, 4 Prozessorkerne und AVX2."
+
+msgid "Search them by their text in History."
+msgstr "Durchsuche sie im Verlauf nach ihrem Text."

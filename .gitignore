@@ -125,3 +125,5 @@ __pycache__/
 
 # Chat-run attachments staged by local tooling
 .ara-run-chat-attachments/
+/organizer/target/
+/organizer/Cargo.lock

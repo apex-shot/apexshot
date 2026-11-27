@@ -68,6 +68,7 @@ name = "apexshot"
 version = "0.3.2"
 dependencies = [
  "anyhow",
+ "apexshot-organizer",
  "arboard",
  "ashpd",
  "async-channel",
@@ -122,6 +123,16 @@ dependencies = [
  "wayland-protocols-wlr",
  "x11rb",
  "zbus",
+]
+
+[[package]]
+name = "apexshot-organizer"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "unicode-segmentation",
 ]
 
 [[package]]

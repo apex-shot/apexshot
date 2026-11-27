@@ -10,6 +10,8 @@ pub struct AdvancedSettingsWidgets {
     pub retina_suffix_check: CheckButton,
     pub ocr_lang_input: SettingsSelect,
     pub ocr_line_breaks_check: CheckButton,
+    pub organizer_auto_name_check: CheckButton,
+    pub organizer_name_style_input: SettingsSelect,
     pub telemetry_enabled_check: CheckButton,
     pub telemetry_hint: Label,
 }
@@ -138,6 +140,57 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
 
     section.append(&ocr_frame);
 
+    // --- Screenshot Names Group ---
+    let organizer_title = Label::new(Some(&t("Screenshot names")));
+    organizer_title.add_css_class("settings-group-title");
+    organizer_title.set_xalign(0.0);
+    organizer_title.set_halign(Align::Start);
+    organizer_title.set_margin_bottom(8);
+    section.append(&organizer_title);
+
+    let organizer_frame = build_frame();
+
+    let organizer_auto_name_check = CheckButton::new();
+    organizer_auto_name_check.set_active(config.organizer_auto_name);
+    let organizer_name_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    organizer_name_hbox.set_hexpand(true);
+    let organizer_name_vbox = GtkBox::new(Orientation::Vertical, 4);
+    organizer_name_vbox.set_hexpand(true);
+    let lbl_organizer_name = Label::new(Some(&t("Name screenshots automatically")));
+    lbl_organizer_name.set_xalign(0.0);
+    let organizer_name_hint = Label::new(Some(&t(
+        "Names come from the window title and on-screen text, on this computer. Private windows and explicit content get a dated name.",
+    )));
+    organizer_name_hint.add_css_class("settings-sub-option");
+    organizer_name_hint.set_xalign(0.0);
+    organizer_name_hint.set_wrap(true);
+    organizer_name_hint.set_max_width_chars(48);
+    organizer_name_vbox.append(&lbl_organizer_name);
+    organizer_name_vbox.append(&organizer_name_hint);
+    organizer_name_hbox.append(&organizer_name_vbox);
+    organizer_name_hbox.append(&organizer_auto_name_check);
+    organizer_frame.append(&build_row!(&organizer_name_hbox, false));
+
+    let organizer_name_style_input = SettingsSelect::new(
+        [
+            ("clean", t("Title")),
+            ("dated", t("Date and title")),
+            ("by_app", t("App and title")),
+        ],
+        &config.organizer_name_style,
+    );
+
+    let organizer_style_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    organizer_style_hbox.set_hexpand(true);
+    let lbl_organizer_style = Label::new(Some(&t("Name style")));
+    lbl_organizer_style.set_xalign(0.0);
+    lbl_organizer_style.set_hexpand(true);
+    organizer_style_hbox.append(&lbl_organizer_style);
+    organizer_style_hbox.append(organizer_name_style_input.widget());
+    organizer_frame.append(&build_row!(&organizer_style_hbox, true));
+
+    section.append(&organizer_frame);
+
     // --- Privacy Group ---
     let privacy_title = Label::new(Some(&t("Privacy")));
     privacy_title.add_css_class("settings-group-title");
@@ -176,6 +229,8 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
         retina_suffix_check,
         ocr_lang_input,
         ocr_line_breaks_check,
+        organizer_auto_name_check,
+        organizer_name_style_input,
         telemetry_enabled_check,
         telemetry_hint,
     }

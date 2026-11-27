@@ -5551,3 +5551,180 @@ msgid ""
 msgstr ""
 "تبقى الروابط المجانية متاحة لمدة 7 أيام.\n"
 "{url}"
+
+msgid "Screenshot names"
+msgstr "أسماء لقطات الشاشة"
+
+msgid "Name screenshots automatically"
+msgstr "تسمية لقطات الشاشة تلقائيًا"
+
+msgid "Names come from the window title and on-screen text, on this computer. Private windows and explicit content get a dated name."
+msgstr "تأتي الأسماء من عنوان النافذة والنص الظاهر على الشاشة، على هذا الجهاز. تحصل النوافذ الخاصة والمحتوى الصريح على اسم بتاريخ."
+
+msgid "Name style"
+msgstr "نمط الاسم"
+
+msgid "Date and title"
+msgstr "التاريخ والعنوان"
+
+msgid "App and title"
+msgstr "التطبيق والعنوان"
+
+msgid "AI names"
+msgstr "أسماء بالذكاء الاصطناعي"
+
+msgid "Name screenshots with AI"
+msgstr "تسمية لقطات الشاشة بالذكاء الاصطناعي"
+
+msgid "A small model on this PC reads the window title and on-screen text and writes a clearer name. Nothing is uploaded."
+msgstr "يقرأ نموذج صغير على هذا الجهاز عنوان النافذة والنص الظاهر على الشاشة ويكتب اسمًا أوضح. لا يتم رفع أي شيء."
+
+msgid "How names change"
+msgstr "كيف تتغير الأسماء"
+
+msgid "Examples"
+msgstr "أمثلة"
+
+msgid "From your own screenshots"
+msgstr "من لقطات الشاشة الخاصة بك"
+
+msgid "Model"
+msgstr "النموذج"
+
+msgid "This PC is below the recommended specs, so names may be slow."
+msgstr "هذا الجهاز أقل من المواصفات الموصى بها، لذا قد تكون الأسماء بطيئة."
+
+msgid "Fast"
+msgstr "سريع"
+
+msgid "Better"
+msgstr "أفضل"
+
+msgid "Ready"
+msgstr "جاهز"
+
+msgid "Test speed"
+msgstr "اختبار السرعة"
+
+msgid "Testing…"
+msgstr "جارٍ الاختبار…"
+
+msgid "That is slower than ApexShot waits for, so most names will stay rule-based."
+msgstr "هذا أبطأ مما ينتظره ApexShot، لذا ستبقى معظم الأسماء قائمة على القواعد."
+
+msgid "The model did not answer. Try again, or remove and download it again."
+msgstr "لم يستجب النموذج. أعد المحاولة، أو أزله ونزّله مرة أخرى."
+
+msgid "Download"
+msgstr "تنزيل"
+
+msgid "Checking the download…"
+msgstr "جارٍ التحقق من التنزيل…"
+
+msgid "Unpacking…"
+msgstr "جارٍ فك الضغط…"
+
+msgid "Download cancelled"
+msgstr "أُلغي التنزيل"
+
+msgid "Free trial"
+msgstr "تجربة مجانية"
+
+msgid "What's included"
+msgstr "ما الذي يشمله"
+
+msgid "Clearer screenshot names from a small model on this PC."
+msgstr "أسماء لقطات شاشة أوضح من نموذج صغير على هذا الجهاز."
+
+msgid "Motion export"
+msgstr "تصدير Motion"
+
+msgid "Animated titles, timing, and Motion video export in the editors."
+msgstr "عناوين متحركة وتوقيت وتصدير فيديو Motion في المحررين."
+
+msgid "Upscale"
+msgstr "تحسين الدقة"
+
+msgid "Sharpen small captures with offline neural upscaling."
+msgstr "زيادة وضوح اللقطات الصغيرة بالتحسين العصبي للدقة دون اتصال."
+
+msgid "Studio styles"
+msgstr "أنماط Studio"
+
+msgid "Frame styles, scene shadows, and presentation transforms."
+msgstr "أنماط الإطار وظلال المشهد وتحويلات العرض."
+
+msgid "Advanced zoom camera"
+msgstr "كاميرا تكبير متقدمة"
+
+msgid "Instant zooms and fine camera control in the video editor."
+msgstr "تكبيرات فورية وتحكم دقيق في الكاميرا داخل محرر الفيديو."
+
+msgid "Recommended for this PC: {} ({})"
+msgstr "موصى به لهذا الجهاز: {} ({})"
+
+msgid "{} model on this PC"
+msgstr "نموذج {} على هذا الجهاز"
+
+msgid "Named a sample in {} s"
+msgstr "تمت تسمية عيّنة خلال {} ثانية"
+
+msgid "{} · downloads once, then works offline"
+msgstr "{} · يُنزَّل مرة واحدة ثم يعمل دون اتصال"
+
+msgid "{} of {} AI names left. After that, names stay rule-based until you upgrade."
+msgstr "تبقى {} من {} أسماء بالذكاء الاصطناعي. بعد ذلك تبقى الأسماء قائمة على القواعد حتى الترقية."
+
+msgid "Screenshots name themselves"
+msgstr "لقطات الشاشة تسمّي نفسها"
+
+msgid "Each capture is named from what you captured. Search by its text in History."
+msgstr "تُسمّى كل لقطة بحسب ما التقطته. ابحث عن نصّها في السجل."
+
+msgid "Your free AI names are used up"
+msgstr "نفدت أسماء الذكاء الاصطناعي المجانية"
+
+msgid "New screenshots are named from the window title again. Here is what AI names did for yours:"
+msgstr "تُسمّى اللقطات الجديدة بعنوان النافذة مرة أخرى. هذا ما فعله الذكاء الاصطناعي بأسمائها:"
+
+msgid "$39 once · also includes Motion export, Upscale, and Studio styles"
+msgstr "39 دولارًا مرة واحدة · يشمل أيضًا تصدير Motion ورفع الدقة وأنماط Studio"
+
+msgid "Want clearer screenshot names?"
+msgstr "هل تريد أسماء لقطات أوضح؟"
+
+msgid "Your screenshots are named from their window titles. AI names also reads what is on screen, using a small model on this PC."
+msgstr "تُسمّى لقطاتك حسب عناوين نوافذها. يقرأ الذكاء الاصطناعي أيضًا ما يظهر على الشاشة باستخدام نموذج صغير على هذا الكمبيوتر."
+
+msgid "Try AI names"
+msgstr "جرّب أسماء الذكاء الاصطناعي"
+
+msgid "Set up AI names"
+msgstr "إعداد أسماء الذكاء الاصطناعي"
+
+msgid "{} free names, then part of Studio"
+msgstr "{} أسماء مجانية، ثم تصبح جزءًا من Studio"
+
+msgid "AI named {} of your screenshots"
+msgstr "سمّى الذكاء الاصطناعي {} من لقطات شاشتك"
+
+msgid "That was the free trial. New screenshots go back to window-title names."
+msgstr "كانت هذه الفترة التجريبية المجانية. ستعود اللقطات الجديدة إلى أسماء عناوين النوافذ."
+
+msgid "Keep AI names"
+msgstr "الاحتفاظ بأسماء الذكاء الاصطناعي"
+
+msgid "$39 once. Studio also includes Motion export, Upscale, and Studio styles."
+msgstr "39 دولارًا مرة واحدة. يتضمن Studio أيضًا تصدير Motion والتكبير وأنماط Studio."
+
+msgid "Your free AI names are used. Upgrade to Studio to keep them."
+msgstr "استُخدمت أسماء الذكاء الاصطناعي المجانية. قم بالترقية إلى Studio للاحتفاظ بها."
+
+msgid "This PC is better off with the free names."
+msgstr "الأسماء المجانية أنسب لهذا الكمبيوتر."
+
+msgid "AI names need at least 8 GB of memory, 4 processor cores, and AVX2."
+msgstr "تحتاج أسماء الذكاء الاصطناعي إلى ذاكرة 8 غيغابايت على الأقل و4 أنوية معالج ودعم AVX2."
+
+msgid "Search them by their text in History."
+msgstr "ابحث فيها بنصها في السجل."

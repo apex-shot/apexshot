@@ -5642,3 +5642,180 @@ msgid ""
 msgstr ""
 "Les liens gratuits restent actifs pendant 7 jours.\n"
 "{url}"
+
+msgid "Screenshot names"
+msgstr "Noms des captures"
+
+msgid "Name screenshots automatically"
+msgstr "Nommer les captures automatiquement"
+
+msgid "Names come from the window title and on-screen text, on this computer. Private windows and explicit content get a dated name."
+msgstr "Les noms viennent du titre de la fenêtre et du texte à l'écran, sur cet ordinateur. Les fenêtres privées et le contenu explicite reçoivent un nom daté."
+
+msgid "Name style"
+msgstr "Style du nom"
+
+msgid "Date and title"
+msgstr "Date et titre"
+
+msgid "App and title"
+msgstr "Application et titre"
+
+msgid "AI names"
+msgstr "Noms par IA"
+
+msgid "Name screenshots with AI"
+msgstr "Nommer les captures avec l'IA"
+
+msgid "A small model on this PC reads the window title and on-screen text and writes a clearer name. Nothing is uploaded."
+msgstr "Un petit modèle sur ce PC lit le titre de la fenêtre et le texte à l'écran, puis écrit un nom plus clair. Rien n'est envoyé."
+
+msgid "How names change"
+msgstr "Comment les noms changent"
+
+msgid "Examples"
+msgstr "Exemples"
+
+msgid "From your own screenshots"
+msgstr "Depuis vos propres captures"
+
+msgid "Model"
+msgstr "Modèle"
+
+msgid "This PC is below the recommended specs, so names may be slow."
+msgstr "Ce PC est en dessous de la configuration recommandée, les noms peuvent donc être lents."
+
+msgid "Fast"
+msgstr "Rapide"
+
+msgid "Better"
+msgstr "Meilleur"
+
+msgid "Ready"
+msgstr "Prêt"
+
+msgid "Test speed"
+msgstr "Tester la vitesse"
+
+msgid "Testing…"
+msgstr "Test en cours…"
+
+msgid "That is slower than ApexShot waits for, so most names will stay rule-based."
+msgstr "C'est plus lent que ce qu'ApexShot attend, la plupart des noms resteront donc basés sur des règles."
+
+msgid "The model did not answer. Try again, or remove and download it again."
+msgstr "Le modèle n'a pas répondu. Réessayez, ou supprimez-le et téléchargez-le à nouveau."
+
+msgid "Download"
+msgstr "Télécharger"
+
+msgid "Checking the download…"
+msgstr "Vérification du téléchargement…"
+
+msgid "Unpacking…"
+msgstr "Décompression…"
+
+msgid "Download cancelled"
+msgstr "Téléchargement annulé"
+
+msgid "Free trial"
+msgstr "Essai gratuit"
+
+msgid "What's included"
+msgstr "Ce qui est inclus"
+
+msgid "Clearer screenshot names from a small model on this PC."
+msgstr "Des noms de captures plus clairs grâce à un petit modèle sur ce PC."
+
+msgid "Motion export"
+msgstr "Export Motion"
+
+msgid "Animated titles, timing, and Motion video export in the editors."
+msgstr "Titres animés, minutage et export vidéo Motion dans les éditeurs."
+
+msgid "Upscale"
+msgstr "Agrandissement"
+
+msgid "Sharpen small captures with offline neural upscaling."
+msgstr "Rendez les petites captures plus nettes grâce à l'agrandissement neuronal hors ligne."
+
+msgid "Studio styles"
+msgstr "Styles Studio"
+
+msgid "Frame styles, scene shadows, and presentation transforms."
+msgstr "Styles de cadre, ombres de scène et transformations de présentation."
+
+msgid "Advanced zoom camera"
+msgstr "Caméra de zoom avancée"
+
+msgid "Instant zooms and fine camera control in the video editor."
+msgstr "Zooms instantanés et réglage précis de la caméra dans l'éditeur vidéo."
+
+msgid "Recommended for this PC: {} ({})"
+msgstr "Recommandé pour ce PC : {} ({})"
+
+msgid "{} model on this PC"
+msgstr "Modèle {} sur ce PC"
+
+msgid "Named a sample in {} s"
+msgstr "Exemple nommé en {} s"
+
+msgid "{} · downloads once, then works offline"
+msgstr "{} · téléchargé une fois, puis fonctionne hors ligne"
+
+msgid "{} of {} AI names left. After that, names stay rule-based until you upgrade."
+msgstr "{} noms IA restants sur {}. Ensuite, les noms resteront basés sur des règles jusqu'à votre mise à niveau."
+
+msgid "Screenshots name themselves"
+msgstr "Les captures se nomment d'elles-mêmes"
+
+msgid "Each capture is named from what you captured. Search by its text in History."
+msgstr "Chaque capture est nommée d'après ce que vous avez capturé. Recherchez-la par son texte dans l'Historique."
+
+msgid "Your free AI names are used up"
+msgstr "Vos noms IA gratuits sont épuisés"
+
+msgid "New screenshots are named from the window title again. Here is what AI names did for yours:"
+msgstr "Les nouvelles captures sont de nouveau nommées d'après le titre de la fenêtre. Voici ce que les noms IA ont fait pour les vôtres :"
+
+msgid "$39 once · also includes Motion export, Upscale, and Studio styles"
+msgstr "39 $ une fois · inclut aussi l'export Motion, l'Upscale et les styles Studio"
+
+msgid "Want clearer screenshot names?"
+msgstr "Envie de noms de captures plus clairs ?"
+
+msgid "Your screenshots are named from their window titles. AI names also reads what is on screen, using a small model on this PC."
+msgstr "Vos captures sont nommées d'après le titre de leur fenêtre. Les noms IA lisent aussi ce qui est à l'écran, avec un petit modèle sur ce PC."
+
+msgid "Try AI names"
+msgstr "Essayer les noms IA"
+
+msgid "Set up AI names"
+msgstr "Configurer les noms IA"
+
+msgid "{} free names, then part of Studio"
+msgstr "{} noms gratuits, puis inclus dans Studio"
+
+msgid "AI named {} of your screenshots"
+msgstr "L’IA a nommé {} de vos captures"
+
+msgid "That was the free trial. New screenshots go back to window-title names."
+msgstr "C’était l’essai gratuit. Les nouvelles captures reprennent le titre de la fenêtre comme nom."
+
+msgid "Keep AI names"
+msgstr "Garder les noms IA"
+
+msgid "$39 once. Studio also includes Motion export, Upscale, and Studio styles."
+msgstr "39 $ une seule fois. Studio comprend aussi l’export Motion, l’agrandissement et les styles Studio."
+
+msgid "Your free AI names are used. Upgrade to Studio to keep them."
+msgstr "Vos noms IA gratuits sont épuisés. Passez à Studio pour les garder."
+
+msgid "This PC is better off with the free names."
+msgstr "Pour ce PC, les noms gratuits sont le meilleur choix."
+
+msgid "AI names need at least 8 GB of memory, 4 processor cores, and AVX2."
+msgstr "Les noms IA nécessitent au moins 8 Go de mémoire, 4 cœurs de processeur et AVX2."
+
+msgid "Search them by their text in History."
+msgstr "Retrouvez-les par leur texte dans l’historique."

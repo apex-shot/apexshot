@@ -6,6 +6,7 @@
 #include "platform/recording_settings.h"
 #include "platform/windows/audio_devices.h"
 #include "platform/windows/ocr.h"
+#include "platform/windows/recording_manifest.h"
 #include "platform/windows/usage_telemetry.h"
 #include "platform/windows/qr.h"
 #include "platform/windows/capture_sound.h"
@@ -44,6 +45,9 @@
 #include <QFontMetrics>
 #include <QGuiApplication>
 #include <QIcon>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QKeyEvent>
 #include <QMenu>
 #include <QLocalServer>
@@ -331,6 +335,140 @@ QString saveCapture(const QImage& image, const QRect& region,
         return QString();
     }
     return path;
+}
+
+/// The topmost app window under the middle of the captured region.
+Platform::WindowIdentity windowUnderCapture(const QRect& region)
+{
+    for (const Platform::WindowInfo& window : Platform::windows()) {
+        if (window.minimized)
+            continue;
+        if (window.geometry.contains(region.center()))
+            return Platform::windowIdentity(window.id);
+    }
+    return Platform::WindowIdentity{};
+}
+
+/// The helper that names and indexes a saved screenshot.
+QString organizerExecutable()
+{
+    QString executable = qEnvironmentVariable("APEXSHOT_ORGANIZER");
+    if (executable.isEmpty()) {
+        const QString sibling =
+            QDir(QCoreApplication::applicationDirPath())
+                .filePath(QStringLiteral("apexshot-organize.exe"));
+        if (QFileInfo::exists(sibling))
+            executable = sibling;
+    }
+    return executable;
+}
+
+/// Set when a capture was just renamed for the first time ever; the next
+/// screenshot card shows where the name came from.
+static bool g_nameHintPending = false;
+
+/// Name, rename, and index a saved screenshot. Returns the path the file has
+/// afterwards; on any failure, the path it was saved under. The synchronous
+/// request asks for the rule-based name only; `requestOut` receives it so a
+/// caller can send the same OCR result back for an AI name later.
+QString organizeCapture(const QImage& image, const QRect& region, const QString& path,
+                        const Platform::ShellSettings& settings,
+                        QJsonObject* requestOut = nullptr)
+{
+    if (path.isEmpty() || !settings.screenshots.afterSave)
+        return path;
+
+    const QString executable = organizerExecutable();
+    if (executable.isEmpty())
+        return path;
+
+    QElapsedTimer timer;
+    timer.start();
+
+    const Platform::WindowIdentity window = windowUnderCapture(region);
+
+    QVector<Platform::OcrTextLine> lines;
+    QString ocrError;
+    if (!Platform::recognizeLines(image, settings.ocr.language, lines, ocrError))
+        debugLog(QStringLiteral("organizer ocr: %1").arg(ocrError));
+
+    QJsonArray jsonLines;
+    for (const Platform::OcrTextLine& line : lines) {
+        QJsonObject entry;
+        entry.insert(QStringLiteral("text"), line.text);
+        entry.insert(QStringLiteral("x"), line.rect.x());
+        entry.insert(QStringLiteral("y"), line.rect.y());
+        entry.insert(QStringLiteral("width"), line.rect.width());
+        entry.insert(QStringLiteral("height"), line.rect.height());
+        jsonLines.append(entry);
+    }
+
+    QJsonObject page;
+    page.insert(QStringLiteral("image_width"), image.width());
+    page.insert(QStringLiteral("image_height"), image.height());
+    page.insert(QStringLiteral("lines"), jsonLines);
+
+    QJsonObject object;
+    object.insert(QStringLiteral("path"), QDir::toNativeSeparators(path));
+    object.insert(QStringLiteral("app"), window.app.isEmpty()
+                                               ? QJsonValue(QJsonValue::Null)
+                                               : QJsonValue(window.app));
+    object.insert(QStringLiteral("window_title"), window.title.isEmpty()
+                                                      ? QJsonValue(QJsonValue::Null)
+                                                      : QJsonValue(window.title));
+    object.insert(QStringLiteral("page"), page);
+    object.insert(QStringLiteral("allow_ai"), false);
+
+    QProcess process;
+    process.start(executable, QStringList());
+    if (!process.waitForStarted(1000)) {
+        debugLog(QStringLiteral("organizer: %1 did not start")
+                     .arg(QDir::toNativeSeparators(executable)));
+        if (requestOut)
+            *requestOut = object;
+        return path;
+    }
+    process.write(QJsonDocument(object).toJson(QJsonDocument::Compact));
+    process.closeWriteChannel();
+
+    // Rule-based names come back in well under a second; the extra room is for
+    // AI names, whose helper gives up on the model by 2.6 s on its own.
+    const int remaining = qMax(100, 3000 - int(timer.elapsed()));
+    if (!process.waitForFinished(remaining)) {
+        process.kill();
+        process.waitForFinished(500);
+        debugLog(QStringLiteral("organizer timed out"));
+        if (requestOut)
+            *requestOut = object;
+        return path;
+    }
+
+    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+        debugLog(QStringLiteral("organizer exited with %1").arg(process.exitCode()));
+        if (requestOut)
+            *requestOut = object;
+        return path;
+    }
+
+    const QString renamed = QString::fromUtf8(process.readAllStandardOutput()).trimmed();
+    if (renamed.isEmpty() || !QFileInfo::exists(renamed)) {
+        if (requestOut)
+            *requestOut = object;
+        return path;
+    }
+
+    debugLog(QStringLiteral("organizer: %1 -> %2 in %3 ms").arg(path, renamed).arg(timer.elapsed()));
+    const QString finalPath = path.contains(QLatin1Char('/')) && !path.contains(QLatin1Char('\\'))
+                                  ? QDir::fromNativeSeparators(renamed)
+                                  : renamed;
+    if (QFileInfo(finalPath).fileName() != QFileInfo(path).fileName()
+        && !QSettings().value(QStringLiteral("organizer/name_hint_shown"), false).toBool()) {
+        QSettings().setValue(QStringLiteral("organizer/name_hint_shown"), true);
+        g_nameHintPending = true;
+    }
+    if (requestOut)
+        *requestOut = object;
+    return finalPath;
 }
 
 QString videoOutputPath(const Platform::ShellSettings& settings)
@@ -1744,6 +1882,46 @@ public:
             m_controls.append(hint);
         }
 
+        // The first capture the organizer ever renamed says where the name
+        // came from.
+        if (!m_video && !m_sample && !m_editorHintShown && g_nameHintPending) {
+            g_nameHintPending = false;
+            m_editorHintShown = true;
+            auto* hint = new CardButton(CardButton::Kind::Hint, 0, QString(), m_scale, this);
+            const QString hintText =
+                QStringLiteral("Named from what you captured. Search it in History.");
+            const int hintPadding = qRound(4 * m_scale);
+            const int hintRoom = std::max(1, m_frameRect.width() - qRound(8 * m_scale));
+            // Keep the sentence whole by giving up a little size before the
+            // text has to elide on a small card.
+            int hintPixels = std::max(1, qRound(9 * m_scale));
+            const int hintPixelsFloor = std::max(1, qRound(7 * m_scale));
+            QFont hintFont = uiFont(hintPixels);
+            QFontMetrics hintMetrics(hintFont);
+            while (hintPixels > hintPixelsFloor
+                   && hintMetrics.horizontalAdvance(hintText) + 2 * hintPadding > hintRoom) {
+                --hintPixels;
+                hintFont = uiFont(hintPixels);
+                hintMetrics = QFontMetrics(hintFont);
+            }
+            hint->setFont(hintFont);
+            hint->setText(hintMetrics.elidedText(hintText, Qt::ElideRight,
+                                                 std::max(1, hintRoom - 2 * hintPadding)));
+            hint->setToolTip(QStringLiteral("Open History"));
+            const int hintWidth =
+                std::min(hintRoom, hintMetrics.horizontalAdvance(hint->text()) + 2 * hintPadding);
+            const int hintHeight = qRound(20 * m_scale);
+            // Centred in the strip between the pill row and the bottom corner
+            // row, so it never covers Upload or the cancel button.
+            const int hintTop = pillsTop + button
+                + std::max(0, (bottom - (pillsTop + button) - hintHeight) / 2);
+            hint->setGeometry(m_frameRect.left() + (m_frameRect.width() - hintWidth) / 2,
+                              hintTop, hintWidth, hintHeight);
+            hint->setEnabled(m_sample || !m_path.isEmpty());
+            connect(hint, &QAbstractButton::clicked, this, [] { openHistoryWindow(); });
+            m_controls.append(hint);
+        }
+
         // The nudge is its own card drawn by the helper, so this card keeps
         // exactly the look and size it always had.
         if (!m_video && !m_sample && !m_editorHintShown && autoCopied)
@@ -1868,6 +2046,8 @@ public:
     bool isPinned() const { return m_pinned; }
     bool isUploading() const { return m_uploadState == UploadState::Uploading; }
     const QString& path() const { return m_path; }
+    /// Point the card at a renamed file, so every action on the card uses it.
+    void setPath(const QString& path) { m_path = path; }
 
 protected:
     void paintEvent(QPaintEvent*) override
@@ -4162,6 +4342,88 @@ private:
         controls->raise();
     }
 
+    /// Ask the helper for an AI name without blocking. When it renames the file,
+    /// point every holder of the old path at the new one.
+    void refineNameInBackground(QJsonObject request, const QString& path, const QImage& image,
+                                const Platform::ShellSettings& settings)
+    {
+        if (request.isEmpty() || path.isEmpty() || !settings.screenshots.afterSave
+            || settings.screenshots.afterOpenEditor
+            || settings.cloud.autoUploadAfterCapture)
+            return;
+        const QString executable = organizerExecutable();
+        if (executable.isEmpty())
+            return;
+
+        request.insert(QStringLiteral("path"), QDir::toNativeSeparators(path));
+        request.insert(QStringLiteral("allow_ai"), true);
+
+        auto* process = new QProcess(this);
+        connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+                [this, process, path, image, settings](int exitCode, QProcess::ExitStatus status) {
+                    const QString output =
+                        QString::fromUtf8(process->readAllStandardOutput()).trimmed();
+                    process->deleteLater();
+                    if (status != QProcess::NormalExit || exitCode != 0 || output.isEmpty()
+                        || !QFileInfo::exists(output)
+                        || QFileInfo(output).fileName() == QFileInfo(path).fileName())
+                        return;
+                    const QString newPath =
+                        path.contains(QLatin1Char('/')) && !path.contains(QLatin1Char('\\'))
+                            ? QDir::fromNativeSeparators(output)
+                            : output;
+                    applyRename(path, newPath, image, settings);
+                    debugLog(QStringLiteral("organizer ai: %1 -> %2").arg(path, newPath));
+                });
+        connect(process, &QProcess::errorOccurred, this,
+                [process](QProcess::ProcessError error) {
+                    debugLog(QStringLiteral("organizer ai: %1").arg(int(error)));
+                    process->deleteLater();
+                });
+        // A helper that hangs must not keep the process around.
+        auto* guard = new QTimer(process);
+        guard->setSingleShot(true);
+        guard->setInterval(12000);
+        connect(guard, &QTimer::timeout, process, [process] {
+            if (process->state() != QProcess::NotRunning)
+                process->kill();
+        });
+        guard->start();
+
+        process->start(executable, QStringList());
+        process->write(QJsonDocument(request).toJson(QJsonDocument::Compact));
+        process->closeWriteChannel();
+    }
+
+    void applyRename(const QString& oldPath, const QString& newPath, const QImage& image,
+                     const Platform::ShellSettings& settings)
+    {
+        for (const QPointer<ResultCard>& card : m_cards) {
+            if (card && card->path() == oldPath)
+                card->setPath(newPath);
+        }
+        if (m_lastScreenshotPath == oldPath) {
+            m_lastScreenshotPath = newPath;
+            QSettings().setValue(QStringLiteral("shortcuts/last_screenshot"), newPath);
+        }
+        // A capture already on the clipboard keeps the old file name, so give
+        // a paste the renamed file instead.
+        if (!settings.screenshots.afterCopyToClipboard)
+            return;
+        const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
+        if (!mime || !mime->hasUrls())
+            return;
+        for (const QUrl& url : mime->urls()) {
+            if (!url.isLocalFile())
+                continue;
+            if (QDir::cleanPath(url.toLocalFile()).compare(QDir::cleanPath(oldPath),
+                                                           Qt::CaseInsensitive) != 0)
+                continue;
+            Platform::copyCaptureToClipboard(image, newPath, settings.screenshots.clipboardMode);
+            return;
+        }
+    }
+
     void presentScroll(const QImage& image, const QRect& region)
     {
         if (image.isNull())
@@ -4170,7 +4432,9 @@ private:
         m_telemetry->recordScreenshot();
         const Platform::ShellSettings settings = Platform::loadShellSettings();
         QString saveError;
-        const QString path = saveCapture(image, region, settings, saveError);
+        const QString saved = saveCapture(image, region, settings, saveError);
+        QJsonObject request;
+        const QString path = organizeCapture(image, region, saved, settings, &request);
         if (path.isEmpty())
             QMessageBox::warning(nullptr, QStringLiteral("Screenshot"),
                                  QStringLiteral("Could not save the screenshot: %1").arg(saveError));
@@ -4195,10 +4459,12 @@ private:
             // A capture that did not save already raised its own warning.
             if (!path.isEmpty())
                 notify(hint);
+            refineNameInBackground(request, path, image, settings);
             return;
         }
 
         showResultCard(image, path, false, settings.screenshots.afterCopyToClipboard);
+        refineNameInBackground(request, path, image, settings);
     }
 
     void presentRecording(const QImage& thumbnail,
@@ -4236,7 +4502,9 @@ private:
         const Platform::ShellSettings settings = Platform::loadShellSettings();
         const bool persist = settings.screenshots.afterSave;
         QString saveError;
-        const QString path = saveCapture(image, region, settings, saveError);
+        const QString saved = saveCapture(image, region, settings, saveError);
+        QJsonObject request;
+        const QString path = organizeCapture(image, region, saved, settings, &request);
         if (path.isEmpty())
             QMessageBox::warning(nullptr, QStringLiteral("Screenshot"),
                                  QStringLiteral("Could not save the screenshot: %1").arg(saveError));
@@ -4305,6 +4573,7 @@ private:
             // A capture that did not save already raised its own warning.
             if (!path.isEmpty())
                 notify(hint);
+            refineNameInBackground(request, path, image, settings);
             return;
         }
 
@@ -4313,6 +4582,7 @@ private:
         const bool autoCopied =
             !options.ocr && settings.screenshots.afterCopyToClipboard;
         showResultCard(image, path, false, autoCopied);
+        refineNameInBackground(request, path, image, settings);
     }
 
     bool m_menuOpen = false;
