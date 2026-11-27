@@ -5544,3 +5544,108 @@ msgstr "日付とタイトル"
 
 msgid "App and title"
 msgstr "アプリとタイトル"
+
+msgid "AI names"
+msgstr "AI による名前"
+
+msgid "Name screenshots with AI"
+msgstr "AI でスクリーンショットに名前を付ける"
+
+msgid "A small model on this PC reads the window title and on-screen text and writes a clearer name. Nothing is uploaded."
+msgstr "この PC 上の小さなモデルがウィンドウのタイトルと画面上のテキストを読み、わかりやすい名前を付けます。何もアップロードされません。"
+
+msgid "How names change"
+msgstr "名前の変わり方"
+
+msgid "Examples"
+msgstr "例"
+
+msgid "From your own screenshots"
+msgstr "自分のスクリーンショットから"
+
+msgid "Model"
+msgstr "モデル"
+
+msgid "This PC is below the recommended specs, so names may be slow."
+msgstr "この PC は推奨スペックを下回っているため、名前の生成が遅くなる場合があります。"
+
+msgid "Fast"
+msgstr "高速"
+
+msgid "Better"
+msgstr "高品質"
+
+msgid "Ready"
+msgstr "準備完了"
+
+msgid "Test speed"
+msgstr "速度をテスト"
+
+msgid "Testing…"
+msgstr "テスト中…"
+
+msgid "That is slower than ApexShot waits for, so most names will stay rule-based."
+msgstr "ApexShot の待ち時間より遅いため、ほとんどの名前はルールベースのままになります。"
+
+msgid "The model did not answer. Try again, or remove and download it again."
+msgstr "モデルが応答しませんでした。もう一度試すか、削除して再ダウンロードしてください。"
+
+msgid "Download"
+msgstr "ダウンロード"
+
+msgid "Checking the download…"
+msgstr "ダウンロードを確認中…"
+
+msgid "Unpacking…"
+msgstr "展開中…"
+
+msgid "Download cancelled"
+msgstr "ダウンロードをキャンセルしました"
+
+msgid "Free trial"
+msgstr "無料トライアル"
+
+msgid "What's included"
+msgstr "含まれる機能"
+
+msgid "Clearer screenshot names from a small model on this PC."
+msgstr "この PC 上の小さなモデルが、よりわかりやすいスクリーンショット名を付けます。"
+
+msgid "Motion export"
+msgstr "Motion 書き出し"
+
+msgid "Animated titles, timing, and Motion video export in the editors."
+msgstr "アニメーションタイトル、タイミング、Motion 動画の書き出しをエディターで利用できます。"
+
+msgid "Upscale"
+msgstr "アップスケール"
+
+msgid "Sharpen small captures with offline neural upscaling."
+msgstr "オフラインのニューラルアップスケーリングで小さいキャプチャを鮮明にします。"
+
+msgid "Studio styles"
+msgstr "Studio スタイル"
+
+msgid "Frame styles, scene shadows, and presentation transforms."
+msgstr "フレームスタイル、シーンの影、プレゼン用の変形。"
+
+msgid "Advanced zoom camera"
+msgstr "高度なズームカメラ"
+
+msgid "Instant zooms and fine camera control in the video editor."
+msgstr "ビデオエディターでの即時ズームと細かなカメラ操作。"
+
+msgid "Recommended for this PC: {} ({})"
+msgstr "この PC におすすめ: {} ({})"
+
+msgid "{} model on this PC"
+msgstr "この PC の {} モデル"
+
+msgid "Named a sample in {} s"
+msgstr "サンプルの命名に {} 秒"
+
+msgid "{} · downloads once, then works offline"
+msgstr "{} · 一度ダウンロードすると、その後はオフラインで動作します"
+
+msgid "{} of {} AI names left. After that, names stay rule-based until you upgrade."
+msgstr "AI による名前があと {} / {} 回使えます。その後はアップグレードするまで名前はルールベースのままです。"

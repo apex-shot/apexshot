@@ -5660,3 +5660,108 @@ msgstr "Date et titre"
 
 msgid "App and title"
 msgstr "Application et titre"
+
+msgid "AI names"
+msgstr "Noms par IA"
+
+msgid "Name screenshots with AI"
+msgstr "Nommer les captures avec l'IA"
+
+msgid "A small model on this PC reads the window title and on-screen text and writes a clearer name. Nothing is uploaded."
+msgstr "Un petit modèle sur ce PC lit le titre de la fenêtre et le texte à l'écran, puis écrit un nom plus clair. Rien n'est envoyé."
+
+msgid "How names change"
+msgstr "Comment les noms changent"
+
+msgid "Examples"
+msgstr "Exemples"
+
+msgid "From your own screenshots"
+msgstr "Depuis vos propres captures"
+
+msgid "Model"
+msgstr "Modèle"
+
+msgid "This PC is below the recommended specs, so names may be slow."
+msgstr "Ce PC est en dessous de la configuration recommandée, les noms peuvent donc être lents."
+
+msgid "Fast"
+msgstr "Rapide"
+
+msgid "Better"
+msgstr "Meilleur"
+
+msgid "Ready"
+msgstr "Prêt"
+
+msgid "Test speed"
+msgstr "Tester la vitesse"
+
+msgid "Testing…"
+msgstr "Test en cours…"
+
+msgid "That is slower than ApexShot waits for, so most names will stay rule-based."
+msgstr "C'est plus lent que ce qu'ApexShot attend, la plupart des noms resteront donc basés sur des règles."
+
+msgid "The model did not answer. Try again, or remove and download it again."
+msgstr "Le modèle n'a pas répondu. Réessayez, ou supprimez-le et téléchargez-le à nouveau."
+
+msgid "Download"
+msgstr "Télécharger"
+
+msgid "Checking the download…"
+msgstr "Vérification du téléchargement…"
+
+msgid "Unpacking…"
+msgstr "Décompression…"
+
+msgid "Download cancelled"
+msgstr "Téléchargement annulé"
+
+msgid "Free trial"
+msgstr "Essai gratuit"
+
+msgid "What's included"
+msgstr "Ce qui est inclus"
+
+msgid "Clearer screenshot names from a small model on this PC."
+msgstr "Des noms de captures plus clairs grâce à un petit modèle sur ce PC."
+
+msgid "Motion export"
+msgstr "Export Motion"
+
+msgid "Animated titles, timing, and Motion video export in the editors."
+msgstr "Titres animés, minutage et export vidéo Motion dans les éditeurs."
+
+msgid "Upscale"
+msgstr "Agrandissement"
+
+msgid "Sharpen small captures with offline neural upscaling."
+msgstr "Rendez les petites captures plus nettes grâce à l'agrandissement neuronal hors ligne."
+
+msgid "Studio styles"
+msgstr "Styles Studio"
+
+msgid "Frame styles, scene shadows, and presentation transforms."
+msgstr "Styles de cadre, ombres de scène et transformations de présentation."
+
+msgid "Advanced zoom camera"
+msgstr "Caméra de zoom avancée"
+
+msgid "Instant zooms and fine camera control in the video editor."
+msgstr "Zooms instantanés et réglage précis de la caméra dans l'éditeur vidéo."
+
+msgid "Recommended for this PC: {} ({})"
+msgstr "Recommandé pour ce PC : {} ({})"
+
+msgid "{} model on this PC"
+msgstr "Modèle {} sur ce PC"
+
+msgid "Named a sample in {} s"
+msgstr "Exemple nommé en {} s"
+
+msgid "{} · downloads once, then works offline"
+msgstr "{} · téléchargé une fois, puis fonctionne hors ligne"
+
+msgid "{} of {} AI names left. After that, names stay rule-based until you upgrade."
+msgstr "{} noms IA restants sur {}. Ensuite, les noms resteront basés sur des règles jusqu'à votre mise à niveau."

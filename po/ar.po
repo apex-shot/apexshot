@@ -5569,3 +5569,108 @@ msgstr "التاريخ والعنوان"
 
 msgid "App and title"
 msgstr "التطبيق والعنوان"
+
+msgid "AI names"
+msgstr "أسماء بالذكاء الاصطناعي"
+
+msgid "Name screenshots with AI"
+msgstr "تسمية لقطات الشاشة بالذكاء الاصطناعي"
+
+msgid "A small model on this PC reads the window title and on-screen text and writes a clearer name. Nothing is uploaded."
+msgstr "يقرأ نموذج صغير على هذا الجهاز عنوان النافذة والنص الظاهر على الشاشة ويكتب اسمًا أوضح. لا يتم رفع أي شيء."
+
+msgid "How names change"
+msgstr "كيف تتغير الأسماء"
+
+msgid "Examples"
+msgstr "أمثلة"
+
+msgid "From your own screenshots"
+msgstr "من لقطات الشاشة الخاصة بك"
+
+msgid "Model"
+msgstr "النموذج"
+
+msgid "This PC is below the recommended specs, so names may be slow."
+msgstr "هذا الجهاز أقل من المواصفات الموصى بها، لذا قد تكون الأسماء بطيئة."
+
+msgid "Fast"
+msgstr "سريع"
+
+msgid "Better"
+msgstr "أفضل"
+
+msgid "Ready"
+msgstr "جاهز"
+
+msgid "Test speed"
+msgstr "اختبار السرعة"
+
+msgid "Testing…"
+msgstr "جارٍ الاختبار…"
+
+msgid "That is slower than ApexShot waits for, so most names will stay rule-based."
+msgstr "هذا أبطأ مما ينتظره ApexShot، لذا ستبقى معظم الأسماء قائمة على القواعد."
+
+msgid "The model did not answer. Try again, or remove and download it again."
+msgstr "لم يستجب النموذج. أعد المحاولة، أو أزله ونزّله مرة أخرى."
+
+msgid "Download"
+msgstr "تنزيل"
+
+msgid "Checking the download…"
+msgstr "جارٍ التحقق من التنزيل…"
+
+msgid "Unpacking…"
+msgstr "جارٍ فك الضغط…"
+
+msgid "Download cancelled"
+msgstr "أُلغي التنزيل"
+
+msgid "Free trial"
+msgstr "تجربة مجانية"
+
+msgid "What's included"
+msgstr "ما الذي يشمله"
+
+msgid "Clearer screenshot names from a small model on this PC."
+msgstr "أسماء لقطات شاشة أوضح من نموذج صغير على هذا الجهاز."
+
+msgid "Motion export"
+msgstr "تصدير Motion"
+
+msgid "Animated titles, timing, and Motion video export in the editors."
+msgstr "عناوين متحركة وتوقيت وتصدير فيديو Motion في المحررين."
+
+msgid "Upscale"
+msgstr "تحسين الدقة"
+
+msgid "Sharpen small captures with offline neural upscaling."
+msgstr "زيادة وضوح اللقطات الصغيرة بالتحسين العصبي للدقة دون اتصال."
+
+msgid "Studio styles"
+msgstr "أنماط Studio"
+
+msgid "Frame styles, scene shadows, and presentation transforms."
+msgstr "أنماط الإطار وظلال المشهد وتحويلات العرض."
+
+msgid "Advanced zoom camera"
+msgstr "كاميرا تكبير متقدمة"
+
+msgid "Instant zooms and fine camera control in the video editor."
+msgstr "تكبيرات فورية وتحكم دقيق في الكاميرا داخل محرر الفيديو."
+
+msgid "Recommended for this PC: {} ({})"
+msgstr "موصى به لهذا الجهاز: {} ({})"
+
+msgid "{} model on this PC"
+msgstr "نموذج {} على هذا الجهاز"
+
+msgid "Named a sample in {} s"
+msgstr "تمت تسمية عيّنة خلال {} ثانية"
+
+msgid "{} · downloads once, then works offline"
+msgstr "{} · يُنزَّل مرة واحدة ثم يعمل دون اتصال"
+
+msgid "{} of {} AI names left. After that, names stay rule-based until you upgrade."
+msgstr "تبقى {} من {} أسماء بالذكاء الاصطناعي. بعد ذلك تبقى الأسماء قائمة على القواعد حتى الترقية."

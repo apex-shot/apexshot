@@ -5536,3 +5536,108 @@ msgstr "日期和标题"
 
 msgid "App and title"
 msgstr "应用和标题"
+
+msgid "AI names"
+msgstr "AI 命名"
+
+msgid "Name screenshots with AI"
+msgstr "用 AI 命名截图"
+
+msgid "A small model on this PC reads the window title and on-screen text and writes a clearer name. Nothing is uploaded."
+msgstr "此 PC 上的小型模型会读取窗口标题和屏幕上的文字，生成更清晰的名称。不会上传任何内容。"
+
+msgid "How names change"
+msgstr "名称如何变化"
+
+msgid "Examples"
+msgstr "示例"
+
+msgid "From your own screenshots"
+msgstr "来自你自己的截图"
+
+msgid "Model"
+msgstr "模型"
+
+msgid "This PC is below the recommended specs, so names may be slow."
+msgstr "此 PC 低于推荐配置，因此命名可能会较慢。"
+
+msgid "Fast"
+msgstr "快速"
+
+msgid "Better"
+msgstr "更佳"
+
+msgid "Ready"
+msgstr "已就绪"
+
+msgid "Test speed"
+msgstr "测试速度"
+
+msgid "Testing…"
+msgstr "正在测试…"
+
+msgid "That is slower than ApexShot waits for, so most names will stay rule-based."
+msgstr "这比 ApexShot 的等待时间更慢，因此大多数名称仍将基于规则生成。"
+
+msgid "The model did not answer. Try again, or remove and download it again."
+msgstr "模型没有响应。请重试，或移除后重新下载。"
+
+msgid "Download"
+msgstr "下载"
+
+msgid "Checking the download…"
+msgstr "正在检查下载…"
+
+msgid "Unpacking…"
+msgstr "正在解压…"
+
+msgid "Download cancelled"
+msgstr "已取消下载"
+
+msgid "Free trial"
+msgstr "免费试用"
+
+msgid "What's included"
+msgstr "包含内容"
+
+msgid "Clearer screenshot names from a small model on this PC."
+msgstr "由此 PC 上的小型模型生成更清晰的截图名称。"
+
+msgid "Motion export"
+msgstr "Motion 导出"
+
+msgid "Animated titles, timing, and Motion video export in the editors."
+msgstr "编辑器中的动画标题、时间控制和 Motion 视频导出。"
+
+msgid "Upscale"
+msgstr "放大"
+
+msgid "Sharpen small captures with offline neural upscaling."
+msgstr "通过离线神经网络放大让小尺寸截图更清晰。"
+
+msgid "Studio styles"
+msgstr "Studio 样式"
+
+msgid "Frame styles, scene shadows, and presentation transforms."
+msgstr "边框样式、场景阴影和演示变换。"
+
+msgid "Advanced zoom camera"
+msgstr "高级缩放相机"
+
+msgid "Instant zooms and fine camera control in the video editor."
+msgstr "视频编辑器中的即时缩放和精细相机控制。"
+
+msgid "Recommended for this PC: {} ({})"
+msgstr "推荐用于此 PC：{} ({})"
+
+msgid "{} model on this PC"
+msgstr "此 PC 上的 {} 模型"
+
+msgid "Named a sample in {} s"
+msgstr "命名示例用时 {} 秒"
+
+msgid "{} · downloads once, then works offline"
+msgstr "{} · 下载一次后即可离线使用"
+
+msgid "{} of {} AI names left. After that, names stay rule-based until you upgrade."
+msgstr "还剩 {} / {} 次 AI 命名。之后名称将保持基于规则生成，直到你升级。"
