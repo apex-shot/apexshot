@@ -5641,3 +5641,27 @@ msgstr "{} · 下载一次后即可离线使用"
 
 msgid "{} of {} AI names left. After that, names stay rule-based until you upgrade."
 msgstr "还剩 {} / {} 次 AI 命名。之后名称将保持基于规则生成，直到你升级。"
+
+msgid "Your free AI names are used up"
+msgstr "你的免费 AI 命名次数已用完"
+
+msgid "New screenshots are named from the window title again. Here is what AI names did for yours:"
+msgstr "新截图将重新按窗口标题命名。以下是 AI 命名为你的截图生成的名字："
+
+msgid "$39 once · also includes Motion export, Upscale, and Studio styles"
+msgstr "39 美元一次性付费 · 还包含 Motion 导出、放大和 Studio 样式"
+
+msgid "Want clearer screenshot names?"
+msgstr "想要更清晰的截图名称吗？"
+
+msgid "Your screenshots are named from their window titles. AI names also reads what is on screen, using a small model on this PC."
+msgstr "你的截图按窗口标题命名。AI 命名还会使用本机的小型模型读取屏幕上的内容。"
+
+msgid "Try AI names"
+msgstr "试用 AI 命名"
+
+msgid "Set up AI names"
+msgstr "设置 AI 命名"
+
+msgid "{} free names, then part of Studio"
+msgstr "{} 次免费命名，之后属于 Studio"

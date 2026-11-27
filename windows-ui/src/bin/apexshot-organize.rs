@@ -7,9 +7,10 @@
 
 use std::io::Read;
 use std::path::Path;
+use std::process::{Command, Stdio};
 
 use apexshot_organizer::organize::{
-    organize_capture_with_ai, parse_name_style, OrganizeRequest, OrganizeSettings,
+    organize_capture_with_ai, parse_name_style, OrganizeOutcome, OrganizeRequest, OrganizeSettings,
 };
 
 fn main() {
@@ -55,6 +56,7 @@ fn main() {
     if outcome.ai_named && !apexshot_settings::studio_entitlement::studio_unlocked() {
         apexshot_settings::ai_names::consume_trial();
     }
+    show_ai_names_card(&outcome, &config, &index_path);
     println!("{}", display_path(&outcome.path));
 }
 
@@ -66,4 +68,65 @@ fn display_path(path: &Path) -> String {
     } else {
         display.into_owned()
     }
+}
+
+/// Show the one AI names card this capture earned, without delaying the path.
+fn show_ai_names_card(
+    outcome: &OrganizeOutcome,
+    config: &apexshot_settings::config::AppConfig,
+    index_path: &Path,
+) {
+    use apexshot_settings::ai_names::{claim_card, trial_remaining, CardKind};
+
+    let kind = if outcome.ai_named
+        && !apexshot_settings::studio_entitlement::studio_unlocked()
+        && trial_remaining() == 0
+        && claim_card(CardKind::TrialEnded)
+    {
+        Some(CardKind::TrialEnded)
+    } else if !config.organizer_ai_enabled
+        && outcome.renamed
+        && index_has_auto_named(index_path, 20)
+        && claim_card(CardKind::TryAiNames)
+    {
+        Some(CardKind::TryAiNames)
+    } else {
+        None
+    };
+    if let Some(kind) = kind {
+        spawn_card(kind);
+    }
+}
+
+/// True when the index holds at least `at_least` auto-named captures.
+fn index_has_auto_named(path: &Path, at_least: usize) -> bool {
+    let Ok(index) = apexshot_organizer::index::Index::load(path) else {
+        return false;
+    };
+    index
+        .entries()
+        .iter()
+        .filter(|entry| entry.auto_named)
+        .count()
+        >= at_least
+}
+
+/// Start the Settings card process; a failure leaves the path untouched.
+fn spawn_card(kind: apexshot_settings::ai_names::CardKind) {
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let settings = exe.with_file_name("apexshot-settings.exe");
+    let mut command = Command::new(settings);
+    command.args(["--ai-names-card", kind.arg()]);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    let _ = command.spawn();
 }

@@ -27,6 +27,16 @@ fn main() {
         }
     }
 
+    if std::env::args().nth(1).as_deref() == Some("--ai-names-card") {
+        let kind = std::env::args()
+            .nth(2)
+            .and_then(|value| app::ai_names::CardKind::from_arg(&value));
+        std::process::exit(match kind {
+            Some(kind) => app::ai_names::run_card(kind),
+            None => 2,
+        });
+    }
+
     // The website opens `apexshot://` links: the Studio page hands a purchased
     // or recovered licence back, and the Cloud page asks the app to connect.
     // A link this build does not know is a normal launch, never a command.
