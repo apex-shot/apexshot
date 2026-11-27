@@ -496,9 +496,21 @@ fn number_marker_len(text: &str) -> Option<usize> {
 
 fn code_text(rows: &[Row], char_width: f32) -> String {
     let left = rows.iter().map(|row| row.left).min().unwrap_or(0) as f32;
+    let raw: Vec<f32> = rows
+        .iter()
+        .map(|row| ((row.left as f32 - left) / char_width).max(0.0))
+        .collect();
+    // Measured indents drift by a space either way; code indents in steps,
+    // so snap to the file's step (2 or 4) taken from its smallest indent.
+    let smallest = raw
+        .iter()
+        .copied()
+        .filter(|indent| *indent >= 1.0)
+        .fold(f32::MAX, f32::min);
+    let step = if smallest < 3.0 { 2.0 } else { 4.0 };
     let mut lines: Vec<String> = Vec::new();
-    for row in rows {
-        let indent = ((row.left as f32 - left) / char_width).round().max(0.0) as usize;
+    for (row, indent) in rows.iter().zip(raw) {
+        let indent = ((indent / step).round() * step) as usize;
         let mut line = " ".repeat(indent);
         line.push_str(&row.text());
         lines.push(line.trim_end().to_string());
