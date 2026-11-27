@@ -206,7 +206,8 @@ rm -rf "$stage"
 mkdir -p "$stage/bin" "$stage/share" "$stage/lib" "$stage/etc"
 
 echo "Staging the binaries"
-for binary in apexshot-settings apexshot-history apexshot-video-editor apexshot-image-editor apexshot-update; do
+for binary in apexshot-settings apexshot-history apexshot-video-editor apexshot-image-editor \
+    apexshot-update apexshot-organize; do
     [[ -f windows-ui/target/release/$binary.exe ]] || die "missing windows-ui/target/release/$binary.exe; run without --skip-build"
     cp "windows-ui/target/release/$binary.exe" "$stage/bin/"
 done
@@ -311,6 +312,7 @@ for required in \
     bin/apexshot-video-editor.exe \
     bin/apexshot-image-editor.exe \
     bin/apexshot-update.exe \
+    bin/apexshot-organize.exe \
     bin/ffmpeg.exe \
     bin/ffprobe.exe \
     "bin/$gtk_dll" \
