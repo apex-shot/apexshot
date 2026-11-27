@@ -28,6 +28,12 @@ pub struct IndexEntry {
     pub text: String,
     /// True when the organizer chose the current name.
     pub auto_named: bool,
+    /// The rule-based name, kept when the model chose the file's name.
+    #[serde(default)]
+    pub heuristic_name: Option<String>,
+    /// True when the model chose the current name.
+    #[serde(default)]
+    pub ai_named: bool,
 }
 
 /// A parsed search: free text plus filters.
@@ -457,6 +463,8 @@ mod tests {
             captured_at: Local.with_ymd_and_hms(2026, 11, day, 12, 0, 0).unwrap(),
             text: text.to_string(),
             auto_named: false,
+            heuristic_name: None,
+            ai_named: false,
         }
     }
 
