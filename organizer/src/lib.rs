@@ -16,6 +16,7 @@ pub mod naming;
 pub mod organize;
 pub mod secrets;
 pub mod sensitive;
+pub mod text_layout;
 mod types;
 
 pub use sensitive::Sensitivity;
