@@ -117,8 +117,8 @@
                 background-color: alpha(#111827, 0.20);
             }
 
+            /* Row titles and hints use the same size as the other tabs' rows. */
             .studio-row-title {
-                font-size: 13px;
                 font-weight: 500;
             }
 
@@ -136,7 +136,6 @@
             }
 
             .studio-feedback {
-                font-size: 12px;
                 color: alpha(white, 0.62);
             }
 
@@ -154,12 +153,10 @@
 
             /* The free name stays quiet; the AI name is the one to read. */
             .editor-root .settings-table-row label.studio-example-free {
-                font-size: 12px;
                 color: alpha(white, 0.62);
             }
 
             .editor-root .settings-table-row label.studio-example-ai {
-                font-size: 12px;
                 font-weight: 700;
                 color: #3ecf8e;
             }

@@ -101,6 +101,7 @@ pub fn prompt_for_upload(parent: Option<&Window>, retry: impl Fn() + 'static) {
             on_start: Rc::new(|| {}),
             on_success: Rc::new(retry),
             on_dismiss: Rc::new(|| {}),
+            slot: None,
         },
     );
 }
@@ -124,6 +125,7 @@ pub fn show_connect(parent: Option<&Window>, on_connected: impl Fn() + 'static) 
             on_start: Rc::new(|| {}),
             on_success: Rc::new(on_connected),
             on_dismiss: Rc::new(|| {}),
+            slot: None,
         },
     );
 }
@@ -136,17 +138,31 @@ pub fn show_connect(parent: Option<&Window>, on_connected: impl Fn() + 'static) 
 /// "Connect account", and a successful connect uploads `path` and copies the
 /// finished link.
 ///
+/// The caller claims the shared promo slot first and passes its guard here, so
+/// this card is never on screen beside another one that advertises something.
+/// The guard is released when the card closes.
+///
 /// `on_dismiss` records the caller's own dismissal counter; the card records
 /// the usage telemetry itself.
-pub fn prompt_cloud_nudge(path: PathBuf, on_dismiss: impl Fn() + 'static) {
-    build_nudge_card(None, path, Rc::new(on_dismiss));
+pub fn prompt_cloud_nudge(
+    path: PathBuf,
+    on_dismiss: impl Fn() + 'static,
+    slot: crate::promo_slot::PromoSlotGuard,
+) {
+    build_nudge_card(None, path, Rc::new(on_dismiss), Some(slot));
 }
 
 /// Run the nudge card as this process's own GTK application.
 ///
 /// The Windows capture shell starts `--cloud-nudge <path>` detached for a copy
-/// that earned the nudge, so this process owns the whole card. Returns 0.
+/// that earned the nudge, so this process owns the whole card. Returns 0,
+/// including when another promo window already holds the slot.
 pub fn run_standalone_cloud_nudge(path: PathBuf, on_dismiss: impl Fn() + 'static) -> i32 {
+    let Some(slot) = crate::promo_slot::try_claim(crate::promo_slot::KIND_CLOUD_INVITE) else {
+        eprintln!("[cloud] Another promotion window is open; not showing the invitation.");
+        return 0;
+    };
+
     let app = Application::builder()
         .application_id(crate::app_identity::app_id())
         .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
@@ -154,18 +170,29 @@ pub fn run_standalone_cloud_nudge(path: PathBuf, on_dismiss: impl Fn() + 'static
 
     let path = Rc::new(path);
     let on_dismiss: Rc<dyn Fn()> = Rc::new(on_dismiss);
+    let slot = Rc::new(RefCell::new(Some(slot)));
     app.connect_activate(move |app| {
         if app.windows().iter().any(|window| window.is_visible()) {
             return;
         }
-        build_nudge_card(Some(app), (*path).clone(), Rc::clone(&on_dismiss));
+        build_nudge_card(
+            Some(app),
+            (*path).clone(),
+            Rc::clone(&on_dismiss),
+            slot.borrow_mut().take(),
+        );
     });
 
     let _ = app.run_with_args::<String>(&[]);
     0
 }
 
-fn build_nudge_card(app: Option<&Application>, path: PathBuf, on_dismiss: Rc<dyn Fn()>) {
+fn build_nudge_card(
+    app: Option<&Application>,
+    path: PathBuf,
+    on_dismiss: Rc<dyn Fn()>,
+    slot: Option<crate::promo_slot::PromoSlotGuard>,
+) {
     let upload_path = path.clone();
     build_card(
         None,
@@ -180,6 +207,7 @@ fn build_nudge_card(app: Option<&Application>, path: PathBuf, on_dismiss: Rc<dyn
                 crate::usage_telemetry::record_cloud_nudge_dismissed();
                 on_dismiss();
             }),
+            slot,
         },
     );
 }
@@ -238,6 +266,7 @@ pub fn run_standalone_for_upload() -> bool {
                 on_start: Rc::new(|| {}),
                 on_success: Rc::new(move || flag.set(true)),
                 on_dismiss: Rc::new(|| {}),
+                slot: None,
             },
         );
     });
@@ -263,6 +292,9 @@ struct SignInOptions {
     on_success: Rc<dyn Fn()>,
     /// Runs when the card closes without ever connecting.
     on_dismiss: Rc<dyn Fn()>,
+    /// The shared promo slot, held for as long as an advertising card is on
+    /// screen. Plain sign-in cards pass `None`.
+    slot: Option<crate::promo_slot::PromoSlotGuard>,
 }
 
 fn build_card(parent: Option<&Window>, app: Option<&Application>, options: SignInOptions) {
@@ -276,6 +308,7 @@ fn build_card(parent: Option<&Window>, app: Option<&Application>, options: SignI
         on_start,
         on_success,
         on_dismiss,
+        slot,
     } = options;
 
     // Keep the card attached to the running application. A card opened over a
@@ -458,6 +491,16 @@ fn build_card(parent: Option<&Window>, app: Option<&Application>, options: SignI
             if !ui.connected.get() {
                 (ui.on_dismiss)();
             }
+            glib::Propagation::Proceed
+        });
+    }
+
+    if let Some(slot) = slot {
+        // An advertising card owns the shared promo slot exactly as long as
+        // it is on screen; closing it lets the next one open.
+        let slot = Rc::new(RefCell::new(Some(slot)));
+        window.connect_close_request(move |_| {
+            slot.borrow_mut().take();
             glib::Propagation::Proceed
         });
     }

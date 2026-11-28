@@ -5848,14 +5848,8 @@ msgstr "KI-Namen (Beta)"
 msgid "A small model on your computer writes clearer names. Nothing is uploaded."
 msgstr "Ein kleines Modell auf deinem Computer schreibt klarere Namen. Es wird nichts hochgeladen."
 
-msgid "Studio is 50% off"
-msgstr "Studio 50 % günstiger"
+msgid "Black Friday: Studio is 50% off"
+msgstr "Black Friday: Studio 50 % günstiger"
 
-msgid "Use code BLACKFRIDAY50 for $19.50 instead of $39, until November 30."
-msgstr "Mit dem Code BLACKFRIDAY50 für 19,50 $ statt 39 $, bis zum 30. November."
-
-msgid "$19.50 once with code {code} · 50% off for Black Friday"
-msgstr "Einmalig 19,50 $ mit Code {code} · 50 % Rabatt zum Black Friday"
-
-msgid "$19.50 once with code {code}, 50% off for Black Friday. Studio also includes Motion export, Upscale, and Studio styles."
-msgstr "Einmalig 19,50 $ mit Code {code}, 50 % Rabatt zum Black Friday. Studio enthält außerdem Motion-Export, Hochskalieren und Studio-Stile."
+msgid "$19.50 instead of $39, until November 30. Motion export, Upscale, Studio styles, and AI names."
+msgstr "19,50 $ statt 39 $, bis zum 30. November. Motion-Export, Hochskalieren, Studio-Stile und KI-Namen."

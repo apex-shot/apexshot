@@ -22,7 +22,15 @@ const CARD_WIDTH: f64 = 440.0;
 const CTA_WIDTH: f64 = 320.0;
 
 /// Run one AI names card as its own small window; returns the exit code.
+///
+/// The card claims the shared promo slot first, so it never opens beside
+/// another card that advertises something.
 pub fn run_card(kind: CardKind) -> i32 {
+    let Some(_slot) = crate::promo_slot::try_claim(crate::promo_slot::KIND_AI_NAMES) else {
+        eprintln!("[ai-names] Another promotion window is open; not showing the card.");
+        return 0;
+    };
+
     let app = Application::builder()
         .application_id(crate::app_identity::app_id())
         .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)

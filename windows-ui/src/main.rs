@@ -37,6 +37,10 @@ fn main() {
         });
     }
 
+    if std::env::args().nth(1).as_deref() == Some("--black-friday-card") {
+        std::process::exit(app::black_friday::run_card());
+    }
+
     // The website opens `apexshot://` links: the Studio page hands a purchased
     // or recovered licence back, and the Cloud page asks the app to connect.
     // A link this build does not know is a normal launch, never a command.

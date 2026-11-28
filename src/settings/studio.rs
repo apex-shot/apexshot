@@ -200,36 +200,51 @@ fn with_dither_field(hero: GtkBox) -> Overlay {
 /// The purchase terms, quiet and inline: the long version that used to be the
 /// button label now reads as three facts under the state sentence.
 fn build_offer_meta() -> GtkBox {
-    let row = GtkBox::new(Orientation::Horizontal, 8);
-    row.add_css_class("studio-hero-meta");
-    row.set_halign(Align::Start);
-    row.set_valign(Align::Center);
-    row.set_margin_top(4);
+    // The price gets its own line so a longer offer wraps instead of
+    // widening the whole Settings window; the terms sit on the row below.
+    let column = GtkBox::new(Orientation::Vertical, 4);
+    column.add_css_class("studio-hero-meta");
+    column.set_halign(Align::Start);
+    column.set_valign(Align::Center);
+    column.set_margin_top(4);
 
-    let items = [
-        crate::studio_offer::price_label(),
-        t("12 months of updates"),
-        t("14-day refund"),
-    ];
-    for (index, item_text) in items.iter().enumerate() {
+    let price = offer_meta_item(&crate::studio_offer::price_label());
+    column.append(&price);
+
+    let terms = GtkBox::new(Orientation::Horizontal, 8);
+    terms.set_halign(Align::Start);
+    for (index, item_text) in [t("12 months of updates"), t("14-day refund")]
+        .iter()
+        .enumerate()
+    {
         if index > 0 {
             let dot = GtkBox::new(Orientation::Horizontal, 0);
             dot.add_css_class("studio-hero-meta-dot");
             dot.set_valign(Align::Center);
-            row.append(&dot);
+            terms.append(&dot);
         }
-        let item = GtkBox::new(Orientation::Horizontal, 5);
-        item.set_valign(Align::Center);
-        let check = Image::from_icon_name(
-            crate::capture::editor::window::icon_names::custom::CHECK_SYMBOLIC,
-        );
-        check.set_pixel_size(13);
-        check.set_valign(Align::Center);
-        item.append(&check);
-        item.append(&Label::new(Some(item_text.as_str())));
-        row.append(&item);
+        terms.append(&offer_meta_item(item_text));
     }
-    row
+    column.append(&terms);
+    column
+}
+
+/// One checked item of the offer line: a tick and a label that may wrap.
+fn offer_meta_item(text: &str) -> GtkBox {
+    let item = GtkBox::new(Orientation::Horizontal, 5);
+    item.set_valign(Align::Center);
+    let check =
+        Image::from_icon_name(crate::capture::editor::window::icon_names::custom::CHECK_SYMBOLIC);
+    check.set_pixel_size(13);
+    check.set_valign(Align::Start);
+    check.set_margin_top(2);
+    item.append(&check);
+    let label = Label::new(Some(text));
+    label.set_wrap(true);
+    label.set_xalign(0.0);
+    label.set_max_width_chars(48);
+    item.append(&label);
+    item
 }
 
 fn group_title(text: &str) -> Label {
@@ -283,7 +298,7 @@ fn row_text_with_badge(title: &str, hint: Option<&str>, beta: bool) -> GtkBox {
     text.append(&title_line);
     if let Some(hint) = hint {
         let hint = Label::new(Some(hint));
-        hint.add_css_class("settings-sub-option-hint");
+        hint.add_css_class("dim-label");
         hint.set_wrap(true);
         hint.set_xalign(0.0);
         text.append(&hint);
@@ -348,7 +363,7 @@ fn ai_names_rows(frame: &GtkBox, root: &GtkBox, status: StudioStatus) {
     examples.set_hexpand(true);
     examples.set_valign(Align::Center);
     let title = Label::new(Some(&t("How names change")));
-    title.add_css_class("settings-sub-option-hint");
+    title.add_css_class("dim-label");
     title.set_xalign(0.0);
     examples.append(&title);
     let own = example_pairs();
@@ -360,7 +375,7 @@ fn ai_names_rows(frame: &GtkBox, root: &GtkBox, status: StudioStatus) {
         t("Examples")
     };
     let source = Label::new(Some(&origin));
-    source.add_css_class("settings-sub-option-hint");
+    source.add_css_class("dim-label");
     source.set_xalign(0.0);
     examples.append(&source);
     for (free, ai) in pairs {
@@ -394,7 +409,7 @@ fn ai_names_rows(frame: &GtkBox, root: &GtkBox, status: StudioStatus) {
             Some(&t_args("{} model on this PC", &[name.as_str()])),
         );
         let result = Label::new(None);
-        result.add_css_class("settings-sub-option-hint");
+        result.add_css_class("dim-label");
         result.set_xalign(0.0);
         result.set_wrap(true);
         result.set_visible(false);
@@ -487,7 +502,7 @@ fn ai_names_rows(frame: &GtkBox, root: &GtkBox, status: StudioStatus) {
         let hint = t_args("{} · downloads once, then works offline", &[size.as_str()]);
         let text = row_text(&t("Download"), Some(&hint));
         let feedback = Label::new(None);
-        feedback.add_css_class("settings-sub-option-hint");
+        feedback.add_css_class("dim-label");
         feedback.set_xalign(0.0);
         feedback.set_wrap(true);
         feedback.set_visible(false);
@@ -591,7 +606,7 @@ fn example_line(free: &str, ai: &str) -> GtkBox {
     before.set_xalign(0.0);
     line.append(&before);
     let arrow = Label::new(Some("→"));
-    arrow.add_css_class("settings-sub-option-hint");
+    arrow.add_css_class("dim-label");
     line.append(&arrow);
     let after = Label::new(Some(ai));
     after.add_css_class("studio-example-ai");

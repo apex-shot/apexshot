@@ -257,13 +257,18 @@ pub(crate) fn show_ai_names_card(
 ) {
     use crate::ai_names::{claim_card, recommend, trial_remaining, CardKind};
 
-    let kind = if ai_named
+    // A window that advertises something already owns the screen. Leaving the
+    // card's one-off claim unspent keeps it available for the next capture.
+    let slot_free = crate::promo_slot::is_free();
+    let kind = if slot_free
+        && ai_named
         && !crate::studio_entitlement::studio_unlocked()
         && trial_remaining() == 0
         && claim_card(CardKind::TrialEnded)
     {
         Some(CardKind::TrialEnded)
-    } else if !config.organizer_ai_enabled
+    } else if slot_free
+        && !config.organizer_ai_enabled
         && recommend().tier.is_some()
         && renamed
         && index_has_auto_named(index_path, 20)

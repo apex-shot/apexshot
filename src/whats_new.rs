@@ -107,13 +107,6 @@ pub const RELEASES: &[ReleaseNotes] = &[
                 without_studio_only: false,
                 platform: Platform::All,
             },
-            Highlight {
-                title: "Studio is 50% off",
-                body: "Use code BLACKFRIDAY50 for $19.50 instead of $39, until November 30.",
-                studio: true,
-                without_studio_only: true,
-                platform: Platform::All,
-            },
         ],
     },
     ReleaseNotes {
@@ -521,7 +514,7 @@ mod tests {
     }
 
     #[test]
-    fn the_current_release_lists_each_build_and_hides_the_offer_from_owners() {
+    fn the_current_release_lists_five_highlights_per_build() {
         let titles = |studio_active, build| -> Vec<&str> {
             highlights_for(&RELEASES[0], studio_active, build)
                 .iter()
@@ -536,7 +529,6 @@ mod tests {
                 "Share links in fewer steps",
                 "Record the display you picked",
                 "AI names (Beta)",
-                "Studio is 50% off",
             ]
         );
         assert_eq!(
@@ -547,14 +539,13 @@ mod tests {
                 "Share links in fewer steps",
                 "Recording is ready from the first start",
                 "AI names (Beta)",
-                "Studio is 50% off",
             ]
         );
-        // Owners keep AI names, their own Studio feature, but not the sale.
+        // Owners keep AI names, their own Studio feature.
         for build in [Platform::Linux, Platform::Windows] {
             let owners = titles(true, build);
+            assert_eq!(owners.len(), 5);
             assert!(owners.contains(&"AI names (Beta)"));
-            assert!(!owners.contains(&"Studio is 50% off"));
         }
     }
 }

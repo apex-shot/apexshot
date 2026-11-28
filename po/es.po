@@ -5846,14 +5846,8 @@ msgstr "Nombres con IA (Beta)"
 msgid "A small model on your computer writes clearer names. Nothing is uploaded."
 msgstr "Un modelo pequeño en tu equipo escribe nombres más claros. No se sube nada."
 
-msgid "Studio is 50% off"
-msgstr "Studio con 50 % de descuento"
+msgid "Black Friday: Studio is 50% off"
+msgstr "Black Friday: Studio con 50 % de descuento"
 
-msgid "Use code BLACKFRIDAY50 for $19.50 instead of $39, until November 30."
-msgstr "Usa el código BLACKFRIDAY50 para pagar 19,50 $ en vez de 39 $, hasta el 30 de noviembre."
-
-msgid "$19.50 once with code {code} · 50% off for Black Friday"
-msgstr "19,50 $ en un solo pago con el código {code} · 50 % de descuento por Black Friday"
-
-msgid "$19.50 once with code {code}, 50% off for Black Friday. Studio also includes Motion export, Upscale, and Studio styles."
-msgstr "19,50 $ una sola vez con el código {code}, 50 % de descuento por Black Friday. Studio también incluye exportación Motion, escalado y estilos de Studio."
+msgid "$19.50 instead of $39, until November 30. Motion export, Upscale, Studio styles, and AI names."
+msgstr "19,50 $ en vez de 39 $, hasta el 30 de noviembre. Exportación Motion, escalado, estilos de Studio y nombres con IA."

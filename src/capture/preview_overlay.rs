@@ -1689,11 +1689,17 @@ fn maybe_show_cloud_nudge(path: &Path, screenshots: u64, preview_hint_shown: boo
         return;
     }
 
+    // Another window that advertises something owns the screen. Claiming the
+    // promo slot first keeps the nudge counters untouched for the next copy.
+    let Some(slot) = crate::promo_slot::try_claim(crate::promo_slot::KIND_CLOUD_INVITE) else {
+        return;
+    };
     crate::studio_nudges::mark_cloud_nudge_shown(&today);
     crate::usage_telemetry::record_cloud_nudge_shown();
     crate::cloud::sign_in::prompt_cloud_nudge(
         path.to_path_buf(),
         crate::studio_nudges::mark_cloud_nudge_dismissed,
+        slot,
     );
 }
 

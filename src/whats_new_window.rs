@@ -67,6 +67,13 @@ pub fn show(notes: &'static ReleaseNotes) -> anyhow::Result<()> {
         return Ok(());
     }
 
+    // One advertising window at a time: the highlights wait when another
+    // promo card already owns the screen.
+    let Some(slot) = crate::promo_slot::try_claim(crate::promo_slot::KIND_WHATS_NEW) else {
+        eprintln!("[whats-new] Another promotion window is open; not showing the highlights.");
+        return Ok(());
+    };
+
     app.connect_activate(move |application| {
         crate::capture::editor::ui_support::apply_theme_to_gtk();
         if let Some(existing) = application.windows().first() {
@@ -77,6 +84,7 @@ pub fn show(notes: &'static ReleaseNotes) -> anyhow::Result<()> {
     });
 
     let _ = app.run_with_args::<String>(&[]);
+    drop(slot);
     Ok(())
 }
 

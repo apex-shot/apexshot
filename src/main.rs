@@ -185,6 +185,9 @@ fn main() {
                 None => 2,
             });
         }
+        "black-friday" => {
+            std::process::exit(apexshot::black_friday::run_card());
+        }
         "update-window" => {
             apexshot::update_window::rename_process();
             let flags = match apexshot::update_window::parse_flags(&args[2..]) {

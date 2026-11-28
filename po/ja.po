@@ -5743,14 +5743,8 @@ msgstr "AIによる名前（ベータ）"
 msgid "A small model on your computer writes clearer names. Nothing is uploaded."
 msgstr "PC上の小さなモデルが、よりわかりやすい名前を付けます。何もアップロードされません。"
 
-msgid "Studio is 50% off"
-msgstr "Studioが50%オフ"
+msgid "Black Friday: Studio is 50% off"
+msgstr "ブラックフライデー：Studioが50%オフ"
 
-msgid "Use code BLACKFRIDAY50 for $19.50 instead of $39, until November 30."
-msgstr "11月30日まで、コードBLACKFRIDAY50で39ドルが19.50ドルになります。"
-
-msgid "$19.50 once with code {code} · 50% off for Black Friday"
-msgstr "コード{code}で買い切り $19.50 · ブラックフライデー50%オフ"
-
-msgid "$19.50 once with code {code}, 50% off for Black Friday. Studio also includes Motion export, Upscale, and Studio styles."
-msgstr "コード{code}で一回払い19.50ドル、ブラックフライデー50%オフ。Studioには、Motion書き出し、アップスケール、Studioスタイルも含まれます。"
+msgid "$19.50 instead of $39, until November 30. Motion export, Upscale, Studio styles, and AI names."
+msgstr "11月30日まで、39ドルが19.50ドル。Motion書き出し、アップスケール、Studioスタイル、AIによる名前。"

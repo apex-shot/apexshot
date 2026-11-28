@@ -5768,14 +5768,8 @@ msgstr "أسماء بالذكاء الاصطناعي (تجريبي)"
 msgid "A small model on your computer writes clearer names. Nothing is uploaded."
 msgstr "نموذج صغير على حاسوبك يكتب أسماء أوضح. لا يُرفع أي شيء."
 
-msgid "Studio is 50% off"
-msgstr "خصم 50% على Studio"
+msgid "Black Friday: Studio is 50% off"
+msgstr "الجمعة السوداء: خصم 50% على Studio"
 
-msgid "Use code BLACKFRIDAY50 for $19.50 instead of $39, until November 30."
-msgstr "استخدم الرمز BLACKFRIDAY50 لتحصل عليه بـ 19.50 دولارًا بدلًا من 39 دولارًا، حتى 30 نوفمبر."
-
-msgid "$19.50 once with code {code} · 50% off for Black Friday"
-msgstr "19.50 دولارًا لمرة واحدة بالرمز {code} · خصم 50% بمناسبة الجمعة السوداء"
-
-msgid "$19.50 once with code {code}, 50% off for Black Friday. Studio also includes Motion export, Upscale, and Studio styles."
-msgstr "19.50 دولارًا مرة واحدة بالرمز {code}، بخصم 50% بمناسبة الجمعة السوداء. يتضمن Studio أيضًا تصدير Motion والتكبير وأنماط Studio."
+msgid "$19.50 instead of $39, until November 30. Motion export, Upscale, Studio styles, and AI names."
+msgstr "19.50 دولارًا بدلًا من 39 دولارًا، حتى 30 نوفمبر. تصدير Motion والتكبير وأنماط Studio وأسماء الذكاء الاصطناعي."

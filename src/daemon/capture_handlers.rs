@@ -239,6 +239,18 @@ fn apply_saved_capture_after_capture_actions(
             }
             drop(card_stdin);
         }
+
+        // The first capture of the day may show the Black Friday card, but
+        // only when no other promotion window holds the shared slot. The card
+        // records the day itself once it opens, so losing the slot here costs
+        // nothing. Quick Access gets a head start, and the card is its own
+        // process, so the capture path never waits for it.
+        if crate::studio_offer::black_friday_card_due() && crate::promo_slot::is_free() {
+            std::thread::sleep(std::time::Duration::from_secs(6));
+            if crate::promo_slot::is_free() {
+                spawn_black_friday_subprocess();
+            }
+        }
     });
 }
 
@@ -746,6 +758,25 @@ pub(super) fn spawn_whats_new_subprocess() -> bool {
             eprintln!("[daemon] Failed to spawn the What's new window: {error}");
             false
         }
+    }
+}
+
+/// Open the Black Friday card in its own process. The caller has checked that
+/// the card is due and the promo slot is free; the card claims the slot and
+/// records the day itself, so a failed start only means no card this time.
+fn spawn_black_friday_subprocess() {
+    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
+    let mut command = std::process::Command::new(exe);
+    command
+        .arg("black-friday")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    if let Ok(mut child) = command.spawn() {
+        // The daemon outlives the card; reap the child when it closes.
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
     }
 }
 

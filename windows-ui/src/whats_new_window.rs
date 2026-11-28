@@ -37,10 +37,18 @@ pub fn show_on_startup() -> anyhow::Result<()> {
         crate::onboarding::is_complete(),
     ) {
         whats_new::StartupDecision::Show(notes) => {
+            // One advertising window at a time: when another promo card owns
+            // the screen, leave the release unseen so a later start shows it.
+            let Some(slot) = crate::promo_slot::try_claim(crate::promo_slot::KIND_WHATS_NEW) else {
+                eprintln!(
+                    "[whats-new] Another promotion window is open; not showing the highlights."
+                );
+                return Ok(());
+            };
             // Recorded before the window opens, so a crash while showing it
             // cannot make the same release announce itself again.
             whats_new::write_last_seen(current);
-            show(notes)
+            show(notes, slot)
         }
         whats_new::StartupDecision::MarkSeen => {
             whats_new::write_last_seen(current);
@@ -52,14 +60,22 @@ pub fn show_on_startup() -> anyhow::Result<()> {
 
 /// Open the current release's highlights on request, from the tray menu.
 pub fn show_latest() -> anyhow::Result<()> {
-    match whats_new::notes_for(env!("CARGO_PKG_VERSION")) {
-        Some(notes) => show(notes),
-        None => Ok(()),
-    }
+    let Some(notes) = whats_new::notes_for(env!("CARGO_PKG_VERSION")) else {
+        return Ok(());
+    };
+    let Some(slot) = crate::promo_slot::try_claim(crate::promo_slot::KIND_WHATS_NEW) else {
+        eprintln!("[whats-new] Another promotion window is open; not showing the highlights.");
+        return Ok(());
+    };
+    show(notes, slot)
 }
 
-/// Present `notes` and block until the window closes.
-fn show(notes: &'static ReleaseNotes) -> anyhow::Result<()> {
+/// Present `notes` and block until the window closes. `slot` keeps the shared
+/// promo slot claimed for exactly as long as the window is up.
+fn show(
+    notes: &'static ReleaseNotes,
+    slot: crate::promo_slot::PromoSlotGuard,
+) -> anyhow::Result<()> {
     let app = gtk4::Application::builder()
         // Share the app's id so the dock groups this window under ApexShot;
         // NON_UNIQUE keeps activation from going to another ApexShot window.
@@ -88,6 +104,7 @@ fn show(notes: &'static ReleaseNotes) -> anyhow::Result<()> {
     });
 
     let _ = app.run_with_args::<String>(&[]);
+    drop(slot);
     Ok(())
 }
 

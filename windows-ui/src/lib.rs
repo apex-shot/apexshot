@@ -9,6 +9,7 @@
 
 pub mod ai_names;
 pub mod app_identity;
+pub mod black_friday;
 
 #[path = "../../src/app_links.rs"]
 pub mod app_links;
@@ -46,11 +47,16 @@ pub mod icons;
 pub mod image_editor;
 pub mod onboarding;
 pub mod platform;
+#[path = "../../src/promo_slot.rs"]
+pub mod promo_slot;
 pub mod recording;
 pub mod settings;
 pub mod studio_entitlement;
 #[path = "../../src/studio_offer.rs"]
 pub(crate) mod studio_offer;
+/// The organizer asks whether the day's Black Friday card is due from outside
+/// this crate; the card records the day itself once it claims the promo slot.
+pub use studio_offer::black_friday_card_due;
 #[path = "../../src/studio_trial.rs"]
 pub mod studio_trial;
 #[path = "../../src/studio_trial_toast.rs"]

@@ -5735,14 +5735,8 @@ msgstr "AI 命名（测试版）"
 msgid "A small model on your computer writes clearer names. Nothing is uploaded."
 msgstr "电脑上的小模型会写出更清晰的名称。不会上传任何内容。"
 
-msgid "Studio is 50% off"
-msgstr "Studio 5 折"
+msgid "Black Friday: Studio is 50% off"
+msgstr "黑色星期五：Studio 5 折"
 
-msgid "Use code BLACKFRIDAY50 for $19.50 instead of $39, until November 30."
-msgstr "11 月 30 日前，使用代码 BLACKFRIDAY50 只需 19.50 美元，原价 39 美元。"
-
-msgid "$19.50 once with code {code} · 50% off for Black Friday"
-msgstr "使用代码 {code} 一次性 $19.50 · 黑色星期五 5 折"
-
-msgid "$19.50 once with code {code}, 50% off for Black Friday. Studio also includes Motion export, Upscale, and Studio styles."
-msgstr "使用代码 {code} 一次性 19.50 美元，黑色星期五 5 折。Studio 还包含 Motion 导出、放大和 Studio 样式。"
+msgid "$19.50 instead of $39, until November 30. Motion export, Upscale, Studio styles, and AI names."
+msgstr "11 月 30 日前，19.50 美元，原价 39 美元。包含 Motion 导出、放大、Studio 样式和 AI 命名。"

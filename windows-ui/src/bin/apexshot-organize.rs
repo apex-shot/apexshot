@@ -60,7 +60,18 @@ fn main() {
     if outcome.ai_named && !apexshot_settings::studio_entitlement::studio_unlocked() {
         apexshot_settings::ai_names::consume_trial();
     }
-    show_ai_names_card(&outcome, &config, &index_path);
+    let ai_card_shown = show_ai_names_card(&outcome, &config, &index_path);
+    // The AI names card is the more useful one after a capture; the Black
+    // Friday card only takes the shared promo slot when no AI card showed and
+    // nothing else (the Cloud invitation) is already up. The card records the
+    // day itself once it opens, so losing the slot costs nothing. Both are
+    // their own windows, so neither delays the path.
+    if !ai_card_shown
+        && apexshot_settings::black_friday_card_due()
+        && apexshot_settings::promo_slot::is_free()
+    {
+        spawn_black_friday_card();
+    }
     println!("{}", display_path(&outcome.path));
 }
 
@@ -75,20 +86,26 @@ fn display_path(path: &Path) -> String {
 }
 
 /// Show the one AI names card this capture earned, without delaying the path.
+/// Returns whether a card was started.
 fn show_ai_names_card(
     outcome: &OrganizeOutcome,
     config: &apexshot_settings::config::AppConfig,
     index_path: &Path,
-) {
+) -> bool {
     use apexshot_settings::ai_names::{claim_card, trial_remaining, CardKind};
 
-    let kind = if outcome.ai_named
+    // A window that advertises something already owns the screen. Leaving the
+    // card's one-off claim unspent keeps it available for the next capture.
+    let slot_free = apexshot_settings::promo_slot::is_free();
+    let kind = if slot_free
+        && outcome.ai_named
         && !apexshot_settings::studio_entitlement::studio_unlocked()
         && trial_remaining() == 0
         && claim_card(CardKind::TrialEnded)
     {
         Some(CardKind::TrialEnded)
-    } else if !config.organizer_ai_enabled
+    } else if slot_free
+        && !config.organizer_ai_enabled
         && apexshot_settings::ai_names::recommend().tier.is_some()
         && outcome.renamed
         && index_has_auto_named(index_path, 20)
@@ -100,7 +117,9 @@ fn show_ai_names_card(
     };
     if let Some(kind) = kind {
         spawn_card(kind);
+        return true;
     }
+    false
 }
 
 /// True when the index holds at least `at_least` auto-named captures.
@@ -124,6 +143,27 @@ fn spawn_card(kind: apexshot_settings::ai_names::CardKind) {
     let settings = exe.with_file_name("apexshot-settings.exe");
     let mut command = Command::new(settings);
     command.args(["--ai-names-card", kind.arg()]);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    let _ = command.spawn();
+}
+
+/// Start the Black Friday card in the Settings process; a failure leaves the
+/// path untouched.
+fn spawn_black_friday_card() {
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let settings = exe.with_file_name("apexshot-settings.exe");
+    let mut command = Command::new(settings);
+    command.arg("--black-friday-card");
     command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
