@@ -350,7 +350,7 @@ mod tests {
 
     #[test]
     fn the_current_release_leads_with_free_improvements_and_has_no_subtitle() {
-        let notes = notes_for("0.3.2").expect("the current release");
+        let notes = notes_for("0.4.0").expect("the current release");
         assert_eq!(notes.subtitle, None);
         // Free improvements come before anything Studio-related.
         let first_studio = notes

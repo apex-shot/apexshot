@@ -48,6 +48,11 @@
     <binary>apexshot</binary>
   </provides>
   <releases>
+    <release version="0.4.0" date="2026-11-28">
+      <description>
+        <p>Screenshots name themselves from their window and on-screen text, and History finds a screenshot by any word it showed; Cloud sign-in fills in its code for you; multi-monitor recording on Hyprland, Sway, and Niri records the display you picked; and AI names (Beta) for Studio write clearer names with a small model on your computer.</p>
+      </description>
+    </release>
     <release version="0.3.2" date="2026-11-25">
       <description>
         <p>Mic and Speaker device menus with live levels on the recording toolbar; recording one app's sound, every app, or no system sound; faster downloads and updates from ApexShot's own download servers; and recordings started without the controls bar can be stopped from the tray or the command line.</p>

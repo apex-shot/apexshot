@@ -1,5 +1,5 @@
 Name:           apexshot
-Version:        0.3.2
+Version:        0.4.0
 Release:        0
 Summary:        Linux screenshot, annotation, OCR, and screen recording tool
 License:        GPL-3.0-or-later
@@ -157,6 +157,13 @@ fi
 %{_datadir}/apexshot/
 
 %changelog
+* Sat Nov 28 2026 codegoddy <codegoddy@gmail.com> - 0.4.0-0
+- Screenshots are named from their window and on-screen text
+- Search History by any word a screenshot showed
+- Connecting Cloud fills in the sign-in code for you
+- Multi-monitor recording on Hyprland, Sway, and Niri records the chosen display
+- AI names (Beta) with a local model for Studio
+
 * Wed Nov 25 2026 codegoddy <codegoddy@gmail.com> - 0.3.2-0
 - Pick the Mic and Speaker devices from the recording toolbar, with live levels
 - Record every app, one app, or no system sound
