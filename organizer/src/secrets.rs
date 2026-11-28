@@ -81,7 +81,10 @@ fn find_emails(bytes: &[u8], out: &mut Vec<SecretSpan>) {
         let Some(start) = local_part_start(bytes, at) else {
             continue;
         };
-        let Some(end) = domain_end(bytes, at + 1) else {
+        // A complete address, or one cut off on screen ("name@gmai…"): the
+        // part before the `@` already identifies the person.
+        let Some(end) = domain_end(bytes, at + 1).or_else(|| truncated_domain_end(bytes, at + 1))
+        else {
             continue;
         };
         out.push(SecretSpan {
@@ -98,6 +101,33 @@ fn local_part_start(bytes: &[u8], at: usize) -> Option<usize> {
         start -= 1;
     }
     (start < at).then_some(start)
+}
+
+/// End of a domain that was cut off before its TLD, including the ellipsis
+/// or dots that cut it off. None when nothing host-like follows the `@`.
+fn truncated_domain_end(bytes: &[u8], start: usize) -> Option<usize> {
+    let mut pos = start;
+    while pos < bytes.len() && (is_label_byte(bytes[pos]) || bytes[pos] == b'.') {
+        pos += 1;
+    }
+    if pos == start || !bytes[start].is_ascii_alphanumeric() {
+        return None;
+    }
+    // A "@2x" density marker on a file name, not a cut-off address.
+    let run = &bytes[start..pos];
+    if let Some((last, digits)) = run.split_last() {
+        if matches!(last, b'x' | b'X')
+            && !digits.is_empty()
+            && digits.iter().all(u8::is_ascii_digit)
+        {
+            return None;
+        }
+    }
+    // "…" is three bytes in UTF-8.
+    if bytes[pos..].starts_with("\u{2026}".as_bytes()) {
+        pos += "\u{2026}".len();
+    }
+    Some(pos)
 }
 
 /// End of the first host-like run that ends in a plausible TLD.
@@ -461,6 +491,22 @@ mod tests {
             .into_iter()
             .map(|span| (span.kind, text[span.start..span.end].to_string()))
             .collect()
+    }
+
+    #[test]
+    fn finds_an_email_cut_off_before_its_domain_ends() {
+        for text in [
+            "codegoddy@gmai... Pro",
+            "codegoddy@gmai\u{2026} Pro",
+            "codegoddy@gmai",
+        ] {
+            let scrubbed = scrub(text);
+            assert!(!scrubbed.contains("codegoddy"), "{text:?} -> {scrubbed:?}");
+        }
+        // A handle with nothing before the `@` is not an address.
+        assert!(scrub("Sam Lee @samlee").contains("samlee"));
+        // Nor is a "@2x" density marker.
+        assert!(scrub("Settings screenshot@2x").contains("screenshot@2x"));
     }
 
     #[test]

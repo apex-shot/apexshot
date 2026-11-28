@@ -36,6 +36,10 @@ struct NudgeState {
     cloud_nudge_shows: u64,
     cloud_nudge_dismissals: u64,
     cloud_nudge_last_day: String,
+    /// The one-time hint that says a capture was named from what it showed.
+    name_hint_shown: bool,
+    /// A rename happened and the hint still has to appear on a card.
+    name_hint_pending: bool,
 }
 
 /// Read-only snapshot of the Cloud nudge counters, for `cloud_nudge_due`.
@@ -97,6 +101,49 @@ pub fn bump_editor_open() -> u64 {
 /// Whether the lifetime screenshot count is one of the quiet hint slots.
 pub fn should_show_editor_hint(screenshot_count: u64) -> bool {
     matches!(screenshot_count, 10 | 30 | 60)
+}
+
+/// Note that the organizer renamed a capture, so the next Quick Access card
+/// with room can explain automatic names. A storage failure and a hinted
+/// machine both leave the file as it is.
+pub fn mark_name_hint_pending() {
+    let Some(path) = nudges_path() else {
+        return;
+    };
+    mark_name_hint_pending_at(&path);
+}
+
+/// Claim the one-time name hint. Returns true once per machine, and never
+/// after the hint has already appeared.
+pub fn take_name_hint() -> bool {
+    let Some(path) = nudges_path() else {
+        return false;
+    };
+    take_name_hint_at(&path)
+}
+
+fn mark_name_hint_pending_at(path: &Path) {
+    let _guard = lock_state();
+
+    let mut state = load_state(path);
+    if state.name_hint_shown || state.name_hint_pending {
+        return;
+    }
+    state.name_hint_pending = true;
+    let _ = save_state(path, &state);
+}
+
+fn take_name_hint_at(path: &Path) -> bool {
+    let _guard = lock_state();
+
+    let mut state = load_state(path);
+    if !state.name_hint_pending || state.name_hint_shown {
+        return false;
+    }
+    state.name_hint_shown = true;
+    state.name_hint_pending = false;
+    let _ = save_state(path, &state);
+    true
 }
 
 /// Persist one new Quick Access Copy count and return it. Counts every
@@ -289,6 +336,55 @@ mod tests {
         for count in [0, 1, 9, 11, 29, 31, 59, 61, 100] {
             assert!(!should_show_editor_hint(count), "{count}");
         }
+    }
+
+    #[test]
+    fn name_hint_is_taken_exactly_once() {
+        let path = scratch_path("name-hint");
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+
+        assert!(!take_name_hint_at(&path), "nothing pending yet");
+        mark_name_hint_pending_at(&path);
+        assert!(take_name_hint_at(&path));
+        assert!(!take_name_hint_at(&path));
+
+        let state = load_state(&path);
+        assert!(state.name_hint_shown);
+        assert!(!state.name_hint_pending);
+
+        fs::remove_file(&path).unwrap();
+        fs::remove_dir(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn a_shown_name_hint_is_never_marked_pending_again() {
+        let path = scratch_path("name-hint-shown");
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+
+        mark_name_hint_pending_at(&path);
+        assert!(take_name_hint_at(&path));
+        mark_name_hint_pending_at(&path);
+        assert!(!take_name_hint_at(&path));
+        assert!(!load_state(&path).name_hint_pending);
+
+        fs::remove_file(&path).unwrap();
+        fs::remove_dir(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn state_without_name_hint_keys_reads_as_unshown() {
+        let path = scratch_path("name-hint-legacy");
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, br#"{"screenshots":3,"copies":1}"#).unwrap();
+
+        let state = load_state(&path);
+        assert!(!state.name_hint_shown);
+        assert!(!state.name_hint_pending);
+        assert!(!take_name_hint_at(&path));
+
+        fs::remove_file(&path).unwrap();
+        fs::remove_dir(path.parent().unwrap()).unwrap();
     }
 
     fn nudge_env_lock() -> std::sync::MutexGuard<'static, ()> {

@@ -60,7 +60,56 @@ pub struct ReleaseNotes {
 ///
 /// Free improvements for a release go first in this list before shipping, so
 /// the window leads with what every copy gains.
-pub const RELEASES: &[ReleaseNotes] = &[ReleaseNotes {
+pub const RELEASES: &[ReleaseNotes] = &[
+    ReleaseNotes {
+        version: "0.4.0",
+        subtitle: None,
+        highlights: &[
+            Highlight {
+                title: "Screenshots name themselves",
+                body: "Each screenshot is named from its window and on-screen text right after you take it.",
+                studio: false,
+                without_studio_only: false,
+                platform: Platform::All,
+            },
+            Highlight {
+                title: "Search what was on screen",
+                body: "Find a screenshot in History by any word it showed.",
+                studio: false,
+                without_studio_only: false,
+                platform: Platform::All,
+            },
+            Highlight {
+                title: "Share links in fewer steps",
+                body: "Connecting Cloud now fills in your sign-in code for you.",
+                studio: false,
+                without_studio_only: false,
+                platform: Platform::All,
+            },
+            Highlight {
+                title: "Recording is ready from the first start",
+                body: "Recording no longer goes missing after a slow first start.",
+                studio: false,
+                without_studio_only: false,
+                platform: Platform::Windows,
+            },
+            Highlight {
+                title: "Record the display you picked",
+                body: "Multi-monitor recording on Hyprland, Sway, and Niri records your chosen display.",
+                studio: false,
+                without_studio_only: false,
+                platform: Platform::Linux,
+            },
+            Highlight {
+                title: "AI names (Beta)",
+                body: "A small model on your computer writes clearer names. Nothing is uploaded.",
+                studio: true,
+                without_studio_only: false,
+                platform: Platform::All,
+            },
+        ],
+    },
+    ReleaseNotes {
     version: "0.3.2",
     subtitle: None,
     highlights: &[
@@ -114,7 +163,8 @@ pub const RELEASES: &[ReleaseNotes] = &[ReleaseNotes {
             platform: Platform::Linux,
         },
     ],
-}];
+},
+];
 
 /// The highlights this person should see on this build: Studio owners skip
 /// the ones that only matter before buying, and each build skips the other
@@ -294,7 +344,7 @@ mod tests {
 
     #[test]
     fn the_newest_qualifying_entry_is_the_one_returned() {
-        let notes = notes_to_show("0.3.2", Some("0.1.0")).expect("the release qualifies");
+        let notes = notes_to_show("0.4.0", Some("0.1.0")).expect("the release qualifies");
         assert_eq!(notes.version, RELEASES[0].version);
     }
 
@@ -317,7 +367,9 @@ mod tests {
     #[test]
     fn notes_for_returns_the_newest_entry_covered_by_the_build() {
         assert_eq!(notes_for("0.3.2").map(|notes| notes.version), Some("0.3.2"));
-        assert_eq!(notes_for("0.4.0").map(|notes| notes.version), Some("0.3.2"));
+        assert_eq!(notes_for("0.3.9").map(|notes| notes.version), Some("0.3.2"));
+        assert_eq!(notes_for("0.4.0").map(|notes| notes.version), Some("0.4.0"));
+        assert_eq!(notes_for("0.5.0").map(|notes| notes.version), Some("0.4.0"));
         assert_eq!(notes_for("0.3.1"), None);
     }
 
@@ -462,37 +514,38 @@ mod tests {
     }
 
     #[test]
-    fn the_current_release_shows_studio_owners_only_free_improvements() {
-        for build in [Platform::Linux, Platform::Windows] {
-            let owners = highlights_for(&RELEASES[0], true, build);
-            assert!(!owners.is_empty());
-            assert!(owners.iter().all(|h| !h.studio && !h.without_studio_only));
-        }
-        let titles = |build| -> Vec<&str> {
-            highlights_for(&RELEASES[0], false, build)
+    fn the_current_release_lists_five_highlights_per_build() {
+        let titles = |studio_active, build| -> Vec<&str> {
+            highlights_for(&RELEASES[0], studio_active, build)
                 .iter()
                 .map(|h| h.title)
                 .collect()
         };
-        // The device menus, one-app audio, and the stop fix are Linux-only;
-        // the recorder fix, the silent update, and Quick Access are Windows-only.
         assert_eq!(
-            titles(Platform::Linux),
+            titles(false, Platform::Linux),
             [
-                "Choose your mic and speaker",
-                "Record one app's sound",
-                "Faster downloads and updates",
-                "Stop any recording"
+                "Screenshots name themselves",
+                "Search what was on screen",
+                "Share links in fewer steps",
+                "Record the display you picked",
+                "AI names (Beta)",
             ]
         );
         assert_eq!(
-            titles(Platform::Windows),
+            titles(false, Platform::Windows),
             [
-                "Recording works again",
-                "Faster downloads and updates",
-                "Updates skip the setup wizard",
-                "Quick Access in your recordings"
+                "Screenshots name themselves",
+                "Search what was on screen",
+                "Share links in fewer steps",
+                "Recording is ready from the first start",
+                "AI names (Beta)",
             ]
         );
+        // Owners keep AI names, their own Studio feature.
+        for build in [Platform::Linux, Platform::Windows] {
+            let owners = titles(true, build);
+            assert_eq!(owners.len(), 5);
+            assert!(owners.contains(&"AI names (Beta)"));
+        }
     }
 }

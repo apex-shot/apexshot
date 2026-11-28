@@ -5695,3 +5695,48 @@ msgstr "AI 命名需要至少 8 GB 内存、4 个处理器核心并支持 AVX2�
 
 msgid "Search them by their text in History."
 msgstr "可在历史记录中按文字搜索。"
+
+msgid "Named from what you captured. Search it in History."
+msgstr "已根据截取的内容命名。可在历史记录中搜索。"
+
+msgid "Open History"
+msgstr "打开历史记录"
+
+msgid "Each screenshot is named from its window and on-screen text right after you take it."
+msgstr "每张截图拍下后，会立即根据窗口和屏幕文字命名。"
+
+msgid "Search what was on screen"
+msgstr "按屏幕上的内容搜索"
+
+msgid "Find a screenshot in History by any word it showed."
+msgstr "用截图中出现过的任何词，在历史记录中找到它。"
+
+msgid "Share links in fewer steps"
+msgstr "分享链接步骤更少"
+
+msgid "Connecting Cloud now fills in your sign-in code for you."
+msgstr "连接 Cloud 时，现在会自动填入你的登录代码。"
+
+msgid "Recording is ready from the first start"
+msgstr "首次启动即可录制"
+
+msgid "Recording no longer goes missing after a slow first start."
+msgstr "首次启动较慢时，录制不再变得不可用。"
+
+msgid "Record the display you picked"
+msgstr "录制你选择的显示器"
+
+msgid "Multi-monitor recording on Hyprland, Sway, and Niri records your chosen display."
+msgstr "在 Hyprland、Sway 和 Niri 的多显示器环境中，会录制你选择的显示器。"
+
+msgid "AI names (Beta)"
+msgstr "AI 命名（测试版）"
+
+msgid "A small model on your computer writes clearer names. Nothing is uploaded."
+msgstr "电脑上的小模型会写出更清晰的名称。不会上传任何内容。"
+
+msgid "Black Friday: Studio is 50% off"
+msgstr "黑色星期五：Studio 5 折"
+
+msgid "$19.50 instead of $39, until November 30. Motion export, Upscale, Studio styles, and AI names."
+msgstr "11 月 30 日前，19.50 美元，原价 39 美元。包含 Motion 导出、放大、Studio 样式和 AI 命名。"

@@ -46,6 +46,9 @@ export function buildWindowListPayload(windows) {
             width: Math.max(1, Math.trunc(window.width)),
             height: Math.max(1, Math.trunc(window.height)),
             minimized: window.minimized,
+            // Which window the user was in, for naming a capture after it.
+            focused: Boolean(window.focused),
+            userTime: Number.isFinite(window.userTime) ? Math.trunc(window.userTime) : 0,
         }));
 }
 
@@ -137,6 +140,8 @@ export class WindowListService {
                     width: frame.width,
                     height: frame.height,
                     minimized: metaWindow.minimized,
+                    focused: metaWindow.has_focus(),
+                    userTime: metaWindow.get_user_time(),
                     skipTaskbar: metaWindow.is_skip_taskbar(),
                     captureUi: this._previewStacker.isCaptureUiWindow(metaWindow),
                     wmClass,

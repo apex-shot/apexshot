@@ -5808,3 +5808,48 @@ msgstr "KI-Namen brauchen mindestens 8 GB Arbeitsspeicher, 4 Prozessorkerne und 
 
 msgid "Search them by their text in History."
 msgstr "Durchsuche sie im Verlauf nach ihrem Text."
+
+msgid "Named from what you captured. Search it in History."
+msgstr "Benannt nach dem, was du aufgenommen hast. Suche danach im Verlauf."
+
+msgid "Open History"
+msgstr "Verlauf öffnen"
+
+msgid "Each screenshot is named from its window and on-screen text right after you take it."
+msgstr "Jeder Screenshot wird direkt nach der Aufnahme nach seinem Fenster und dem Text auf dem Bildschirm benannt."
+
+msgid "Search what was on screen"
+msgstr "Suche nach dem, was zu sehen war"
+
+msgid "Find a screenshot in History by any word it showed."
+msgstr "Finde einen Screenshot im Verlauf über jedes Wort, das darauf zu sehen war."
+
+msgid "Share links in fewer steps"
+msgstr "Links teilen in weniger Schritten"
+
+msgid "Connecting Cloud now fills in your sign-in code for you."
+msgstr "Beim Verbinden mit Cloud wird dein Anmeldecode jetzt automatisch eingetragen."
+
+msgid "Recording is ready from the first start"
+msgstr "Aufnahme ab dem ersten Start bereit"
+
+msgid "Recording no longer goes missing after a slow first start."
+msgstr "Die Aufnahme verschwindet nach einem langsamen ersten Start nicht mehr."
+
+msgid "Record the display you picked"
+msgstr "Den gewählten Bildschirm aufnehmen"
+
+msgid "Multi-monitor recording on Hyprland, Sway, and Niri records your chosen display."
+msgstr "Aufnahmen mit mehreren Bildschirmen unter Hyprland, Sway und Niri nehmen den gewählten Bildschirm auf."
+
+msgid "AI names (Beta)"
+msgstr "KI-Namen (Beta)"
+
+msgid "A small model on your computer writes clearer names. Nothing is uploaded."
+msgstr "Ein kleines Modell auf deinem Computer schreibt klarere Namen. Es wird nichts hochgeladen."
+
+msgid "Black Friday: Studio is 50% off"
+msgstr "Black Friday: Studio 50 % günstiger"
+
+msgid "$19.50 instead of $39, until November 30. Motion export, Upscale, Studio styles, and AI names."
+msgstr "19,50 $ statt 39 $, bis zum 30. November. Motion-Export, Hochskalieren, Studio-Stile und KI-Namen."

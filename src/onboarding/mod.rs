@@ -465,27 +465,34 @@ pub(crate) fn install_pane_drag(pane: &GtkBox, window: &ApplicationWindow) {
     gesture.set_button(1);
     let window = window.downgrade();
     gesture.connect_pressed(move |gesture, _, x, y| {
+        // As in the editors: a press this gesture will not move with is
+        // denied so the control keeps it, and a move claims the press first so
+        // no other handler on the window takes it.
+        let deny = |gesture: &gtk4::GestureClick| {
+            gesture.set_state(gtk4::EventSequenceState::Denied);
+        };
         let Some(pane) = gesture.widget() else {
-            return;
+            return deny(gesture);
         };
         if press_hits_control(&pane, x, y) {
-            return;
+            return deny(gesture);
         }
         let Some(window) = window.upgrade() else {
-            return;
+            return deny(gesture);
         };
         let Some(event) = gesture.current_event() else {
-            return;
+            return deny(gesture);
         };
         let Some(device) = event.device() else {
-            return;
+            return deny(gesture);
         };
         let Some(toplevel) = window
             .surface()
             .and_then(|surface| surface.downcast::<gtk4::gdk::Toplevel>().ok())
         else {
-            return;
+            return deny(gesture);
         };
+        gesture.set_state(gtk4::EventSequenceState::Claimed);
         toplevel.begin_move(&device, gesture.current_button() as i32, x, y, event.time());
     });
     pane.add_controller(gesture);

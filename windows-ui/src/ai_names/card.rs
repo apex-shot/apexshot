@@ -21,7 +21,15 @@ const CARD_WIDTH: f64 = 440.0;
 const CTA_WIDTH: f64 = 320.0;
 
 /// Run one AI names card as its own small window; returns the exit code.
+///
+/// The card claims the shared promo slot first, so it never opens beside
+/// another card that advertises something.
 pub fn run_card(kind: CardKind) -> i32 {
+    let Some(_slot) = crate::promo_slot::try_claim(crate::promo_slot::KIND_AI_NAMES) else {
+        eprintln!("[ai-names] Another promotion window is open; not showing the card.");
+        return 0;
+    };
+
     let app = Application::builder()
         .application_id(crate::app_identity::app_id())
         .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
@@ -83,8 +91,16 @@ fn build_card(app: &Application, kind: CardKind) {
     let title_label = centered_label(&title, "apexshot-studio-headline");
     title_label.add_css_class("apexshot-studio-headline-compact");
     title_label.add_css_class("ai-names-headline");
-    title_label.set_max_width_chars(34);
-    body.append(&title_label);
+    title_label.set_max_width_chars(32);
+    let title_line = GtkBox::new(Orientation::Horizontal, px(8.0));
+    title_line.set_halign(Align::Center);
+    title_line.set_valign(Align::Center);
+    title_line.append(&title_label);
+    let beta = Label::new(Some(&t("Beta")));
+    beta.add_css_class("ai-names-tag");
+    beta.set_valign(Align::Center);
+    title_line.append(&beta);
+    body.append(&title_line);
 
     let lede_label = centered_label(&lede, "apexshot-studio-lede");
     lede_label.set_max_width_chars(40);
@@ -142,7 +158,7 @@ fn build_card(app: &Application, kind: CardKind) {
     match kind {
         CardKind::TrialEnded => {
             let hint = centered_label(
-                &t("$39 once. Studio also includes Motion export, Upscale, and Studio styles."),
+                &crate::studio_offer::ai_names_price_note(),
                 "apexshot-studio-note",
             );
             hint.set_max_width_chars(46);
@@ -307,6 +323,9 @@ pub(crate) fn example_pairs(limit: usize) -> Vec<(String, String)> {
             let ai = apexshot_organizer::ai::clean_reply(&stem).unwrap_or_else(|| {
                 apexshot_organizer::ai::strip_density_marker(stem.trim()).to_string()
             });
+            // Names from before the readability check could be OCR noise;
+            // only a name that reads as words is worth showing off.
+            let ai = apexshot_organizer::quality::readable_name(&ai)?;
             if ai.trim().eq_ignore_ascii_case(free.trim()) {
                 return None;
             }

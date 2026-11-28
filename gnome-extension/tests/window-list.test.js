@@ -105,3 +105,16 @@ runTest('activating a window restores it before focusing it', () => {
 runTest('activating a window that no longer exists fails cleanly', () => {
     assertEqual(activateWindowRecord(null, 0), false, 'missing window should not activate');
 });
+
+runTest('window list reports which window the user was in', () => {
+    const payload = buildWindowListPayload([
+        window({id: 3, title: 'Docs', focused: true, userTime: 900}),
+        window({id: 4, title: 'Mail', userTime: 400}),
+        window({id: 5, title: 'Old'}),
+    ]);
+
+    assertEqual(payload[0].focused, true, 'focused window is flagged');
+    assertEqual(payload[0].userTime, 900, 'last use time is kept');
+    assertEqual(payload[1].focused, false, 'other windows are not focused');
+    assertEqual(payload[2].userTime, 0, 'a missing time reads as never used');
+});

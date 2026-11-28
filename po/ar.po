@@ -5728,3 +5728,48 @@ msgstr "تحتاج أسماء الذكاء الاصطناعي إلى ذاكرة 
 
 msgid "Search them by their text in History."
 msgstr "ابحث فيها بنصها في السجل."
+
+msgid "Named from what you captured. Search it in History."
+msgstr "سُمّيت حسب ما التقطته. ابحث عنها في السجل."
+
+msgid "Open History"
+msgstr "فتح السجل"
+
+msgid "Each screenshot is named from its window and on-screen text right after you take it."
+msgstr "تُسمّى كل لقطة شاشة من نافذتها ومن النص الظاهر على الشاشة فور التقاطها."
+
+msgid "Search what was on screen"
+msgstr "ابحث فيما كان على الشاشة"
+
+msgid "Find a screenshot in History by any word it showed."
+msgstr "اعثر على لقطة شاشة في السجل بأي كلمة ظهرت فيها."
+
+msgid "Share links in fewer steps"
+msgstr "روابط مشاركة بخطوات أقل"
+
+msgid "Connecting Cloud now fills in your sign-in code for you."
+msgstr "يملأ ربط Cloud الآن رمز تسجيل الدخول نيابةً عنك."
+
+msgid "Recording is ready from the first start"
+msgstr "التسجيل جاهز من أول تشغيل"
+
+msgid "Recording no longer goes missing after a slow first start."
+msgstr "لم يعد التسجيل يختفي بعد تشغيل أول بطيء."
+
+msgid "Record the display you picked"
+msgstr "سجّل الشاشة التي اخترتها"
+
+msgid "Multi-monitor recording on Hyprland, Sway, and Niri records your chosen display."
+msgstr "يسجّل التسجيل متعدد الشاشات على Hyprland وSway وNiri الشاشة التي اخترتها."
+
+msgid "AI names (Beta)"
+msgstr "أسماء بالذكاء الاصطناعي (تجريبي)"
+
+msgid "A small model on your computer writes clearer names. Nothing is uploaded."
+msgstr "نموذج صغير على حاسوبك يكتب أسماء أوضح. لا يُرفع أي شيء."
+
+msgid "Black Friday: Studio is 50% off"
+msgstr "الجمعة السوداء: خصم 50% على Studio"
+
+msgid "$19.50 instead of $39, until November 30. Motion export, Upscale, Studio styles, and AI names."
+msgstr "19.50 دولارًا بدلًا من 39 دولارًا، حتى 30 نوفمبر. تصدير Motion والتكبير وأنماط Studio وأسماء الذكاء الاصطناعي."

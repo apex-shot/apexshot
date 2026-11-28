@@ -668,19 +668,18 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
 
     let create_header = |section: &GtkBox, label_text: &str, icon: &str| {
         let hbox = GtkBox::new(Orientation::Horizontal, 10);
-        #[cfg(target_os = "windows")]
+        // The heading's own top margin would push it below the icon; the row
+        // carries the spacing instead, so icon and title share a centre line.
         hbox.add_css_class("shortcut-heading-windows");
         hbox.set_margin_bottom(8);
         hbox.set_margin_top(8);
 
         let img = Image::from_icon_name(icon);
         img.set_pixel_size(20);
-        #[cfg(target_os = "windows")]
         img.set_valign(Align::Center);
 
         let lbl = Label::new(Some(&t(label_text)));
         lbl.add_css_class("settings-group-title");
-        #[cfg(target_os = "windows")]
         lbl.set_valign(Align::Center);
 
         hbox.append(&img);

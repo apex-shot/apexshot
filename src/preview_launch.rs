@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
@@ -10,6 +10,14 @@ use crate::{
 
 const PREVIEW_TIMING_ENV: &str = "APEXSHOT_PREVIEW_TIMING";
 const PREVIEW_PARENT_START_ENV: &str = "APEXSHOT_PREVIEW_PARENT_START_MS";
+
+/// Set on a preview subprocess that will receive the capture's final path over
+/// stdin, and report on stdout when its card was used before that path came.
+pub const PREVIEW_RENAMES_ENV: &str = "APEXSHOT_PREVIEW_RENAMES";
+
+/// A line the preview prints when the card's actions ran before the final path
+/// arrived, so the capture keeps the name its card already shows.
+pub const PREVIEW_USED_SIGNAL: &str = "apexshot-preview:used";
 
 pub fn should_use_direct_preview_launch() -> bool {
     kde_screenshot::is_kde_wayland_session()
@@ -37,6 +45,24 @@ pub fn spawn_preview_subprocess_on_display(
     path: &Path,
     display: Option<CaptureDisplay>,
 ) -> std::io::Result<Child> {
+    preview_command(path, display).spawn()
+}
+
+/// Launch the preview with piped stdin/stdout so the daemon can hand it the
+/// capture's final path after naming and hear back if its card was used first.
+pub fn spawn_preview_subprocess_with_renames_on_display(
+    path: &Path,
+    display: Option<CaptureDisplay>,
+) -> std::io::Result<Child> {
+    let mut command = preview_command(path, display);
+    command
+        .env(PREVIEW_RENAMES_ENV, "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped());
+    command.spawn()
+}
+
+fn preview_command(path: &Path, display: Option<CaptureDisplay>) -> Command {
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("apexshot"));
     let mut command = Command::new(&exe);
     command.arg("preview").arg(path);
@@ -55,7 +81,7 @@ pub fn spawn_preview_subprocess_on_display(
         }
     }
 
-    command.spawn()
+    command
 }
 
 /// Best-effort fallback if the preview subprocess cannot be started.

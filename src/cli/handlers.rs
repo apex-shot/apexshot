@@ -444,16 +444,18 @@ pub(crate) fn run_capture(args: &[String]) {
         return;
     } else {
         match save_capture(&capture, &config) {
-            Ok(path) => {
-                println!("Saved to: {}", path.display());
-                path
-            }
+            Ok(path) => path,
             Err(e) => {
                 eprintln!("Error saving capture: {}", e);
                 std::process::exit(1);
             }
         }
     };
+
+    // The no-daemon path names and indexes the saved screenshot too, so every
+    // later use below works with the final path.
+    let saved_path = apexshot::organizer_hook::organize_saved_capture(saved_path, &app_config);
+    println!("Saved to: {}", saved_path.display());
 
     // Hotkeys normally go through the daemon (which auto-uploads). When the
     // daemon is down we fall back to this in-process path — still honor

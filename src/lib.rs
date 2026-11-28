@@ -11,10 +11,12 @@
     deprecated
 )]
 
+pub mod ai_names;
 pub mod annotations;
 pub mod app_identity;
 pub mod app_links;
 pub mod backend;
+pub mod black_friday;
 pub mod capture;
 pub mod capture_overlay;
 pub mod cloud;
@@ -32,14 +34,17 @@ pub mod hotkeys;
 pub mod i18n;
 pub mod ocr;
 pub mod onboarding;
+pub mod organizer_hook;
 pub mod overlay;
 pub mod pipewire_engine;
 pub mod preview_launch;
+pub mod promo_slot;
 pub mod qr;
 pub mod recording;
 pub mod settings;
 pub(crate) mod studio_entitlement;
 pub(crate) mod studio_nudges;
+pub(crate) mod studio_offer;
 pub(crate) mod studio_trial;
 pub(crate) mod studio_trial_toast;
 pub(crate) mod studio_upsell;

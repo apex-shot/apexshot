@@ -17,25 +17,24 @@ pub fn build(body: &GtkBox, actions: &GtkBox, nav: &Nav) {
 
     let tray_title = t("Tray icon");
     let tray_body = t("Right-click for Area, Screen, and Record");
-    let hotkeys_title = t("Hotkeys");
-    let hotkeys_body = if crate::app_identity::portal_only() {
-        t("Available when your desktop supports the GlobalShortcuts portal")
-    } else {
-        t("Capture without opening Settings every time")
-    };
+    let naming_title = t("Screenshots name themselves");
+    // One line, like the other items: the page must fit without scrolling.
+    let naming_body = t("Search them by their text in History.");
     let menu_title = t("App menu");
     let menu_body = t("Open ApexShot anytime for Settings, shortcuts, and preferences");
+    // The shortcuts page just before this one already covers hotkeys.
+    let search_icon = if crate::settings::windowing::prefers_dark_glass_theme() {
+        custom::SEARCH
+    } else {
+        custom::SEARCH_LIGHT
+    };
     let checklist = feature_card_list(&[
         (
             custom::OVERLAPPING_WINDOWS_SYMBOLIC,
             tray_title.as_str(),
             tray_body.as_str(),
         ),
-        (
-            custom::KEYBOARD_SHORTCUTS_SYMBOLIC,
-            hotkeys_title.as_str(),
-            hotkeys_body.as_str(),
-        ),
+        (search_icon, naming_title.as_str(), naming_body.as_str()),
         (
             custom::SETTINGS_SYMBOLIC,
             menu_title.as_str(),

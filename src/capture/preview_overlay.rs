@@ -9,7 +9,7 @@ use gtk4::{
     glib::{self, ControlFlow},
     prelude::*,
     Align, ApplicationWindow, Box as GtkBox, Button, CssProvider, DragSource, DrawingArea,
-    EventControllerKey, FileChooserNative, Orientation, Overlay, WidgetPaintable, Window,
+    EventControllerKey, FileChooserNative, Label, Orientation, Overlay, WidgetPaintable, Window,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use std::cell::{Cell, RefCell};
@@ -103,6 +103,33 @@ fn generate_preview_id(pid: u32) -> String {
         .map(|d| d.as_millis())
         .unwrap_or(0);
     format!("preview-{}-{}", pid, ts)
+}
+
+/// Whether the daemon is going to send this card the capture's final path.
+fn preview_renames_enabled() -> bool {
+    std::env::var(crate::preview_launch::PREVIEW_RENAMES_ENV)
+        .map(|value| value == "1")
+        .unwrap_or(false)
+}
+
+/// Parse one line the daemon writes to the preview's stdin.
+///
+/// A message is `path<TAB><new path>` for a final name, or
+/// `path-interim<TAB><new path>` when the rule-based name is in place but a
+/// background refine may still rename the file. The flag says which. Anything
+/// else is ignored, and an empty path is not a location.
+fn parse_preview_message(line: &str) -> Option<(PathBuf, bool)> {
+    let line = line.trim_end_matches(|c| c == '\n' || c == '\r');
+    for (prefix, is_final) in [("path-interim\t", false), ("path\t", true)] {
+        let Some(path) = line.strip_prefix(prefix) else {
+            continue;
+        };
+        if path.is_empty() {
+            return None;
+        }
+        return Some((PathBuf::from(path), is_final));
+    }
+    None
 }
 
 const PREVIEW_WIDTH: i32 = 190;
@@ -360,6 +387,28 @@ fn setup_preview_window(
     probe.log("setup-preview-window-enter");
     let startup = probe.startup;
     let path = path.to_path_buf();
+    let renames_enabled = preview_renames_enabled();
+    // Every action reads this at the moment it runs, so a rename the daemon
+    // reports over stdin moves the whole card to the final file.
+    let current_path = Rc::new(RefCell::new(path.clone()));
+    let final_path_received = Rc::new(Cell::new(!renames_enabled));
+    let used_reported = Rc::new(Cell::new(false));
+    // The daemon keeps the saved name when an action runs before the final
+    // path arrives, because this card already showed the old one.
+    let mark_used: Rc<dyn Fn()> = {
+        let final_path_received = final_path_received.clone();
+        let used_reported = used_reported.clone();
+        Rc::new(move || {
+            if !renames_enabled || final_path_received.get() || used_reported.get() {
+                return;
+            }
+            used_reported.set(true);
+            use std::io::Write;
+            let mut stdout = std::io::stdout();
+            let _ = writeln!(stdout, "{}", crate::preview_launch::PREVIEW_USED_SIGNAL);
+            let _ = stdout.flush();
+        })
+    };
     // One bump per Quick Access preview, independent of telemetry.
     let screenshot_count = crate::studio_nudges::bump_screenshot();
 
@@ -544,6 +593,26 @@ fn setup_preview_window(
         hint.connect_clicked(move |_| edit_btn_hint.emit_clicked());
     }
 
+    // The first capture the organizer renamed explains where its name came
+    // from. It shares the quiet slot with the editor hint, so the two never
+    // appear together. The card is built before the rename on a normal
+    // capture, so the hint may also arrive with the final path below.
+    let name_hint_shown = !editor_hint_shown && crate::studio_nudges::take_name_hint();
+    if name_hint_shown {
+        add_name_hint(&card);
+    }
+    let preview_hint_shown = Rc::new(Cell::new(editor_hint_shown || name_hint_shown));
+
+    if renames_enabled {
+        start_path_updates(
+            current_path.clone(),
+            final_path_received.clone(),
+            card.clone(),
+            preview_hint_shown.clone(),
+            editor_hint_shown,
+        );
+    }
+
     let chrome = GtkBox::new(Orientation::Vertical, 0);
     chrome.set_widget_name("capture-preview-chrome");
     chrome.set_hexpand(false);
@@ -724,7 +793,8 @@ fn setup_preview_window(
         });
     }
 
-    let path_actions = path.clone();
+    let current_path_actions = current_path.clone();
+    let mark_used_actions = mark_used.clone();
     let window_actions = window.downgrade();
     let card_actions = card.clone();
     let pinned_actions = pinned.clone();
@@ -751,26 +821,23 @@ fn setup_preview_window(
             return;
         };
 
-        let uri = match file_uri(&path_actions) {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!("Failed to enable drag/drop for preview: {e}");
-                return;
-            }
-        };
-
-        let uri_provider = gdk::ContentProvider::for_bytes(
-            "text/uri-list",
-            &glib::Bytes::from_owned(format!("{uri}\r\n").into_bytes()),
-        );
-        let text_provider = gdk::ContentProvider::for_value(&uri.to_value());
-        let provider = gdk::ContentProvider::new_union(&[uri_provider, text_provider]);
-
+        let current_path_drag = current_path_actions.clone();
+        let mark_used_drag = mark_used_actions.clone();
         let drag_source = DragSource::new();
         drag_source.set_actions(gdk::DragAction::COPY);
-        drag_source.set_content(Some(&provider));
-        let provider_prepare = provider.clone();
-        drag_source.connect_prepare(move |_, _, _| Some(provider_prepare.clone()));
+        // The content is rebuilt when a drag starts so it names the file the
+        // card shows at that moment, not the one it opened with.
+        let opened_uri = file_uri(current_path_drag.borrow().as_path());
+        if let Ok(uri) = opened_uri {
+            drag_source.set_content(Some(&drag_content_provider(&uri)));
+        }
+        drag_source.connect_prepare(move |_, _, _| {
+            mark_used_drag();
+            let path = current_path_drag.borrow();
+            file_uri(path.as_path())
+                .ok()
+                .map(|uri| drag_content_provider(&uri))
+        });
         let drag_paintable = WidgetPaintable::new(Some(&card_actions));
         drag_source.set_icon(Some(&drag_paintable), 24, 24);
 
@@ -843,13 +910,17 @@ fn setup_preview_window(
             );
         });
 
-        let path_copy = path_actions.clone();
+        let current_path_copy = current_path_actions.clone();
+        let mark_used_copy = mark_used_actions.clone();
+        let preview_hint_shown_copy = preview_hint_shown.clone();
         copy_btn_actions.connect_clicked(move |_| {
-            if let Err(e) = copy_screenshot_to_clipboard(&path_copy) {
+            mark_used_copy();
+            let path = current_path_copy.borrow().clone();
+            if let Err(e) = copy_screenshot_to_clipboard(&path) {
                 eprintln!("Copy failed: {e}");
                 return;
             }
-            maybe_show_cloud_nudge(&path_copy, screenshot_count, editor_hint_shown);
+            maybe_show_cloud_nudge(&path, screenshot_count, preview_hint_shown_copy.get());
         });
 
         // With copy-after-capture on, the capture is already on the clipboard
@@ -857,7 +928,8 @@ fn setup_preview_window(
         // as that copy. Show the card just after the result so the capture is
         // seen first.
         if load_config().after_capture_copy_file_to_clipboard {
-            let path_nudge = path_actions.clone();
+            let current_path_nudge = current_path_actions.clone();
+            let preview_hint_shown_nudge = preview_hint_shown.clone();
             let window_nudge = window.downgrade();
             glib::timeout_add_local_once(Duration::from_millis(1500), move || {
                 let Some(window) = window_nudge.upgrade() else {
@@ -866,11 +938,13 @@ fn setup_preview_window(
                 if !window.is_visible() {
                     return;
                 }
-                maybe_show_cloud_nudge(&path_nudge, screenshot_count, editor_hint_shown);
+                let path = current_path_nudge.borrow().clone();
+                maybe_show_cloud_nudge(&path, screenshot_count, preview_hint_shown_nudge.get());
             });
         }
 
-        let path_save_as = path_actions.clone();
+        let current_path_save_as = current_path_actions.clone();
+        let mark_used_save_as = mark_used_actions.clone();
         let window_weak_save_as = window.downgrade();
         let save_dialog_open_click = save_dialog_open_actions;
         let save_chooser_click = save_chooser_actions;
@@ -881,13 +955,15 @@ fn setup_preview_window(
             let Some(parent) = window_weak_save_as.upgrade() else {
                 return;
             };
+            mark_used_save_as();
             save_dialog_open_click.set(true);
 
             let save_dialog_open_done = save_dialog_open_click.clone();
             let save_chooser_done = save_chooser_click.clone();
+            let path = current_path_save_as.borrow().clone();
             let chooser = crate::capture::save_dialog::show_save_dialog(
                 Some(&parent),
-                path_save_as.clone(),
+                path,
                 move |_destination| {
                     save_dialog_open_done.set(false);
                     *save_chooser_done.borrow_mut() = None;
@@ -896,7 +972,8 @@ fn setup_preview_window(
             *save_chooser_click.borrow_mut() = Some(chooser);
         });
 
-        let path_upload = path_actions.clone();
+        let current_path_upload = current_path_actions.clone();
+        let mark_used_upload = mark_used_actions.clone();
         // Worker thread signals the GTK main loop via this channel (GTK widgets
         // are !Send, so we cannot touch the window/button from the upload thread).
         let (upload_ui_tx, upload_ui_rx) = std::sync::mpsc::channel::<UploadUiEvent>();
@@ -955,10 +1032,11 @@ fn setup_preview_window(
                 return;
             }
 
+            mark_used_upload();
             let config = load_config();
             if crate::cloud::sign_in::needs_apexshot_sign_in(&config) {
                 let retry_button = upload_btn_retry.clone();
-                let retry_path = path_upload.clone();
+                let retry_path = current_path_upload.clone();
                 crate::cloud::sign_in::prompt_for_upload(None, move || {
                     if let Some(button) = retry_button.upgrade() {
                         if button.is_mapped() {
@@ -970,7 +1048,7 @@ fn setup_preview_window(
                     // process's only window. The shared helper holds the
                     // application open until the upload finishes instead of
                     // letting the card's close end the process mid-request.
-                    crate::cloud::sign_in::upload_after_sign_in(retry_path.clone());
+                    crate::cloud::sign_in::upload_after_sign_in(retry_path.borrow().clone());
                 });
                 return;
             }
@@ -985,7 +1063,7 @@ fn setup_preview_window(
 
             // Live Settings value so Quick Access toggles apply without reopening.
             let close_after_upload = config.quick_access_close_after_uploading;
-            let path = path_upload.clone();
+            let path = current_path_upload.borrow().clone();
             let upload_ui_tx = upload_ui_tx.clone();
             std::thread::spawn(move || {
                 // Shared upload path (logs + notifications). Auto-upload after
@@ -1018,18 +1096,21 @@ fn setup_preview_window(
             });
         });
 
-        let path_edit = path_actions.clone();
+        let current_path_edit = current_path_actions.clone();
+        let mark_used_edit = mark_used_actions.clone();
         let source_bytes_edit = source_bytes_actions.clone();
         let edit_opened_btn = edit_opened_actions.clone();
         let window_weak_edit = window.downgrade();
         edit_btn_actions.connect_clicked(move |_| {
-            if !path_edit.exists() {
+            mark_used_edit();
+            let path = current_path_edit.borrow().clone();
+            if !path.exists() {
                 let cached_bytes = source_bytes_edit
                     .lock()
                     .ok()
                     .and_then(|guard| guard.clone());
                 if let Some(bytes) = cached_bytes {
-                    if let Err(e) = std::fs::write(&path_edit, bytes.as_slice()) {
+                    if let Err(e) = std::fs::write(&path, bytes.as_slice()) {
                         eprintln!("Edit failed: could not restore missing screenshot file: {e}");
                         return;
                     }
@@ -1040,13 +1121,13 @@ fn setup_preview_window(
             }
 
             if crate::preview_launch::should_use_direct_editor_launch() {
-                if let Err(e) = crate::capture::open_image_editor(path_edit.clone()) {
+                if let Err(e) = crate::capture::open_image_editor(path.clone()) {
                     eprintln!("Edit failed: {e}");
                     return;
                 }
             } else {
                 let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("apexshot"));
-                if let Err(e) = Command::new(&exe).arg("edit").arg(&path_edit).spawn() {
+                if let Err(e) = Command::new(&exe).arg("edit").arg(&path).spawn() {
                     eprintln!("Edit failed: {e}");
                     return;
                 }
@@ -1063,7 +1144,7 @@ fn setup_preview_window(
             eprintln!(
                 "[preview] deferred actions initialized at {}ms for {}",
                 startup_actions.elapsed().as_millis(),
-                path_actions.display()
+                current_path_actions.borrow().display()
             );
         }
     });
@@ -1136,10 +1217,11 @@ fn setup_preview_window(
         glib::Propagation::Proceed
     });
 
-    let path_source_bytes = path.clone();
+    let current_path_source_bytes = current_path.clone();
     let source_bytes_cache = source_bytes.clone();
     glib::idle_add_local_once(move || {
-        if let Ok(bytes) = std::fs::read(&path_source_bytes) {
+        let path = current_path_source_bytes.borrow().clone();
+        if let Ok(bytes) = std::fs::read(&path) {
             if let Ok(mut cache) = source_bytes_cache.lock() {
                 *cache = Some(Arc::new(bytes));
             }
@@ -1508,16 +1590,95 @@ fn install_preview_css() {
     }
 }
 
+/// Add the one-time automatic-naming hint to the card. It shares the quiet
+/// slot with the editor hint, so callers only add it when that one is absent.
+fn add_name_hint(card: &Overlay) {
+    let hint = Button::new();
+    let hint_label = Label::new(Some(&t(
+        "Named from what you captured. Search it in History.",
+    )));
+    hint_label.set_wrap(true);
+    hint_label.set_justify(gtk4::Justification::Center);
+    hint_label.set_max_width_chars(26);
+    hint.set_child(Some(&hint_label));
+    hint.set_has_frame(false);
+    hint.set_focusable(false);
+    hint.add_css_class("preview-hint");
+    hint.set_halign(Align::Center);
+    hint.set_valign(Align::End);
+    hint.set_margin_bottom(PREVIEW_CORNER_MARGIN);
+    hint.set_tooltip_text(Some(&t("Open History")));
+    card.add_overlay(&hint);
+    card.set_measure_overlay(&hint, false);
+    hint.connect_clicked(|_| {
+        if let Ok(exe) = std::env::current_exe() {
+            let _ = Command::new(exe).arg("history").spawn();
+        }
+    });
+}
+
+/// Follow the daemon's path lines on stdin and move the card's actions to the
+/// current file. An interim line means the rule-based name is in place but a
+/// background refine may still rename it; only a final line means no further
+/// rename can follow. The card was built before the rename, so this is also
+/// the first moment the name hint can claim its slot.
+fn start_path_updates(
+    current_path: Rc<RefCell<PathBuf>>,
+    final_path_received: Rc<Cell<bool>>,
+    card: Overlay,
+    preview_hint_shown: Rc<Cell<bool>>,
+    editor_hint_shown: bool,
+) {
+    let (path_tx, path_rx) = std::sync::mpsc::channel::<(PathBuf, bool)>();
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        for line in std::io::stdin().lock().lines() {
+            let Ok(line) = line else {
+                break;
+            };
+            if let Some(message) = parse_preview_message(&line) {
+                if path_tx.send(message).is_err() {
+                    break;
+                }
+            }
+        }
+    });
+
+    glib::timeout_add_local(Duration::from_millis(50), move || loop {
+        match path_rx.try_recv() {
+            Ok((path, is_final)) => {
+                *current_path.borrow_mut() = path;
+                // The rule-based name is the first moment the name hint can
+                // claim its slot, even when the model may refine it later.
+                if !editor_hint_shown
+                    && !preview_hint_shown.get()
+                    && crate::studio_nudges::take_name_hint()
+                {
+                    add_name_hint(&card);
+                    preview_hint_shown.set(true);
+                }
+                // Only the final line means no further rename can follow, so
+                // only it stops the card reporting a used path.
+                if is_final {
+                    final_path_received.set(true);
+                }
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => return ControlFlow::Continue,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => return ControlFlow::Break,
+        }
+    });
+}
+
 /// Count this Copy and offer the Cloud card when the nudge counters allow it.
 ///
 /// The offer is a card of its own, so it no longer changes the preview's
 /// geometry or keeps its auto-close running.
-fn maybe_show_cloud_nudge(path: &Path, screenshots: u64, editor_hint_shown: bool) {
+fn maybe_show_cloud_nudge(path: &Path, screenshots: u64, preview_hint_shown: bool) {
     // Every successful Copy counts, even when something else keeps the nudge
     // off this capture.
     crate::studio_nudges::bump_copy();
-    // The editor hint and the nudge never share a capture.
-    if editor_hint_shown {
+    // A quiet hint on the card and the nudge never share a capture.
+    if preview_hint_shown {
         return;
     }
 
@@ -1528,11 +1689,17 @@ fn maybe_show_cloud_nudge(path: &Path, screenshots: u64, editor_hint_shown: bool
         return;
     }
 
+    // Another window that advertises something owns the screen. Claiming the
+    // promo slot first keeps the nudge counters untouched for the next copy.
+    let Some(slot) = crate::promo_slot::try_claim(crate::promo_slot::KIND_CLOUD_INVITE) else {
+        return;
+    };
     crate::studio_nudges::mark_cloud_nudge_shown(&today);
     crate::usage_telemetry::record_cloud_nudge_shown();
     crate::cloud::sign_in::prompt_cloud_nudge(
         path.to_path_buf(),
         crate::studio_nudges::mark_cloud_nudge_dismissed,
+        slot,
     );
 }
 
@@ -1594,6 +1761,16 @@ fn file_uri(path: &Path) -> Result<String, CapturePreviewError> {
     url::Url::from_file_path(path)
         .map(|u| u.to_string())
         .map_err(|_| CapturePreviewError::InvalidPath)
+}
+
+/// The drag payload for a capture: its file URI as both a URI list and text.
+fn drag_content_provider(uri: &str) -> gdk::ContentProvider {
+    let uri_provider = gdk::ContentProvider::for_bytes(
+        "text/uri-list",
+        &glib::Bytes::from_owned(format!("{uri}\r\n").into_bytes()),
+    );
+    let text_provider = gdk::ContentProvider::for_value(&glib::Value::from(uri));
+    gdk::ContentProvider::new_union(&[uri_provider, text_provider])
 }
 
 fn copy_screenshot_to_clipboard(path: &Path) -> Result<(), CapturePreviewError> {
@@ -2057,6 +2234,48 @@ mod tests {
         assert_eq!(preview_side("Left"), PreviewSide::Left);
         assert_eq!(preview_side("Right"), PreviewSide::Right);
         assert_eq!(preview_side("Top"), PreviewSide::Left);
+    }
+
+    #[test]
+    fn preview_message_reads_the_final_path() {
+        assert_eq!(
+            parse_preview_message("path\t/tmp/Capture.png\n"),
+            Some((PathBuf::from("/tmp/Capture.png"), true))
+        );
+        assert_eq!(
+            parse_preview_message("path\t/tmp/Capture.png\r\n"),
+            Some((PathBuf::from("/tmp/Capture.png"), true))
+        );
+    }
+
+    #[test]
+    fn preview_message_reads_an_interim_path_as_renameable() {
+        assert_eq!(
+            parse_preview_message("path-interim\t/tmp/Capture.png\n"),
+            Some((PathBuf::from("/tmp/Capture.png"), false))
+        );
+        assert_eq!(
+            parse_preview_message("path-interim\t/tmp/Capture.png\r\n"),
+            Some((PathBuf::from("/tmp/Capture.png"), false))
+        );
+    }
+
+    #[test]
+    fn preview_message_keeps_the_rest_of_the_path_intact() {
+        assert_eq!(
+            parse_preview_message("path\t/tmp/with\ttab.png\n"),
+            Some((PathBuf::from("/tmp/with\ttab.png"), true))
+        );
+    }
+
+    #[test]
+    fn preview_message_ignores_other_lines_and_empty_paths() {
+        assert_eq!(parse_preview_message("path\t"), None);
+        assert_eq!(parse_preview_message("path\t\n"), None);
+        assert_eq!(parse_preview_message("path-interim\t"), None);
+        assert_eq!(parse_preview_message("apexshot-preview:used\n"), None);
+        assert_eq!(parse_preview_message("path /tmp/a.png\n"), None);
+        assert_eq!(parse_preview_message(""), None);
     }
 
     #[test]

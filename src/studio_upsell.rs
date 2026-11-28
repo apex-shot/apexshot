@@ -113,6 +113,8 @@ const CSS: &str = r#"
         text-shadow: 0 0 22px #141414, 0 0 10px #141414, 0 0 4px #141414;
     }
     .apexshot-studio-headline-compact { font-size: 30px; }
+    /* The Black Friday headline stays on one line in its 440px card. */
+    .apexshot-studio-headline-compact.apexshot-black-friday-headline { font-size: 26px; }
     .apexshot-studio-lede {
         font-size: 13px;
         color: rgba(255, 255, 255, 0.55);
@@ -134,6 +136,21 @@ const CSS: &str = r#"
     }
     .apexshot-studio-note { font-size: 12px; color: rgba(255, 255, 255, 0.50); }
     .apexshot-studio-fineprint { font-size: 11px; color: rgba(255, 255, 255, 0.40); }
+    /* The Black Friday code chip: a dashed chip that copies on click, with
+       the same corner radius as the card's buttons. */
+    button.apexshot-black-friday-code {
+        min-height: 0;
+        padding: 6px 14px;
+        border: 1px dashed rgba(255, 255, 255, 0.35);
+        border-radius: 7px;
+        background: transparent;
+        color: #f1f1f3;
+        font-family: monospace;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.4px;
+    }
+    button.apexshot-black-friday-code:hover { background: alpha(white, 0.06); }
     .apexshot-studio-separator { font-size: 12px; color: rgba(255, 255, 255, 0.25); }
     .apexshot-studio-feedback { font-size: 12px; color: #ff8a80; }
 
@@ -235,6 +252,13 @@ const CSS: &str = r#"
     .apexshot-studio-light .apexshot-studio-meta-dot { background: alpha(#111827, 0.20); }
     .apexshot-studio-light .apexshot-studio-note { color: rgba(29, 33, 41, 0.55); }
     .apexshot-studio-light .apexshot-studio-fineprint { color: rgba(29, 33, 41, 0.45); }
+    .apexshot-studio-light button.apexshot-black-friday-code {
+        border-color: alpha(#111827, 0.28);
+        color: #1d2129;
+    }
+    .apexshot-studio-light button.apexshot-black-friday-code:hover {
+        background: alpha(#111827, 0.06);
+    }
     .apexshot-studio-light .apexshot-studio-separator { color: rgba(29, 33, 41, 0.25); }
     .apexshot-studio-light .apexshot-studio-feedback { color: #b42318; }
     .apexshot-studio-light .apexshot-whats-new-divider { background: alpha(#111827, 0.10); }
@@ -814,7 +838,12 @@ fn offer_meta(capabilities: StudioCapabilities, dark: bool) -> GtkBox {
             true,
         ));
     }
-    items.push((t("$39 once"), custom::CHECK_SYMBOLIC, None, false));
+    items.push((
+        crate::studio_offer::price_label(),
+        custom::CHECK_SYMBOLIC,
+        None,
+        false,
+    ));
     items.push((
         t("12 months of updates"),
         custom::CHECK_SYMBOLIC,

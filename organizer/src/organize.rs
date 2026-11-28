@@ -211,7 +211,16 @@ pub fn organize_capture_with_ai(
         }),
         _ => None,
     };
-    let chosen_stem = ai_stem.clone().unwrap_or_else(|| suggestion.stem.clone());
+    // A name made from recognised text has to read as words; noise from a
+    // small or dark capture leaves the saved name alone instead. A window
+    // title or the dated fallback is trusted as it is.
+    let ai_stem = ai_stem.and_then(|stem| crate::quality::readable_name(&stem));
+    let heuristic_stem = if suggestion.source == crate::naming::NameSource::Heading {
+        crate::quality::readable_name(&suggestion.stem)
+    } else {
+        Some(suggestion.stem.clone())
+    };
+    let chosen_stem = ai_stem.clone().or(heuristic_stem);
     let original_name = previous
         .as_ref()
         .map(|entry| entry.original_name.clone())
@@ -229,7 +238,7 @@ pub fn organize_capture_with_ai(
 
     let mut path = request.path.clone();
     let mut renamed = false;
-    if settings.auto_name {
+    if let (true, Some(chosen_stem)) = (settings.auto_name, chosen_stem.as_deref()) {
         if let (Some(dir), Some(ext)) = (request.path.parent(), request.path.extension()) {
             let ext = ext.to_string_lossy();
             let stem = request
@@ -241,9 +250,9 @@ pub fn organize_capture_with_ai(
             let density = density_suffix(&stem);
             let new_stem = format!("{}{density}", chosen_stem);
             // Only the copy number or punctuation would change: keep the file as is.
-            let same = same_name(&chosen_stem, without_copy_number(plain_stem));
+            let same = same_name(chosen_stem, without_copy_number(plain_stem));
             if new_stem != stem && !same {
-                let target = unique_density_path(dir, &chosen_stem, density, &ext);
+                let target = unique_density_path(dir, chosen_stem, density, &ext);
                 if fs::rename(&request.path, &target).is_ok() {
                     path = target;
                     renamed = true;
@@ -551,6 +560,31 @@ mod tests {
         assert!(!index.entries()[0].ai_named);
 
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn unreadable_text_keeps_the_saved_name() {
+        let dir = temp_dir("noise");
+        let path = dir.join("ApexShot-2026-11-27_23-53-01.png");
+        fs::write(&path, b"png").unwrap();
+        let index_path = dir.join("index").join("index.json");
+        let mut req = request(path.clone(), None);
+        req.page = page(&["TOM Bil", "Q", "Cc", "x", "y?", "Crarannchatc"]);
+        let settings = OrganizeSettings {
+            auto_name: true,
+            ..OrganizeSettings::default()
+        };
+        // The model echoing the noise back is refused the same way.
+        let namer = FixedNamer(Some("TOM Bil QCc y Crarannchatc".to_string()));
+
+        let outcome =
+            organize_capture_with_ai(&req, &settings, &index_path, captured_at(), Some(&namer));
+
+        assert!(!outcome.renamed);
+        assert!(!outcome.ai_named);
+        assert_eq!(outcome.path, path);
+        assert!(path.exists());
+        assert!(outcome.indexed, "the text is still searchable");
     }
 
     #[test]

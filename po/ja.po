@@ -5703,3 +5703,48 @@ msgstr "AIによる名前付けには、8 GB以上のメモリ、4コア以上�
 
 msgid "Search them by their text in History."
 msgstr "履歴でテキストから検索できます。"
+
+msgid "Named from what you captured. Search it in History."
+msgstr "撮影した内容から名前を付けました。履歴で検索できます。"
+
+msgid "Open History"
+msgstr "履歴を開く"
+
+msgid "Each screenshot is named from its window and on-screen text right after you take it."
+msgstr "撮影直後に、ウィンドウと画面上の文字から各スクリーンショットに名前が付きます。"
+
+msgid "Search what was on screen"
+msgstr "画面に写っていた文字で検索"
+
+msgid "Find a screenshot in History by any word it showed."
+msgstr "写っていた言葉で、履歴からスクリーンショットを見つけられます。"
+
+msgid "Share links in fewer steps"
+msgstr "共有リンクがより簡単に"
+
+msgid "Connecting Cloud now fills in your sign-in code for you."
+msgstr "Cloudの接続時に、サインインコードが自動で入力されるようになりました。"
+
+msgid "Recording is ready from the first start"
+msgstr "初回起動から録画できます"
+
+msgid "Recording no longer goes missing after a slow first start."
+msgstr "初回起動が遅くても、録画が使えなくなることはなくなりました。"
+
+msgid "Record the display you picked"
+msgstr "選んだディスプレイを録画"
+
+msgid "Multi-monitor recording on Hyprland, Sway, and Niri records your chosen display."
+msgstr "Hyprland、Sway、Niriの複数ディスプレイ環境で、選んだディスプレイを録画します。"
+
+msgid "AI names (Beta)"
+msgstr "AIによる名前（ベータ）"
+
+msgid "A small model on your computer writes clearer names. Nothing is uploaded."
+msgstr "PC上の小さなモデルが、よりわかりやすい名前を付けます。何もアップロードされません。"
+
+msgid "Black Friday: Studio is 50% off"
+msgstr "ブラックフライデー：Studioが50%オフ"
+
+msgid "$19.50 instead of $39, until November 30. Motion export, Upscale, Studio styles, and AI names."
+msgstr "11月30日まで、39ドルが19.50ドル。Motion書き出し、アップスケール、Studioスタイル、AIによる名前。"

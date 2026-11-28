@@ -5799,3 +5799,48 @@ msgstr "Os nomes com IA precisam de pelo menos 8 GB de memória, 4 núcleos de p
 
 msgid "Search them by their text in History."
 msgstr "Encontre-as pelo texto no Histórico."
+
+msgid "Named from what you captured. Search it in History."
+msgstr "Nomeada pelo que você capturou. Procure no Histórico."
+
+msgid "Open History"
+msgstr "Abrir Histórico"
+
+msgid "Each screenshot is named from its window and on-screen text right after you take it."
+msgstr "Cada captura recebe um nome a partir da janela e do texto na tela logo depois de tirada."
+
+msgid "Search what was on screen"
+msgstr "Pesquise o que estava na tela"
+
+msgid "Find a screenshot in History by any word it showed."
+msgstr "Encontre uma captura no Histórico por qualquer palavra que ela mostrava."
+
+msgid "Share links in fewer steps"
+msgstr "Compartilhe links em menos passos"
+
+msgid "Connecting Cloud now fills in your sign-in code for you."
+msgstr "Ao conectar o Cloud, seu código de login agora é preenchido para você."
+
+msgid "Recording is ready from the first start"
+msgstr "A gravação fica pronta desde a primeira abertura"
+
+msgid "Recording no longer goes missing after a slow first start."
+msgstr "A gravação não some mais depois de uma primeira abertura lenta."
+
+msgid "Record the display you picked"
+msgstr "Grave a tela que você escolheu"
+
+msgid "Multi-monitor recording on Hyprland, Sway, and Niri records your chosen display."
+msgstr "A gravação com várias telas no Hyprland, Sway e Niri grava a tela que você escolheu."
+
+msgid "AI names (Beta)"
+msgstr "Nomes por IA (Beta)"
+
+msgid "A small model on your computer writes clearer names. Nothing is uploaded."
+msgstr "Um modelo pequeno no seu computador escreve nomes mais claros. Nada é enviado."
+
+msgid "Black Friday: Studio is 50% off"
+msgstr "Black Friday: Studio com 50% de desconto"
+
+msgid "$19.50 instead of $39, until November 30. Motion export, Upscale, Studio styles, and AI names."
+msgstr "US$ 19,50 em vez de US$ 39, até 30 de novembro. Exportação Motion, ampliação, estilos do Studio e nomes por IA."

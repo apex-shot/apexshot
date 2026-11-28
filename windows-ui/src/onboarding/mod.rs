@@ -192,6 +192,11 @@ pub fn is_complete() -> bool {
     flag_path().is_some_and(|path| path.exists())
 }
 
+/// The Linux build's name for the same check, for code both builds share.
+pub fn is_onboarding_complete() -> bool {
+    is_complete()
+}
+
 /// Mark this Windows install as onboarded.
 pub fn mark_complete() -> std::io::Result<()> {
     let Some(path) = flag_path() else {

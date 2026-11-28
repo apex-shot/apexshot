@@ -5819,3 +5819,48 @@ msgstr "Les noms IA nécessitent au moins 8 Go de mémoire, 4 cœurs de processe
 
 msgid "Search them by their text in History."
 msgstr "Retrouvez-les par leur texte dans l’historique."
+
+msgid "Named from what you captured. Search it in History."
+msgstr "Nommée d’après ce que vous avez capturé. Retrouvez-la dans l’historique."
+
+msgid "Open History"
+msgstr "Ouvrir l’historique"
+
+msgid "Each screenshot is named from its window and on-screen text right after you take it."
+msgstr "Chaque capture est nommée d’après sa fenêtre et le texte à l’écran juste après la prise."
+
+msgid "Search what was on screen"
+msgstr "Cherchez ce qui était à l’écran"
+
+msgid "Find a screenshot in History by any word it showed."
+msgstr "Retrouvez une capture dans l’Historique grâce à n’importe quel mot qu’elle affichait."
+
+msgid "Share links in fewer steps"
+msgstr "Partagez des liens en moins d’étapes"
+
+msgid "Connecting Cloud now fills in your sign-in code for you."
+msgstr "La connexion à Cloud remplit désormais votre code de connexion pour vous."
+
+msgid "Recording is ready from the first start"
+msgstr "L’enregistrement est prêt dès le premier lancement"
+
+msgid "Recording no longer goes missing after a slow first start."
+msgstr "L’enregistrement ne disparaît plus après un premier lancement lent."
+
+msgid "Record the display you picked"
+msgstr "Enregistrez l’écran choisi"
+
+msgid "Multi-monitor recording on Hyprland, Sway, and Niri records your chosen display."
+msgstr "L’enregistrement multi-écran sous Hyprland, Sway et Niri enregistre l’écran que vous avez choisi."
+
+msgid "AI names (Beta)"
+msgstr "Noms par IA (Bêta)"
+
+msgid "A small model on your computer writes clearer names. Nothing is uploaded."
+msgstr "Un petit modèle sur votre ordinateur rédige des noms plus clairs. Rien n’est envoyé."
+
+msgid "Black Friday: Studio is 50% off"
+msgstr "Black Friday : Studio à -50 %"
+
+msgid "$19.50 instead of $39, until November 30. Motion export, Upscale, Studio styles, and AI names."
+msgstr "19,50 $ au lieu de 39 $, jusqu’au 30 novembre. Export Motion, agrandissement, styles Studio et noms par IA."

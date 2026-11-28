@@ -5806,3 +5806,48 @@ msgstr "Los nombres con IA necesitan al menos 8 GB de memoria, 4 núcleos de pro
 
 msgid "Search them by their text in History."
 msgstr "Búscalas por su texto en el historial."
+
+msgid "Named from what you captured. Search it in History."
+msgstr "Nombrada por lo que capturaste. Búscala en el historial."
+
+msgid "Open History"
+msgstr "Abrir historial"
+
+msgid "Each screenshot is named from its window and on-screen text right after you take it."
+msgstr "Cada captura recibe un nombre según su ventana y el texto en pantalla justo después de tomarla."
+
+msgid "Search what was on screen"
+msgstr "Busca lo que había en pantalla"
+
+msgid "Find a screenshot in History by any word it showed."
+msgstr "Encuentra una captura en el Historial por cualquier palabra que mostraba."
+
+msgid "Share links in fewer steps"
+msgstr "Comparte enlaces en menos pasos"
+
+msgid "Connecting Cloud now fills in your sign-in code for you."
+msgstr "Al conectar Cloud, ahora se rellena tu código de inicio de sesión automáticamente."
+
+msgid "Recording is ready from the first start"
+msgstr "La grabación está lista desde el primer inicio"
+
+msgid "Recording no longer goes missing after a slow first start."
+msgstr "La grabación ya no desaparece tras un primer inicio lento."
+
+msgid "Record the display you picked"
+msgstr "Graba la pantalla que elegiste"
+
+msgid "Multi-monitor recording on Hyprland, Sway, and Niri records your chosen display."
+msgstr "La grabación con varias pantallas en Hyprland, Sway y Niri graba la pantalla que elegiste."
+
+msgid "AI names (Beta)"
+msgstr "Nombres con IA (Beta)"
+
+msgid "A small model on your computer writes clearer names. Nothing is uploaded."
+msgstr "Un modelo pequeño en tu equipo escribe nombres más claros. No se sube nada."
+
+msgid "Black Friday: Studio is 50% off"
+msgstr "Black Friday: Studio con 50 % de descuento"
+
+msgid "$19.50 instead of $39, until November 30. Motion export, Upscale, Studio styles, and AI names."
+msgstr "19,50 $ en vez de 39 $, hasta el 30 de noviembre. Exportación Motion, escalado, estilos de Studio y nombres con IA."

@@ -33,7 +33,10 @@ use apexshot::{
         editor::{open_empty_recording_editor, open_recording_editor},
         run_overlay_recording_request, run_recording_countdown_bar,
     },
-    settings::{show_settings_window, show_settings_window_for_cloud_connect},
+    settings::{
+        show_settings_window, show_settings_window_for_cloud_connect,
+        show_settings_window_for_studio,
+    },
 };
 use std::path::PathBuf;
 
@@ -161,11 +164,29 @@ fn main() {
             return;
         }
         "settings-internal" => {
-            if let Err(e) = show_settings_window() {
+            let studio = args[2..].iter().any(|argument| argument == "--studio");
+            let result = if studio {
+                show_settings_window_for_studio()
+            } else {
+                show_settings_window()
+            };
+            if let Err(e) = result {
                 eprintln!("Failed to open settings window: {e}");
                 std::process::exit(1);
             }
             return;
+        }
+        "ai-names-card" => {
+            let kind = args
+                .get(2)
+                .and_then(|value| apexshot::ai_names::CardKind::from_arg(value));
+            std::process::exit(match kind {
+                Some(kind) => apexshot::ai_names::run_card(kind),
+                None => 2,
+            });
+        }
+        "black-friday" => {
+            std::process::exit(apexshot::black_friday::run_card());
         }
         "update-window" => {
             apexshot::update_window::rename_process();
@@ -538,10 +559,13 @@ async fn async_main(args: Vec<String>) {
         "settings" => {
             // Run settings as a subprocess to avoid tokio runtime conflicts
             let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("apexshot"));
-            let status = std::process::Command::new(&exe)
-                .arg("settings-internal")
-                .status()
-                .expect("Failed to spawn settings");
+            let mut command = std::process::Command::new(&exe);
+            command.arg("settings-internal");
+            // A card can ask for the Studio page directly.
+            if args.iter().any(|argument| argument == "--studio") {
+                command.arg("--studio");
+            }
+            let status = command.status().expect("Failed to spawn settings");
             if !status.success() {
                 std::process::exit(status.code().unwrap_or(1));
             }

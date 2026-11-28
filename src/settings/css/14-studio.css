@@ -117,8 +117,8 @@
                 background-color: alpha(#111827, 0.20);
             }
 
+            /* Row titles and hints use the same size as the other tabs' rows. */
             .studio-row-title {
-                font-size: 13px;
                 font-weight: 500;
             }
 
@@ -136,11 +136,36 @@
             }
 
             .studio-feedback {
-                font-size: 12px;
                 color: alpha(white, 0.62);
             }
 
             .editor-root.editor-theme-light .studio-feedback {
                 color: alpha(#1d2129, 0.62);
+            }
+
+            /* The AI model download bar takes the same orange as the button
+               it replaces. */
+            .editor-root progressbar.studio-download-progress > trough > progress {
+                background-image: none;
+                background-color: #ff670d;
+                border-color: #ff670d;
+            }
+
+            /* The free name stays quiet; the AI name is the one to read. */
+            .editor-root .settings-table-row label.studio-example-free {
+                color: alpha(white, 0.62);
+            }
+
+            .editor-root .settings-table-row label.studio-example-ai {
+                font-weight: 700;
+                color: #3ecf8e;
+            }
+
+            .editor-root.editor-theme-light .settings-table-row label.studio-example-free {
+                color: alpha(#1d2129, 0.60);
+            }
+
+            .editor-root.editor-theme-light .settings-table-row label.studio-example-ai {
+                color: #1f9d63;
             }
 

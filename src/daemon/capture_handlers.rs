@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::{
@@ -43,6 +44,14 @@ pub(super) fn apply_screenshot_after_capture_actions(
     unsaved_capture: bool,
 ) {
     let config = load_config().sanitized();
+    // A capture the user never saved lives in app-owned storage, so it is
+    // never renamed or indexed. Its path never changes, so it keeps the
+    // one-shot flow at the end of this function.
+    if !unsaved_capture {
+        apply_saved_capture_after_capture_actions(saved_path, state, target_display, config);
+        return;
+    }
+
     state.lock().unwrap().last_capture_path = Some(saved_path.clone());
 
     let open_annotate = config.after_capture_open_annotate;
@@ -56,13 +65,8 @@ pub(super) fn apply_screenshot_after_capture_actions(
     let configured_mode = crate::utils::clipboard::ScreenshotClipboardMode::from_config_value(
         &config.adv_clipboard_mode,
     );
-    let mode = if unsaved_capture {
-        configured_mode.for_unsaved_capture()
-    } else {
-        configured_mode
-    };
-    let unsaved_bitmap_only =
-        unsaved_capture && mode == crate::utils::clipboard::ScreenshotClipboardMode::ImageOnly;
+    let mode = configured_mode.for_unsaved_capture();
+    let unsaved_bitmap_only = mode == crate::utils::clipboard::ScreenshotClipboardMode::ImageOnly;
     let clip_path = saved_path.clone();
     let clip_config = config.clone();
     std::thread::spawn(move || {
@@ -96,6 +100,176 @@ pub(super) fn apply_screenshot_after_capture_actions(
         let child = show_preview_subprocess(saved_path, target_display);
         replace_preview_child(&state, child);
     }
+}
+
+/// Run the after-capture actions for a normally saved capture: the Quick Access
+/// card appears at once with the saved path, while naming, the clipboard, an
+/// auto-upload, and the editor happen on a background thread once the name is
+/// settled.
+fn apply_saved_capture_after_capture_actions(
+    saved_path: std::path::PathBuf,
+    state: Arc<Mutex<DaemonState>>,
+    target_display: Option<CaptureDisplay>,
+    config: crate::config::AppConfig,
+) {
+    state.lock().unwrap().last_capture_path = Some(saved_path.clone());
+
+    // The card reports this when one of its actions ran before the final path
+    // arrived: it keeps showing the saved path, so naming must keep that name.
+    let keep_original_name = Arc::new(AtomicBool::new(false));
+    let mut card_stdin = None;
+
+    if config.after_capture_show_quick_access {
+        match crate::preview_launch::spawn_preview_subprocess_with_renames_on_display(
+            &saved_path,
+            target_display,
+        ) {
+            Ok(mut child) => {
+                card_stdin = child.stdin.take();
+                if let Some(stdout) = child.stdout.take() {
+                    watch_preview_card_usage(stdout, keep_original_name.clone());
+                }
+                replace_preview_child(&state, Some(child));
+            }
+            Err(error) => {
+                // The in-process fallback builds every action on this path and
+                // cannot follow a rename, so keep the name as it is.
+                keep_original_name.store(true, Ordering::Relaxed);
+                eprintln!(
+                    "[daemon] Failed to spawn preview subprocess: {error}, falling back to in-app preview"
+                );
+                crate::preview_launch::show_preview_direct_on_display(
+                    saved_path.clone(),
+                    target_display,
+                );
+            }
+        }
+    }
+
+    // Start loading the naming model while the text is read, so the AI name
+    // does not wait for a cold start.
+    if config.organizer_auto_name && crate::ai_names::ai_allowed(&config) {
+        let tier = crate::ai_names::tier_from_setting(&config.organizer_ai_model);
+        std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+            let _ = crate::ai_names::ensure_server(tier, deadline);
+        });
+    }
+
+    std::thread::spawn(move || {
+        use std::io::Write;
+
+        let gate = keep_original_name;
+        let organized =
+            crate::organizer_hook::organize_saved_capture_gated(saved_path, &config, &|| {
+                !gate.load(Ordering::Relaxed)
+            });
+        let crate::organizer_hook::Organized {
+            path: final_path,
+            request,
+            renamed,
+            indexed,
+        } = organized;
+
+        if let Ok(mut guard) = state.lock() {
+            guard.last_capture_path = Some(final_path.clone());
+        }
+
+        // The model may refine the rule-based name after the card, the
+        // clipboard, and any upload have the path. Only a capture nothing
+        // else claims can be renamed a second time: the editor and an
+        // auto-upload both hold the file by now.
+        let will_refine = indexed
+            && request.is_some()
+            && config.organizer_auto_name
+            && crate::ai_names::ai_allowed(&config)
+            && !config.after_capture_open_annotate
+            && !crate::cloud::upload::should_auto_upload_after_capture(&config);
+
+        // Tell the card where the capture lives now. An interim line keeps it
+        // reporting a used path, because a second rename may still follow.
+        let mut card_stdin = card_stdin;
+        if let Some(stdin) = card_stdin.as_mut() {
+            let line = if will_refine { "path-interim" } else { "path" };
+            let _ = writeln!(stdin, "{line}\t{}", final_path.display());
+            let _ = stdin.flush();
+        }
+
+        // These run against the rule-based path, after naming, so the card,
+        // the clipboard, and the upload all agree on where the capture is,
+        // and none of them waits for the model.
+        if config.after_capture_copy_file_to_clipboard {
+            if crate::cloud::upload::should_defer_text_clipboard_to_share_url(&config) {
+                if let Err(e) = crate::utils::clipboard::copy_image_to_clipboard(&final_path) {
+                    eprintln!("[daemon] Failed to copy screenshot image to clipboard: {e}");
+                }
+            } else {
+                copy_screenshot_to_clipboard(&final_path, &config);
+            }
+        }
+
+        crate::cloud::upload::spawn_auto_upload_after_capture(final_path.clone());
+
+        if config.after_capture_open_annotate {
+            spawn_editor_subprocess(final_path.clone());
+        }
+
+        if will_refine {
+            // The card may have used the path while the server was starting,
+            // so the gate is asked again inside the refine, right before the
+            // rename.
+            let outcome = crate::organizer_hook::refine_name_with_ai(
+                final_path,
+                request.expect("will_refine means the request was kept"),
+                &config,
+                &|| !gate.load(Ordering::Relaxed),
+            );
+            if let Ok(mut guard) = state.lock() {
+                guard.last_capture_path = Some(outcome.path.clone());
+            }
+            // A final path line stops the card's usage reports.
+            if let Some(stdin) = card_stdin.as_mut() {
+                let _ = writeln!(stdin, "path\t{}", outcome.path.display());
+                let _ = stdin.flush();
+            }
+            drop(card_stdin);
+        } else {
+            if let Some(index_path) = crate::config::organizer_index_path() {
+                crate::organizer_hook::show_ai_names_card(false, renamed, &config, &index_path);
+            }
+            drop(card_stdin);
+        }
+
+        // The first capture of the day may show the Black Friday card, but
+        // only when no other promotion window holds the shared slot. The card
+        // records the day itself once it opens, so losing the slot here costs
+        // nothing. Quick Access gets a head start, and the card is its own
+        // process, so the capture path never waits for it.
+        if crate::studio_offer::black_friday_card_due() && crate::promo_slot::is_free() {
+            std::thread::sleep(std::time::Duration::from_secs(6));
+            if crate::promo_slot::is_free() {
+                spawn_black_friday_subprocess();
+            }
+        }
+    });
+}
+
+/// Read the card's stdout until it exits. Only its "used" line matters; every
+/// other line is ignored.
+fn watch_preview_card_usage(stdout: std::process::ChildStdout, used: Arc<AtomicBool>) {
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        for line in std::io::BufReader::new(stdout).lines() {
+            let Ok(line) = line else {
+                break;
+            };
+            if line.trim_end_matches(|c| c == '\n' || c == '\r')
+                == crate::preview_launch::PREVIEW_USED_SIGNAL
+            {
+                used.store(true, Ordering::Relaxed);
+            }
+        }
+    });
 }
 
 pub fn copy_screenshot_to_clipboard(path: &std::path::Path, config: &crate::config::AppConfig) {
@@ -584,6 +758,25 @@ pub(super) fn spawn_whats_new_subprocess() -> bool {
             eprintln!("[daemon] Failed to spawn the What's new window: {error}");
             false
         }
+    }
+}
+
+/// Open the Black Friday card in its own process. The caller has checked that
+/// the card is due and the promo slot is free; the card claims the slot and
+/// records the day itself, so a failed start only means no card this time.
+fn spawn_black_friday_subprocess() {
+    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
+    let mut command = std::process::Command::new(exe);
+    command
+        .arg("black-friday")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    if let Ok(mut child) = command.spawn() {
+        // The daemon outlives the card; reap the child when it closes.
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
     }
 }
 

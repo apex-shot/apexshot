@@ -14,6 +14,7 @@ pub mod ai;
 pub mod index;
 pub mod naming;
 pub mod organize;
+pub mod quality;
 pub mod secrets;
 pub mod sensitive;
 mod types;

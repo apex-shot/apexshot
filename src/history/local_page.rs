@@ -565,6 +565,10 @@ fn build_card(state: &Rc<PageState>, id: u64, entry: &CaptureEntry, now: SystemT
         let entry = entry.clone();
         let drag = gtk4::DragSource::new();
         drag.set_actions(gtk4::gdk::DragAction::COPY);
+        // The tile is a button, and a button claims the press in the bubble
+        // phase, which denies a drag source there. Seeing the press first lets
+        // the drag start once the pointer moves; a plain click still clicks.
+        drag.set_propagation_phase(gtk4::PropagationPhase::Capture);
         let list = gtk4::gdk::FileList::from_array(&[gtk4::gio::File::for_path(&entry.path)]);
         drag.set_content(Some(&gtk4::gdk::ContentProvider::for_value(
             &list.to_value(),
